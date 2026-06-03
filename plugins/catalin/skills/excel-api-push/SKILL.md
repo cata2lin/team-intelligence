@@ -24,12 +24,10 @@ Optional flags: `--sheet <name>` (default: first sheet), `--status-col <header>`
 sent, change nothing). Spreadsheets live on the NAS — pass paths under
 `$NAS_ROOT/data/...`.
 
-## After running — log it to the knowledge base
-```bash
-KB=${CLAUDE_PLUGIN_ROOT}/../../core/scripts/kb.py   # or the core plugin's kb.py
-uv run "$KB" log --type skill --action used --name catalin:excel-api-push --summary "pushed N rows from <file>"
-```
-(If you created/modified the file on the NAS, also `kb.py file-add ...`.)
+## After running -- log it to the knowledge base
+Use the **`core:knowledge-base`** skill (the `kb.py` tool) to record the run:
+`kb.py log --type skill --action used --name catalin:excel-api-push --summary "pushed N rows from <file>"`.
+If you created or moved the file on the NAS, also `kb.py file-add ...`.
 
 ## How it works
 1. Opens the workbook with openpyxl, reads the header row, ensures the status

@@ -23,6 +23,10 @@ You are **{$EMPLOYEE_HANDLE}** on this machine.
 - The **knowledge base** (`core:knowledge-base` skill → `kb.py`): the team's
   shared memory of activity, files, secrets, and reference links.
 
+> All team plugins are enabled at **user scope**, so they work in every project.
+> If you ever see per-project approval prompts for the `postgres-*` MCP servers,
+> they were enabled at the wrong scope -- re-run the onboarding.
+
 ## Two stores — use the right one
 - **SharedClaude DB = knowledge base.** Secrets, the activity/usage log, the
   file registry, skills, and reference links (IPs/URLs/docs). Reached via

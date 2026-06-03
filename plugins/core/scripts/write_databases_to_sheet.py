@@ -1,3 +1,7 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["google-api-python-client>=2.0", "google-auth>=2.0", "google-auth-oauthlib>=1.0"]
+# ///
 """Write the list of databases on 38.242.226.83 into a Google Sheet."""
 import os
 import sys

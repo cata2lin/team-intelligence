@@ -29,11 +29,18 @@ import sys
 
 import psycopg2
 
+# Force UTF-8 output so messages render on any console (Windows cp1252 included).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 
 def _conn():
     url = os.environ.get("KB_DATABASE_URL")
     if not url:
-        sys.stderr.write("[kb] KB_DATABASE_URL not set — cannot reach the knowledge base.\n")
+        sys.stderr.write("[kb] KB_DATABASE_URL not set - cannot reach the knowledge base.\n")
         sys.exit(3)
     return psycopg2.connect(url, connect_timeout=12)
 

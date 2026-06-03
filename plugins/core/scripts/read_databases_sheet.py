@@ -1,3 +1,7 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["google-api-python-client>=2.0", "google-auth>=2.0"]
+# ///
 """Read the databases sheet back."""
 from pathlib import Path
 import json

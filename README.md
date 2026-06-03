@@ -41,27 +41,39 @@ NAS ($NAS_ROOT)            data/   exports/        ← files only, no secrets
   `shared/CLAUDE.team.md`; a `git pull` (SessionStart hook) refreshes it.
 - **Updates**: `claude plugin update` / marketplace `autoUpdate`.
 
-## Onboarding (one command per teammate)
+## Onboarding (clone, then one interactive command)
 
-Prereqs: replace `YOUR_ORG` in the installers + `marketplace.json`, push to
-GitHub, apply `db/schema.sql` to the SharedClaude DB (once), and hand each
-teammate the `KB_DATABASE_URL` (the SharedClaude connection string).
+The admin gives each teammate just four things: the database **host, user,
+password, and name**. Nothing else — every secret is read from that database.
 
-**macOS / Linux**
 ```bash
-./install.sh --employee iulian --nas-root "/Volumes/team" \
-             --kb-url "postgresql://scraper:****@38.242.226.83/SharedClaude"
-```
-**Windows (PowerShell)**
-```powershell
-./install.ps1 -Employee iulian -NasRoot "Z:\" `
-              -KbUrl "postgresql://scraper:****@38.242.226.83/SharedClaude"
+git clone https://github.com/cata2lin/team-intelligence.git
+cd team-intelligence
+./install.sh            # macOS / Linux        (Windows: ./install.ps1)
 ```
 
-The installer installs `uv`, clones the repo to `~/team-intelligence`, writes the
-per-machine env (`KB_DATABASE_URL`, `EMPLOYEE_HANDLE`, `NAS_ROOT`, `TEAM_REPO`)
-+ the `CLAUDE.md` `@import`, adds the marketplace, and installs every plugin at
-user scope. Restart Claude Code afterward.
+The walkthrough then:
+1. asks for the DB **host / user / password / name** and tests the connection;
+2. lists the team and asks **which employee you are**;
+3. (optional) asks for your NAS mount path;
+4. installs `uv`, enables every team plugin at **user scope**, writes the global
+   `~/.claude/settings.json` env (`KB_DATABASE_URL`, `EMPLOYEE_HANDLE`,
+   `NAS_ROOT`, `TEAM_REPO`) + the `CLAUDE.md` `@import`, and registers your
+   machine in the knowledge base.
+
+Restart Claude Code. From then on, in **every** project, the team skills, the
+read-only Postgres MCP servers, the knowledge base, and the NAS are available.
+Re-run anytime to update (e.g. to add your NAS path once you have it).
+
+> **Admin one-time setup:** push this repo to GitHub and apply `db/schema.sql`
+> to the SharedClaude DB. The 6 employees + secret keys are seeded by the schema;
+> populate secret values with `kb.py secret-set`.
+
+Plugins are enabled at **user scope** (written to `~/.claude/settings.json`) so
+they work in *every* project, and the walkthrough does it without needing the
+`claude` CLI on PATH (Claude Code reads the marketplace + `enabledPlugins` on
+start). If you ever get per-project MCP approval prompts, a plugin was enabled at
+the wrong scope — re-run onboarding.
 
 ## The knowledge base (`db/schema.sql`)
 

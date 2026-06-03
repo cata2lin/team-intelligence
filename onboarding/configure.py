@@ -60,6 +60,28 @@ def set_env_vars(settings_path: str, env_vars: dict) -> None:
     _atomic_write(settings_path, json.dumps(data, indent=2) + "\n")
 
 
+def set_plugins(settings_path, repo, market_name, plugins, auto_update=True):
+    """Enable the team marketplace + every plugin at USER scope (all projects),
+    by writing settings.json directly -- works whether or not the `claude` CLI
+    is on PATH. Claude Code picks these up on start."""
+    data = {}
+    if os.path.exists(settings_path):
+        try:
+            with open(settings_path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (json.JSONDecodeError, OSError):
+            data = {}
+    data.setdefault("extraKnownMarketplaces", {})
+    data["extraKnownMarketplaces"][market_name] = {
+        "source": {"source": "github", "repo": repo},
+        "autoUpdate": auto_update,
+    }
+    data.setdefault("enabledPlugins", {})
+    for p in plugins:
+        data["enabledPlugins"][f"{p}@{market_name}"] = True
+    _atomic_write(settings_path, json.dumps(data, indent=2) + "\n")
+
+
 def ensure_import(claude_md_path: str, import_line: str) -> None:
     existing = ""
     if os.path.exists(claude_md_path):
