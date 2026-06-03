@@ -4,14 +4,32 @@
       {
         "matcher": "startup",
         "hooks": [
-          {
-            "type": "command",
-            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/scripts/refresh_team_repo.py\""
-          },
-          {
-            "type": "command",
-            "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/scripts/nas_connect.py\""
-          }
+          { "type": "command", "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/scripts/refresh_team_repo.py\"", "timeout": 30 },
+          { "type": "command", "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/scripts/nas_connect.py\"", "timeout": 60 },
+          { "type": "command", "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/scripts/kb_guard_sync.py\"", "timeout": 20 }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/scripts/kb_hook_guard.py\"", "timeout": 15 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Skill|mcp__.*",
+        "hooks": [
+          { "type": "command", "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/scripts/kb_hook_log.py\"", "timeout": 15 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/scripts/kb_hook_flush.py\"", "timeout": 20 }
         ]
       }
     ]

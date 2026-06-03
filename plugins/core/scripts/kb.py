@@ -221,6 +221,32 @@ def cmd_whoami(a):
               "| id:", emp, "| host:", socket.gethostname())
 
 
+def cmd_guard_add(a):
+    with _conn() as conn, conn.cursor() as cur:
+        emp = _employee_id(cur, a.employee)
+        cur.execute("""INSERT INTO guardrails (kind, tool, pattern, reason, created_by)
+                       VALUES (%s,%s,%s,%s,%s)
+                       ON CONFLICT (kind, pattern) DO UPDATE SET
+                           reason=EXCLUDED.reason, tool=EXCLUDED.tool, active=true
+                       RETURNING id""", (a.kind, a.tool, a.pattern, a.reason, emp))
+        gid = cur.fetchone()[0]
+        cur.execute("INSERT INTO events (employee_id, entity_type, entity_id, entity_name, action, summary) "
+                    "VALUES (%s,'guardrail',%s,%s,'added',%s)",
+                    (emp, gid, a.kind, f"guardrail {a.kind}: {a.pattern}"))
+        print(f"guardrail {a.kind} added (id {gid}); applies to everyone on their next session.")
+
+
+def cmd_guard_list(a):
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, kind, tool, active, reason, pattern FROM guardrails ORDER BY id")
+        rows = cur.fetchall()
+        if not rows:
+            print("(no custom guardrails; the built-in critical rules are always on)")
+        for gid, kind, tool, active, reason, pattern in rows:
+            flag = "" if active else " [inactive]"
+            print(f"  [{gid}] {kind:4} {tool:6}{flag}  {pattern}   -- {reason or ''}")
+
+
 def main():
     p = argparse.ArgumentParser(prog="kb", description="SharedClaude knowledge base interface")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -260,6 +286,12 @@ def main():
     s = sub.add_parser("recent", help="show recent activity"); s.add_argument("--limit", type=int, default=20)
     s.set_defaults(fn=cmd_recent)
     s = sub.add_parser("whoami"); s.set_defaults(fn=cmd_whoami)
+
+    s = sub.add_parser("guard-add", help="add a team guardrail (deny|ask) for the PreToolUse hook")
+    s.add_argument("kind", choices=["deny", "ask"]); s.add_argument("pattern", help="regex matched against the command")
+    s.add_argument("--reason", default=""); s.add_argument("--tool", default="Bash"); s.add_argument("--employee")
+    s.set_defaults(fn=cmd_guard_add)
+    s = sub.add_parser("guard-list", help="list team guardrails"); s.set_defaults(fn=cmd_guard_list)
 
     a = p.parse_args()
     a.fn(a)

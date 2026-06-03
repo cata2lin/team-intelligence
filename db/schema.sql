@@ -102,6 +102,29 @@ CREATE TABLE IF NOT EXISTS nas_credentials (
   updated_at  timestamptz NOT NULL DEFAULT now()
 );
 
+-- ---- Guardrails (settable safety rules enforced by the PreToolUse hook) -----
+-- Built-in critical rules live in kb_hook_guard.py (always on). These DB rows
+-- are the team-settable extras, synced to a local cache each session
+-- (kb_guard_sync.py) and read by the PreToolUse guard hook. Set via
+-- `kb.py guard-add deny|ask <regex> --reason "..."`.
+
+CREATE TABLE IF NOT EXISTS guardrails (
+  id         serial PRIMARY KEY,
+  kind       text NOT NULL,                 -- deny | ask
+  tool       text NOT NULL DEFAULT 'Bash',
+  pattern    text NOT NULL,                 -- regex matched against the command
+  reason     text,
+  active     boolean NOT NULL DEFAULT true,
+  created_by integer REFERENCES employees(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (kind, pattern)
+);
+
+INSERT INTO guardrails (kind, tool, pattern, reason) VALUES
+  ('deny', 'Bash', '(?i)\bdelete\s+from\s+\S+(?!.*\bwhere\b)', 'Unscoped DELETE (no WHERE) would wipe the whole table.'),
+  ('ask',  'Bash', '(?i)\bcmdkey\s+/delete', 'Removing a stored NAS credential -- confirm first.')
+ON CONFLICT (kind, pattern) DO NOTHING;
+
 -- ---- Reference knowledge: IPs, URLs, hosts, docs, links --------------------
 
 CREATE TABLE IF NOT EXISTS resources (

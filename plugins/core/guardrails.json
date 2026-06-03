@@ -1,0 +1,9 @@
+{
+  "_comment": "Default guardrails used by kb_hook_guard.py before the DB sync runs (kb_guard_sync.py writes the live set to ~/.claude/team-guardrails.json each session). Built-in critical rules are hardcoded in kb_hook_guard.py and always on. Patterns are regexes matched against the Bash command.",
+  "deny": [
+    { "pattern": "(?i)\\bdelete\\s+from\\s+\\S+(?!.*\\bwhere\\b)", "reason": "Unscoped DELETE (no WHERE) would wipe the whole table." }
+  ],
+  "ask": [
+    { "pattern": "(?i)\\bcmdkey\\s+/delete", "reason": "Removing a stored NAS credential -- confirm first." }
+  ]
+}

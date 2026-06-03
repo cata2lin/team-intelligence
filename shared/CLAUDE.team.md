@@ -34,9 +34,11 @@ You are **{$EMPLOYEE_HANDLE}** on this machine.
 - **NAS (`$NAS_ROOT`) = file storage only.** The actual data files live here
   (`$NAS_ROOT/data/…`, `$NAS_ROOT/exports/…`). **No secrets on the NAS.**
 
-## ALWAYS log to the knowledge base
-Use the `core:knowledge-base` skill (`kb.py`) to record what you do, so the team
-shares one memory. At minimum:
+## Logging to the knowledge base
+**Skill and MCP/DB usage is logged automatically** — a PostToolUse hook buffers
+it and a Stop hook flushes it to the `events` table every turn (guaranteed; you
+don't have to remember). You still record the things hooks can't see, with the
+`core:knowledge-base` skill (`kb.py`):
 - After **using a skill** → `kb.py log --type skill --action used --name <plugin>:<skill> --summary "..."`
 - After **creating or modifying a skill** → `kb.py skill-register …` (+ a `log`)
 - After **creating a file on the NAS** → `kb.py file-add --location nas --path … --action created`
@@ -59,6 +61,11 @@ Recall with `kb.py recent`, `kb.py secret-list`, or by querying the DB directly.
 3. **No destructive SQL** without the matching `SELECT` shown first + confirmation.
 4. **Never `git push`, force-push, or add a remote** without explicit confirmation.
 5. **Call out cross-app side effects** before executing.
+
+> These rules are also **enforced** by a PreToolUse guardrail hook: catastrophic
+> commands are blocked outright, and destructive SQL / `git push` require
+> confirmation. Add team guardrails with `kb.py guard-add deny|ask <regex>
+> --reason "..."` (applies to everyone next session); list with `kb.py guard-list`.
 
 ## NAS files (your shared storage)
 Your files live on the NAS at **`$NAS_ROOT`** = your `ClaudeShared/<you>` folder
