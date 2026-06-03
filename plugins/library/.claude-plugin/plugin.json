@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "library",
+  "displayName": "Skill Library",
+  "description": "Shared skill library imported from local installs: design, branding, slides, UI/UX (shadcn/Tailwind), Shopify (Admin API, app patterns, launch), and web-scraping references. Bundles the chrome-devtools MCP server (cross-platform).",
+  "author": { "name": "Arona", "email": "carcucatalin@gmail.com" },
+  "keywords": ["design", "ui", "ux", "shopify", "scraping", "slides", "branding"],
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "uv",
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/npx_mcp_launch.py", "chrome-devtools-mcp@latest", "--isolated"]
+    }
+  }
+}

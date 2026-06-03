@@ -17,6 +17,14 @@
       "category": "core",
       "keywords": ["postgres", "knowledge-base", "secrets", "sheets", "excel"]
     },
+    {
+      "name": "library",
+      "source": "./plugins/library",
+      "description": "Shared skill library (design, branding, slides, UI/UX, Shopify, scraping) + the chrome-devtools MCP server.",
+      "author": { "name": "Arona" },
+      "category": "library",
+      "keywords": ["design", "ui", "shopify", "scraping", "slides"]
+    },
     { "name": "iulian",  "source": "./plugins/iulian",  "description": "Skills contributed by Iulian.",  "author": { "name": "Iulian" },  "category": "employee" },
     { "name": "gigi",    "source": "./plugins/gigi",    "description": "Skills contributed by Gigi.",    "author": { "name": "Gigi" },    "category": "employee" },
     { "name": "adriana", "source": "./plugins/adriana", "description": "Skills contributed by Adriana.", "author": { "name": "Adriana" }, "category": "employee" },
