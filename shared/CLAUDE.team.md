@@ -60,6 +60,13 @@ Recall with `kb.py recent`, `kb.py secret-list`, or by querying the DB directly.
 4. **Never `git push`, force-push, or add a remote** without explicit confirmation.
 5. **Call out cross-app side effects** before executing.
 
+## NAS files (your shared storage)
+Your files live on the NAS at **`$NAS_ROOT`** = your `ClaudeShared/<you>` folder
+(`$NAS_ROOT/data`, `$NAS_ROOT/exports`; the sibling `_shared` is team-wide). It
+auto-connects each session using your NAS login stored in the database;
+reconnect or inspect with the **`core:nas`** skill. Record files you create:
+`kb.py file-add --location nas --path "$NAS_ROOT/..."`. No secrets on the NAS.
+
 ## Python
 - Use **`uv`** (`uv run <script.py>`). Never assume a committed `.venv`.
 

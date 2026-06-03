@@ -114,6 +114,38 @@ def register_machine(url, handle, nas, repo):
     return emp
 
 
+def store_nas_credentials(url, handle, username, password):
+    import psycopg2
+    with psycopg2.connect(url, connect_timeout=12) as conn, conn.cursor() as cur:
+        cur.execute("SELECT id FROM employees WHERE handle=%s", (handle,))
+        emp = cur.fetchone()[0]
+        cur.execute("""INSERT INTO nas_credentials (employee_id, username, password, updated_at)
+                       VALUES (%s,%s,%s,now())
+                       ON CONFLICT (employee_id) DO UPDATE SET
+                           username=EXCLUDED.username, password=EXCLUDED.password, updated_at=now()""",
+                    (emp, username, password))
+        cur.execute("INSERT INTO events (employee_id, entity_type, entity_name, action, summary) "
+                    "VALUES (%s,'secret','nas_credentials','set',%s)", (emp, f"stored NAS login for {handle}"))
+
+
+def nas_connect(url, handle):
+    """Run nas_connect.py (authenticate + ensure folder) and return the NAS_ROOT it prints."""
+    script = os.path.join(REPO, "plugins", "core", "scripts", "nas_connect.py")
+    env = {**os.environ, "KB_DATABASE_URL": url, "EMPLOYEE_HANDLE": handle}
+    uv = shutil.which("uv") or "uv"
+    try:
+        r = subprocess.run([uv, "run", "--no-project", script], env=env,
+                           capture_output=True, text=True, timeout=120)
+    except Exception as exc:
+        sys.stderr.write(f"   [nas] connect failed: {exc}\n")
+        return ""
+    lines = [l for l in (r.stdout or "").splitlines() if l.strip()]
+    if r.returncode == 0 and lines:
+        return lines[-1].strip()
+    sys.stderr.write((r.stderr or "")[:300])
+    return ""
+
+
 def marketplace_plugins():
     with open(os.path.join(REPO, ".claude-plugin", "marketplace.json"), encoding="utf-8") as fh:
         return [p["name"] for p in json.load(fh)["plugins"]]
@@ -129,6 +161,7 @@ def main():
     ap.add_argument("--employee"); ap.add_argument("--db-host"); ap.add_argument("--db-port", default=None)
     ap.add_argument("--db-user"); ap.add_argument("--db-pass"); ap.add_argument("--db-name", default=None)
     ap.add_argument("--nas-root", default="")
+    ap.add_argument("--nas-user", default=""); ap.add_argument("--nas-pass", default="")
     ap.add_argument("--non-interactive", action="store_true", help="use flags instead of prompts")
     ap.add_argument("--skip-plugins", action="store_true", help="config only; don't touch the claude CLI")
     ap.add_argument("--home", help="override config dir (testing)")
@@ -181,15 +214,20 @@ def main():
         sys.exit("non-interactive mode needs --employee")
     print(f"   -> you are: {handle}")
 
-    # 3) NAS
-    if a.nas_root:
-        nas = a.nas_root
-    elif interactive:
-        nas = input("\nNAS mount path for shared files (Enter to set later): ").strip()
-    else:
-        nas = ""
-    if nas and re.match(r"^[A-Za-z]:$", nas):
-        nas += os.sep
+    # 3) NAS login -> store it (DB remembers it), connect, resolve NAS_ROOT
+    nas = a.nas_root  # explicit path override, if given
+    nas_user, nas_pw = a.nas_user, a.nas_pass
+    if not nas and interactive and not nas_user:
+        print("\nNAS login (your personal NAS account; Claude remembers it in the database):")
+        nas_user = input("   NAS username (Enter to set up later): ").strip()
+        nas_pw = getpass.getpass("   NAS password: ").strip() if nas_user else ""
+    if not nas and nas_user and nas_pw:
+        store_nas_credentials(url, handle, nas_user, nas_pw)
+        nas = nas_connect(url, handle)
+        if nas:
+            print(f"   [ok] NAS connected: {nas}")
+        else:
+            print("   [!] saved your NAS login, but could not connect right now (each session retries).")
 
     # 4-5) save config + enable plugins (global / user scope -> every project)
     home = a.home or configure.claude_home()
@@ -238,7 +276,7 @@ def main():
     print("base, the secret store, and the NAS" + (", and the 5 read-only Postgres MCP servers." if npx_ok else "."))
     print("All secrets are read from the database -- nothing to configure per project.")
     if not nas:
-        print("\nTip: re-run this onboarding with your NAS path once you have it.")
+        print("\nTip: re-run this onboarding to add your NAS login once you have it.")
 
 
 if __name__ == "__main__":

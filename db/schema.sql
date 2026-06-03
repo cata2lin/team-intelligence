@@ -90,6 +90,18 @@ CREATE TABLE IF NOT EXISTS secrets (
   rotated_at   timestamptz
 );
 
+-- ---- Per-user NAS login (file storage; replaces no secret, stays in the DB) -
+-- Team-wide NAS host/share/base live in the `secrets` table as config rows
+-- (NAS_HOST, NAS_SHARE, NAS_BASE). Each user's personal SMB login lives here so
+-- Claude can mount their ClaudeShared/<handle> folder on any machine they log in.
+
+CREATE TABLE IF NOT EXISTS nas_credentials (
+  employee_id integer PRIMARY KEY REFERENCES employees(id) ON DELETE CASCADE,
+  username    text NOT NULL,
+  password    text NOT NULL,             -- access-controlled by DB grants
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
 -- ---- Reference knowledge: IPs, URLs, hosts, docs, links --------------------
 
 CREATE TABLE IF NOT EXISTS resources (
@@ -253,5 +265,8 @@ INSERT INTO secrets (key, value, service, kind, is_sensitive, description) VALUE
   ('SCENTUM_AUTH_SECRET',    NULL, 'scentum', 'secret', true, 'NextAuth secret (scentum)'),
   ('GRANDIA_ADMIN_PASSWORD', NULL, 'grandia', 'secret', true, 'grandia-inventory admin password'),
   ('METRICS_ADMIN_EMAIL',    NULL, 'metrics', 'config', false, 'metrics admin email'),
-  ('METRICS_ADMIN_PASSWORD', NULL, 'metrics', 'secret', true, 'metrics admin password')
+  ('METRICS_ADMIN_PASSWORD', NULL, 'metrics', 'secret', true, 'metrics admin password'),
+  ('NAS_HOST',  '192.168.10.107', 'nas', 'config', false, 'NAS host/IP (SMB)'),
+  ('NAS_SHARE', 'IT_Dev',         'nas', 'config', false, 'NAS SMB share name'),
+  ('NAS_BASE',  'ClaudeShared',   'nas', 'config', false, 'Base folder inside the share; each user gets a subfolder named by handle')
 ON CONFLICT (key) DO NOTHING;
