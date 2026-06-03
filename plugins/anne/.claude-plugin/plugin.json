@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "anne",
+  "displayName": "Anne",
+  "description": "Skills contributed by Anne. Shared with the whole team.",
+  "author": { "name": "Anne" },
+  "keywords": []
+}

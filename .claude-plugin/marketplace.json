@@ -1,0 +1,27 @@
+{
+  "name": "team-intelligence",
+  "owner": {
+    "name": "Arona",
+    "email": "carcucatalin@gmail.com"
+  },
+  "description": "Arona shared intelligence center: every employee's skills, scripts, MCP servers and playbooks, shared across the whole team, backed by the SharedClaude knowledge base.",
+  "metadata": {
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "core",
+      "source": "./plugins/core",
+      "description": "Company-wide canonical capabilities: read-only Postgres MCP (creds from the knowledge base), knowledge-base logging, secret store access, Excel/Sheets export.",
+      "author": { "name": "Arona" },
+      "category": "core",
+      "keywords": ["postgres", "knowledge-base", "secrets", "sheets", "excel"]
+    },
+    { "name": "iulian",  "source": "./plugins/iulian",  "description": "Skills contributed by Iulian.",  "author": { "name": "Iulian" },  "category": "employee" },
+    { "name": "gigi",    "source": "./plugins/gigi",    "description": "Skills contributed by Gigi.",    "author": { "name": "Gigi" },    "category": "employee" },
+    { "name": "adriana", "source": "./plugins/adriana", "description": "Skills contributed by Adriana.", "author": { "name": "Adriana" }, "category": "employee" },
+    { "name": "andreea", "source": "./plugins/andreea", "description": "Skills contributed by Andreea.", "author": { "name": "Andreea" }, "category": "employee" },
+    { "name": "anne",    "source": "./plugins/anne",    "description": "Skills contributed by Anne.",    "author": { "name": "Anne" },    "category": "employee" },
+    { "name": "catalin", "source": "./plugins/catalin", "description": "Skills contributed by Catalin (example: excel-api-push).", "author": { "name": "Catalin" }, "category": "employee" }
+  ]
+}

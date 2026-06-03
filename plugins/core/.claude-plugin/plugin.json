@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "core",
+  "displayName": "Arona Core",
+  "description": "Company-wide canonical capabilities shared by every employee: read-only Postgres MCP, NAS secret loading, Excel/Sheets export, shared playbooks.",
+  "author": {
+    "name": "Arona",
+    "email": "carcucatalin@gmail.com"
+  },
+  "keywords": ["postgres", "sheets", "excel", "secrets", "nas"],
+  "mcpServers": {
+    "postgres-metrics": {
+      "command": "uv",
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/pg_mcp_launch.py", "DATABASE_URL_METRICS"]
+    },
+    "postgres-grandia": {
+      "command": "uv",
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/pg_mcp_launch.py", "DATABASE_URL_GRANDIA"]
+    },
+    "postgres-tom": {
+      "command": "uv",
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/pg_mcp_launch.py", "DATABASE_URL_TOM"]
+    },
+    "postgres-arona-bi": {
+      "command": "uv",
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/pg_mcp_launch.py", "DATABASE_URL_ARONA_BI"]
+    },
+    "postgres-scentum": {
+      "command": "uv",
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/pg_mcp_launch.py", "DATABASE_URL_SCENTUM"]
+    }
+  }
+}

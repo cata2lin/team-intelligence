@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "catalin",
+  "displayName": "Catalin",
+  "description": "Skills contributed by Catalin. Shared with the whole team. Example: excel-api-push.",
+  "author": { "name": "Catalin", "email": "carcucatalin@gmail.com" },
+  "keywords": ["excel", "api", "sync"]
+}

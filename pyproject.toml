@@ -1,0 +1,19 @@
+[project]
+name = "team-intelligence"
+version = "0.1.0"
+description = "Arona shared intelligence center — Python deps for shared scripts and MCP launchers."
+requires-python = ">=3.10"
+dependencies = [
+    "psycopg2-binary>=2.9",
+    "python-dotenv>=1.0",
+    "requests>=2.31",
+    "openpyxl>=3.1",
+    "google-api-python-client>=2.0",
+    "google-auth>=2.0",
+    "google-auth-oauthlib>=1.0",
+]
+
+# Managed with uv (https://docs.astral.sh/uv/). Cross-platform: same commands on
+# Windows and macOS. Onboarding runs `uv sync`; scripts run via `uv run <script.py>`.
+# Standalone scripts (e.g. plugins/*/scripts/*.py) may also declare their own
+# PEP 723 inline deps so `uv run` auto-installs them without this file.

@@ -1,0 +1,5 @@
+# Cross-platform line endings: LF in the repo, CRLF only for Windows-only scripts
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf

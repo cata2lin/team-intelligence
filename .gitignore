@@ -1,0 +1,27 @@
+# Secrets — NEVER commit. These live on the NAS ($NAS_ROOT/secrets), not in git.
+secrets/
+*.env
+*.env.*
+!*.env.example
+*.key
+*.pem
+*-credentials.json
+*-service-account.json
+
+# Python (uv manages venvs per-machine; never commit one)
+.venv/
+venv/
+__pycache__/
+*.pyc
+.uv/
+
+# OS / editor
+.DS_Store
+.vscode/*.log
+Thumbs.db
+
+# Build / cache
+node_modules/
+dist/
+build/
+.cache/
