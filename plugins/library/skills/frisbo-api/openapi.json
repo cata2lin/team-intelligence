@@ -1,0 +1,7181 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "API Reference",
+    "description": "API documentation for the Fulfillment Monitoring service.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/orders/search": {
+      "get": {
+        "tags": [
+          "Orders"
+        ],
+        "summary": "Retrieve A List Of Orders",
+        "description": "Retrieves a list of orders that meet the specified criteria. Note: This endpoint implements pagination.",
+        "operationId": "Retrieve_a_list_of_orders_orders_search_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "reference",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reference"
+            }
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": 0,
+              "title": "Skip"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": 0,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "phone_number",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Phone Number"
+            }
+          },
+          {
+            "name": "email_address",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Email Address"
+            }
+          },
+          {
+            "name": "updated_at_start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Updated At Start"
+            }
+          },
+          {
+            "name": "updated_at_end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Updated At End"
+            }
+          },
+          {
+            "name": "created_at_start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created At Start"
+            }
+          },
+          {
+            "name": "created_at_end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created At End"
+            }
+          },
+          {
+            "name": "managed_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/OrderManagedBy"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Managed By"
+            }
+          },
+          {
+            "name": "display_priorities[]",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Display Priorities[]"
+            }
+          },
+          {
+            "name": "aggregated_status_keys[]",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Aggregated Status Keys[]"
+            }
+          },
+          {
+            "name": "store_uids[]",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Store Uids[]"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchOrdersResponseOUT"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneralResponseModelError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/orders/order": {
+      "post": {
+        "tags": [
+          "Orders"
+        ],
+        "summary": "Create Or Update An Order",
+        "description": "Create or updates an order",
+        "operationId": "Create_or_update_an_order_orders_order_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/POSTSellingChannelsOrderIN"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreteOrderResponseAPIOUTData"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneralResponseModelError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/orders": {
+      "post": {
+        "tags": [
+          "Orders"
+        ],
+        "summary": "Create Or Update Orders In Bulk",
+        "description": "Create or updates orders in bulk",
+        "operationId": "Create_or_update_orders_in_bulk_orders_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/POSTBulkSellingChannelsOrderIN"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreteOrdersResponseAPIOUTData"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneralResponseModelError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/orders/order/{order_uid}/regenerate_shipment": {
+      "post": {
+        "tags": [
+          "Order"
+        ],
+        "summary": "Service Order Regenerate Shipment",
+        "description": "Recreates the shipping label",
+        "operationId": "service_order_regenerate_shipment_orders_order__order_uid__regenerate_shipment_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/POSTRegenerateShipment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "boolean",
+                  "title": "Response Service Order Regenerate Shipment Orders Order  Order Uid  Regenerate Shipment Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneralResponseModelError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/orders/order/{order_uid}/print_shipment": {
+      "get": {
+        "tags": [
+          "Order"
+        ],
+        "summary": "Service Order Print Shipment",
+        "description": "Retrieve the shipping label",
+        "operationId": "service_order_print_shipment_orders_order__order_uid__print_shipment_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "order_uid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Uid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdersPrintShipmentResponseOUT"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneralResponseModelError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/orders/order/{order_uid}/shipment": {
+      "get": {
+        "tags": [
+          "Order"
+        ],
+        "summary": "Service Order Shipment",
+        "description": "Retrieve order shipment details",
+        "operationId": "service_order_shipment_orders_order__order_uid__shipment_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "order_uid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Uid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdersShipmentResponseOUT"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneralResponseModelError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/orders/order/{order_uid}": {
+      "get": {
+        "tags": [
+          "Order"
+        ],
+        "summary": "Service Order",
+        "description": "Retrieve the shipping label",
+        "operationId": "service_order_orders_order__order_uid__get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "order_uid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Uid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdersOrderResponseOUT"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneralResponseModelError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/orders/order/{order_uid}/mark_waiting_for_pickup": {
+      "get": {
+        "tags": [
+          "Order"
+        ],
+        "summary": "Service Mark Order Waiting For Pickup",
+        "description": "Mark as Waiting for Pickup",
+        "operationId": "service_mark_order_waiting_for_pickup_orders_order__order_uid__mark_waiting_for_pickup_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "order_uid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Uid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdersMarkInWaitingForPickupResponseOUT"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneralResponseModelError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/orders/order/{order_uid}/mark_waiting_for_courier": {
+      "get": {
+        "tags": [
+          "Order"
+        ],
+        "summary": "Service Mark Order Waiting For Courier",
+        "description": "Mark as Waiting for Courier",
+        "operationId": "service_mark_order_waiting_for_courier_orders_order__order_uid__mark_waiting_for_courier_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "order_uid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Uid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdersMarkInWaitingForCourierResponseOUT"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneralResponseModelError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/orders/order/{order_uid}/shipments": {
+      "get": {
+        "tags": [
+          "Order"
+        ],
+        "summary": "Service Retrieve Order Shipping Labels",
+        "description": "Retrieve all the shipping labels",
+        "operationId": "service_retrieve_order_shipping_labels_orders_order__order_uid__shipments_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "order_uid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Uid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdersShipmentsResponseOUT"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneralResponseModelError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/inventory_items/search": {
+      "get": {
+        "tags": [
+          "Inventory Items"
+        ],
+        "summary": "Retrieve A List Of Products",
+        "description": "Retrieve a list of products.",
+        "operationId": "Retrieve_a_list_of_products_inventory_items_search_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": 0,
+              "title": "Skip"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": 250,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "inventory_level_owner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "all",
+                    "frisbo",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Inventory Level Owner"
+            }
+          },
+          {
+            "name": "store_uids[]",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Store Uids[]"
+            }
+          },
+          {
+            "name": "days_left[]",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Days Left[]"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryItemsOUT"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneralResponseModelError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        }
+      }
+    },
+    "/inventory_items/inventory_item": {
+      "post": {
+        "tags": [
+          "Inventory Items"
+        ],
+        "summary": "Create Or Update A New Product",
+        "description": "Create or update a new product",
+        "operationId": "Create_or_update_a_new_product_inventory_items_inventory_item_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/POSTSellingChannelsInventoryItemIN"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryItemsOUTAPI"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneralResponseModelError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Address": {
+        "properties": {
+          "locker_pudo_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locker Pudo Id",
+            "default": ""
+          },
+          "country_code": {
+            "type": "string",
+            "title": "Country Code"
+          },
+          "administrative_area_level_1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Administrative Area Level 1",
+            "default": ""
+          },
+          "administrative_area_level_2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Administrative Area Level 2",
+            "default": ""
+          },
+          "administrative_area_level_3": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Administrative Area Level 3"
+          },
+          "administrative_area_level_4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Administrative Area Level 4"
+          },
+          "administrative_area_level_5": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Administrative Area Level 5"
+          },
+          "street_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Street Name",
+            "default": ""
+          },
+          "street_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Street Number",
+            "default": ""
+          },
+          "street_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Street Type",
+            "default": ""
+          },
+          "suburb": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suburb",
+            "default": ""
+          },
+          "suite": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suite",
+            "default": ""
+          },
+          "postal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code",
+            "default": ""
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "default": ""
+          },
+          "contact_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Name",
+            "default": ""
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email",
+            "default": ""
+          },
+          "phone_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone Number",
+            "default": ""
+          },
+          "address_line1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Line1",
+            "default": ""
+          },
+          "address_line2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Line2",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "country_code"
+        ],
+        "title": "Address"
+      },
+      "CreteOrderResponseAPIOUTData": {
+        "properties": {
+          "order": {
+            "$ref": "#/components/schemas/OrderResponseOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order"
+        ],
+        "title": "CreteOrderResponseAPIOUTData"
+      },
+      "CreteOrdersResponseAPIOUTData": {
+        "properties": {
+          "orders": {
+            "items": {
+              "$ref": "#/components/schemas/OrderResponseOut"
+            },
+            "type": "array",
+            "title": "Orders",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "CreteOrdersResponseAPIOUTData"
+      },
+      "Currency": {
+        "type": "string",
+        "enum": [
+          "AED",
+          "AFN",
+          "ALL",
+          "AMD",
+          "ANG",
+          "AOA",
+          "ARS",
+          "AUD",
+          "AWG",
+          "AZN",
+          "BAM",
+          "BBD",
+          "BDT",
+          "BGN",
+          "BIF",
+          "BMD",
+          "BND",
+          "BOB",
+          "BRL",
+          "BSD",
+          "BWP",
+          "BZD",
+          "CAD",
+          "CDF",
+          "CHF",
+          "CLP",
+          "CNY",
+          "COP",
+          "CRC",
+          "CVE",
+          "CZK",
+          "DJF",
+          "DKK",
+          "DOP",
+          "DZD",
+          "EGP",
+          "ETB",
+          "EUR",
+          "FJD",
+          "FKP",
+          "GBP",
+          "GEL",
+          "GIP",
+          "GMD",
+          "GNF",
+          "GTQ",
+          "GYD",
+          "HKD",
+          "HNL",
+          "HRK",
+          "HTG",
+          "HUF",
+          "IDR",
+          "ILS",
+          "INR",
+          "ISK",
+          "JMD",
+          "JPY",
+          "KES",
+          "KGS",
+          "KHR",
+          "KMF",
+          "KRW",
+          "KYD",
+          "KZT",
+          "LAK",
+          "LBP",
+          "LKR",
+          "LRD",
+          "LSL",
+          "MAD",
+          "MDL",
+          "MGA",
+          "MKD",
+          "MMK",
+          "MNT",
+          "MOP",
+          "MUR",
+          "MVR",
+          "MWK",
+          "MXN",
+          "MYR",
+          "MZN",
+          "NAD",
+          "NGN",
+          "NIO",
+          "NOK",
+          "NPR",
+          "NZD",
+          "PAB",
+          "PEN",
+          "PGK",
+          "PHP",
+          "PKR",
+          "PLN",
+          "PYG",
+          "QAR",
+          "RON",
+          "RSD",
+          "RUB",
+          "RWF",
+          "SAR",
+          "SBD",
+          "SCR",
+          "SEK",
+          "SGD",
+          "SHP",
+          "SLL",
+          "SRD",
+          "STD",
+          "SZL",
+          "THB",
+          "TJS",
+          "TOP",
+          "TRY",
+          "TTD",
+          "TWD",
+          "TZS",
+          "UAH",
+          "UGX",
+          "USD",
+          "UYU",
+          "UZS",
+          "VND",
+          "VUV",
+          "WST",
+          "XAF",
+          "XCD",
+          "XOF",
+          "XPF",
+          "YER",
+          "ZAR",
+          "ZMW"
+        ],
+        "title": "Currency"
+      },
+      "GeneralResponseModelError": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "data": {
+            "items": {},
+            "type": "array",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "data"
+        ],
+        "title": "GeneralResponseModelError"
+      },
+      "GeneratingCouriers": {
+        "type": "string",
+        "enum": [
+          "urgent_cargus",
+          "dpd_ro",
+          "dhl_de",
+          "inpost_pl",
+          "econt_bg",
+          "nemo_express_ro",
+          "gls_ro",
+          "gls_de",
+          "sameday_ro",
+          "sameday_hu",
+          "fan_courier_ro",
+          "fan_courier_md",
+          "shipvam_gr",
+          "curier_rapid_md"
+        ],
+        "title": "GeneratingCouriers"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "InventoryItem": {
+        "properties": {
+          "uid": {
+            "type": "string",
+            "title": "Uid"
+          },
+          "organization_uid": {
+            "type": "string",
+            "title": "Organization Uid"
+          },
+          "title_1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title 1"
+          },
+          "title_2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title 2"
+          },
+          "title_3": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title 3"
+          },
+          "state": {
+            "$ref": "#/components/schemas/InventoryItemState",
+            "default": "active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "imported_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imported At",
+            "description": "The date and time when the product was first imported."
+          },
+          "dimensions": {
+            "$ref": "#/components/schemas/InventoryItemDimensions"
+          },
+          "codes": {
+            "items": {
+              "$ref": "#/components/schemas/InventoryItemCode"
+            },
+            "type": "array",
+            "title": "Codes"
+          },
+          "requires_shipping": {
+            "type": "boolean",
+            "title": "Requires Shipping",
+            "default": false
+          },
+          "quantity_tracked": {
+            "type": "boolean",
+            "title": "Quantity Tracked",
+            "default": false
+          },
+          "selling_policy": {
+            "$ref": "#/components/schemas/InventoryItemSellingPolicy",
+            "default": "deny"
+          },
+          "managed_by": {
+            "$ref": "#/components/schemas/InventoryItemManagedBy",
+            "default": "others"
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/InventoryItemImage"
+            },
+            "type": "array",
+            "title": "Images",
+            "default": []
+          },
+          "computed_inventory_levels": {
+            "items": {
+              "$ref": "#/components/schemas/InventoryItemComputedInventoryLevel"
+            },
+            "type": "array",
+            "title": "Computed Inventory Levels",
+            "default": []
+          },
+          "aggregated_inventory_levels": {
+            "$ref": "#/components/schemas/InventoryItemAggregatedInventoryLevels"
+          },
+          "selling_channels_inventory_items_unique_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Selling Channels Inventory Items Unique Keys"
+          },
+          "selling_channels_store_uids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Selling Channels Store Uids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "organization_uid",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "InventoryItem"
+      },
+      "InventoryItemAggregatedInventoryLevel": {
+        "properties": {
+          "available": {
+            "type": "number",
+            "title": "Available",
+            "default": 0
+          },
+          "sales": {
+            "type": "number",
+            "title": "Sales",
+            "default": 0
+          },
+          "has_sales": {
+            "type": "boolean",
+            "title": "Has Sales",
+            "default": false
+          },
+          "has_available": {
+            "type": "boolean",
+            "title": "Has Available",
+            "default": false
+          },
+          "days_left": {
+            "type": "number",
+            "title": "Days Left",
+            "default": 0
+          },
+          "committed": {
+            "type": "number",
+            "title": "Committed",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "InventoryItemAggregatedInventoryLevel"
+      },
+      "InventoryItemAggregatedInventoryLevels": {
+        "properties": {
+          "all": {
+            "$ref": "#/components/schemas/InventoryItemAggregatedInventoryLevel"
+          },
+          "other": {
+            "$ref": "#/components/schemas/InventoryItemAggregatedInventoryLevel"
+          },
+          "frisbo": {
+            "$ref": "#/components/schemas/InventoryItemAggregatedInventoryLevel"
+          }
+        },
+        "type": "object",
+        "title": "InventoryItemAggregatedInventoryLevels"
+      },
+      "InventoryItemCode": {
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/InventoryItemCodeKey"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "value"
+        ],
+        "title": "InventoryItemCode"
+      },
+      "InventoryItemCodeKey": {
+        "type": "string",
+        "enum": [
+          "barcode",
+          "sku",
+          "hs"
+        ],
+        "title": "InventoryItemCodeKey"
+      },
+      "InventoryItemComputedInventoryLevel": {
+        "properties": {
+          "owner": {
+            "$ref": "#/components/schemas/InventoryItemComputedInventoryLevelOwner"
+          },
+          "available": {
+            "type": "number",
+            "title": "Available",
+            "default": 0
+          },
+          "incoming": {
+            "type": "number",
+            "title": "Incoming",
+            "default": 0
+          },
+          "committed": {
+            "type": "number",
+            "title": "Committed",
+            "default": 0
+          },
+          "returned": {
+            "type": "number",
+            "title": "Returned",
+            "default": 0
+          },
+          "defects": {
+            "type": "number",
+            "title": "Defects",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "owner"
+        ],
+        "title": "InventoryItemComputedInventoryLevel"
+      },
+      "InventoryItemComputedInventoryLevelOwner": {
+        "type": "string",
+        "enum": [
+          "other",
+          "frisbo"
+        ],
+        "title": "InventoryItemComputedInventoryLevelOwner"
+      },
+      "InventoryItemDimensions": {
+        "properties": {
+          "weight": {
+            "type": "number",
+            "title": "Weight",
+            "description": "Weight in grams",
+            "default": 0
+          },
+          "height": {
+            "type": "number",
+            "title": "Height",
+            "description": "Height in millimeters",
+            "default": 0
+          },
+          "width": {
+            "type": "number",
+            "title": "Width",
+            "description": "Width in millimeters",
+            "default": 0
+          },
+          "length": {
+            "type": "number",
+            "title": "Length",
+            "description": "Length in millimeters",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "InventoryItemDimensions"
+      },
+      "InventoryItemImage": {
+        "properties": {
+          "src": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Src"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "title": "InventoryItemImage"
+      },
+      "InventoryItemManagedBy": {
+        "type": "string",
+        "enum": [
+          "frisbo",
+          "others"
+        ],
+        "title": "InventoryItemManagedBy"
+      },
+      "InventoryItemSellingPolicy": {
+        "type": "string",
+        "enum": [
+          "deny",
+          "continue_"
+        ],
+        "title": "InventoryItemSellingPolicy"
+      },
+      "InventoryItemState": {
+        "type": "string",
+        "enum": [
+          "active",
+          "draft",
+          "archived",
+          "deleted",
+          "replaced"
+        ],
+        "title": "InventoryItemState"
+      },
+      "InventoryItemsOUT": {
+        "properties": {
+          "inventory_items": {
+            "items": {
+              "$ref": "#/components/schemas/InventoryItem"
+            },
+            "type": "array",
+            "title": "Inventory Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inventory_items"
+        ],
+        "title": "InventoryItemsOUT"
+      },
+      "InventoryItemsOUTAPI": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "data": {
+            "$ref": "#/components/schemas/InventoryItemsOUTAPIData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "data"
+        ],
+        "title": "InventoryItemsOUTAPI"
+      },
+      "InventoryItemsOUTAPIData": {
+        "properties": {
+          "inventory_items": {
+            "items": {
+              "$ref": "#/components/schemas/InventoryItem"
+            },
+            "type": "array",
+            "title": "Inventory Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inventory_items"
+        ],
+        "title": "InventoryItemsOUTAPIData"
+      },
+      "MessagesCommentsTeam": {
+        "type": "string",
+        "enum": [
+          "development",
+          "non-technical"
+        ],
+        "title": "MessagesCommentsTeam"
+      },
+      "Order": {
+        "properties": {
+          "uid": {
+            "type": "string",
+            "title": "Uid"
+          },
+          "organization_uid": {
+            "type": "string",
+            "title": "Organization Uid"
+          },
+          "store_uid": {
+            "type": "string",
+            "title": "Store Uid"
+          },
+          "aggregated_status": {
+            "$ref": "#/components/schemas/OrderAggregatedStatus"
+          },
+          "aggregated_courier": {
+            "$ref": "#/components/schemas/OrderAggregatedCourierData"
+          },
+          "selling_channel": {
+            "$ref": "#/components/schemas/OrderSellingChannel"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "comments": {
+            "$ref": "#/components/schemas/OrderComments"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/OrderError"
+            },
+            "type": "array",
+            "title": "Errors",
+            "default": []
+          },
+          "financial_status": {
+            "$ref": "#/components/schemas/OrderFinancialStatus",
+            "default": "pending"
+          },
+          "fulfillment_status": {
+            "$ref": "#/components/schemas/OrderFulfillmentStatus"
+          },
+          "fulfillment_conditions": {
+            "$ref": "#/components/schemas/OrderFulfillmentConditions"
+          },
+          "fulfillments": {
+            "items": {
+              "$ref": "#/components/schemas/OrderFulfillment"
+            },
+            "type": "array",
+            "title": "Fulfillments",
+            "default": []
+          },
+          "imported_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imported At",
+            "description": "The date and time when the order was imported."
+          },
+          "inventory_status": {
+            "$ref": "#/components/schemas/OrderInventoryStatus"
+          },
+          "line_items": {
+            "items": {
+              "$ref": "#/components/schemas/OrderLineItem"
+            },
+            "type": "array",
+            "title": "Line Items",
+            "default": []
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "managed_by": {
+            "$ref": "#/components/schemas/OrderManagedBy",
+            "default": "others"
+          },
+          "messages": {
+            "$ref": "#/components/schemas/OrderMessages"
+          },
+          "metadata": {
+            "items": {
+              "$ref": "#/components/schemas/OrderMetadata"
+            },
+            "type": "array",
+            "title": "Metadata",
+            "default": []
+          },
+          "metafields": {
+            "items": {
+              "$ref": "#/components/schemas/OrderMetafield"
+            },
+            "type": "array",
+            "title": "Metafields",
+            "default": []
+          },
+          "notes": {
+            "$ref": "#/components/schemas/OrderNotes"
+          },
+          "payment": {
+            "$ref": "#/components/schemas/OrderPayment"
+          },
+          "prices": {
+            "$ref": "#/components/schemas/OrderPrices"
+          },
+          "payout_status": {
+            "$ref": "#/components/schemas/OrderPayoutStatus"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "reverse_logistics": {
+            "$ref": "#/components/schemas/OrderReverseLogistics"
+          },
+          "shipping_address": {
+            "$ref": "#/components/schemas/OrderShippingAddress"
+          },
+          "shipping_courier": {
+            "$ref": "#/components/schemas/OrderShippingCourier"
+          },
+          "shipping_conditions": {
+            "$ref": "#/components/schemas/OrderShippingConditions"
+          },
+          "shipment_status": {
+            "$ref": "#/components/schemas/OrderShipmentStatus"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OrderState",
+            "description": "Order state in selling channel.",
+            "default": "active"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/OrderStage",
+            "default": "live"
+          },
+          "tags": {
+            "$ref": "#/components/schemas/OrderTags"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "display_priority": {
+            "type": "integer",
+            "maximum": 5,
+            "minimum": 0,
+            "title": "Display Priority",
+            "description": "The priority of the order for UI's to display. Valid 0 - 5.",
+            "default": 0
+          },
+          "sla": {
+            "$ref": "#/components/schemas/OrderSLAStatus"
+          },
+          "selling_channels_order_unique_key": {
+            "type": "string",
+            "title": "Selling Channels Order Unique Key"
+          },
+          "workflow_process": {
+            "$ref": "#/components/schemas/OrderWorkflowProcess"
+          },
+          "statuses_history": {
+            "$ref": "#/components/schemas/OrderStatusesHistory"
+          },
+          "es_version": {
+            "type": "integer",
+            "title": "Es Version",
+            "description": "The version of the order in Elasticsearch. Used for optimistic concurrency control.",
+            "default": 27032026
+          },
+          "module_processes": {
+            "$ref": "#/components/schemas/OrderModuleProcesses"
+          }
+        },
+        "type": "object",
+        "required": [
+          "organization_uid",
+          "store_uid",
+          "created_at",
+          "updated_at",
+          "selling_channels_order_unique_key"
+        ],
+        "title": "Order"
+      },
+      "OrderAfterWorkflow": {
+        "properties": {
+          "inventory_levels": {
+            "$ref": "#/components/schemas/OrderAfterWorkflowInventoryLevels"
+          },
+          "cancellation_request": {
+            "$ref": "#/components/schemas/OrderAfterWorkflowCancellationRequested"
+          }
+        },
+        "type": "object",
+        "title": "OrderAfterWorkflow"
+      },
+      "OrderAfterWorkflowCancellationRequested": {
+        "properties": {
+          "requested": {
+            "type": "boolean",
+            "title": "Requested",
+            "default": false
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted",
+            "default": false
+          },
+          "requested_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested At"
+          },
+          "accepted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted At"
+          }
+        },
+        "type": "object",
+        "title": "OrderAfterWorkflowCancellationRequested"
+      },
+      "OrderAfterWorkflowInventoryLevels": {
+        "properties": {
+          "committed_subtracted": {
+            "type": "boolean",
+            "title": "Committed Subtracted",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "OrderAfterWorkflowInventoryLevels"
+      },
+      "OrderAggregatedCourierData": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TrackingOnlyCouriers"
+              },
+              {
+                "$ref": "#/components/schemas/GeneratingCouriers"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "subkey": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TrackingOnlyCouriers"
+              },
+              {
+                "$ref": "#/components/schemas/GeneratingCouriers"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subkey"
+          },
+          "tracking_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracking Number"
+          },
+          "is_known": {
+            "type": "boolean",
+            "title": "Is Known",
+            "default": false
+          },
+          "has_courier": {
+            "type": "boolean",
+            "title": "Has Courier",
+            "default": false
+          },
+          "left": {
+            "type": "boolean",
+            "title": "Left",
+            "description": "True if the order was left at the merchant fulfillment location",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "OrderAggregatedCourierData"
+      },
+      "OrderAggregatedStatus": {
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/OrderAggregatedStatusOption",
+            "default": "not_generated"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderAggregatedStatusPriority"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "title": "Priority",
+            "default": 3500000
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          }
+        },
+        "type": "object",
+        "title": "OrderAggregatedStatus"
+      },
+      "OrderAggregatedStatusOption": {
+        "type": "string",
+        "enum": [
+          "unknown",
+          "errors_miscellaneous_errors",
+          "errors_incorrect_shipping_address",
+          "inventory_fulfillment_center_inventory_enough_quantity",
+          "inventory_fulfillment_center_inventory_insufficient_quantity",
+          "inventory_merchant_inventory_enough_quantity",
+          "inventory_merchant_inventory_insufficient_quantity",
+          "inventory_merchant_inventory_pending",
+          "not_generated",
+          "generating_awb",
+          "generated_awb",
+          "shipping_canceled",
+          "refused",
+          "personal_pickup",
+          "customer_pickup",
+          "out_for_delivery",
+          "in_parcel_locker",
+          "redirected",
+          "in_transit",
+          "incorrect_address",
+          "unsuccessful_delivery",
+          "delivered",
+          "returning_to_sender",
+          "received_by_sender",
+          "deferred_delivery",
+          "initializing_fulfillment",
+          "awaiting_fulfillment_initialization",
+          "awaiting_fulfillment_order",
+          "awaiting_fulfillment_hold_release",
+          "initializing_shipment_generation",
+          "awaiting_shipment_generation_initialization",
+          "awaiting_shipment_generation_order",
+          "awaiting_shipment_generation_hold_release",
+          "awaiting_shipment_generation_hold_release_incorrect_address",
+          "pending_fulfillment",
+          "sending",
+          "ready_for_picking",
+          "in_picking",
+          "waiting_for_courier",
+          "waiting_for_pickup",
+          "out_of_stock",
+          "on_hold",
+          "fulfillment_cancelled",
+          "cancelled",
+          "fulfilled",
+          "not_fulfilled",
+          "shipment_refunded",
+          "back_to_sender",
+          "lost",
+          "lost_in_transit",
+          "lost_in_warehouse",
+          "returned",
+          "partial"
+        ],
+        "title": "OrderAggregatedStatusOption",
+        "description": "Statuses from OrderFulfillmentStatus and OrderShippingStatus\n\nShould be replicated in OrderAggregatedStatusPriority"
+      },
+      "OrderAggregatedStatusPriority": {
+        "type": "integer",
+        "enum": [
+          0,
+          1000,
+          1001,
+          2801000,
+          2802000,
+          2803000,
+          2804000,
+          2805000,
+          3500000,
+          3600000,
+          3700000,
+          3750000,
+          4150000,
+          4000000,
+          4100000,
+          4200000,
+          4300000,
+          4175000,
+          3800000,
+          4050000,
+          4700000,
+          4800000,
+          4900000,
+          5000000,
+          4750000,
+          1900000,
+          1800000,
+          1700000,
+          2025000,
+          1900000,
+          1800000,
+          1700000,
+          2025000,
+          2025001,
+          2200000,
+          2300000,
+          2400000,
+          2500000,
+          2600000,
+          2650000,
+          2700000,
+          2800000,
+          2850000,
+          2900000,
+          3150000,
+          3200000,
+          3250000,
+          3275000,
+          3275000,
+          3300000,
+          10000000,
+          11000000,
+          12000000
+        ],
+        "title": "OrderAggregatedStatusPriority",
+        "description": "Statuses from OrderAggregatedStatusOption\n\nShould be replicated in OrderAggregatedStatusPriority"
+      },
+      "OrderComments": {
+        "properties": {
+          "count_": {
+            "type": "integer",
+            "title": "Count",
+            "default": 0
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderCommentsStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          },
+          "team": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderCommentsTeam"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "OrderComments"
+      },
+      "OrderCommentsStatus": {
+        "type": "string",
+        "enum": [
+          "escalated",
+          "snoozed"
+        ],
+        "title": "OrderCommentsStatus"
+      },
+      "OrderCommentsTeam": {
+        "type": "string",
+        "enum": [
+          "development",
+          "non-technical"
+        ],
+        "title": "OrderCommentsTeam"
+      },
+      "OrderError": {
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderErrorCode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "unknown"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "OrderError"
+      },
+      "OrderErrorCode": {
+        "type": "string",
+        "enum": [
+          "unknown",
+          "undefined_products",
+          "no_line_items",
+          "fewer_line_items",
+          "invalid_shipping_address",
+          "incorrect_shipping_address",
+          "undefined_payment_gateway",
+          "insufficient_quantity",
+          "nonexistent_inventory_level"
+        ],
+        "title": "OrderErrorCode"
+      },
+      "OrderFinancialStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "paid",
+          "authorized",
+          "partially_paid",
+          "partially_refunded",
+          "refunded",
+          "voided"
+        ],
+        "title": "OrderFinancialStatus",
+        "description": "The financial status of an order.\nOnce an order is paid we will not change the financial status."
+      },
+      "OrderFulfillment": {
+        "properties": {
+          "owner": {
+            "$ref": "#/components/schemas/OrderFulfillmentOwner",
+            "default": "other"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At",
+            "description": "The date and time when the fulfillment was created."
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderFulfillmentStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origin_address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderShippingAddress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tracking_company": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TrackingOnlyCouriers"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracking Company"
+          },
+          "tracking_numbers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tracking Numbers",
+            "default": []
+          },
+          "tracking_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tracking Urls",
+            "default": []
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "title": "OrderFulfillment"
+      },
+      "OrderFulfillmentConditions": {
+        "properties": {
+          "are_required": {
+            "type": "boolean",
+            "title": "Are Required",
+            "description": "True if the selling channel does not have fulfillment capabilities and the fulfillment is managed through the status of the order.",
+            "default": false
+          },
+          "has_fulfillment_conditions": {
+            "type": "boolean",
+            "title": "Has Fulfillment Conditions",
+            "description": "True if the order has fulfillment conditions. For ",
+            "default": false
+          },
+          "has_fulfillment_holds": {
+            "type": "boolean",
+            "title": "Has Fulfillment Holds",
+            "description": "True if the order has fulfillment holds.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "OrderFulfillmentConditions",
+        "description": "True if the fulfillment modules is active."
+      },
+      "OrderFulfillmentOwner": {
+        "type": "string",
+        "enum": [
+          "other",
+          "frisbo"
+        ],
+        "title": "OrderFulfillmentOwner"
+      },
+      "OrderFulfillmentStatus": {
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/OrderFulfillmentStatusOption",
+            "default": "not_fulfilled"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          }
+        },
+        "type": "object",
+        "title": "OrderFulfillmentStatus"
+      },
+      "OrderFulfillmentStatusOption": {
+        "type": "string",
+        "enum": [
+          "pending_fulfillment",
+          "sending",
+          "ready_for_picking",
+          "in_picking",
+          "waiting_for_courier",
+          "out_of_stock",
+          "cancelled",
+          "back_to_sender",
+          "fulfilled",
+          "not_fulfilled",
+          "returned",
+          "partial",
+          "on_hold"
+        ],
+        "title": "OrderFulfillmentStatusOption"
+      },
+      "OrderInventoryAggregatedStatus": {
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/OrderInventoryAggregatedStatusOption",
+            "default": "inventory_merchant_inventory_enough_quantity"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          }
+        },
+        "type": "object",
+        "title": "OrderInventoryAggregatedStatus"
+      },
+      "OrderInventoryAggregatedStatusOption": {
+        "type": "string",
+        "enum": [
+          "inventory_fulfillment_center_inventory_enough_quantity",
+          "inventory_fulfillment_center_inventory_insufficient_quantity",
+          "inventory_merchant_inventory_enough_quantity",
+          "inventory_merchant_inventory_insufficient_quantity",
+          "inventory_merchant_inventory_pending"
+        ],
+        "title": "OrderInventoryAggregatedStatusOption"
+      },
+      "OrderInventoryFulfillmentCenterStatus": {
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/OrderInventoryFulfillmentCenterStatusOption",
+            "default": "inventory_fulfillment_center_inventory_enough_quantity"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          }
+        },
+        "type": "object",
+        "title": "OrderInventoryFulfillmentCenterStatus"
+      },
+      "OrderInventoryFulfillmentCenterStatusOption": {
+        "type": "string",
+        "enum": [
+          "inventory_fulfillment_center_inventory_enough_quantity",
+          "inventory_fulfillment_center_inventory_insufficient_quantity"
+        ],
+        "title": "OrderInventoryFulfillmentCenterStatusOption"
+      },
+      "OrderInventoryMerchantStatus": {
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/OrderInventoryMerchantStatusOption",
+            "default": "inventory_merchant_inventory_enough_quantity"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          }
+        },
+        "type": "object",
+        "title": "OrderInventoryMerchantStatus"
+      },
+      "OrderInventoryMerchantStatusOption": {
+        "type": "string",
+        "enum": [
+          "inventory_merchant_inventory_enough_quantity",
+          "inventory_merchant_inventory_insufficient_quantity",
+          "inventory_merchant_inventory_pending"
+        ],
+        "title": "OrderInventoryMerchantStatusOption"
+      },
+      "OrderInventoryStatus": {
+        "properties": {
+          "aggregated": {
+            "$ref": "#/components/schemas/OrderInventoryAggregatedStatus"
+          },
+          "merchant": {
+            "$ref": "#/components/schemas/OrderInventoryMerchantStatus"
+          },
+          "fulfillment_center": {
+            "$ref": "#/components/schemas/OrderInventoryFulfillmentCenterStatus"
+          }
+        },
+        "type": "object",
+        "title": "OrderInventoryStatus"
+      },
+      "OrderLineItem": {
+        "properties": {
+          "unique_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unique Key"
+          },
+          "external_identifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Identifier"
+          },
+          "managed_by": {
+            "$ref": "#/components/schemas/OrderLineItemManagedBy",
+            "default": "others"
+          },
+          "price": {
+            "type": "number",
+            "title": "Price",
+            "description": "The price of the item before discounts have been applied in the shop currency.",
+            "default": 0
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity",
+            "description": "The number of items that were purchased.",
+            "default": 0
+          },
+          "reserved_quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserved Quantity",
+            "description": "The number of items that are reserved at the moment of selling.",
+            "default": 0
+          },
+          "missing_quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Quantity",
+            "description": "The number of items that are missing.",
+            "default": 0
+          },
+          "has_missing": {
+            "type": "boolean",
+            "title": "Has Missing",
+            "default": false
+          },
+          "requires_shipping": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requires Shipping"
+          },
+          "inventory_item": {
+            "$ref": "#/components/schemas/OrderLineItemInventoryItem"
+          },
+          "gift_card": {
+            "type": "boolean",
+            "title": "Gift Card",
+            "default": false
+          },
+          "properties": {
+            "items": {
+              "$ref": "#/components/schemas/OrderLineProperty"
+            },
+            "type": "array",
+            "title": "Properties",
+            "default": []
+          },
+          "taxable": {
+            "type": "boolean",
+            "title": "Taxable",
+            "default": false
+          },
+          "tax_lines": {
+            "items": {
+              "$ref": "#/components/schemas/OrderLineItemTaxLine"
+            },
+            "type": "array",
+            "title": "Tax Lines",
+            "default": []
+          },
+          "tip_payment_gateway": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tip Payment Gateway"
+          },
+          "tip_payment_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tip Payment Method"
+          },
+          "order_uid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Uid"
+          },
+          "last_operation": {
+            "$ref": "#/components/schemas/OrderLineItemLastOperation",
+            "default": "nothing"
+          },
+          "total_discount": {
+            "type": "number",
+            "title": "Total Discount",
+            "default": 0
+          },
+          "discount_allocations": {
+            "items": {
+              "$ref": "#/components/schemas/OrderLineItemDiscountAllocation"
+            },
+            "type": "array",
+            "title": "Discount Allocations",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "inventory_item"
+        ],
+        "title": "OrderLineItem"
+      },
+      "OrderLineItemDiscountAllocation": {
+        "properties": {
+          "amount": {
+            "type": "number",
+            "title": "Amount",
+            "default": 0
+          },
+          "discount_application_index": {
+            "type": "integer",
+            "title": "Discount Application Index",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "OrderLineItemDiscountAllocation"
+      },
+      "OrderLineItemInventoryItem": {
+        "properties": {
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku"
+          },
+          "uid": {
+            "type": "string",
+            "title": "Uid"
+          },
+          "title_1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title 1"
+          },
+          "title_2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title 2"
+          }
+        },
+        "type": "object",
+        "required": [
+          "uid"
+        ],
+        "title": "OrderLineItemInventoryItem"
+      },
+      "OrderLineItemLastOperation": {
+        "type": "string",
+        "enum": [
+          "nothing",
+          "create",
+          "update"
+        ],
+        "title": "OrderLineItemLastOperation"
+      },
+      "OrderLineItemManagedBy": {
+        "type": "string",
+        "enum": [
+          "frisbo",
+          "others"
+        ],
+        "title": "OrderLineItemManagedBy"
+      },
+      "OrderLineItemTaxLine": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "default": ""
+          },
+          "price": {
+            "type": "number",
+            "title": "Price",
+            "default": 0
+          },
+          "rate": {
+            "type": "number",
+            "title": "Rate",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "OrderLineItemTaxLine"
+      },
+      "OrderLineProperty": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "title": "OrderLineProperty"
+      },
+      "OrderManagedBy": {
+        "type": "string",
+        "enum": [
+          "frisbo",
+          "others"
+        ],
+        "title": "OrderManagedBy"
+      },
+      "OrderMessages": {
+        "properties": {
+          "count_": {
+            "type": "integer",
+            "title": "Count",
+            "default": 0
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderMessagesStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          },
+          "team": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessagesCommentsTeam"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "OrderMessages"
+      },
+      "OrderMessagesStatus": {
+        "type": "string",
+        "enum": [
+          "escalated",
+          "snoozed"
+        ],
+        "title": "OrderMessagesStatus"
+      },
+      "OrderMetadata": {
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "title": "OrderMetadata"
+      },
+      "OrderMetafield": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/OrderMetafieldKind"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderMetafieldNumberOfParcels"
+              },
+              {
+                "$ref": "#/components/schemas/OrderMetafieldExchangePackage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "OrderMetafield"
+      },
+      "OrderMetafieldExchangePackage": {
+        "properties": {
+          "exchange_package": {
+            "type": "boolean",
+            "title": "Exchange Package"
+          }
+        },
+        "type": "object",
+        "required": [
+          "exchange_package"
+        ],
+        "title": "OrderMetafieldExchangePackage"
+      },
+      "OrderMetafieldKind": {
+        "type": "string",
+        "enum": [
+          "number_of_parcels",
+          "exchange_package"
+        ],
+        "title": "OrderMetafieldKind"
+      },
+      "OrderMetafieldNumberOfParcels": {
+        "properties": {
+          "number_of_parcels": {
+            "type": "integer",
+            "title": "Number Of Parcels"
+          }
+        },
+        "type": "object",
+        "required": [
+          "number_of_parcels"
+        ],
+        "title": "OrderMetafieldNumberOfParcels"
+      },
+      "OrderModuleProcesses": {
+        "properties": {
+          "selected": {
+            "items": {
+              "$ref": "#/components/schemas/OrderModuleProcessesModulesModuleKind"
+            },
+            "type": "array",
+            "title": "Selected",
+            "default": []
+          },
+          "modules": {
+            "$ref": "#/components/schemas/OrderModuleProcessesModules"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/OrderModuleProcessesModulesModuleKind"
+            },
+            "type": "array",
+            "title": "History",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "OrderModuleProcesses"
+      },
+      "OrderModuleProcessesModules": {
+        "properties": {
+          "invoicing": {
+            "$ref": "#/components/schemas/OrderModuleProcessesModulesModuleInvoicing"
+          },
+          "tracking": {
+            "$ref": "#/components/schemas/OrderModuleProcessesModulesModuleTracking"
+          },
+          "shipping": {
+            "$ref": "#/components/schemas/OrderModuleProcessesModulesModuleShipping"
+          },
+          "fulfillment": {
+            "$ref": "#/components/schemas/OrderModuleProcessesModulesModuleFulfillment"
+          }
+        },
+        "type": "object",
+        "title": "OrderModuleProcessesModules"
+      },
+      "OrderModuleProcessesModulesModuleFulfillment": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/OrderModuleProcessesModulesModuleKind",
+            "default": "fulfillment"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "default": false
+          },
+          "actioned": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actioned"
+          }
+        },
+        "type": "object",
+        "title": "OrderModuleProcessesModulesModuleFulfillment"
+      },
+      "OrderModuleProcessesModulesModuleInvoicing": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/OrderModuleProcessesModulesModuleKind",
+            "default": "invoicing"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "default": false
+          },
+          "actioned": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actioned"
+          }
+        },
+        "type": "object",
+        "title": "OrderModuleProcessesModulesModuleInvoicing"
+      },
+      "OrderModuleProcessesModulesModuleKind": {
+        "type": "string",
+        "enum": [
+          "invoicing",
+          "tracking",
+          "shipping",
+          "fulfillment"
+        ],
+        "title": "OrderModuleProcessesModulesModuleKind"
+      },
+      "OrderModuleProcessesModulesModuleShipping": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/OrderModuleProcessesModulesModuleKind",
+            "default": "shipping"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "default": false
+          },
+          "actioned": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actioned"
+          },
+          "data": {
+            "$ref": "#/components/schemas/OrderModuleProcessesModulesModuleShippingData"
+          }
+        },
+        "type": "object",
+        "title": "OrderModuleProcessesModulesModuleShipping"
+      },
+      "OrderModuleProcessesModulesModuleShippingData": {
+        "properties": {
+          "label_creation_excepted_city": {
+            "type": "boolean",
+            "title": "Label Creation Excepted City",
+            "description": "The label will not be created for this order because of the selling channel policy regarding the excepted cities.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "OrderModuleProcessesModulesModuleShippingData"
+      },
+      "OrderModuleProcessesModulesModuleTracking": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/OrderModuleProcessesModulesModuleKind",
+            "default": "tracking"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "default": false
+          },
+          "actioned": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actioned"
+          }
+        },
+        "type": "object",
+        "title": "OrderModuleProcessesModulesModuleTracking"
+      },
+      "OrderNotes": {
+        "properties": {
+          "selling_channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selling Channel"
+          }
+        },
+        "type": "object",
+        "title": "OrderNotes"
+      },
+      "OrderPayment": {
+        "properties": {
+          "currency": {
+            "$ref": "#/components/schemas/Currency",
+            "default": "EUR"
+          },
+          "gateway_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Gateway Names",
+            "default": []
+          },
+          "bank_deposit": {
+            "type": "boolean",
+            "title": "Bank Deposit",
+            "default": false
+          },
+          "bank_deposit_value": {
+            "type": "number",
+            "title": "Bank Deposit Value",
+            "default": 0
+          },
+          "cash_on_delivery": {
+            "type": "boolean",
+            "title": "Cash On Delivery",
+            "default": false
+          },
+          "cash_on_delivery_value": {
+            "type": "number",
+            "title": "Cash On Delivery Value",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "OrderPayment"
+      },
+      "OrderPayoutStatus": {
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/OrderPayoutStatusOption",
+            "default": "not_applicable"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          }
+        },
+        "type": "object",
+        "title": "OrderPayoutStatus"
+      },
+      "OrderPayoutStatusOption": {
+        "type": "string",
+        "enum": [
+          "not_applicable",
+          "not_collected",
+          "collected",
+          "at_frisbo",
+          "at_merchant"
+        ],
+        "title": "OrderPayoutStatusOption"
+      },
+      "OrderPreWorkflow": {
+        "properties": {
+          "shipment": {
+            "$ref": "#/components/schemas/OrderPreWorkflowShipment"
+          },
+          "process": {
+            "$ref": "#/components/schemas/OrderPreWorkflowProcess"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrderPreWorkflowStatus"
+          }
+        },
+        "type": "object",
+        "title": "OrderPreWorkflow"
+      },
+      "OrderPreWorkflowProcess": {
+        "properties": {
+          "started": {
+            "type": "boolean",
+            "title": "Started",
+            "default": false
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "interrupted": {
+            "type": "boolean",
+            "title": "Interrupted",
+            "default": false
+          },
+          "interrupted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interrupted At"
+          },
+          "ended": {
+            "type": "boolean",
+            "title": "Ended",
+            "default": false
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          }
+        },
+        "type": "object",
+        "title": "OrderPreWorkflowProcess"
+      },
+      "OrderPreWorkflowShipment": {
+        "properties": {
+          "generated": {
+            "type": "boolean",
+            "title": "Generated",
+            "default": false
+          },
+          "has_error": {
+            "type": "boolean",
+            "title": "Has Error",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "OrderPreWorkflowShipment"
+      },
+      "OrderPreWorkflowStatus": {
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderPreWorkflowStatusOption"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "not_started"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          }
+        },
+        "type": "object",
+        "title": "OrderPreWorkflowStatus"
+      },
+      "OrderPreWorkflowStatusOption": {
+        "type": "string",
+        "enum": [
+          "not_started",
+          "awaiting_fulfillment_initialization",
+          "awaiting_fulfillment_order",
+          "initializing_fulfillment",
+          "fulfillment_initialized",
+          "awaiting_shipment_generating",
+          "generating_shipment",
+          "initializing_shipment_generation",
+          "shipment_generated"
+        ],
+        "title": "OrderPreWorkflowStatusOption"
+      },
+      "OrderPrices": {
+        "properties": {
+          "subtotal_price": {
+            "type": "number",
+            "title": "Subtotal Price",
+            "description": "The total discounts applied to the price of the order in the shop currency.",
+            "default": 0
+          },
+          "total_discounts": {
+            "type": "number",
+            "title": "Total Discounts",
+            "description": "The total discounts applied to the price of the order in the shop currency.",
+            "default": 0
+          },
+          "total_price": {
+            "type": "number",
+            "title": "Total Price",
+            "description": "The sum of all line item prices, discounts, shipping, taxes, and tips in the shop currency. Must be positive.",
+            "default": 0
+          },
+          "total_tax": {
+            "type": "number",
+            "title": "Total Tax",
+            "description": "The sum of all the taxes applied to the order in the shop currency. Must be positive.",
+            "default": 0
+          },
+          "total_tip_received": {
+            "type": "number",
+            "title": "Total Tip Received",
+            "description": "The sum of all the tips in the order in the shop currency.",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "OrderPrices"
+      },
+      "OrderResponseOut": {
+        "properties": {
+          "uid": {
+            "type": "string",
+            "title": "Uid"
+          },
+          "organization_uid": {
+            "type": "string",
+            "title": "Organization Uid"
+          },
+          "store_uid": {
+            "type": "string",
+            "title": "Store Uid"
+          },
+          "aggregated_status": {
+            "$ref": "#/components/schemas/OrderAggregatedStatus"
+          },
+          "aggregated_courier": {
+            "$ref": "#/components/schemas/OrderAggregatedCourierData"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/OrderError"
+            },
+            "type": "array",
+            "title": "Errors",
+            "default": []
+          },
+          "financial_status": {
+            "$ref": "#/components/schemas/OrderFinancialStatus",
+            "default": "pending"
+          },
+          "fulfillment_status": {
+            "$ref": "#/components/schemas/OrderFulfillmentStatus"
+          },
+          "imported_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imported At",
+            "description": "The date and time when the order was imported."
+          },
+          "line_items": {
+            "items": {
+              "$ref": "#/components/schemas/OrderLineItem"
+            },
+            "type": "array",
+            "title": "Line Items",
+            "default": []
+          },
+          "notes": {
+            "$ref": "#/components/schemas/OrderNotes"
+          },
+          "payment": {
+            "$ref": "#/components/schemas/OrderPayment"
+          },
+          "prices": {
+            "$ref": "#/components/schemas/OrderPrices"
+          },
+          "payout_status": {
+            "$ref": "#/components/schemas/OrderPayoutStatus"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "shipping_address": {
+            "$ref": "#/components/schemas/OrderShippingAddress"
+          },
+          "shipping_courier": {
+            "$ref": "#/components/schemas/OrderShippingCourier"
+          },
+          "shipment_status": {
+            "$ref": "#/components/schemas/OrderShipmentStatus"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OrderState",
+            "description": "Order state in selling channel.",
+            "default": "active"
+          },
+          "tags": {
+            "$ref": "#/components/schemas/OrderTags"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "sla": {
+            "$ref": "#/components/schemas/OrderSLAStatus"
+          },
+          "statuses_history": {
+            "$ref": "#/components/schemas/OrderStatusesHistory"
+          },
+          "metadata": {
+            "items": {
+              "$ref": "#/components/schemas/OrderMetadata"
+            },
+            "type": "array",
+            "title": "Metadata",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "uid",
+          "organization_uid",
+          "store_uid",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "OrderResponseOut"
+      },
+      "OrderReverseLogistics": {
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderReverseLogisticsKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "initiated": {
+            "$ref": "#/components/schemas/OrderReverseLogisticsInitiated"
+          },
+          "in_transit": {
+            "$ref": "#/components/schemas/OrderReverseLogisticsInTransit"
+          },
+          "received": {
+            "$ref": "#/components/schemas/OrderReverseLogisticsReceived"
+          },
+          "processed": {
+            "$ref": "#/components/schemas/OrderReverseLogisticsProcessed"
+          }
+        },
+        "type": "object",
+        "title": "OrderReverseLogistics"
+      },
+      "OrderReverseLogisticsInTransit": {
+        "properties": {
+          "value": {
+            "type": "boolean",
+            "title": "Value",
+            "default": false
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          }
+        },
+        "type": "object",
+        "title": "OrderReverseLogisticsInTransit"
+      },
+      "OrderReverseLogisticsInitiated": {
+        "properties": {
+          "value": {
+            "type": "boolean",
+            "title": "Value",
+            "default": false
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          }
+        },
+        "type": "object",
+        "title": "OrderReverseLogisticsInitiated"
+      },
+      "OrderReverseLogisticsKind": {
+        "type": "string",
+        "enum": [
+          "returning_to_sender",
+          "return_items"
+        ],
+        "title": "OrderReverseLogisticsKind"
+      },
+      "OrderReverseLogisticsProcessed": {
+        "properties": {
+          "value": {
+            "type": "boolean",
+            "title": "Value",
+            "default": false
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          }
+        },
+        "type": "object",
+        "title": "OrderReverseLogisticsProcessed"
+      },
+      "OrderReverseLogisticsReceived": {
+        "properties": {
+          "value": {
+            "type": "boolean",
+            "title": "Value",
+            "default": false
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          }
+        },
+        "type": "object",
+        "title": "OrderReverseLogisticsReceived"
+      },
+      "OrderSLAStatus": {
+        "properties": {
+          "is_late": {
+            "type": "boolean",
+            "title": "Is Late",
+            "default": false
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderAggregatedStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "display_priority": {
+            "type": "integer",
+            "title": "Display Priority",
+            "default": 4
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "display_priorities": {
+            "$ref": "#/components/schemas/SLADisplayPriorities"
+          }
+        },
+        "type": "object",
+        "title": "OrderSLAStatus"
+      },
+      "OrderSellingChannel": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/OrderSellingChannelKind",
+            "default": "shopify"
+          },
+          "uid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uid"
+          }
+        },
+        "type": "object",
+        "title": "OrderSellingChannel"
+      },
+      "OrderSellingChannelKind": {
+        "type": "string",
+        "enum": [
+          "shopify",
+          "magento2",
+          "woocommerce",
+          "standard_api_v1",
+          "easysales_ro",
+          "gomag_ro"
+        ],
+        "title": "OrderSellingChannelKind"
+      },
+      "OrderShipmentStatus": {
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/OrderShipmentStatusOption",
+            "default": "not_generated"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          }
+        },
+        "type": "object",
+        "title": "OrderShipmentStatus"
+      },
+      "OrderShipmentStatusOption": {
+        "type": "string",
+        "enum": [
+          "not_generated",
+          "generating_awb",
+          "generated_awb",
+          "not_created",
+          "creating_awb",
+          "created_awb",
+          "canceled",
+          "refused",
+          "personal_pickup",
+          "customer_pickup",
+          "out_for_delivery",
+          "in_parcel_locker",
+          "redirected",
+          "in_transit",
+          "incorrect_address",
+          "unsuccessful_delivery",
+          "delivered",
+          "returning_to_sender",
+          "received_by_sender",
+          "deferred_delivery",
+          "shipment_refunded"
+        ],
+        "title": "OrderShipmentStatusOption"
+      },
+      "OrderShippingAddress": {
+        "properties": {
+          "address1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address1",
+            "description": "The street address of the shipping address."
+          },
+          "address2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address2",
+            "description": "An optional additional field for the street address of the shipping address."
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City",
+            "description": "The city, town, or village of the shipping address."
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company",
+            "description": "The company of the person associated with the shipping address."
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country",
+            "description": "The name of the country of the shipping address."
+          },
+          "country_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Code",
+            "description": "The two-letter code (ISO 3166-1 format) for the country of the shipping address."
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email",
+            "description": "Email address of the customer."
+          },
+          "first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Name",
+            "description": "The first name of the person associated with the shipping address."
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name",
+            "description": "The last name of the person associated with the shipping address."
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": " The full name of the person associated with the payment method."
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone",
+            "description": " The phone number at the shipping address."
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province",
+            "description": "The name of the region (for example, province, state, or prefecture) of the shipping address."
+          },
+          "province_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province Code",
+            "description": "The two-letter abbreviation of the region of the shipping address."
+          },
+          "zip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zip",
+            "description": "The postal code (for example, zip, postcode, or Eircode) of the shipping address."
+          }
+        },
+        "type": "object",
+        "title": "OrderShippingAddress"
+      },
+      "OrderShippingConditions": {
+        "properties": {
+          "are_required": {
+            "type": "boolean",
+            "title": "Are Required",
+            "description": "True if the selling channel does not have fulfillment capabilities and the fulfillment is managed through the status of the order.",
+            "default": false
+          },
+          "has_shipping_conditions": {
+            "type": "boolean",
+            "title": "Has Shipping Conditions",
+            "description": "True if the order has shipping generation conditions. For ",
+            "default": false
+          },
+          "has_shipping_holds": {
+            "type": "boolean",
+            "title": "Has Shipping Holds",
+            "description": "True if the order has holds.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "OrderShippingConditions",
+        "description": "True if the shipping modules is active."
+      },
+      "OrderShippingCourier": {
+        "properties": {
+          "preferred_courier_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/TrackingOnlyCouriers"
+              },
+              {
+                "$ref": "#/components/schemas/GeneratingCouriers"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Courier Id"
+          }
+        },
+        "type": "object",
+        "title": "OrderShippingCourier"
+      },
+      "OrderStage": {
+        "type": "string",
+        "enum": [
+          "demo",
+          "live"
+        ],
+        "title": "OrderStage"
+      },
+      "OrderState": {
+        "type": "string",
+        "enum": [
+          "active",
+          "draft",
+          "closed",
+          "cancelled",
+          "deleted",
+          "frozen"
+        ],
+        "title": "OrderState"
+      },
+      "OrderStatusesHistory": {
+        "properties": {
+          "aggregated_status": {
+            "items": {
+              "$ref": "#/components/schemas/OrderAggregatedStatus"
+            },
+            "type": "array",
+            "title": "Aggregated Status",
+            "default": []
+          },
+          "shipment_status": {
+            "items": {
+              "$ref": "#/components/schemas/OrderShipmentStatus"
+            },
+            "type": "array",
+            "title": "Shipment Status",
+            "default": []
+          },
+          "raw_shipment_statuses": {
+            "items": {
+              "$ref": "#/components/schemas/OrderShipmentStatus"
+            },
+            "type": "array",
+            "title": "Raw Shipment Statuses",
+            "default": []
+          },
+          "fulfillment_status": {
+            "items": {
+              "$ref": "#/components/schemas/OrderFulfillmentStatus"
+            },
+            "type": "array",
+            "title": "Fulfillment Status",
+            "default": []
+          },
+          "sla_statuses": {
+            "items": {
+              "$ref": "#/components/schemas/OrderSLAStatus"
+            },
+            "type": "array",
+            "title": "Sla Statuses",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "OrderStatusesHistory"
+      },
+      "OrderTagItem": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key",
+            "default": ""
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "title": "OrderTagItem"
+      },
+      "OrderTags": {
+        "properties": {
+          "selling_channel": {
+            "items": {
+              "$ref": "#/components/schemas/OrderTagItem"
+            },
+            "type": "array",
+            "title": "Selling Channel",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "OrderTags"
+      },
+      "OrderWorkflowProcess": {
+        "properties": {
+          "pre": {
+            "$ref": "#/components/schemas/OrderPreWorkflow"
+          },
+          "after": {
+            "$ref": "#/components/schemas/OrderAfterWorkflow"
+          }
+        },
+        "type": "object",
+        "title": "OrderWorkflowProcess"
+      },
+      "OrdersDisplayStatisticsOUT": {
+        "properties": {
+          "display_priority_0": {
+            "type": "integer",
+            "title": "Display Priority 0"
+          },
+          "display_priority_1": {
+            "type": "integer",
+            "title": "Display Priority 1"
+          },
+          "display_priority_2": {
+            "type": "integer",
+            "title": "Display Priority 2"
+          },
+          "display_priority_3": {
+            "type": "integer",
+            "title": "Display Priority 3"
+          },
+          "display_priority_4": {
+            "type": "integer",
+            "title": "Display Priority 4"
+          },
+          "display_priority_5": {
+            "type": "integer",
+            "title": "Display Priority 5"
+          }
+        },
+        "type": "object",
+        "required": [
+          "display_priority_0",
+          "display_priority_1",
+          "display_priority_2",
+          "display_priority_3",
+          "display_priority_4",
+          "display_priority_5"
+        ],
+        "title": "OrdersDisplayStatisticsOUT"
+      },
+      "OrdersMarkInWaitingForCourierResponseOUT": {
+        "properties": {
+          "order": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Order"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "OrdersMarkInWaitingForCourierResponseOUT"
+      },
+      "OrdersMarkInWaitingForPickupResponseOUT": {
+        "properties": {
+          "order": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Order"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "OrdersMarkInWaitingForPickupResponseOUT"
+      },
+      "OrdersOrderResponseOUT": {
+        "properties": {
+          "order": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Order"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "OrdersOrderResponseOUT"
+      },
+      "OrdersPrintShipmentResponseOUT": {
+        "properties": {
+          "order": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Order"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shipment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Shipment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "OrdersPrintShipmentResponseOUT"
+      },
+      "OrdersShipmentResponseOUT": {
+        "properties": {
+          "order": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Order"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shipment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Shipment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "OrdersShipmentResponseOUT"
+      },
+      "OrdersShipmentsResponseOUT": {
+        "properties": {
+          "shipments": {
+            "items": {
+              "$ref": "#/components/schemas/Shipment"
+            },
+            "type": "array",
+            "title": "Shipments",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "OrdersShipmentsResponseOUT"
+      },
+      "OrdersStatusStatisticsOUT": {
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/OrderAggregatedStatusOption"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "count"
+        ],
+        "title": "OrdersStatusStatisticsOUT"
+      },
+      "POSTBulkSellingChannelsOrderIN": {
+        "properties": {
+          "orders": {
+            "items": {
+              "$ref": "#/components/schemas/POSTSellingChannelsOrder"
+            },
+            "type": "array",
+            "maxItems": 250,
+            "title": "Orders",
+            "description": "List of orders. Max. 250 orders"
+          }
+        },
+        "type": "object",
+        "title": "POSTBulkSellingChannelsOrderIN"
+      },
+      "POSTRegenerateShipment": {
+        "properties": {
+          "order_uid": {
+            "type": "string",
+            "title": "Order Uid"
+          },
+          "parcel_count": {
+            "type": "integer",
+            "title": "Parcel Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_uid",
+          "parcel_count"
+        ],
+        "title": "POSTRegenerateShipment"
+      },
+      "POSTSellingChannelsFulfillmentOrderFulfillmentStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "open",
+          "success",
+          "cancelled",
+          "error",
+          "failure"
+        ],
+        "title": "POSTSellingChannelsFulfillmentOrderFulfillmentStatus"
+      },
+      "POSTSellingChannelsInventoryItem": {
+        "properties": {
+          "external_identifier": {
+            "type": "string",
+            "title": "External Identifier"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SellingChannelInventoryItemStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "active"
+          },
+          "title_1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title 1",
+            "examples": [
+              null
+            ]
+          },
+          "title_2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title 2",
+            "examples": [
+              null
+            ]
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At",
+            "examples": [
+              null
+            ]
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight",
+            "default": 0
+          },
+          "codes": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SellingChannelInventoryItemCodes"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quantity_tracked": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity Tracked",
+            "default": false
+          },
+          "requires_shipping": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requires Shipping",
+            "default": false
+          },
+          "selling_policy": {
+            "$ref": "#/components/schemas/POSTSellingChannelsInventoryItemSellingPolicy",
+            "default": "deny"
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/POSTSellingChannelsInventoryItemImage"
+            },
+            "type": "array",
+            "title": "Images",
+            "default": []
+          },
+          "tracking": {
+            "$ref": "#/components/schemas/POSTSellingChannelsInventoryItemTracking"
+          }
+        },
+        "type": "object",
+        "required": [
+          "external_identifier"
+        ],
+        "title": "POSTSellingChannelsInventoryItem"
+      },
+      "POSTSellingChannelsInventoryItemIN": {
+        "properties": {
+          "inventory_item": {
+            "$ref": "#/components/schemas/POSTSellingChannelsInventoryItem"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inventory_item"
+        ],
+        "title": "POSTSellingChannelsInventoryItemIN"
+      },
+      "POSTSellingChannelsInventoryItemImage": {
+        "properties": {
+          "src": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Src"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "title": "POSTSellingChannelsInventoryItemImage"
+      },
+      "POSTSellingChannelsInventoryItemSellingPolicy": {
+        "type": "string",
+        "enum": [
+          "deny",
+          "continue_"
+        ],
+        "title": "POSTSellingChannelsInventoryItemSellingPolicy"
+      },
+      "POSTSellingChannelsInventoryItemTracking": {
+        "properties": {
+          "batches": {
+            "$ref": "#/components/schemas/POSTSellingChannelsInventoryItemTrackingBatches"
+          },
+          "serial_numbers": {
+            "$ref": "#/components/schemas/POSTSellingChannelsInventoryItemTrackingSerialNumbers"
+          }
+        },
+        "type": "object",
+        "title": "POSTSellingChannelsInventoryItemTracking"
+      },
+      "POSTSellingChannelsInventoryItemTrackingBatches": {
+        "properties": {
+          "has": {
+            "type": "boolean",
+            "title": "Has",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "POSTSellingChannelsInventoryItemTrackingBatches"
+      },
+      "POSTSellingChannelsInventoryItemTrackingSerialNumbers": {
+        "properties": {
+          "has": {
+            "type": "boolean",
+            "title": "Has",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "POSTSellingChannelsInventoryItemTrackingSerialNumbers"
+      },
+      "POSTSellingChannelsOrder": {
+        "properties": {
+          "external_identifier": {
+            "type": "string",
+            "title": "External Identifier",
+            "description": "The ID of the order from the selling channel. This ID is unique to the selling channel and must be kept constant for the life of the order. Example: SQL order ID, Shopify order ID, etc."
+          },
+          "billing_address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/POSTSellingChannelsOrderMailAddress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The mailing address associated with the payment method. This address is an optional field that won't be available on orders that do not require a payment method. It has the following properties:"
+          },
+          "cancel_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Reason",
+            "description": "The reason why the order was canceled. Valid values:",
+            "examples": [
+              null
+            ]
+          },
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At",
+            "description": "The date and time when the order was canceled. Returns null if the order isn't canceled. DATE_FORMAT"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At",
+            "description": "The autogenerated date and time (ISO 8601 format) when the order was created in the selling channel. The value for this property cannot be changed."
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency",
+            "description": "The three-letter code (ISO 4217 format) for the shop currency."
+          },
+          "current_total_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Total Price",
+            "description": "The current total additional fees on the order in shop and presentment currencies. The amount values associated with this field reflect order edits, returns, and refunds.",
+            "examples": [
+              null
+            ]
+          },
+          "customer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/POSTSellingChannelsOrderCustomer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "financial_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/POSTSellingChannelsOrderFinancialStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The status of payments associated with the order. Can only be set when the order is created. Valid values:"
+          },
+          "fulfillments": {
+            "items": {
+              "$ref": "#/components/schemas/POSTSellingChannelsOrderFulfillment"
+            },
+            "type": "array",
+            "title": "Fulfillments",
+            "description": "A fulfillment order represents a group of one or more items in an order that will be fulfilled from the same location. A fulfillment represents work that is completed as part of a fulfillment order and can include one or more items. You can use the Fulfillment resource to manage fulfillments for fulfillment orders. Each object has the following properties:"
+          },
+          "fulfillment_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/POSTSellingChannelsOrderFulfillmentStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The order's status in terms of fulfilled line items. You can use the FulfillmentOrder resource for a more granular view. Valid values:"
+          },
+          "line_items": {
+            "items": {
+              "$ref": "#/components/schemas/POSTSellingChannelsOrderLineItem"
+            },
+            "type": "array",
+            "title": "Line Items",
+            "description": "A list of line item objects, each containing information about an item in the order. Each object has the following properties:"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "The order name, generated by combining the order_number property with the order prefix and suffix that are set in the merchant's general settings. This is different from the external_identifier property, which is the ID of the order used by the API. This field can also be set by the API to be any string value.",
+            "examples": [
+              null
+            ]
+          },
+          "payment_terms": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/POSTSellingChannelsOrderPaymentTerms"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The terms and conditions under which a payment should be processed."
+          },
+          "payment_gateway_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Payment Gateway Names",
+            "description": "The list of payment gateways used for the order."
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference",
+            "description": "The order name, generated by combining the order_number property with the order prefix and suffix that are set in the merchant's general settings. This is different from the external_identifier property, which is the ID of the order used by the API. This field can also be set by the API to be any string value.",
+            "examples": [
+              null
+            ]
+          },
+          "shipping_address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/POSTSellingChannelsOrderMailAddress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The mailing address to where the order will be shipped. This address is optional and will not be available on orders that do not require shipping. It has the following properties:"
+          },
+          "total_price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Price",
+            "description": "The sum of all line item prices, discounts, shipping, taxes, and tips in the shop currency. Must be positive.",
+            "examples": [
+              null
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "external_identifier",
+          "currency"
+        ],
+        "title": "POSTSellingChannelsOrder"
+      },
+      "POSTSellingChannelsOrderCustomer": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "accepts_marketing": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepts Marketing"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Name"
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "verified_email": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified Email"
+          },
+          "multipass_identifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multipass Identifier"
+          },
+          "tax_exempt": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Exempt"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "locale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locale"
+          }
+        },
+        "type": "object",
+        "title": "POSTSellingChannelsOrderCustomer"
+      },
+      "POSTSellingChannelsOrderFinancialStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "authorized",
+          "partially_paid",
+          "paid",
+          "partially_refunded",
+          "refunded",
+          "voided"
+        ],
+        "title": "POSTSellingChannelsOrderFinancialStatus"
+      },
+      "POSTSellingChannelsOrderFulfillment": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At",
+            "description": "The date and time when the fulfillment was created. The API returns this value in ISO 8601 format."
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id",
+            "description": "The ID for the fulfillment."
+          },
+          "line_items": {
+            "items": {
+              "$ref": "#/components/schemas/POSTSellingChannelsOrderFulfillmentLineItem"
+            },
+            "type": "array",
+            "title": "Line Items",
+            "description": "A list of the fulfillment's line items, which includes:"
+          },
+          "location_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "The uniquely identifying fulfillment name, consisting of two parts separated by a .. The first part represents the order name and the second part represents the fulfillment number. The fulfillment number automatically increments depending on how many fulfillments are in an order (e.g. #1001.1, #1001.2).",
+            "examples": [
+              null
+            ]
+          },
+          "notify_customer": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notify Customer"
+          },
+          "order_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Id"
+          },
+          "origin_address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/POSTSellingChannelsOrderFulfillmentAddress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The address of the fulfillment location."
+          },
+          "service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service",
+            "examples": [
+              null
+            ]
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/POSTSellingChannelsFulfillmentOrderFulfillmentStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The status of the fulfillment. Valid values:",
+            "examples": [
+              null
+            ]
+          },
+          "tracking_company": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TrackingOnlyCouriers"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracking Company",
+            "description": "The name of the tracking company with which the fulfillment is associated. This value is used to determine the tracking URL for the fulfillment. If the tracking company is not recognized, the tracking URL will not be generated. If you cannot find the possible value below, send it as a string and we will be notified. Possible values below:",
+            "examples": [
+              null
+            ]
+          },
+          "tracking_numbers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tracking Numbers",
+            "description": "A list of tracking numbers provided by the shipping company."
+          },
+          "tracking_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tracking Urls",
+            "description": "A list of tracking URLs provided by the shipping company."
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At",
+            "description": "The date and time (ISO 8601 format) when the fulfillment was last modified.."
+          },
+          "variant_inventory_management": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Variant Inventory Management",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "POSTSellingChannelsOrderFulfillment"
+      },
+      "POSTSellingChannelsOrderFulfillmentAddress": {
+        "properties": {
+          "address1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address1",
+            "description": "The street address of the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "address2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address2",
+            "description": "An optional additional field for the street address of the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City",
+            "description": "The city, town, or village of the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "country_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Code",
+            "description": "The two-letter code (ISO 3166-1 format) for the country of the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "province_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province Code",
+            "description": "The two-letter abbreviation of the region of the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "zip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zip",
+            "description": "The postal code (for example, zip, postcode, or Eircode) of the shipping address.",
+            "examples": [
+              null
+            ]
+          }
+        },
+        "type": "object",
+        "title": "POSTSellingChannelsOrderFulfillmentAddress"
+      },
+      "POSTSellingChannelsOrderFulfillmentLineItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "The ID of the line item. Must be unique and kept constant for the life of the line item. If the line item is removed from the order then the quantity must be set to 0",
+            "default": 0
+          },
+          "product_variant_external_identifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Variant External Identifier",
+            "description": "The ID of the product variant being fulfilled."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "The title of the product.",
+            "examples": [
+              null
+            ]
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity",
+            "description": "The number of items in the fulfillment."
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price",
+            "description": "The price of the item before discounts have been applied in the shop currency.",
+            "examples": [
+              null
+            ]
+          },
+          "grams": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grams"
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku",
+            "examples": [
+              null
+            ]
+          },
+          "variant_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Title",
+            "examples": [
+              null
+            ]
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor",
+            "examples": [
+              null
+            ]
+          },
+          "product_external_identifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product External Identifier",
+            "examples": [
+              null
+            ]
+          },
+          "requires_shipping": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requires Shipping"
+          },
+          "taxable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taxable"
+          },
+          "gift_card": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gift Card"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "examples": [
+              null
+            ]
+          },
+          "variant_inventory_management": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Inventory Management",
+            "examples": [
+              null
+            ]
+          },
+          "properties": {
+            "items": {
+              "$ref": "#/components/schemas/POSTSellingChannelsOrderFulfillmentLineItemProperty"
+            },
+            "type": "array",
+            "title": "Properties",
+            "default": []
+          },
+          "product_exists": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Exists"
+          },
+          "total_discount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Discount",
+            "examples": [
+              null
+            ]
+          },
+          "tax_lines": {
+            "items": {
+              "$ref": "#/components/schemas/POSTSellingChannelsOrderFulfillmentLineItemTaxLine"
+            },
+            "type": "array",
+            "title": "Tax Lines",
+            "default": []
+          },
+          "duties": {
+            "items": {
+              "$ref": "#/components/schemas/POSTSellingChannelsOrderFulfillmentLineItemDuty"
+            },
+            "type": "array",
+            "title": "Duties",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "POSTSellingChannelsOrderFulfillmentLineItem"
+      },
+      "POSTSellingChannelsOrderFulfillmentLineItemDuty": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "harmonized_system_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Harmonized System Code"
+          },
+          "country_code_of_origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Code Of Origin"
+          },
+          "tax_lines": {
+            "items": {
+              "$ref": "#/components/schemas/POSTSellingChannelsOrderFulfillmentLineItemDutyTaxLine"
+            },
+            "type": "array",
+            "title": "Tax Lines",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "POSTSellingChannelsOrderFulfillmentLineItemDuty"
+      },
+      "POSTSellingChannelsOrderFulfillmentLineItemDutyTaxLine": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
+          },
+          "channel_liable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel Liable"
+          }
+        },
+        "type": "object",
+        "title": "POSTSellingChannelsOrderFulfillmentLineItemDutyTaxLine"
+      },
+      "POSTSellingChannelsOrderFulfillmentLineItemProperty": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "title": "POSTSellingChannelsOrderFulfillmentLineItemProperty"
+      },
+      "POSTSellingChannelsOrderFulfillmentLineItemTaxLine": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
+          }
+        },
+        "type": "object",
+        "title": "POSTSellingChannelsOrderFulfillmentLineItemTaxLine"
+      },
+      "POSTSellingChannelsOrderFulfillmentStatus": {
+        "type": "string",
+        "enum": [
+          "null",
+          "fulfilled",
+          "partial",
+          "not_eligible",
+          "restocked"
+        ],
+        "title": "POSTSellingChannelsOrderFulfillmentStatus"
+      },
+      "POSTSellingChannelsOrderIN": {
+        "properties": {
+          "order": {
+            "$ref": "#/components/schemas/POSTSellingChannelsOrder"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order"
+        ],
+        "title": "POSTSellingChannelsOrderIN"
+      },
+      "POSTSellingChannelsOrderLineItem": {
+        "properties": {
+          "fulfillable_quantity": {
+            "type": "number",
+            "title": "Fulfillable Quantity",
+            "description": "The amount available to fulfill, calculated as follows: quantity - max(refunded_quantity, fulfilled_quantity) - pending_fulfilled_quantity - open_fulfilled_quantity",
+            "default": 0
+          },
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "The ID of the line item. Must be unique and kept constant for the life of the line item. If the line item is removed from the order then the quantity must be se to 0",
+            "default": "0"
+          },
+          "product_external_identifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product External Identifier",
+            "description": "The external_identifier of the product that must be shipped. Can be null if the product was deleted. Usually an SQL ID, but can be any string that uniquely identifies the product variant in the merchant's system."
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity",
+            "description": "The number of items that were purchased.",
+            "default": 0
+          },
+          "requires_shipping": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requires Shipping",
+            "description": "Whether the item requires shipping.",
+            "default": false
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku",
+            "description": "The item's SKU (stock keeping unit)."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "The title of the product."
+          },
+          "product_variant_external_identifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Variant External Identifier",
+            "description": "The external_identifier of the product that must be shipped. Can be null if the product was deleted. Usually an SQL ID, but can be any string that uniquely identifies the product variant in the merchant's system."
+          }
+        },
+        "type": "object",
+        "title": "POSTSellingChannelsOrderLineItem"
+      },
+      "POSTSellingChannelsOrderMailAddress": {
+        "properties": {
+          "address1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address1",
+            "description": "The street address of the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "address2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address2",
+            "description": "An optional additional field for the street address of the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City",
+            "description": "The city, town, or village of the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company",
+            "description": "The company of the person associated with the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country",
+            "description": "The name of the country of the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "country_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Code",
+            "description": "The two-letter code (ISO 3166-1 format) for the country of the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Name",
+            "description": "The first name of the person associated with the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "last_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Name",
+            "description": "The last name of the person associated with the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude",
+            "description": "The latitude of the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude",
+            "description": "The longitude of the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": " The full name of the person associated with the payment method.",
+            "examples": [
+              null
+            ]
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone",
+            "description": " The phone number at the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province",
+            "description": "The name of the region (for example, province, state, or prefecture) of the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "province_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province Code",
+            "description": "The two-letter abbreviation of the region of the shipping address.",
+            "examples": [
+              null
+            ]
+          },
+          "zip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zip",
+            "description": "The postal code (for example, zip, postcode, or Eircode) of the shipping address.",
+            "examples": [
+              null
+            ]
+          }
+        },
+        "type": "object",
+        "title": "POSTSellingChannelsOrderMailAddress"
+      },
+      "POSTSellingChannelsOrderPaymentTerms": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount",
+            "description": "The amount that is owed according to the payment terms."
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Currency"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The presentment currency for the payment. Possible values:"
+          },
+          "payment_terms_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Terms Name",
+            "description": "The name of the selected payment terms template for the order."
+          },
+          "payment_terms_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Terms Type",
+            "description": "The type of selected payment terms template for the order."
+          },
+          "due_in_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due In Days",
+            "description": "The number of days between the invoice date and due date that is defined in the selected payment terms template."
+          },
+          "payment_schedules": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/POSTSellingChannelsOrderPaymentTermsSchedule"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Schedules",
+            "description": "An array of schedules associated to the payment terms."
+          }
+        },
+        "type": "object",
+        "title": "POSTSellingChannelsOrderPaymentTerms"
+      },
+      "POSTSellingChannelsOrderPaymentTermsSchedule": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Currency"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued At",
+            "description": "The date and time when the payment terms were initiated."
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At",
+            "description": "The date and time when the payment is due. Calculated based on issued_at and due_in_days or a customized fixed date if the type is fixed."
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At",
+            "description": "The date and time when the purchase is completed. Returns null initially and updates when the payment is captured."
+          },
+          "expected_payment_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Payment Method"
+          }
+        },
+        "type": "object",
+        "title": "POSTSellingChannelsOrderPaymentTermsSchedule"
+      },
+      "PaidBy": {
+        "type": "string",
+        "enum": [
+          "sender",
+          "receiver",
+          "third_party"
+        ],
+        "title": "PaidBy"
+      },
+      "Parcel": {
+        "properties": {
+          "weight": {
+            "type": "number",
+            "title": "Weight",
+            "default": 0
+          },
+          "width": {
+            "type": "number",
+            "title": "Width",
+            "default": 0
+          },
+          "height": {
+            "type": "number",
+            "title": "Height",
+            "default": 0
+          },
+          "length": {
+            "type": "number",
+            "title": "Length",
+            "default": 0
+          },
+          "packaging_type": {
+            "type": "string",
+            "title": "Packaging Type",
+            "default": ""
+          },
+          "package_preset": {
+            "type": "string",
+            "title": "Package Preset",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "default": ""
+          },
+          "is_document": {
+            "type": "boolean",
+            "title": "Is Document",
+            "default": false
+          },
+          "weight_unit": {
+            "type": "string",
+            "title": "Weight Unit",
+            "default": "kg"
+          },
+          "dimension_unit": {
+            "type": "string",
+            "title": "Dimension Unit",
+            "default": "cm"
+          }
+        },
+        "type": "object",
+        "title": "Parcel"
+      },
+      "Pickup": {
+        "properties": {
+          "schedule": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedule",
+            "default": true
+          },
+          "scheduled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled",
+            "default": false
+          },
+          "picked_up": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Picked Up",
+            "default": false
+          },
+          "pickup_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pickup Date",
+            "description": "The date the courier should pick up the package. It should be in the following format: YYYY-MM-DDTHH:MM:SS"
+          }
+        },
+        "type": "object",
+        "title": "Pickup"
+      },
+      "RepaymentMethod": {
+        "type": "string",
+        "enum": [
+          "cash",
+          "bank",
+          "cheque",
+          "None"
+        ],
+        "title": "RepaymentMethod"
+      },
+      "SLADisplayPriorities": {
+        "properties": {
+          "display_priority_0": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Priority 0",
+            "description": "The date and time when the order should be placed in the late status. Date is UTC, Zulu format."
+          },
+          "display_priority_1": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Priority 1",
+            "description": "The date and time when the order should be placed in the late status. Date is UTC, Zulu format."
+          },
+          "display_priority_2": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Priority 2",
+            "description": "The date and time when the order should be placed in the late status. Date is UTC, Zulu format."
+          },
+          "display_priority_3": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Priority 3",
+            "description": "The date and time when the order should be placed in the late status. Date is UTC, Zulu format."
+          },
+          "display_priority_4": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Priority 4",
+            "description": "The date and time when the order should be placed in the late status. Date is UTC, Zulu format."
+          },
+          "display_priority_5": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Priority 5",
+            "description": "The date and time when the order should be placed in the late status. Date is UTC, Zulu format."
+          }
+        },
+        "type": "object",
+        "title": "SLADisplayPriorities"
+      },
+      "SearchOrdersResponseOUT": {
+        "properties": {
+          "orders": {
+            "items": {
+              "$ref": "#/components/schemas/OrderResponseOut"
+            },
+            "type": "array",
+            "title": "Orders"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "display_statistics": {
+            "$ref": "#/components/schemas/OrdersDisplayStatisticsOUT"
+          },
+          "statuses_statistics": {
+            "items": {
+              "$ref": "#/components/schemas/OrdersStatusStatisticsOUT"
+            },
+            "type": "array",
+            "title": "Statuses Statistics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "orders",
+          "count",
+          "display_statistics",
+          "statuses_statistics"
+        ],
+        "title": "SearchOrdersResponseOUT"
+      },
+      "SellingChannelInventoryItemCodes": {
+        "properties": {
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku"
+          },
+          "hs": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hs"
+          },
+          "barcode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Barcode"
+          }
+        },
+        "type": "object",
+        "title": "SellingChannelInventoryItemCodes"
+      },
+      "SellingChannelInventoryItemStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "draft",
+          "archived",
+          "deleted",
+          "replaced"
+        ],
+        "title": "SellingChannelInventoryItemStatus"
+      },
+      "Shipment": {
+        "properties": {
+          "identifiers": {
+            "items": {
+              "$ref": "#/components/schemas/ShipmentIdentifier"
+            },
+            "type": "array",
+            "title": "Identifiers",
+            "default": []
+          },
+          "uid": {
+            "type": "string",
+            "title": "Uid"
+          },
+          "courier_id": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TrackingOnlyCouriers"
+              },
+              {
+                "$ref": "#/components/schemas/GeneratingCouriers"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Courier Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/ShipmentDocument"
+            },
+            "type": "array",
+            "title": "Documents",
+            "default": []
+          },
+          "events": {
+            "$ref": "#/components/schemas/ShipmentEvents",
+            "default": []
+          },
+          "notification_urls": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notification Urls",
+            "default": []
+          },
+          "retailer_uid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retailer Uid"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShipmentDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tracking_only": {
+            "type": "boolean",
+            "title": "Tracking Only",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "details"
+        ],
+        "title": "Shipment"
+      },
+      "ShipmentDetails": {
+        "properties": {
+          "address_from": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "address_to": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "parcels": {
+            "items": {
+              "$ref": "#/components/schemas/Parcel"
+            },
+            "type": "array",
+            "title": "Parcels"
+          },
+          "payment": {
+            "$ref": "#/components/schemas/ShipmentPayment"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShipmentOptions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pickup": {
+            "$ref": "#/components/schemas/Pickup"
+          }
+        },
+        "type": "object",
+        "required": [
+          "address_from",
+          "address_to",
+          "parcels",
+          "payment",
+          "options",
+          "pickup"
+        ],
+        "title": "ShipmentDetails"
+      },
+      "ShipmentDocument": {
+        "properties": {
+          "external_id": {
+            "type": "string",
+            "title": "External Id"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ShipmentLabel"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Labels"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "is_return": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Return",
+            "default": false
+          },
+          "is_redirect": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Redirect",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "external_id",
+          "labels"
+        ],
+        "title": "ShipmentDocument"
+      },
+      "ShipmentEvent": {
+        "properties": {
+          "date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "default": 10000
+          },
+          "key": {
+            "$ref": "#/components/schemas/ShipmentEventKey",
+            "default": "generated_awb"
+          },
+          "returning": {
+            "type": "boolean",
+            "title": "Returning",
+            "default": false
+          },
+          "redirected": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redirected",
+            "default": false
+          },
+          "reason_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Status"
+          }
+        },
+        "type": "object",
+        "title": "ShipmentEvent"
+      },
+      "ShipmentEventKey": {
+        "type": "string",
+        "enum": [
+          "generated_awb",
+          "canceled",
+          "error",
+          "redirected",
+          "in_transit",
+          "returning_to_sender",
+          "incorrect_address",
+          "partial_delivery",
+          "personal_pickup",
+          "customer_pickup",
+          "out_for_delivery",
+          "in_parcel_locker",
+          "refused",
+          "unsuccessful_delivery",
+          "delivered",
+          "received_by_sender",
+          "deferred_delivery",
+          "shipment_refunded"
+        ],
+        "title": "ShipmentEventKey"
+      },
+      "ShipmentEvents": {
+        "properties": {
+          "latest_event": {
+            "$ref": "#/components/schemas/ShipmentEvent"
+          },
+          "processed": {
+            "items": {
+              "$ref": "#/components/schemas/ShipmentEvent"
+            },
+            "type": "array",
+            "title": "Processed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "latest_event",
+          "processed"
+        ],
+        "title": "ShipmentEvents"
+      },
+      "ShipmentIdentifier": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "value"
+        ],
+        "title": "ShipmentIdentifier",
+        "description": "Shipment identifiers.\nExample: If you have 3 fields for identification (order id, order reference and phone number) you will need to add the following entries:\n    - \"phone_number\": str\n    - \"email_address\": str\n    - \"order_id\": str"
+      },
+      "ShipmentLabel": {
+        "properties": {
+          "format": {
+            "type": "string",
+            "title": "Format"
+          },
+          "download_url": {
+            "type": "string",
+            "title": "Download Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "format",
+          "download_url"
+        ],
+        "title": "ShipmentLabel"
+      },
+      "ShipmentOptions": {
+        "properties": {
+          "verify_package_at_delivery": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verify Package At Delivery",
+            "default": false
+          },
+          "saturday_delivery": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saturday Delivery",
+            "default": false
+          },
+          "is_return": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Return",
+            "default": false
+          },
+          "track_immediately": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Track Immediately",
+            "default": false
+          },
+          "exchange_package": {
+            "type": "boolean",
+            "title": "Exchange Package",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "ShipmentOptions"
+      },
+      "ShipmentPayment": {
+        "properties": {
+          "paid_by": {
+            "$ref": "#/components/schemas/PaidBy"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "default": ""
+          },
+          "declared_value": {
+            "type": "number",
+            "title": "Declared Value",
+            "default": 0
+          },
+          "insured_value": {
+            "type": "number",
+            "title": "Insured Value",
+            "default": 0
+          },
+          "repayment_method": {
+            "$ref": "#/components/schemas/RepaymentMethod",
+            "default": "bank"
+          },
+          "cash_on_delivery": {
+            "type": "boolean",
+            "title": "Cash On Delivery",
+            "default": false
+          },
+          "cash_on_delivery_value": {
+            "type": "number",
+            "title": "Cash On Delivery Value",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "paid_by"
+        ],
+        "title": "ShipmentPayment"
+      },
+      "TrackingOnlyCouriers": {
+        "type": "string",
+        "enum": [
+          "acs_gr",
+          "brt_it",
+          "cargus_ro",
+          "correos_es",
+          "correos_express",
+          "colis_prive_fr",
+          "courier_manager",
+          "ctt_pt",
+          "deutsche_post_de",
+          "dhl",
+          "direct_link_mmp",
+          "dpd_cz",
+          "dpd_de",
+          "dpd_fr",
+          "dpd_hr",
+          "dpd_hu",
+          "dpd_it",
+          "dpd_pl",
+          "dpd_ro",
+          "dpd_uk",
+          "dpd_sk",
+          "econt_bg",
+          "evri_uk",
+          "exelot",
+          "fan_courier_md",
+          "fan_courier_ro",
+          "fedex_us",
+          "fox_post_hu",
+          "geis_cz",
+          "gls_at",
+          "gls_cz",
+          "gls_de",
+          "gls_hr",
+          "gls_hu",
+          "gls_pl",
+          "gls_ro",
+          "gls_es",
+          "gls_si",
+          "gls_sk",
+          "inpost_pl",
+          "kurier123_sk",
+          "la_poste_fr",
+          "mrw_es",
+          "nemo_express_ro",
+          "paack",
+          "packeta",
+          "parcel_force_uk",
+          "post_at",
+          "posta_cz",
+          "postis_ro",
+          "poste_it",
+          "post_nl",
+          "postnord",
+          "ppl_cz",
+          "raben",
+          "royal_mail_uk",
+          "sameday_hu",
+          "sameday_ro",
+          "sps_sk",
+          "team_courier_ro",
+          "tnt",
+          "tipsa_es",
+          "ups",
+          "xp_courier_gr"
+        ],
+        "title": "TrackingOnlyCouriers"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "OAuth2PasswordBearer": {
+        "type": "oauth2",
+        "flows": {
+          "password": {
+            "scopes": {},
+            "tokenUrl": "/api/v1/users/login"
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://ingest.apis.store-view.frisbo.dev",
+      "description": "Production server"
+    }
+  ],
+  "x-ext-urls": {}
+}
