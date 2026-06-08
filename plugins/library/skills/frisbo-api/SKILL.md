@@ -11,6 +11,8 @@ Frisbo is the 3PL/fulfillment provider. The **Store-View / Fulfillment-Monitorin
 
 ## 0. Connection
 
+> **Team setup (Arona intelligence center):** the Frisbo JWT(s) live in the shared secret store, not a local `.env`. Fetch with the `core:fetch-secret` skill: `kb.py secret-get FRISBO_API_TOKEN` (the primary JWT) or `kb.py secret-get FRISBO_ORG_TOKENS` (a JSON array, one JWT per organization — iterate for multi-org sync). Use the raw token as `Authorization: Bearer <token>`.
+
 | | |
 |---|---|
 | **Base URL** | `https://ingest.apis.store-view.frisbo.dev` |
