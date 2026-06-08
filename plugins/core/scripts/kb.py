@@ -247,6 +247,25 @@ def cmd_guard_list(a):
             print(f"  [{gid}] {kind:4} {tool:6}{flag}  {pattern}   -- {reason or ''}")
 
 
+def cmd_nas_set(a):
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id FROM employees WHERE handle=%s", (a.employee.lower().strip(),))
+        row = cur.fetchone()
+        if not row:
+            sys.exit(f"unknown employee: {a.employee}")
+        emp = row[0]
+        cur.execute(
+            """INSERT INTO nas_credentials (employee_id, username, password, updated_at)
+               VALUES (%s,%s,%s,now())
+               ON CONFLICT (employee_id) DO UPDATE SET
+                   username=EXCLUDED.username, password=EXCLUDED.password, updated_at=now()""",
+            (emp, a.username, a.password),
+        )
+        cur.execute("INSERT INTO events (employee_id, entity_type, entity_name, action, summary) "
+                    "VALUES (%s,'secret','nas_credentials','set',%s)", (emp, f"NAS login set for {a.employee}"))
+        print(f"NAS login stored for {a.employee}")
+
+
 def main():
     p = argparse.ArgumentParser(prog="kb", description="SharedClaude knowledge base interface")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -292,6 +311,10 @@ def main():
     s.add_argument("--reason", default=""); s.add_argument("--tool", default="Bash"); s.add_argument("--employee")
     s.set_defaults(fn=cmd_guard_add)
     s = sub.add_parser("guard-list", help="list team guardrails"); s.set_defaults(fn=cmd_guard_list)
+
+    s = sub.add_parser("nas-set", help="store an employee's NAS login (admin)")
+    s.add_argument("--employee", required=True); s.add_argument("--username", required=True)
+    s.add_argument("--password", required=True); s.set_defaults(fn=cmd_nas_set)
 
     a = p.parse_args()
     a.fn(a)

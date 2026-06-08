@@ -151,6 +151,16 @@ def marketplace_plugins():
         return [p["name"] for p in json.load(fh)["plugins"]]
 
 
+def db_current_user(url):
+    import psycopg2
+    try:
+        with psycopg2.connect(url, connect_timeout=12) as conn, conn.cursor() as cur:
+            cur.execute("SELECT current_user")
+            return (cur.fetchone()[0] or "").lower()
+    except Exception:
+        return ""
+
+
 def _run(cmd, **kw):
     print("   $", " ".join(cmd))
     return subprocess.run(cmd, **kw)
@@ -169,15 +179,15 @@ def main():
     interactive = not a.non_interactive
 
     print("\n=== Arona intelligence center -- onboarding ===")
-    print("(the only things you need: the database host, user, password, and name)\n")
+    print("(the only thing you need: your database host/IP, user, and password)\n")
 
-    # 1) DB connection
+    # 1) DB connection -- only host/user/password; everything else is pulled from the DB
     if interactive:
         host = a.db_host or _ask("Database host / IP")
-        port = a.db_port or _ask("Database port", default="5432")
         user = a.db_user or _ask("Database user")
         pw   = a.db_pass or _ask("Database password", secret=True)
-        name = a.db_name or _ask("Database name", default="SharedClaude")
+        port = a.db_port or "5432"
+        name = a.db_name or "SharedClaude"
     else:
         host, user, pw = a.db_host, a.db_user, a.db_pass
         port = a.db_port or "5432"
@@ -194,14 +204,19 @@ def main():
         print(f"   [ERROR] could not connect: {exc}")
         sys.exit(1)
 
-    # 2) employee selection (live from the DB)
+    # 2) identity -- resolved automatically from your database login (DB role == handle)
     employees = list_employees(url)
+    known = {h for h, _ in employees}
+    dbuser = db_current_user(url)
     if a.employee:
         handle = a.employee.lower().strip()
-        if handle not in {h for h, _ in employees}:
-            sys.exit(f"'{handle}' is not a known employee handle: {[h for h, _ in employees]}")
+        if handle not in known:
+            sys.exit(f"'{handle}' is not a known employee handle: {sorted(known)}")
+    elif dbuser in known:
+        handle = dbuser
+        print(f"   -> identified you as '{handle}' from your database login")
     elif interactive:
-        print("\nWhich employee are you?")
+        print("\nYour database login isn't tied to an employee. Which one are you?")
         for i, (h, n) in enumerate(employees, 1):
             print(f"   {i}. {n}  ({h})")
         while True:
@@ -211,23 +226,19 @@ def main():
                 break
             print("   pick a valid number")
     else:
-        sys.exit("non-interactive mode needs --employee")
+        sys.exit("could not identify the employee (DB user not mapped); pass --employee")
     print(f"   -> you are: {handle}")
 
-    # 3) NAS login -> store it (DB remembers it), connect, resolve NAS_ROOT
+    # 3) NAS -- pulled from the DB (admin stores each employee's login once via kb.py nas-set)
     nas = a.nas_root  # explicit path override, if given
-    nas_user, nas_pw = a.nas_user, a.nas_pass
-    if not nas and interactive and not nas_user:
-        print("\nNAS login (your personal NAS account; Claude remembers it in the database):")
-        nas_user = input("   NAS username (Enter to set up later): ").strip()
-        nas_pw = getpass.getpass("   NAS password: ").strip() if nas_user else ""
-    if not nas and nas_user and nas_pw:
-        store_nas_credentials(url, handle, nas_user, nas_pw)
-        nas = nas_connect(url, handle)
+    if not nas and a.nas_user and a.nas_pass:   # optional: set my own NAS login during onboarding
+        store_nas_credentials(url, handle, a.nas_user, a.nas_pass)
+    if not nas:
+        nas = nas_connect(url, handle)   # reads my stored NAS login from the DB
         if nas:
             print(f"   [ok] NAS connected: {nas}")
         else:
-            print("   [!] saved your NAS login, but could not connect right now (each session retries).")
+            print("   [i] no NAS login stored for you yet (ask the admin: kb.py nas-set). NAS skipped for now.")
 
     # 4-5) save config + enable plugins (global / user scope -> every project)
     home = a.home or configure.claude_home()
