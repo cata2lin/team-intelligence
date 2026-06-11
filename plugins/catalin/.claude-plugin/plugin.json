@@ -2,7 +2,19 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "catalin",
   "displayName": "Catalin",
-  "description": "Skills contributed by Catalin. Shared with the whole team. Example: excel-api-push.",
-  "author": { "name": "Catalin", "email": "carcucatalin@gmail.com" },
-  "keywords": ["excel", "api", "sync"]
+  "description": "Skills contributed by Catalin, shared with the team — excel-api-push plus general Claude Code productivity skills: verify-output, handoff, review-claudemd, break-down, gha-investigate.",
+  "author": {
+    "name": "Catalin",
+    "email": "carcucatalin@gmail.com"
+  },
+  "keywords": [
+    "excel",
+    "api",
+    "sync",
+    "productivity",
+    "verification",
+    "context",
+    "planning",
+    "ci"
+  ]
 }
