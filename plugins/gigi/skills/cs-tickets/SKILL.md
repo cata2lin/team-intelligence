@@ -5,6 +5,11 @@ description: Operate the Richpanel helpdesk (the team's CS inbox for all Arona b
 
 # CS — Tichete Richpanel (operare prin MCP + datele noastre)
 
+> ## 🔒 MOD TESTARE — DOAR DRAFT (regulă tare, activă acum)
+> **NU se trimite NICIODATĂ mesaj live la client.** Tot ce ar fi un răspuns către client se face EXCLUSIV ca **`create_draft`** (sau `add_private_note` intern). **Este INTERZIS** `mcp__richpanel__send_message` și orice închidere/răspuns care ajunge la client (inclusiv auto-close pe tichete cu client care așteaptă răspuns). Citit + draft + analytics + triaj intern = OK; trimitere live = NU.
+> Pe mașina asta `send_message` e și blocat prin permission `deny` în settings.json.
+> **Go-live viitor:** ca să se permită trimiterea reală, se scoate `mcp__richpanel__send_message` din `permissions.deny` ȘI se elimină acest banner. Până atunci: doar draft, de testat.
+
 Helpdesk-ul Richpanel acoperă TOATE brandurile (org `nocturna954`; email-uri contact@esteban.ro / george-talent.ro / grandia.ro / magdeal.ro etc.). MCP-ul e un connector Claude — **Claude apelează uneltele `mcp__richpanel__*`** (nu un script `uv`).
 
 ## Realitatea inboxului (de știut)
@@ -17,7 +22,7 @@ Helpdesk-ul Richpanel acoperă TOATE brandurile (org `nocturna954`; email-uri co
 - **Triaj:** `list_conversations` (status=open, channel=, startDate/endDate, sortKey=updatedAt) → grupează pe canal/vechime; cele mai vechi neasignate/nerăspunse primele. `list_tags` + filtru `tagIds`.
 - **Caută client/comandă:** `search_conversations_by_customer`, `get_customer_by_email_or_phone`. Pentru contextul comenzii (status livrare + AWB), rulează **`gigi:cs-order-status --order <nr>`** sau **`gigi:cs-customer-360 --phone <tel>`** și pune răspunsul pe baza lor.
 - **Citește firul:** `get_conversation` (mode=audit pt mesaje paginate).
-- **Răspunde:** `create_draft` (recomandat — lași agentul să confirme) sau `send_message`; `add_private_note` pt notițe interne. ⚠️ `send_message` trimite REAL clientului — confirmă cu utilizatorul înainte de trimitere în masă.
+- **Răspunde (DOAR DRAFT în mod testare):** `create_draft` — întotdeauna; `add_private_note` pt notițe interne. **NU folosi `send_message`** (interzis acum, vezi bannerul). Agentul uman revizuiește și trimite draftul din Richpanel.
 - **Gestionează:** `assign_conversation`, `update_conversation_status` (close), `snooze_conversation`, `add_tags_to_conversation`/`remove_tags_from_conversation`/`create_tag`.
 - **Analytics:** `query_analytics` (metrics: new_conversations, closed_conversations, backlog, frt, csat; dimensions: agent|channel|team|tags; startDate/endDate) + `get_available_metrics`. `list_ai_closure_candidates` pt tichete închidibile automat.
 
@@ -28,5 +33,5 @@ Helpdesk-ul Richpanel acoperă TOATE brandurile (org `nocturna954`; email-uri co
 - **Performanță agenți (completă):** `query_analytics dimension=agent` (volum, FRT, închise) combinat cu `gigi:cs-agent-performance` (comenzi plasate + profit) = imaginea totală per agent.
 
 ## Reguli
-- Citește înainte să scrii. Niciun `send_message`/închidere în masă fără confirmarea utilizatorului.
+- **MOD TESTARE: NU `send_message` deloc — doar `create_draft`.** Niciun mesaj live la client. Nicio închidere în masă pe tichete cu client care așteaptă, fără confirmare.
 - Pentru cifre de comandă/profit folosește skill-urile noastre (sursa de adevăr), nu inventa.
