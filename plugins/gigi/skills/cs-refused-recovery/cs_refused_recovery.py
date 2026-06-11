@@ -73,14 +73,18 @@ def metrics_contacts(order_names):
     return out
 
 
+MSG = {
+    "ro": "Bună {n}! Suntem de la {b}. Coletul tău ({o}) s-a întors pentru că nu a putut fi livrat. Vrei să ți-l retrimitem? Sau plătește acum cu cardul și primești -10% + livrare gratuită. Răspunde DA și ne ocupăm. 🙌",
+    "bg": "Здравейте {n}! Това е {b}. Вашата пратка ({o}) се върна, защото не можа да бъде доставена. Искате ли да я изпратим отново? Платете с карта сега и получете -10% + безплатна доставка. Отговорете ДА и ще се погрижим. 🙌",
+    "cz": "Dobrý den {n}! Tady {b}. Vaše zásilka ({o}) se vrátila, protože nemohla být doručena. Chcete ji poslat znovu? Zaplaťte kartou nyní a získáte -10 % + dopravu zdarma. Odpovězte ANO a postaráme se o to. 🙌",
+    "pl": "Cześć {n}! Tu {b}. Twoja paczka ({o}) wróciła, bo nie udało się jej dostarczyć. Chcesz, żebyśmy wysłali ją ponownie? Zapłać teraz kartą i otrzymaj -10% + darmową dostawę. Odpowiedz TAK, a my się tym zajmiemy. 🙌",
+    "en": "Hi {n}! This is {b}. Your parcel ({o}) came back undelivered. Want us to resend it? Pay by card now and get -10% + free shipping. Reply YES and we'll handle it. 🙌",
+}
+
+
 def msg(lang, cust, order, brand):
-    nm = (cust or "").split()[0] if cust else "Bună"
-    if lang == "ro":
-        return ("Bună %s! Suntem de la %s. Coletul tău (%s) s-a întors pentru că nu a putut fi livrat. "
-                "Vrei să ți-l retrimitem? Sau, dacă plătești acum cu cardul, îți dăm -10%% și livrare gratuită. "
-                "Răspunde DA și ne ocupăm. 🙌" % (nm, brand, order))
-    return ("Hi %s! This is %s. Your parcel (%s) came back undelivered. Want us to resend it? "
-            "Pay by card now and get -10%% + free shipping. Reply YES and we'll handle it." % (nm, brand, order))
+    nm = (cust or "").split()[0] if cust else ""
+    return MSG.get(lang, MSG["en"]).format(n=nm, b=brand, o=order)
 
 
 def main():
