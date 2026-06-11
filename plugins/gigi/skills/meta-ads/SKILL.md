@@ -1,6 +1,6 @@
 ---
 name: meta-ads
-description: Read AND operate Meta (Facebook/Instagram) Ads for any team brand. Read — accounts, performance reports at account/campaign/adset/ad level (spend, purchases, revenue, ROAS, CPA, CTR, CPM), demographic & placement breakdowns (age/gender/platform/country), daily trend, creative/ad ranking (with optional match to local video files), and `list` (ids/status/budget). Write — gated mutations: pause/activate a campaign/adset/ad and set daily/lifetime budget (DRY-RUN by default via Meta validate_only; `--apply` to execute). Token + ad accounts come from the `metrics` DB (no per-account login). Use to answer "which Meta ads/creatives/audiences perform best for brand X", to pull a brand's Meta spend/ROAS, to pick winning creatives to reuse on Google, or to pause/scale Meta campaigns. Companion to `gigi:google-ads-mcc`.
+description: Read AND operate Meta (Facebook/Instagram) Ads for any team brand. Read — accounts, performance reports at account/campaign/adset/ad level (spend, purchases, revenue, ROAS, CPA, CTR, CPM), demographic & placement breakdowns (age/gender/platform/country), daily trend, creative/ad ranking (with optional match to local video files), and `list` (ids/status/budget). Write — gated mutations: pause/activate a campaign/adset/ad and set daily/lifetime budget (DRY-RUN by default via Meta validate_only; `--apply` to execute). Token + ad accounts come from the `metrics` DB (no per-account login). Use to answer "which Meta ads/creatives/audiences perform best for brand X", to pull a brand's Meta spend/ROAS, to pick winning creatives to reuse on Google, or to pause/scale Meta campaigns. Also `products` — spend per product (Nomenclator/HA mapping) split TEST vs SALES, for multi-product "deals" accounts like Reflexino/Magdeal. All amounts in RON (per-day FX from AWBprint.exchange_rates). Companion to `gigi:google-ads-mcc` and `gigi:tiktok-ads`.
 ---
 
 # Meta Ads performance (read-only)
@@ -14,12 +14,15 @@ skill never mutates campaigns.
 > tab), cached in `brand_map.json` by `brandmap.py`. This is the source of truth — name-ILIKE is only a
 > fallback. It matters: e.g. **Magdeal → FB account "Reflexino"**, **Ofertele Zilei → "Genti promo,
 > Esteban 3"** — a plain ILIKE would attribute the wrong accounts (or none). A brand can have several
-> accounts; the tool queries all and aggregates. **Currency is per account** (Belasil/Esteban Meta
-> accounts are USD) — the report prints the first account's currency; don't mix currencies in one number.
+> accounts; the tool queries all and aggregates. **All output is in RON** — USD/EUR/… accounts are
+> converted **per day** from the dynamic BNR rates in `AWBprint.exchange_rates` (via `DATABASE_URL_AWBPRINT`,
+> forward-filled; fixed `CURRENCY_RATES_RON` KB config as fallback). Validated vs "Raport Zilnic 2":
+> Belasil/GT/Esteban/Nubra match the Facebook column within ~1%.
 >
 > **Config/creds come from the KB** (no hardcoded paths): `GA4_SA_JSON` (the Sheets/GA4 service account,
-> used in-memory — never written to disk), `MAPPING_SHEET_ID`, `DATABASE_URL_METRICS`. Refresh the cache
-> after the sheet changes: `uv run brandmap.py sync`  (resolve a brand: `uv run brandmap.py show magdeal`).
+> used in-memory — never written to disk), `MAPPING_SHEET_ID`, `NOMENCLATOR_SHEET_ID`, `DATABASE_URL_METRICS`,
+> `DATABASE_URL_AWBPRINT`. Refresh caches after a sheet changes: `uv run brandmap.py sync` (accounts) /
+> `uv run prodmap.py sync` (product rules).
 >
 > **TikTok shared accounts:** the mapping also captures TikTok, where one account (e.g. "ROSSI Nails
 > Romania") runs **several brands** split by a campaign-name token (col `Campanie`, e.g. `APRECIAT`,
@@ -57,7 +60,23 @@ uv run meta.py creatives belasil --range last_90d --match-folder "/path/Creative
 # list entities WITH ids (to find what to mutate) — id · status · budget/day · name
 uv run meta.py list belasil --level campaign
 uv run meta.py list belasil --level adset
+
+# spend per PRODUCT, split VÂNZARE vs TEST (for multi-product "deals" accounts, e.g. Reflexino/Magdeal)
+uv run meta.py products magdeal --range last_30d
 ```
+
+## Products & TEST vs SALES (`products`)
+For accounts that sell **many products, one campaign each** (e.g. **Reflexino = Magdeal's FB account**),
+`products` attributes each campaign's spend to a **product** and separates **TEST** from **VÂNZARE (sales)**:
+- **Product** = a `HA-<digits>` code in the campaign name, else the team's **Nomenclator** rules
+  (`ACCOUNT` / `CAMPAIGN_KEYWORD` / `AD_KEYWORD`, accent-insensitive substring) — same logic as the ARONA
+  product-profitability `apply_mapping`. Rules sync from the Nomenclator sheet: `uv run prodmap.py sync`.
+- **TEST vs SALES**: a campaign whose name contains **"TEST"** is TEST; everything else is sales. The brand
+  total in `report` includes both; `products` shows the **sales** P&L per product and the **TEST** spend
+  apart. (This is why a raw `report` on Magdeal reads ~19% higher than the team's sales figure — the gap is TEST.)
+- Validated vs "Raport Zilnic 2": Magdeal `products` sales total matched the sheet's Magdeal FB to ~0.4%.
+
+`prodmap.py` + `prod_rules.json` are shared with `gigi:tiktok-ads`.
 
 ## Mutations (writes) — DRY-RUN by default, add `--apply` to execute
 Treat like a live ad-account write: `list` to find the id, dry-run (Meta `validate_only`), confirm with the user, then `--apply`.
