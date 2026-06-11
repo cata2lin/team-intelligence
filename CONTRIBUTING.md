@@ -44,6 +44,16 @@ tasks:
 7. Open a PR. On merge, teammates get it on their next `claude plugin update`
    (or automatically if `autoUpdate` is on for the marketplace).
 
+> **Shortcut — automate steps 6–7.** Once your `SKILL.md` is in place, ship the
+> whole thing (register → branch → commit → push → PR → merge → sync → log) with
+> one command — the **`gigi:publish-skill`** skill:
+> ```bash
+> uv run plugins/gigi/skills/publish-skill/scripts/publish_skill.py \
+>   --path plugins/<you>/skills/<name>            # add --no-merge to review first
+> ```
+> It needs `gh` once (`brew install gh`); auth is automatic — it reads
+> `GITHUB_TOKEN` from the knowledge base (or the keychain `git push` already uses).
+
 ## Add a new teammate
 
 1. Create `plugins/<name>/.claude-plugin/plugin.json` (copy `plugins/alex/`),
