@@ -1,0 +1,107 @@
+---
+name: shopify-seo
+description: End-to-end SEO + good-practice optimisation for a Shopify store via the Admin API — audit, then fix on-page meta, duplicate content, image alt, structured data (Product/Offer/AggregateRating/Organization/WebSite/BreadcrumbList/Article/FAQ), navigation, sales-channel publication, technical hygiene (canonical, og/twitter, https, noindex), and a blog content cluster. Use when asked to "improve SEO", "audit SEO", fix meta titles/descriptions, add schema/rich results, fix social-share previews, surface collections in the menu, or otherwise raise organic visibility for a Shopify shop. Works on any store the ARONA Assistant app is installed on. Battle-tested on Esteban / GT / Nubra.
+---
+
+# shopify-seo
+
+> Author: **Gigi**. Shared with the whole team via the `gigi` plugin.
+
+A repeatable playbook + tooling to take a Shopify store from "audited" to
+"fixed and verified" across the whole SEO surface. Encodes every fix **and every
+hard-won gotcha** from the ARONA stores rollout, so the next site goes fast and
+avoids the same traps.
+
+## Golden rules (read first — these cost real time to learn)
+
+1. **`seo:{}` REPLACES, it does not merge.** On `productUpdate`/`collectionUpdate`,
+   if you send `seo:{title:…}` *without* `description`, Shopify **wipes** the
+   description (and vice-versa). **Always send BOTH** title and description, even
+   when changing only one. This silently nuked 300+ meta descriptions once.
+2. **Themes often append the brand to `<title>`.** If your SEO title already ends
+   with `| Brand`, the rendered title doubles: `… | Brand – Brand by X`. **Strip
+   the brand** from SEO titles on stores whose theme appends it (check live first;
+   it differs per template — product vs page vs article).
+3. **Verify before you "fix".** Half the "issues" in the first audit were false:
+   WebP *was* served (CDN content-negotiates on the `Accept` header), canonical
+   *was* present (attribute order fooled a naive grep), Judge.me stars *were*
+   there (injected client-side). Check with a real parser / proper headers / the
+   API read-back **before** changing anything.
+4. **Edge cache lies.** Storefront pages (esp. product & homepage) serve stale
+   HTML even with `?nc=…`. The **API read-back is authoritative**; for rendered
+   output, confirm a FAIL in a **real browser** (chrome-devtools) before believing it.
+5. **Admin API talks to `*.myshopify.com`, not the custom domain.** Token + Admin
+   API only work on the myshopify domain (from the secret). The custom domain is
+   for storefront/live checks only. `Store` handles both.
+6. **Publish to ALL sales channels, not just Online Store.** New smart collections
+   default to Online Store only → invisible on Google & YouTube / Shop / etc.
+7. **Never print a secret or token.** Fetch via `kb.py secret-get`, pipe into the process.
+
+## Auth / setup
+
+The **ARONA Assistant** custom app (full scopes) is installed on the team stores.
+Tokens are minted per-run via OAuth `client_credentials`. App id/secret/version
+live in the SharedClaude `secrets` table; per-store admin domain in
+`SHOPIFY_ARONA_<STORE>_DOMAIN`. All of this is wrapped in `scripts/shopify_lib.py`:
+
+```python
+import sys, os; sys.path.insert(0, os.path.dirname(__file__))
+from shopify_lib import Store, fetch_live
+s = Store("esteban")            # store key -> SHOPIFY_ARONA_ESTEBAN_DOMAIN, or pass a *.myshopify.com
+s.gql("{ shop { name } }")      # Admin GraphQL (throttle-retry built in)
+s.gql_all("products", "handle seo{title description}", "status:active")  # auto-paginate
+s.rest("GET", "pages.json?handle=contact")
+s.asset_get("layout/theme.liquid"); s.asset_put("layout/theme.liquid", new)  # main theme
+fetch_live(f"https://{s.public}/products/x")   # storefront HTML, cache-busted
+```
+
+## Process — always in this order
+
+### 1. Audit (read-only, no writes)
+```bash
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/seo_audit.py" --store <key-or-myshopify-domain>
+```
+Prints a pass/fail matrix: meta coverage (products/collections), structured-data
+presence & validity, og:image https + twitter:image, canonical, single H1,
+breadcrumbs, brand-doubling in `<title>`, homepage SEO text, channel breadth,
+sitemap. **Re-check any FAIL in a browser** before acting (cache).
+
+### 2. Prioritise by impact
+Rough order of ROI (see `reference/playbook.md` for the full list & how-to):
+1. **Duplicate content** → unique product/collection descriptions (the #1 killer).
+2. **Missing meta** → SEO title + meta description on products, collections, pages.
+3. **Structured data** → Product+Offer, AggregateRating (verify Judge.me first!),
+   Organization+sameAs, WebSite+SearchAction, BreadcrumbList, Article, FAQPage.
+4. **Image alt** → bulk, but detect shared images (generic alt on shared, specific on unique).
+5. **Navigation/structure** → high-intent collections into the menu; publish to all channels.
+6. **Technical hygiene** → canonical, og:image https, twitter:image, noindex utility pages.
+7. **Content** → blog cluster (topic articles + internal links), homepage SEO text.
+
+### 3. Fix — dry-run, apply, verify
+Every change: build → print a dry-run diff → `--apply` → verify (API read-back +
+cache-busted live + browser for anything visible). Get user approval for anything
+**visible or structural** (menus, homepage content, redirects, noindex).
+
+### 4. Re-audit
+Re-run `seo_audit.py`; confirm the matrix is green. Note any deliberate skips.
+
+## What "cover everything" means — the full checklist
+
+On-page: unique descriptions · SEO title ≤60 · meta desc ≤155 · no brand-doubling ·
+no double-spaces · H1 single & meaningful. Collections: intro copy + SEO meta +
+internal cross-links. Pages: title_tag/description_tag metafields on real pages
+(skip utility/funnel). Images: alt everywhere (shared-image aware); WebP is
+automatic via CDN (verify, don't "fix"). Structured data: all of the types above,
+**valid JSON** (parse every block). Technical: canonical present · og:image
+**https** · twitter:image · hreflang only if multi-locale · 404 real · noindex
+search/utility pages. Structure: gender + family + brand collections in the menu
+(`menuUpdate` preserves existing items faithfully) · everything published to all
+sales channels · sitemap includes new collections/articles. Content: blog cluster
+with AI hero images · homepage SEO text block.
+
+Deep detail, exact patterns, and copy templates: **`reference/playbook.md`**.
+The traps that waste hours: **`reference/pitfalls.md`**.
+Drop-in Liquid / JSON-LD: **`reference/snippets.md`**.
+
+## Logging (team convention)
+After a run: `kb.py log --type skill --action used --name gigi:shopify-seo --summary "…"`.
