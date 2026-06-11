@@ -1,6 +1,6 @@
 ---
 name: shopify-stores
-description: How to programmatically access ANY of the team's Shopify stores (Esteban, GT, Nubra, Grandia, Bonhaus, Rossi, … ~21 shops) for both reads and mutations via the Admin GraphQL API — resolve the right shop domain + access token (including the OAuth token-rotation stores where the static token is dead by design), run queries and mutations with rate-limit-safe backoff, read theme assets, and do it without ever leaking a token. Use whenever a script/task needs to talk to a Shopify store's Admin API, you hit a 401 / "Invalid API key or access token", you need a fresh token for an OAuth store (e.g. Nubra), or you're doing a mutation (publish/unpublish, tags, order editing, product/variant updates).
+description: How to programmatically access ANY of the team's Shopify stores (Esteban, GT, Nubra, Grandia, Bonhaus, Rossi, … ~21 shops) for both reads and mutations via the Admin GraphQL API — resolve the right shop domain + access token (including the OAuth token-rotation stores where the static token is dead by design), run queries and mutations with rate-limit-safe backoff, read/write theme assets, and do it without ever leaking a token. Includes a full mutation cookbook (reference/mutations.md)- products, variants & prices, inventory, media, collections, tags & metafields, order update/cancel/edit, refunds, fulfillment, draft orders, discounts (BXGY 2+1, codes), publications, blog articles, webhooks, bulk operations. Use whenever a script/task needs to talk to a Shopify store's Admin API, you hit a 401 / "Invalid API key or access token", you need a fresh token for an OAuth store (e.g. Nubra), or you need ANY mutation (change price/stock, add/remove order items, refund, create draft order, create discount, publish/unpublish, post a blog article, bulk export).
 ---
 
 # shopify-stores
@@ -121,6 +121,18 @@ PY
 
 Every mutation: send the mutation + variables, then **check `userErrors`**.
 
+> **Full cookbook → [`reference/mutations.md`](reference/mutations.md)** — 18
+> copy-paste sections: products (create/update/`productSet` upsert/duplicate),
+> variants & pricing (`productVariantsBulkUpdate/Create/Delete`), inventory
+> (`inventorySetQuantities` with compare-and-set, `inventoryAdjustQuantities`),
+> media & files (attach image by URL), collections (manual + smart rules),
+> tags & metafields, order update/cancel/markAsPaid, **order editing**
+> (begin→add→commit, the idempotency trick), refunds (`suggestedRefund` first),
+> fulfillment (fulfillment orders + Frisbo warning), draft orders (UGC pattern,
+> `paymentPending:true` for COD), discounts (the BXGY 2+1, code discounts),
+> publications, blog articles, webhooks, bulk operations, theme-asset writes
+> (REST PUT), and a gotcha index. Below: the three used most.
+
 **Sales-channel publication** (publish / unpublish a product per channel). Used to
 make a product **non-purchasable on the storefront** while keeping it usable by
 back-office order editing / Flow:
@@ -149,15 +161,18 @@ orders with proper throttling, reuse `shopify_tag_orders_parallel.py` (workers +
 
 **Order editing** (add / change / remove line items after an order exists):
 `orderEditBegin` → `orderEditAddVariant` / `orderEditSetQuantity` /
-`orderEditAddCustomItem` → `orderEditCommit`. **Key fact:** order editing adds a
-variant **regardless of its sales-channel publication or stock** — so a product can
-be hidden/unpublished from the storefront and still be added to orders server-side
-(this is exactly how the surprise-perfume Flow keeps working after you unpublish it
-from the Online Store).
+`orderEditAddCustomItem` → `orderEditCommit`. **Key facts:** (a) order editing adds
+a variant **regardless of its sales-channel publication or stock** — so a product
+can be hidden/unpublished from the storefront and still be added to orders
+server-side (this is exactly how the surprise-perfume Flow keeps working after you
+unpublish it from the Online Store); (b) `orderEditAddVariant` has
+`allowDuplicates:false` by default — a **free idempotency guard** that errors
+instead of stacking a variant already on the order. Full step-by-step in
+`reference/mutations.md` §8.
 
 **Product / variant updates:** `productUpdate`, `productVariantsBulkUpdate`,
 `publishablePublish`. ⚠ `seo:{}` on `productUpdate` **replaces, not merges** — see
-the `shopify-seo` skill.
+the `shopify-seo` skill. ⚠ `productUpdate.tags` also replaces — use `tagsAdd`.
 
 ## 5. Reading the theme (when you need to find storefront logic)
 
@@ -212,4 +227,5 @@ Reversible any time with `publishablePublish`.
 | Make product non-addable | `publishableUnpublish` Online Store + Shop, verify `.js` = 404 |
 | Bulk tag orders | reuse `shopify_tag_orders_parallel.py` |
 | Edit an order's lines | `orderEditBegin`→…→`orderEditCommit` (ignores publication/stock) |
+| Any other mutation (prices, stock, refunds, drafts, discounts, blog, webhooks, bulk) | `reference/mutations.md` — copy-paste cookbook |
 | 429s | slow to ~2–3 req/s, retry, read `throttleStatus` |
