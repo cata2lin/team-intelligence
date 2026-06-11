@@ -37,16 +37,19 @@ def secret(k):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--brand", default=""); ap.add_argument("--stuck-days", type=int, default=6, dest="sd")
+    ap.add_argument("--brand", default=""); ap.add_argument("--brands", default="", help="mai multe magazine, separate prin virgulă")
+    ap.add_argument("--stuck-days", type=int, default=6, dest="sd")
+    ap.add_argument("--from", default="", dest="dfrom", help="YYYY-MM-DD"); ap.add_argument("--to", default="", dest="dto", help="YYYY-MM-DD")
     ap.add_argument("--limit", type=int, default=50); ap.add_argument("--draft", action="store_true")
     a = ap.parse_args()
-    prefix = ""
-    for p, (b, _l) in PREFIX.items():
-        if a.brand and a.brand.lower() in b.lower():
-            prefix = p; break
-    lo = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
-    hi = (datetime.date.today() - datetime.timedelta(days=a.sd)).isoformat()
-    pf = ("AND prefix=" + repr(prefix)) if prefix else ""
+    wanted = [x.strip() for x in (a.brands or a.brand).split(",") if x.strip()]
+    prefixes = [p for p, (b, _l) in PREFIX.items() if any(w.lower() in b.lower() for w in wanted)]
+    if a.dfrom or a.dto:
+        lo = a.dfrom or "2025-01-01"; hi = a.dto or datetime.date.today().isoformat()
+    else:
+        lo = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
+        hi = (datetime.date.today() - datetime.timedelta(days=a.sd)).isoformat()
+    pf = ("AND prefix IN (" + ",".join(repr(p) for p in prefixes) + ")") if prefixes else ""
     py = ("import sqlite3,json;c=sqlite3.connect('data/profitability.db');lo=" + repr(lo) + ";hi=" + repr(hi) + ";"
           "print(json.dumps([dict(zip(['o','p','rev','awb','ck','cs','cr'],r)) for r in c.execute("
           "\"SELECT order_name,prefix,revenue,awb,courier_key,courier_status,created_at FROM profit_orders "
