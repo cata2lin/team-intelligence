@@ -83,39 +83,52 @@ if kb:
     run(["uv", "run", kb, "skill-register", "--plugin", author, "--name", name,
          "--author", author, "--description", desc, "--path", skill_path], check=False)
 
-# 2) git branch + commit
-branch = f"{author}/{name}-skill"
+# auth up front (needed to inspect PR state before we pick a branch)
+import json
+env = dict(os.environ)
+tok = gh_token(repo)
+if not tok:
+    sys.exit("No GitHub token. Put GITHUB_TOKEN in the KB (kb.py secret-set GITHUB_TOKEN …) "
+             "or do one `git push` first so it lands in the keychain.")
+env["GH_TOKEN"] = tok
+
+def pr_state(br):
+    r = subprocess.run(["gh", "pr", "view", br, "--json", "state,number,url"],
+                       cwd=repo, env=env, capture_output=True, text=True)
+    return json.loads(r.stdout) if r.returncode == 0 else None
+
+# 2) pick a branch — never reuse one whose PR is already MERGED/CLOSED (you can't
+#    re-merge a closed PR, so a new commit there would silently never reach main)
+base_branch = f"{author}/{name}-skill"
 cur = run(["git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD"], quiet=True).stdout.strip()
 if cur == A.base:
-    run(["git", "-C", repo, "checkout", "-B", branch], quiet=True)
-    branch_used = branch
+    branch_used, n = base_branch, 2
+    while True:
+        pr = pr_state(branch_used)
+        if not pr or pr["state"] == "OPEN":
+            break
+        branch_used = f"{base_branch}-{n}"; n += 1
+    run(["git", "-C", repo, "checkout", "-B", branch_used], quiet=True)
 else:
     branch_used = cur  # already on a feature branch; publish from it
+
+# 3) commit + push
 run(["git", "-C", repo, "add", rel], quiet=True)
 staged = run(["git", "-C", repo, "diff", "--cached", "--name-only"], quiet=True).stdout.strip()
 if staged:
     msg = f"Add {author}:{name} skill\n\n{desc[:200]}\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
     run(["git", "-C", repo, "commit", "-q", "-m", msg], quiet=True)
-    print(f"committed: {staged.splitlines()[0]} (+{len(staged.splitlines())-1} more)" if staged else "")
+    print(f"committed: {staged.splitlines()[0]} (+{len(staged.splitlines())-1} more)")
 else:
     print("(nothing new to commit — publishing current branch state)")
-
-# 3) push
 run(["git", "-C", repo, "push", "-u", "origin", branch_used], quiet=True)
 print(f"pushed branch {branch_used}")
 
-env = dict(os.environ)
-tok = gh_token(repo)
-if not tok:
-    sys.exit("No github.com credential in keychain. Do one `git push` first (it stores it), then re-run.")
-env["GH_TOKEN"] = tok
-
-# 4) PR (reuse if one already exists for the branch)
-existing = subprocess.run(["gh", "pr", "view", branch_used, "--json", "url,number"],
-                          cwd=repo, env=env, capture_output=True, text=True)
-if existing.returncode == 0:
-    import json; pr = json.loads(existing.stdout); pr_num, pr_url = pr["number"], pr["url"]
-    print(f"reusing PR #{pr_num}")
+# 4) PR — reuse only an OPEN one, else create
+pr = pr_state(branch_used)
+if pr and pr["state"] == "OPEN":
+    pr_num, pr_url = pr["number"], pr["url"]
+    print(f"reusing open PR #{pr_num}")
 else:
     body = (f"Adds the `{author}:{name}` skill.\n\n{desc}\n\n"
             "🤖 Generated with [Claude Code](https://claude.com/claude-code)")
@@ -125,7 +138,7 @@ else:
     pr_num = pr_url.rstrip("/").split("/")[-1]
 print(f"PR: {pr_url}")
 
-# 5) merge + sync
+# 5) merge + sync + clean
 if A.no_merge:
     print("--no-merge: PR left open for review. Done.")
 else:
@@ -133,7 +146,8 @@ else:
     run(["git", "-C", repo, "checkout", A.base], quiet=True)
     run(["git", "-C", repo, "pull", "--ff-only", "origin", A.base], quiet=True)
     run(["git", "-C", repo, "branch", "-D", branch_used], check=False, quiet=True)
-    print(f"MERGED into {A.base} + synced local. Team gets {author}:{name} on next plugin update.")
+    run(["git", "-C", repo, "push", "origin", "--delete", branch_used], check=False, quiet=True, env=env)
+    print(f"MERGED into {A.base} + synced local, branch cleaned. Team gets {author}:{name} on next plugin update.")
 
 # 6) log
 if kb:
