@@ -1,6 +1,6 @@
 ---
 name: cs-agent-performance
-description: Customer-Service agent performance — orders each CS agent PLACED in Shopify (CS tags Raluca/Oana/Andra/Anna/OanaO, the same tags the Scripturi CS tool uses), with placed / delivered / refused counts, delivered value and delivery rate per agent. Note this currently measures only agent-placed orders (manual orders); full ticket throughput will come once Richpanel is connected. Use for "CS agent performance", "how many orders did Raluca place", "agent workload", "CS team report", "performanta agenti CS", "comenzi pe agent". Read-only.
+description: Customer-Service agent performance AND profitability — orders each CS agent PLACED in Shopify (CS tags Raluca/Oana/Andra/Anna/OanaO, the same tags the Scripturi CS tool uses), with placed / delivered / refused counts, delivered revenue, and the actual PROFIT per agent computed with the Scripturi all-in formula (delivered revenue − COGS − transport, VAT-stripped). Note this currently measures only agent-placed orders (manual orders); full ticket throughput comes once Richpanel is connected. Use for "CS agent performance", "profit per CS agent", "how many orders did Raluca place", "which agent is most profitable", "agent workload", "CS team report", "performanta agenti CS", "profitabilitate pe agent". Read-only.
 ---
 
 # CS — Performanță agenți (comenzi plasate)
