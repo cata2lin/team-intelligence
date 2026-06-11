@@ -106,9 +106,11 @@ Don't bulk-upload everything — pick the **proven winners** (see §5). PMax wan
 - Verify: `SELECT asset.name FROM asset_group_asset WHERE asset_group.id=… AND asset_group_asset.field_type='YOUTUBE_VIDEO'`.
 - **Images** (unlike video) CAN be uploaded raw via API (`imageAsset.data` = base64 bytes) and linked with field types `MARKETING_IMAGE` (1.91:1) / `SQUARE_MARKETING_IMAGE` (1:1) / `PORTRAIT_MARKETING_IMAGE` (4:5).
 
-### 4d. Pick the winners from Meta — `meta_top_ads.py`
-The Meta API (token in `metrics` DB, accounts by name `ILIKE '%brand%'`) ranks ads by ROAS/purchases so you upload
-only the proven creatives. `meta_resolve.py` maps ad → creative video → source title (note: heavy creative fields can 500 — request `creative{video_id}` only, small page size).
+### 4d. Pick the winners from Meta — use the **`gigi:meta-ads`** skill
+Don't guess which creatives to upload. The companion **`gigi:meta-ads`** skill reads Meta ad performance
+(same `metrics` DB token) and ranks a brand's ads by ROAS/purchases:
+`uv run meta.py creatives <brand> --range last_90d` → take the top-ROAS ads with real volume → upload + attach here.
+It also does audience breakdowns (`breakdown <brand> --by age,gender`) that inform PMax audience signals.
 
 ## 4e. PMax asset groups — text, images, logos (Brand Guidelines)
 A PMax asset group needs a full set before it serves beyond Shopping. Build with `assets:mutate`
