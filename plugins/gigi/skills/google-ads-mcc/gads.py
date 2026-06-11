@@ -1,0 +1,239 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["psycopg2-binary>=2.9", "requests>=2.31"]
+# ///
+"""
+gads.py — Google Ads API v20 via the team MCC.
+
+Reads the MCC connection (developer token, login-customer-id, OAuth client +
+refresh token) from the `metrics` DB (table google_ads_connections), refreshes
+an access token, and runs reports / mutations against ANY customer linked under
+the MCC. Secrets are read from the DB and used in-process only — never printed.
+
+Auth/DSN: pass the metrics DSN via env DATABASE_URL_METRICS, e.g.
+    DATABASE_URL_METRICS=$(uv run "$KB" secret-get DATABASE_URL_METRICS) \\
+      uv run gads.py report --preset campaigns --customer 5229815058 --range TODAY
+"""
+from __future__ import annotations
+import argparse, json, os, sys
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+import psycopg2, psycopg2.extras, requests
+
+API = "v20"
+TOKEN_URL = "https://oauth2.googleapis.com/token"
+_PG_OK = {"host","hostaddr","port","dbname","user","password","sslmode","sslrootcert",
+          "sslcert","sslkey","connect_timeout","application_name","options","channel_binding"}
+
+def _clean_dsn(dsn: str) -> str:
+    p = urlsplit(dsn)
+    if not p.query: return dsn
+    kept = [(k,v) for k,v in parse_qsl(p.query, keep_blank_values=True) if k.lower() in _PG_OK]
+    return urlunsplit((p.scheme,p.netloc,p.path,urlencode(kept),p.fragment))
+
+def _digits(s) -> str:
+    return "".join(ch for ch in str(s) if ch.isdigit())
+
+def get_connection(mcc: str | None = None) -> dict:
+    dsn = os.environ.get("DATABASE_URL_METRICS")
+    if not dsn:
+        sys.exit("Set DATABASE_URL_METRICS (e.g. via: kb.py secret-get DATABASE_URL_METRICS).")
+    conn = psycopg2.connect(_clean_dsn(dsn)); conn.set_session(readonly=True)
+    q = ('SELECT "developerToken" dev, "loginCustomerId" mcc, "oauthClientId" cid, '
+         '"oauthClientSecret" csec, "refreshToken" rt '
+         'FROM google_ads_connections WHERE "isActive"=true')
+    args = ()
+    if mcc:
+        q += ' AND "loginCustomerId"=%s'; args = (mcc,)
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(q, args); rows = cur.fetchall()
+    conn.close()
+    if not rows:
+        sys.exit("No active google_ads_connections found in metrics DB.")
+    return dict(rows[0])
+
+def access_token(c: dict) -> str:
+    r = requests.post(TOKEN_URL, data={"grant_type":"refresh_token","client_id":c["cid"],
+        "client_secret":c["csec"],"refresh_token":c["rt"]}, timeout=20)
+    r.raise_for_status(); return r.json()["access_token"]
+
+def _headers(c: dict, tok: str) -> dict:
+    return {"Authorization":f"Bearer {tok}","developer-token":c["dev"],
+            "login-customer-id":_digits(c["mcc"]),"Content-Type":"application/json"}
+
+def search(c: dict, customer_id: str, query: str) -> list[dict]:
+    tok = access_token(c)
+    url = f"https://googleads.googleapis.com/{API}/customers/{_digits(customer_id)}/googleAds:search"
+    out=[]; page=None
+    while True:
+        body={"query":query}
+        if page: body["pageToken"]=page
+        r=requests.post(url, headers=_headers(c,tok), json=body, timeout=60)
+        if r.status_code!=200: sys.exit(f"Google Ads API {r.status_code}: {r.text[:700]}")
+        d=r.json(); out+=d.get("results",[]) or []; page=d.get("nextPageToken")
+        if not page: break
+    return out
+
+def mutate(c: dict, customer_id: str, service: str, operations: list, apply: bool, partial: bool=False) -> dict:
+    tok = access_token(c)
+    url = f"https://googleads.googleapis.com/{API}/customers/{_digits(customer_id)}/{service}:mutate"
+    body={"operations":operations,"validateOnly":(not apply),"partialFailure":partial}
+    r=requests.post(url, headers=_headers(c,tok), json=body, timeout=60)
+    if r.status_code!=200: sys.exit(f"Google Ads API {r.status_code}: {r.text[:900]}")
+    return r.json()
+
+# ---- report presets (GAQL). {r} = date range macro ----
+PRESETS = {
+ "campaigns": ("SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type,"
+    " metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions,"
+    " metrics.conversions_value, metrics.average_cpc FROM campaign WHERE segments.date DURING {r}"
+    " ORDER BY metrics.cost_micros DESC",
+    ["campaign.name","campaign.status","metrics.impressions","metrics.clicks","metrics.costMicros",
+     "metrics.conversions","metrics.conversionsValue"]),
+ "ad_groups": ("SELECT campaign.name, ad_group.name, ad_group.status, metrics.impressions, metrics.clicks,"
+    " metrics.cost_micros, metrics.conversions, metrics.conversions_value FROM ad_group"
+    " WHERE segments.date DURING {r} ORDER BY metrics.cost_micros DESC",
+    ["campaign.name","ad_group.name","metrics.impressions","metrics.clicks","metrics.costMicros",
+     "metrics.conversions","metrics.conversionsValue"]),
+ "keywords": ("SELECT ad_group.name, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type,"
+    " metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions,"
+    " metrics.conversions_value FROM keyword_view WHERE segments.date DURING {r}"
+    " ORDER BY metrics.cost_micros DESC",
+    ["ad_group.name","adGroupCriterion.keyword.text","adGroupCriterion.keyword.matchType",
+     "metrics.clicks","metrics.costMicros","metrics.conversions","metrics.conversionsValue"]),
+ "search_terms": ("SELECT search_term_view.search_term, metrics.impressions, metrics.clicks,"
+    " metrics.cost_micros, metrics.conversions, metrics.conversions_value FROM search_term_view"
+    " WHERE segments.date DURING {r} ORDER BY metrics.cost_micros DESC",
+    ["searchTermView.searchTerm","metrics.clicks","metrics.costMicros","metrics.conversions","metrics.conversionsValue"]),
+ "ads": ("SELECT campaign.name, ad_group.name, ad_group_ad.ad.id, ad_group_ad.status,"
+    " ad_group_ad.policy_summary.approval_status, metrics.impressions, metrics.clicks,"
+    " metrics.conversions FROM ad_group_ad WHERE segments.date DURING {r}",
+    ["campaign.name","ad_group.name","adGroupAd.ad.id","adGroupAd.status",
+     "adGroupAd.policySummary.approvalStatus","metrics.impressions","metrics.conversions"]),
+ "accounts": ("SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code,"
+    " customer_client.manager, customer_client.status FROM customer_client",
+    ["customerClient.id","customerClient.descriptiveName","customerClient.currencyCode",
+     "customerClient.manager","customerClient.status"]),
+}
+
+def _get(d: dict, path: str):
+    cur=d
+    for k in path.split("."):
+        if not isinstance(cur,dict): return ""
+        cur=cur.get(k)
+        if cur is None: return ""
+    return cur
+
+def _fmt(path, val):
+    if path.endswith("costMicros") or path.endswith("Micros"):
+        try: return f"{float(val)/1e6:.2f}"
+        except: return val
+    return val
+
+def print_rows(results, cols, fmt):
+    rows=[{c:_fmt(c,_get(r,c)) for c in cols} for r in results]
+    if fmt=="json":
+        print(json.dumps(rows, ensure_ascii=False, indent=1)); return
+    short=[c.split(".")[-1] for c in cols]
+    widths=[max(len(short[i]), *(len(str(row[cols[i]])) for row in rows)) if rows else len(short[i]) for i in range(len(cols))]
+    line=lambda vals: "  ".join(str(v).ljust(widths[i]) for i,v in enumerate(vals))
+    print(line(short)); print("  ".join("-"*w for w in widths))
+    for row in rows: print(line([row[c] for c in cols]))
+    print(f"\n{len(rows)} rânduri")
+
+def main():
+    ap=argparse.ArgumentParser(description="Google Ads API via team MCC")
+    sub=ap.add_subparsers(dest="cmd", required=True)
+    r=sub.add_parser("report", help="run a report")
+    r.add_argument("--customer", required=True); r.add_argument("--preset", choices=list(PRESETS))
+    r.add_argument("--query", help="raw GAQL (overrides --preset)")
+    r.add_argument("--range", default="LAST_7_DAYS"); r.add_argument("--format", default="table", choices=["table","json"])
+    r.add_argument("--mcc")
+    a=sub.add_parser("accounts", help="list child accounts under the MCC")
+    a.add_argument("--mcc"); a.add_argument("--format", default="table", choices=["table","json"])
+    sb=sub.add_parser("set-budget", help="change a campaign daily budget (dry-run unless --apply)")
+    sb.add_argument("--customer", required=True); sb.add_argument("--campaign", required=True)
+    sb.add_argument("--daily", required=True, type=float, help="RON/day"); sb.add_argument("--apply", action="store_true"); sb.add_argument("--mcc")
+    ss=sub.add_parser("set-status", help="enable/pause a campaign (dry-run unless --apply)")
+    ss.add_argument("--customer", required=True); ss.add_argument("--campaign", required=True)
+    ss.add_argument("--status", required=True, choices=["ENABLED","PAUSED"]); ss.add_argument("--apply", action="store_true"); ss.add_argument("--mcc")
+    st=sub.add_parser("set-troas", help="set target ROAS on a Max-conv-value campaign (dry-run unless --apply)")
+    st.add_argument("--customer", required=True); st.add_argument("--campaign", required=True)
+    st.add_argument("--roas", type=float, required=True, help="multiplier, e.g. 4.8 = 480%"); st.add_argument("--apply", action="store_true"); st.add_argument("--mcc")
+    sc=sub.add_parser("set-tcpa", help="switch to Max conversions + target CPA (dry-run unless --apply)")
+    sc.add_argument("--customer", required=True); sc.add_argument("--campaign", required=True)
+    sc.add_argument("--cpa", type=float, required=True, help="RON"); sc.add_argument("--apply", action="store_true"); sc.add_argument("--mcc")
+    ng=sub.add_parser("add-negatives", help="add campaign-level negative keywords (dry-run unless --apply)")
+    ng.add_argument("--customer", required=True); ng.add_argument("--campaign", required=True)
+    ng.add_argument("--terms", required=True, help="comma-separated negative terms")
+    ng.add_argument("--match", default="PHRASE", choices=["EXACT","PHRASE","BROAD"])
+    ng.add_argument("--apply", action="store_true"); ng.add_argument("--mcc")
+    ak=sub.add_parser("add-keywords", help="add positive keywords to an ad group (dry-run unless --apply)")
+    ak.add_argument("--customer", required=True); ak.add_argument("--adgroup", required=True)
+    ak.add_argument("--terms", required=True, help="comma-separated"); ak.add_argument("--match", default="PHRASE", choices=["EXACT","PHRASE","BROAD"])
+    ak.add_argument("--apply", action="store_true"); ak.add_argument("--mcc")
+    args=ap.parse_args()
+
+    if args.cmd=="report":
+        c=get_connection(args.mcc)
+        if args.query: q=args.query; cols=None
+        else:
+            if not args.preset: sys.exit("--preset or --query required")
+            q,cols=PRESETS[args.preset]; q=q.replace("{r}",args.range)
+        res=search(c, args.customer, q)
+        if cols: print_rows(res, cols, args.format)
+        else: print(json.dumps(res, ensure_ascii=False, indent=1))
+    elif args.cmd=="accounts":
+        c=get_connection(args.mcc); q,cols=PRESETS["accounts"]
+        res=search(c, _digits(c["mcc"]), q); print_rows(res, cols, args.format)
+    elif args.cmd=="set-budget":
+        c=get_connection(args.mcc)
+        # find the campaign's budget resource
+        rows=search(c,args.customer,f"SELECT campaign.id, campaign.name, campaign.campaign_budget FROM campaign WHERE campaign.id={_digits(args.campaign)}")
+        if not rows: sys.exit("campaign not found")
+        budget_res=_get(rows[0],"campaign.campaignBudget")
+        ops=[{"updateMask":"amountMicros","update":{"resourceName":budget_res,"amountMicros":int(round(args.daily*1e6))}}]
+        out=mutate(c,args.customer,"campaignBudgets",ops,args.apply)
+        print(("APLICAT" if args.apply else "DRY-RUN (validateOnly) — adaugă --apply ca să execuți"))
+        print(f"  buget {args.daily} RON/zi pe {budget_res}"); print(json.dumps(out,ensure_ascii=False))
+    elif args.cmd=="set-status":
+        c=get_connection(args.mcc)
+        res_name=f"customers/{_digits(args.customer)}/campaigns/{_digits(args.campaign)}"
+        ops=[{"updateMask":"status","update":{"resourceName":res_name,"status":args.status}}]
+        out=mutate(c,args.customer,"campaigns",ops,args.apply)
+        print(("APLICAT" if args.apply else "DRY-RUN — adaugă --apply ca să execuți"))
+        print(f"  status={args.status} pe {res_name}"); print(json.dumps(out,ensure_ascii=False))
+    elif args.cmd=="set-troas":
+        c=get_connection(args.mcc)
+        res_name=f"customers/{_digits(args.customer)}/campaigns/{_digits(args.campaign)}"
+        ops=[{"updateMask":"maximizeConversionValue.targetRoas","update":{"resourceName":res_name,"maximizeConversionValue":{"targetRoas":args.roas}}}]
+        out=mutate(c,args.customer,"campaigns",ops,args.apply)
+        print(("APLICAT" if args.apply else "DRY-RUN — adaugă --apply ca să execuți"))
+        print(f"  tROAS={args.roas} ({int(args.roas*100)}%) pe {res_name}"); print(json.dumps(out,ensure_ascii=False)[:300])
+    elif args.cmd=="set-tcpa":
+        c=get_connection(args.mcc)
+        res_name=f"customers/{_digits(args.customer)}/campaigns/{_digits(args.campaign)}"
+        ops=[{"updateMask":"maximizeConversions.targetCpaMicros","update":{"resourceName":res_name,"maximizeConversions":{"targetCpaMicros":int(round(args.cpa*1e6))}}}]
+        out=mutate(c,args.customer,"campaigns",ops,args.apply)
+        print(("APLICAT" if args.apply else "DRY-RUN — adaugă --apply ca să execuți"))
+        print(f"  tCPA={args.cpa} RON pe {res_name}"); print(json.dumps(out,ensure_ascii=False)[:300])
+    elif args.cmd=="add-negatives":
+        c=get_connection(args.mcc)
+        res_camp=f"customers/{_digits(args.customer)}/campaigns/{_digits(args.campaign)}"
+        terms=[t.strip() for t in args.terms.split(",") if t.strip()]
+        ops=[{"create":{"campaign":res_camp,"negative":True,"keyword":{"text":t,"matchType":args.match}}} for t in terms]
+        out=mutate(c,args.customer,"campaignCriteria",ops,args.apply)
+        print(("APLICAT" if args.apply else "DRY-RUN — adaugă --apply ca să execuți"))
+        print(f"  {len(terms)} negative ({args.match}) pe {res_camp}: {', '.join(terms)}")
+        print(json.dumps(out,ensure_ascii=False)[:400])
+    elif args.cmd=="add-keywords":
+        c=get_connection(args.mcc)
+        ag=f"customers/{_digits(args.customer)}/adGroups/{_digits(args.adgroup)}"
+        terms=[t.strip() for t in args.terms.split(",") if t.strip()]
+        ops=[{"create":{"adGroup":ag,"status":"ENABLED","keyword":{"text":t,"matchType":args.match}}} for t in terms]
+        out=mutate(c,args.customer,"adGroupCriteria",ops,args.apply,partial=True)
+        print(("APLICAT" if args.apply else "DRY-RUN — adaugă --apply ca să execuți"))
+        print(f"  {len(terms)} keywords ({args.match}) -> {ag}")
+        print(json.dumps(out,ensure_ascii=False)[:300])
+
+if __name__=="__main__":
+    main()
