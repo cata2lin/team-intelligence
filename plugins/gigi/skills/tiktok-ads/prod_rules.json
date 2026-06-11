@@ -1,0 +1,916 @@
+{
+ "facebook": [
+  {
+   "product_group": "Esteban",
+   "map_type": "ACCOUNT",
+   "pattern": "Esteban"
+  },
+  {
+   "product_group": "Esteban",
+   "map_type": "ACCOUNT",
+   "pattern": "Esteban 2"
+  },
+  {
+   "product_group": "Belasil",
+   "map_type": "ACCOUNT",
+   "pattern": "Belasil"
+  },
+  {
+   "product_group": "Genti",
+   "map_type": "ACCOUNT",
+   "pattern": "GENTO"
+  },
+  {
+   "product_group": "Genti",
+   "map_type": "ACCOUNT",
+   "pattern": "Apreciat"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "LAVETE MAGICE"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "LM"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "LAVETE ABRAZIVE"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "LA"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "AD_KEYWORD",
+   "pattern": "abraziva"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "AD_KEYWORD",
+   "pattern": "magica"
+  },
+  {
+   "product_group": "Creion sprancene",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "CREION"
+  },
+  {
+   "product_group": "Brad Montessori",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Brad"
+  },
+  {
+   "product_group": "Broscuta inotatoare",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Broscuta"
+  },
+  {
+   "product_group": "Geanta de depozitare",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Geanta de depozitare"
+  },
+  {
+   "product_group": "Genti",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Genti"
+  },
+  {
+   "product_group": "Sosete masaj",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Sosete masaj"
+  },
+  {
+   "product_group": "Covoras magic",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "-Covoraș"
+  },
+  {
+   "product_group": "Set cadou barbati",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Set Cadou Bărbați"
+  },
+  {
+   "product_group": "Perie de par auto-curatare",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Perie de par auto-curatare"
+  },
+  {
+   "product_group": "Set 580 Tuburi",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "580 Tuburi"
+  },
+  {
+   "product_group": "Set cadou barbati",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "-Set Cadou Bărbați"
+  },
+  {
+   "product_group": "Super glue",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "-Super Glue"
+  },
+  {
+   "product_group": "Covoare",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "COVOARE MARI"
+  },
+  {
+   "product_group": "Cleme",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "SUPORTURI CEARCEAF"
+  },
+  {
+   "product_group": "Covorase baie",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "COVORASE BAIE"
+  },
+  {
+   "product_group": "Cleme",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "SUPORT PAT"
+  },
+  {
+   "product_group": "Manusa",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "MANUSA MAGICA"
+  },
+  {
+   "product_group": "George Talent",
+   "map_type": "ACCOUNT",
+   "pattern": "George Talent"
+  },
+  {
+   "product_group": "Pijamale",
+   "map_type": "ACCOUNT",
+   "pattern": "Nocturna BG"
+  },
+  {
+   "product_group": "Pijamale",
+   "map_type": "ACCOUNT",
+   "pattern": "Nocturna Lux"
+  },
+  {
+   "product_group": "Covorase baie",
+   "map_type": "ACCOUNT",
+   "pattern": "Reduceri bune"
+  },
+  {
+   "product_group": "Masinute",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Masinute"
+  },
+  {
+   "product_group": "Masina de cusut",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Mașină de Cusut"
+  },
+  {
+   "product_group": "Oglinda",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Oglindă Acrilică"
+  },
+  {
+   "product_group": "Pensula magica",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "-Pensula"
+  },
+  {
+   "product_group": "Covoras magic",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Covorașul Magic"
+  },
+  {
+   "product_group": "Pijamale",
+   "map_type": "ACCOUNT",
+   "pattern": "[TW] Nocturna"
+  },
+  {
+   "product_group": "Pudra",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "MINI SCALE"
+  },
+  {
+   "product_group": "Polygel",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "POLYKIT"
+  },
+  {
+   "product_group": "Perie de par auto-curatare",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "-Perie"
+  },
+  {
+   "product_group": "Cleste mufe",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Cleste Deconectare"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "LAVETA MINUNE"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "LAVETA ABRAZIVA"
+  },
+  {
+   "product_group": "Test",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "TEST"
+  },
+  {
+   "product_group": "Scaun de birou",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Scaun de birou"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "AD_KEYWORD",
+   "pattern": "abraziv"
+  },
+  {
+   "product_group": "Bicicleta fara pedale",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Bicicleta fara pedale"
+  },
+  {
+   "product_group": "Tapet",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Set 10x tapet"
+  },
+  {
+   "product_group": "Consola",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Consola mini"
+  },
+  {
+   "product_group": "Drona",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Drona"
+  },
+  {
+   "product_group": "Cana magica",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "CanaMagică"
+  },
+  {
+   "product_group": "Asternuturi",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Cearceaf Impermeabil"
+  },
+  {
+   "product_group": "Fata de masa",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Fată de Masă Impermeabilă"
+  },
+  {
+   "product_group": "Aparat foto instant",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Aparat foto instant"
+  },
+  {
+   "product_group": "Perna ortopedica",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Perna ortopedica"
+  },
+  {
+   "product_group": "Protectie antistropire aragaz",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Protectie antistropire"
+  },
+  {
+   "product_group": "Cleste mufe",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Cleste Mufe"
+  },
+  {
+   "product_group": "Caserola",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Caserolă"
+  },
+  {
+   "product_group": "Test",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Aparat pentru Curățat Fructe"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "LAVETA MAGICA"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Laveta din Fibra abraziva"
+  },
+  {
+   "product_group": "Cleme",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "SET 4 SUPORTURI CEARSAF"
+  },
+  {
+   "product_group": "Sosete masaj",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "SOSETE PENTRU MASAJ"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Set 5 lavete"
+  },
+  {
+   "product_group": "Cleme",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "FixCearceaf-Broad"
+  },
+  {
+   "product_group": "Cleme",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "FixCearceaf-Rural"
+  },
+  {
+   "product_group": "Suport pantofi",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "FIXPANTOF"
+  },
+  {
+   "product_group": "Iluminat",
+   "map_type": "ACCOUNT",
+   "pattern": "Iluminat Mag"
+  },
+  {
+   "product_group": "Sosete masaj",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Sosete pentru"
+  },
+  {
+   "product_group": "Asternuturi",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "AȘTERNUT"
+  },
+  {
+   "product_group": "Fata de masa",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "FAȚĂ DE MASĂ"
+  },
+  {
+   "product_group": "Cleme",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "FIX CEARSAF"
+  },
+  {
+   "product_group": "Masina de cusut",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "MASINA CUSUT"
+  },
+  {
+   "product_group": "Cleme",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "SUPORTURI DE PAT"
+  },
+  {
+   "product_group": "Suport pantofi",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "SUPORT PANTOFI"
+  },
+  {
+   "product_group": "Cleme",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "SUPORT PENTRU CEARCEAF"
+  },
+  {
+   "product_group": "Cleste mufe",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "CLESTE PENTRU MUFE"
+  },
+  {
+   "product_group": "Broscuta inotatoare",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "BROSCUȚE"
+  },
+  {
+   "product_group": "Cana magica",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "CANA MAGICA"
+  },
+  {
+   "product_group": "Cleme",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "SUPORT CEARCEAF"
+  },
+  {
+   "product_group": "Geanta de depozitare",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "GEANTA DEPOZITARE"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE #3 - UPD STRATEGY 2026 - 14.01.26 && AD 4"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW - UPD #2 - STRATEGY 2026 - 14.01.26 && CARLA 5"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW - UPD #2 - STRATEGY 2026 - 14.01.26 && CARLA 4"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW - UPD #3 - STRATEGY 2026 - 14.01.26 && AD 4"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE #5 - STRATEGY UPD 2026 - 14.01.26 && ad 9"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE #7 - STRATEGY UPD 2026 - 14.01.26 && ad 2"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE #8 - STRATEGY UPD 2026 - 14.01.26 && ad 4"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE #9 - STRATEGY UPD 2026 - 14.01.26 && ad 6"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE #9 - STRATEGY UPD 2026 - 14.01.26 && ad 9"
+  },
+  {
+   "product_group": "Test",
+   "map_type": "ACCOUNT",
+   "pattern": "Favmag"
+  },
+  {
+   "product_group": "Test",
+   "map_type": "ACCOUNT",
+   "pattern": "Orice Redus"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE CEHIA - 23.01.26 - #16 && AD2 - #16"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE CEHIA - 23.01.26 - #21 && AD 1 - #21"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE CEHIA - 23.01.26 - #3 && BF AD - 9 - #3"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE CEHIA - 23.01.26 - #31 && AD 3 - #31"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE CEHIA - 23.01.26 - #32 && BF AD - 9 - #32"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE CEHIA - 23.01.26 - #40 && AD 1 - #40"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE CEHIA - 23.01.26 - #46 && AD 4 - #46"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE CEHIA - 23.01.26 - #54 && AD 4 - #54"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE CEHIA - 23.01.26 - #56 && AD 5 - #56"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE CEHIA - 23.01.26 - #8 && AD 2 - #8"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE CEHIA - 23.01.26 - #9 && BF AD - 6 - #9"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #22 && #22 AD 3"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #23 && #23 ad 5"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #25 && #25 ad 1"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #3 && #3 - ad 3"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #30 && #30 AD 2"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #34 && #34 ad 3"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #35 && #35 ad 4"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #38 && #38 ad 2"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #39 && #39 AD 6"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #41 && #41 ad 3"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #42 && #42 BF AD - 7"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #45 && #45 ad 8"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #48 && #48 ad 6"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #52 && #52 ad 2"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #54 && #54 AD 3"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #56 && #56 ad 4"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #61 && #61 AD 5"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW LAVETE - 23.01.26 #63 && #63 ad 1"
+  },
+  {
+   "product_group": "Test",
+   "map_type": "ACCOUNT",
+   "pattern": "Bonhaus Brasil"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW BEST AD - 03.03.26 && AD 1"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW BEST AD - 03.03.26 && AD 4"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW ALL WIN - 03.03.26 && BF AD"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW ALL WIN - 03.03.26 && ad 2"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_AND_AD",
+   "pattern": "{HA} - NEW ALL WIN - 03.03.26 && ad 6"
+  }
+ ],
+ "tiktok": [
+  {
+   "product_group": "Belasil",
+   "map_type": "ACCOUNT",
+   "pattern": "Belasil.ro"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "ABRAZIVE"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "MAGICE"
+  },
+  {
+   "product_group": "Esteban",
+   "map_type": "ACCOUNT",
+   "pattern": "Belasil"
+  },
+  {
+   "product_group": "Esteban",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "ESTEBAN"
+  },
+  {
+   "product_group": "Cleste mufe",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Cleste Mufe"
+  },
+  {
+   "product_group": "Creion sprancene",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Creion sprancene"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "LAVETA MAGICA"
+  },
+  {
+   "product_group": "Set 580 Tuburi",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Tuburi Termocontractibile"
+  },
+  {
+   "product_group": "Perie par animale",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Perie par animale"
+  },
+  {
+   "product_group": "Perie de par auto-curatare",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Perie par auto-curatare"
+  },
+  {
+   "product_group": "Set cadou barbati",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "SET CADOU BARBATI"
+  },
+  {
+   "product_group": "Snur magnetic",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "SNUR MAGNETIC"
+  },
+  {
+   "product_group": "Set surubelnite",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Set Surubelnite 24 in 1"
+  },
+  {
+   "product_group": "Sort",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Sortz"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "LAVETA ABRAZIVĂ"
+  },
+  {
+   "product_group": "Genti",
+   "map_type": "ACCOUNT",
+   "pattern": "Gento.ro"
+  },
+  {
+   "product_group": "Cleme",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "CEPATAI"
+  },
+  {
+   "product_group": "Manusa",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Manusa Magica"
+  },
+  {
+   "product_group": "Covoras magic",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "COVORAȘ MAGIC"
+  },
+  {
+   "product_group": "Masinute",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Masinute"
+  },
+  {
+   "product_group": "Oglinda",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Oglinda"
+  },
+  {
+   "product_group": "Sort",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Sort floral cu dantela-"
+  },
+  {
+   "product_group": "Pijamale",
+   "map_type": "ACCOUNT",
+   "pattern": "Nocturna Lux"
+  },
+  {
+   "product_group": "Suport pantofi",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Suport pantofi -"
+  },
+  {
+   "product_group": "Cleme",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "SUPORTURI PENTRU CEARCEAF"
+  },
+  {
+   "product_group": "Covorase baie",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "COVORIA"
+  },
+  {
+   "product_group": "George Talent",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "GT"
+  },
+  {
+   "product_group": "Esteban",
+   "map_type": "ACCOUNT",
+   "pattern": "Esteban.ro"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "LAVETE POLONIA #2"
+  },
+  {
+   "product_group": "Esteban",
+   "map_type": "ACCOUNT",
+   "pattern": "Eseban"
+  },
+  {
+   "product_group": "Genti",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Genti"
+  },
+  {
+   "product_group": "Tel",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Telul Magic"
+  },
+  {
+   "product_group": "Snur magnetic",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Snur draperii"
+  },
+  {
+   "product_group": "Snur magnetic",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Snur magic"
+  },
+  {
+   "product_group": "Cleme",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Suport pat"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "{HA} - LAVETE CEHIA - 12.07.25"
+  },
+  {
+   "product_group": "Perie ingusta",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Perie ingusta"
+  },
+  {
+   "product_group": "Broscuta inotatoare",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Broscute inotatoare"
+  },
+  {
+   "product_group": "Caserola",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "CASEROLA GOSPODINEI"
+  },
+  {
+   "product_group": "Asternuturi",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "ASTERNUT"
+  },
+  {
+   "product_group": "Masina de cusut",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "MAȘINĂ CUSUT-"
+  },
+  {
+   "product_group": "Fata de masa",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "FAȚĂ DE MASA"
+  },
+  {
+   "product_group": "Lavete abrazive",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "LAVETE CEHIA ABRAZIVE"
+  },
+  {
+   "product_group": "Lavete magice",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "{HA} - LAVETE CEHIA #2 - 19.08.25"
+  },
+  {
+   "product_group": "Pudra",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "{HA} - NEW ROSSI Nails - 25.05.25"
+  },
+  {
+   "product_group": "Covoras magic",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "COVORAȘUL MAGIC"
+  },
+  {
+   "product_group": "Sosete masaj",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "SOSETE MASAJ"
+  },
+  {
+   "product_group": "Cleme",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "SUPORT CEARCEAF"
+  },
+  {
+   "product_group": "Super glue",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Super Glue"
+  },
+  {
+   "product_group": "Broscuta inotatoare",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "BROSCUȚE"
+  },
+  {
+   "product_group": "Cleste mufe",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "CLESTE PENTRU MUFE"
+  },
+  {
+   "product_group": "Perie par animale",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "PERIE ANIMALE"
+  },
+  {
+   "product_group": "Geanta de depozitare",
+   "map_type": "CAMPAIGN_KEYWORD",
+   "pattern": "Geanta Depozitare"
+  }
+ ]
+}

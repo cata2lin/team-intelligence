@@ -230,6 +230,34 @@ def cmd_list(a):
             if ac["filter"] and ac["filter"].lower() not in nm.lower(): continue
             print(f"  {x['campaign_id']:22} {x.get('operation_status','?'):8} {str(x.get('budget','')):>8}  {nm[:44]}  [{ac['nm']}]")
 
+def cmd_products(a):
+    """Spend per PRODUCT (Nomenclator mapping) split VÂNZARE vs TEST — campaign name contains 'TEST' → TEST."""
+    import prodmap
+    start,end=daterange(a.range)
+    accts,rows=report_rows(a.brand,"campaign",start,end)
+    idx=fx_index([x["cur"] for x in accts], start, end)
+    agg={}
+    for r in rows:
+        if not _passes(r,"campaign"): continue
+        m=r.get("metrics",{}); cname=m.get("campaign_name","")
+        d=(r.get("dimensions",{}).get("stat_time_day","") or "")[:10]
+        try: dd=datetime.date.fromisoformat(d)
+        except Exception: dd=None
+        sp=conv(_f(m,"spend"), r.get("_cur"), dd, idx); rv=conv(_f(m,"spend")*_f(m,"complete_payment_roas"), r.get("_cur"), dd, idx)
+        pg=prodmap.product_of("tiktok", r["_acct"], cname, "")
+        g=agg.setdefault(pg, dict(s_sp=0,s_pu=0,s_rv=0,t_sp=0))
+        if prodmap.is_test(cname): g["t_sp"]+=sp
+        else: g["s_sp"]+=sp; g["s_pu"]+=_f(m,"complete_payment"); g["s_rv"]+=rv
+    out=sorted(agg.items(), key=lambda kv:-(kv[1]["s_sp"]+kv[1]["t_sp"]))
+    print(f"# {a.brand} · produse TikTok · {start}→{end} · RON   [VÂNZARE | TEST]")
+    print(f"{'produs':24} {'spend':>9} {'achiz':>6} {'venit':>9} {'ROAS':>5} {'CPA':>6} | {'TEST':>8}")
+    T=dict(s=0,p=0,r=0,t=0)
+    for pg,g in out:
+        roas=g["s_rv"]/g["s_sp"] if g["s_sp"] else 0; cpa=g["s_sp"]/g["s_pu"] if g["s_pu"] else 0
+        print(f"{pg[:24]:24} {g['s_sp']:>9.0f} {g['s_pu']:>6.0f} {g['s_rv']:>9.0f} {roas:>5.2f} {cpa:>6.1f} | {g['t_sp']:>8.0f}")
+        T['s']+=g['s_sp']; T['p']+=g['s_pu']; T['r']+=g['s_rv']; T['t']+=g['t_sp']
+    print(f"{'TOTAL vânzare':24} {T['s']:>9.0f} {T['p']:>6.0f} {T['r']:>9.0f} {(T['r']/T['s'] if T['s'] else 0):>5.2f} {'':>6} | {T['t']:>8.0f}")
+
 def find_owner(brand, cid):
     for ac in accounts_for(brand):
         rows=tk_get("/campaign/get/", ac["tok"], {"advertiser_id":ac["adv"],
@@ -263,11 +291,12 @@ def main():
     s=sub.add_parser("report"); s.add_argument("brand"); s.add_argument("--level",default="campaign",choices=["account","campaign","adgroup","ad"]); s.add_argument("--range",default="last_30d"); s.add_argument("--sort",default="spend",choices=["spend","roas","purchases","cpa"]); s.add_argument("--limit",type=int,default=25)
     s=sub.add_parser("trend"); s.add_argument("brand"); s.add_argument("--range",default="last_14d")
     s=sub.add_parser("list"); s.add_argument("brand")
+    s=sub.add_parser("products"); s.add_argument("brand"); s.add_argument("--range",default="last_30d")
     for nm in ("pause","activate"):
         s=sub.add_parser(nm); s.add_argument("brand"); s.add_argument("id",help="campaign id"); s.add_argument("--apply",action="store_true")
     s=sub.add_parser("budget"); s.add_argument("brand"); s.add_argument("id",help="campaign id"); s.add_argument("--daily",required=True); s.add_argument("--apply",action="store_true")
     a=ap.parse_args()
-    {"accounts":cmd_accounts,"report":cmd_report,"trend":cmd_trend,"list":cmd_list,
+    {"accounts":cmd_accounts,"report":cmd_report,"trend":cmd_trend,"list":cmd_list,"products":cmd_products,
      "pause":cmd_pause,"activate":cmd_activate,"budget":cmd_budget}[a.cmd](a)
 
 if __name__=="__main__":
