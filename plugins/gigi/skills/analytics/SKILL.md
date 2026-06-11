@@ -23,13 +23,25 @@ All scripts run with `uv` (deps inline). The GCP project `rising-hallway-462906-
 ## GA4 — `ga4.py`
 ```bash
 uv run ga4.py properties                                   # every property the SA can read + IDs
-uv run ga4.py channels --brand esteban                     # channel mix + conversions, last 90 days
-uv run ga4.py channels --brand grandia --start 2026-03-01 --end 2026-06-10
-uv run ga4.py channels --all                               # loop Grandia/Esteban/GT/Nubra
-uv run ga4.py trend    --brand grandia                     # monthly Organic Search trend
-uv run ga4.py trend    --brand esteban --channel "Paid Social"
+uv run ga4.py channels  --brand esteban                    # session mix (sessions/users/conversions), last 90d
+uv run ga4.py channels  --all --start 2026-03-01 --end 2026-06-10
+uv run ga4.py economics --brand esteban                    # sessions + CVR + revenue + rev/session per channel
+uv run ga4.py economics --all                              # the "which channel actually makes money" view
+uv run ga4.py landing   --brand esteban                    # top landing pages for Organic Search (+ conv/revenue)
+uv run ga4.py landing   --brand grandia --channel "Paid Shopping" --limit 20
+uv run ga4.py trend     --brand grandia                    # monthly Organic Search
+uv run ga4.py trend     --brand nubra --weekly --channels "Organic Search,Organic Social"
 ```
-Default metrics: `sessions,totalUsers,keyEvents` (override with `--metrics`). Default range: last 90 days (yesterday-anchored). `--brand` or `--property <id>`.
+Common flags: `--brand <name>` or `--property <id>`; `--all` (channels/economics); `--start/--end` (default last 90 days, yesterday-anchored). `channels --metrics` overrides metric list. `landing --channel`/`--limit`. `trend --weekly` and `--channels "A,B"`.
+
+| Command | What you get | Why it matters |
+|---|---|---|
+| `channels` | sessions/users/conversions per channel | quick traffic mix, organic vs paid |
+| **`economics`** | sessions + **CVR + revenue + revenue-share + rev/session** per channel | the decision view — organic usually has the **highest rev/session** even when it's a small slice of traffic |
+| **`landing`** | top landing pages for a channel, with conversions + revenue | *which pages* pull organic (separates brand-search homepage from category/product pages) |
+| `trend` | monthly or `--weekly` sessions per channel | organic momentum; watch for a partial final week |
+
+> Conversions (`keyEvents`) and revenue (`purchaseRevenue`, `ecommercePurchases`) come from GA4's ecommerce tracking — populated for Esteban & Grandia. **This is exactly what Shopify could not give** (its per-channel conversion column is all-zero).
 
 ### Brand → GA4 property
 | Brand | Property ID | GA4 status |

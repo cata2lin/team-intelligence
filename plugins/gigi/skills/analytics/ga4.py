@@ -3,8 +3,8 @@
 # dependencies = ["google-auth>=2.0", "requests>=2.31"]
 # ///
 """
-GA4 puller for the team — sessions / users / conversions by channel, for any
-brand property, straight from the Google Analytics Data API.
+GA4 puller for the team — traffic, channel economics (revenue/CVR), organic
+trend, and top organic landing pages, straight from the Google Analytics Data API.
 
 Credentials: the shared `looker-sheets` service account JSON, fetched from the
 knowledge base secret `GA4_SA_JSON` (never hard-coded). The service account must
@@ -13,13 +13,17 @@ be a Viewer on the target GA4 property.
 Usage (export the secret once, then run):
     KB=~/.claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py
     export GA4_SA_JSON="$(uv run "$KB" secret-get GA4_SA_JSON)"
-    uv run ga4.py properties                      # list every property the SA can see + IDs
-    uv run ga4.py channels --brand esteban        # channel mix (sessions/users/conversions) last 90d
-    uv run ga4.py channels --property 510626424 --start 2026-03-01 --end 2026-06-10
-    uv run ga4.py trend   --brand grandia         # monthly Organic Search trend
-    uv run ga4.py channels --all                  # loop all known brands
+    uv run ga4.py properties                          # list properties the SA can see + IDs
+    uv run ga4.py channels  --brand esteban           # session mix (sessions/users/conversions), last 90d
+    uv run ga4.py economics --brand esteban            # sessions + CVR + revenue + rev/session per channel
+    uv run ga4.py economics --all --start 2026-03-01 --end 2026-06-10
+    uv run ga4.py landing   --brand esteban            # top landing pages for Organic Search
+    uv run ga4.py landing   --brand grandia --channel "Paid Shopping" --limit 20
+    uv run ga4.py trend     --brand grandia            # monthly Organic Search
+    uv run ga4.py trend     --brand nubra --weekly --channels "Organic Search,Organic Social"
 """
 import argparse, datetime as dt, json, os, subprocess, sys
+from collections import defaultdict
 from google.oauth2 import service_account
 from google.auth.transport.requests import Request
 import requests
@@ -35,15 +39,14 @@ BRANDS = {
     "george-talent": "541255080",
     "gt":            "541255080",
 }
+ALL_BRANDS = [("Grandia", "510760223"), ("Esteban", "510626424"),
+              ("George Talent", "541255080"), ("Nubra", "541249929")]
 
 # ---------- credentials ----------
 def _find_kb():
-    cands = [
-        os.environ.get("KB_PY"),
-        os.path.expanduser("~/.claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "core", "scripts", "kb.py"),
-    ]
-    for c in cands:
+    for c in [os.environ.get("KB_PY"),
+              os.path.expanduser("~/.claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py"),
+              os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "core", "scripts", "kb.py")]:
         if c and os.path.exists(c):
             return os.path.abspath(c)
     return None
@@ -59,8 +62,7 @@ def load_creds():
             except Exception:
                 raw = ""
     if not raw:
-        for p in ("google_credentials.json",
-                  os.path.expanduser("~/Downloads/Scripturi/google_credentials.json")):
+        for p in ("google_credentials.json", os.path.expanduser("~/Downloads/Scripturi/google_credentials.json")):
             if os.path.exists(p):
                 raw = open(p).read(); break
     if not raw:
@@ -69,8 +71,8 @@ def load_creds():
     creds.refresh(Request())
     return creds
 
-# ---------- HTTP with retries ----------
-def _post(url, headers, body, tries=5):
+# ---------- HTTP ----------
+def _post(url, headers, body, tries=6):
     for attempt in range(1, tries + 1):
         try:
             r = requests.post(url, headers=headers, json=body, timeout=120)
@@ -83,7 +85,7 @@ def _post(url, headers, body, tries=5):
         return r.json()
     sys.exit("GA4 API failed after retries (transient 5xx).")
 
-def _get(url, headers, params, tries=5):
+def _get(url, headers, params, tries=6):
     for attempt in range(1, tries + 1):
         try:
             r = requests.get(url, headers=headers, params=params, timeout=120)
@@ -96,21 +98,36 @@ def _get(url, headers, params, tries=5):
         return r.json()
     sys.exit("GA4 API failed after retries (transient 5xx).")
 
+def _report(creds, pid, body):
+    return _post(f"https://analyticsdata.googleapis.com/v1beta/properties/{pid}:runReport",
+                 {"Authorization": f"Bearer {creds.token}"}, body)
+
 def _rows(j):
-    out = []
-    for row in (j or {}).get("rows", []):
-        out.append(([d["value"] for d in row.get("dimensionValues", [])],
-                    [m["value"] for m in row.get("metricValues", [])]))
-    return out
+    return [([d["value"] for d in r.get("dimensionValues", [])],
+             [m["value"] for m in r.get("metricValues", [])]) for r in (j or {}).get("rows", [])]
 
 def _default_range():
     end = dt.date.today() - dt.timedelta(days=1)
     return (end - dt.timedelta(days=89)).isoformat(), end.isoformat()
 
+def _range(args):
+    d = _default_range()
+    return args.start or d[0], args.end or d[1]
+
+def _resolve_pid(args):
+    if getattr(args, "property", None):
+        return args.property
+    if getattr(args, "brand", None):
+        pid = BRANDS.get(args.brand.lower())
+        if not pid:
+            sys.exit(f"Unknown brand '{args.brand}'. Known: {', '.join(sorted(set(BRANDS)))}")
+        return pid
+    sys.exit("Pass --property <id>, --brand <name>, or --all.")
+
 # ---------- commands ----------
 def cmd_properties(creds, args):
-    H = {"Authorization": f"Bearer {creds.token}"}
-    j = _get("https://analyticsadmin.googleapis.com/v1beta/accountSummaries", H, {"pageSize": 200})
+    j = _get("https://analyticsadmin.googleapis.com/v1beta/accountSummaries",
+             {"Authorization": f"Bearer {creds.token}"}, {"pageSize": 200})
     summ = j.get("accountSummaries", [])
     if not summ:
         print("No properties visible — the SA isn't a Viewer on any property yet."); return
@@ -119,89 +136,132 @@ def cmd_properties(creds, args):
         for p in acc.get("propertySummaries", []):
             print(f"  {p.get('displayName'):<24} -> {p.get('property')}")
 
-def _resolve_pid(args):
-    if args.property:
-        return args.property
-    if args.brand:
-        pid = BRANDS.get(args.brand.lower())
-        if not pid:
-            sys.exit(f"Unknown brand '{args.brand}'. Known: {', '.join(sorted(set(BRANDS)))}")
-        return pid
-    sys.exit("Pass --property <id>, --brand <name>, or --all.")
-
 def _channels_for(creds, pid, label, start, end, metrics):
-    H = {"Authorization": f"Bearer {creds.token}"}
-    j = _post(f"https://analyticsdata.googleapis.com/v1beta/properties/{pid}:runReport", H, {
+    j = _report(creds, pid, {
         "dateRanges": [{"startDate": start, "endDate": end}],
         "dimensions": [{"name": "sessionDefaultChannelGroup"}],
         "metrics": [{"name": m} for m in metrics],
-        "orderBys": [{"metric": {"metricName": "sessions"}, "desc": True}],
-    })
+        "orderBys": [{"metric": {"metricName": "sessions"}, "desc": True}]})
     rr = _rows(j)
     print(f"\n{'='*66}\n{label}  (property {pid})   {start}..{end}\n{'='*66}")
     if not rr:
-        print("  (no data — GA4 has no sessions for this property in range)"); return
+        print("  (no data in range)"); return
     total = sum(int(m[0]) for _, m in rr) or 1
-    head = f"{'Channel':<22}{'Sessions':>11}{'Share':>8}"
-    for m in metrics[1:]:
-        head += f"{m:>12}"
+    head = f"{'Channel':<22}{'Sessions':>11}{'Share':>8}" + "".join(f"{m:>12}" for m in metrics[1:])
     print(head)
     org_s = org_so = 0
     for dims, mets in rr:
         ch = dims[0]; s = int(mets[0])
         if ch == "Organic Search": org_s = s
         if ch == "Organic Social": org_so = s
-        line = f"{ch:<22}{s:>11,}{100*s/total:>7.1f}%"
-        for v in mets[1:]:
-            line += f"{float(v):>12,.0f}"
+        line = f"{ch:<22}{s:>11,}{100*s/total:>7.1f}%" + "".join(f"{float(v):>12,.0f}" for v in mets[1:])
         print(line)
-    print("-"*66)
-    print(f"{'TOTAL':<22}{total:>11,}")
+    print("-"*66 + f"\n{'TOTAL':<22}{total:>11,}")
     print(f"Organic Search: {100*org_s/total:.1f}%  |  Organic (search+social): {100*(org_s+org_so)/total:.1f}%")
 
 def cmd_channels(creds, args):
-    start, end = args.start or _default_range()[0], args.end or _default_range()[1]
+    start, end = _range(args)
     metrics = args.metrics.split(",") if args.metrics else ["sessions", "totalUsers", "keyEvents"]
     if args.all:
-        for b, pid in [("Grandia","510760223"),("Esteban","510626424"),
-                       ("George Talent","541255080"),("Nubra","541249929")]:
-            _channels_for(creds, pid, b, start, end, metrics)
+        for label, pid in ALL_BRANDS:
+            _channels_for(creds, pid, label, start, end, metrics)
     else:
         _channels_for(creds, _resolve_pid(args), args.brand or args.property, start, end, metrics)
 
-def cmd_trend(creds, args):
-    pid = _resolve_pid(args)
-    start, end = args.start or _default_range()[0], args.end or _default_range()[1]
-    H = {"Authorization": f"Bearer {creds.token}"}
-    j = _post(f"https://analyticsdata.googleapis.com/v1beta/properties/{pid}:runReport", H, {
+def _economics_for(creds, pid, label, start, end):
+    j = _report(creds, pid, {
         "dateRanges": [{"startDate": start, "endDate": end}],
-        "dimensions": [{"name": "yearMonth"}],
-        "metrics": [{"name": "sessions"}],
+        "dimensions": [{"name": "sessionDefaultChannelGroup"}],
+        "metrics": [{"name": "sessions"}, {"name": "ecommercePurchases"}, {"name": "purchaseRevenue"}],
+        "orderBys": [{"metric": {"metricName": "purchaseRevenue"}, "desc": True}]})
+    rr = _rows(j)
+    print(f"\n{'='*82}\n{label}  (property {pid})   {start}..{end}   [channel economics]\n{'='*82}")
+    if not rr:
+        print("  (no data in range)"); return
+    tot_s = sum(int(m[0]) for _, m in rr) or 1
+    tot_r = sum(float(m[2]) for _, m in rr) or 1
+    print(f"{'Channel':<20}{'Sessions':>10}{'Sess%':>7}{'Purch':>8}{'CVR%':>7}{'Revenue':>13}{'Rev%':>7}{'Rev/sess':>10}")
+    for d, m in rr:
+        s = int(m[0]); pur = int(float(m[1])); rev = float(m[2])
+        cvr = 100*pur/s if s else 0; rps = rev/s if s else 0
+        print(f"{d[0]:<20}{s:>10,}{100*s/tot_s:>6.1f}%{pur:>8,}{cvr:>6.2f}%{rev:>13,.0f}{100*rev/tot_r:>6.1f}%{rps:>10,.2f}")
+    org = {d[0]: (int(m[0]), float(m[2])) for d, m in rr}
+    o_rev = sum(org.get(c, (0, 0))[1] for c in ("Organic Search", "Organic Social", "Organic Shopping"))
+    print("-"*82 + f"\nTOTAL sessions {tot_s:,} | revenue {tot_r:,.0f} | "
+          f"Organic revenue {o_rev:,.0f} ({100*o_rev/tot_r:.1f}%)")
+
+def cmd_economics(creds, args):
+    start, end = _range(args)
+    if args.all:
+        for label, pid in ALL_BRANDS:
+            _economics_for(creds, pid, label, start, end)
+    else:
+        _economics_for(creds, _resolve_pid(args), args.brand or args.property, start, end)
+
+def cmd_landing(creds, args):
+    pid = _resolve_pid(args); start, end = _range(args)
+    j = _report(creds, pid, {
+        "dateRanges": [{"startDate": start, "endDate": end}],
+        "dimensions": [{"name": "landingPage"}],
+        "metrics": [{"name": "sessions"}, {"name": "keyEvents"}, {"name": "purchaseRevenue"}],
         "dimensionFilter": {"filter": {"fieldName": "sessionDefaultChannelGroup",
                                        "stringFilter": {"value": args.channel}}},
-        "orderBys": [{"dimension": {"dimensionName": "yearMonth"}}],
-    })
-    print(f"{args.channel} by month ({pid}, {start}..{end}):")
-    print("  " + ", ".join(f"{d[0]}={int(m[0]):,}" for d, m in _rows(j)) or "  (none)")
+        "orderBys": [{"metric": {"metricName": "sessions"}, "desc": True}],
+        "limit": args.limit})
+    print(f"\nTop {args.limit} landing pages — {args.channel}  ({pid}, {start}..{end})")
+    print(f"  {'sessions':>9}{'keyEv':>8}{'revenue':>12}  landing page")
+    for d, m in _rows(j):
+        print(f"  {int(m[0]):>9,}{int(float(m[1])):>8,}{float(m[2]):>12,.0f}  {d[0][:68]}")
+
+def cmd_trend(creds, args):
+    pid = _resolve_pid(args); start, end = _range(args)
+    channels = [c.strip() for c in (args.channels or "Organic Search").split(",")]
+    j = _report(creds, pid, {
+        "dateRanges": [{"startDate": start, "endDate": end}],
+        "dimensions": [{"name": "date"}, {"name": "sessionDefaultChannelGroup"}],
+        "metrics": [{"name": "sessions"}]})
+    bucket = defaultdict(lambda: defaultdict(int))
+    for d, m in _rows(j):
+        ch = d[1]
+        if ch not in channels:
+            continue
+        day = dt.date(int(d[0][:4]), int(d[0][4:6]), int(d[0][6:8]))
+        key = (day - dt.timedelta(days=day.weekday())).isoformat() if args.weekly else d[0][:6]
+        bucket[key][ch] += int(m[0])
+    period = "week" if args.weekly else "month"
+    print(f"\n{period.title()} trend — {', '.join(channels)}  ({pid}, {start}..{end})")
+    print(f"  {period:<12}" + "".join(f"{c[:14]:>15}" for c in channels))
+    for k in sorted(bucket):
+        print(f"  {k:<12}" + "".join(f"{bucket[k][c]:>15,}" for c in channels))
 
 def main():
-    ap = argparse.ArgumentParser(description="Pull GA4 traffic by channel for the team.")
+    ap = argparse.ArgumentParser(description="Pull GA4 traffic, economics & organic insights for the team.")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sp = sub.add_parser("properties", help="list properties the SA can read + IDs")
-    sp.set_defaults(fn=cmd_properties)
-    sc = sub.add_parser("channels", help="sessions/users/conversions by channel group")
-    sc.add_argument("--brand"); sc.add_argument("--property"); sc.add_argument("--all", action="store_true")
-    sc.add_argument("--start"); sc.add_argument("--end")
-    sc.add_argument("--metrics", help="comma list; default sessions,totalUsers,keyEvents")
-    sc.set_defaults(fn=cmd_channels)
-    st = sub.add_parser("trend", help="monthly trend for one channel (default Organic Search)")
-    st.add_argument("--brand"); st.add_argument("--property")
-    st.add_argument("--start"); st.add_argument("--end")
-    st.add_argument("--channel", default="Organic Search")
+
+    sub.add_parser("properties", help="list properties the SA can read + IDs").set_defaults(fn=cmd_properties)
+
+    def add_common(p, all_opt=True):
+        p.add_argument("--brand"); p.add_argument("--property")
+        if all_opt: p.add_argument("--all", action="store_true")
+        p.add_argument("--start"); p.add_argument("--end")
+
+    sc = sub.add_parser("channels", help="session mix by channel group"); add_common(sc)
+    sc.add_argument("--metrics", help="comma list; default sessions,totalUsers,keyEvents"); sc.set_defaults(fn=cmd_channels)
+
+    se = sub.add_parser("economics", help="sessions + CVR + revenue + rev/session per channel"); add_common(se)
+    se.set_defaults(fn=cmd_economics)
+
+    sl = sub.add_parser("landing", help="top landing pages for a channel (default Organic Search)"); add_common(sl, all_opt=False)
+    sl.add_argument("--channel", default="Organic Search"); sl.add_argument("--limit", type=int, default=15)
+    sl.set_defaults(fn=cmd_landing)
+
+    st = sub.add_parser("trend", help="monthly/weekly trend for one or more channels"); add_common(st, all_opt=False)
+    st.add_argument("--channels", help="comma list; default 'Organic Search'")
+    st.add_argument("--weekly", action="store_true", help="weekly buckets instead of monthly")
     st.set_defaults(fn=cmd_trend)
+
     args = ap.parse_args()
-    creds = load_creds()
-    args.fn(creds, args)
+    args.fn(load_creds(), args)
 
 if __name__ == "__main__":
     main()
