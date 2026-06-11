@@ -1,6 +1,6 @@
 ---
 name: tiktok-ads
-description: Read AND operate TikTok Ads for any team brand. Read — accounts, performance reports at account/campaign/adgroup/ad level (spend, purchases, revenue, ROAS, CPA, CTR, CPM), daily trend, and `list` (ids/status/budget). Write — gated mutations: pause/activate a campaign and set its budget (DRY-RUN by default; `--apply` to execute). Brand→accounts uses the canonical Mapping (brand_map.json); the key trick: a single TikTok advertiser (e.g. "ROSSI Nails Romania") runs SEVERAL brands, so spend is attributed by a campaign-name token (e.g. 'GT','APRECIAT','COVORIA'). Creds (advertiser_id + token) from the `metrics` DB. Use to answer "how is brand X doing on TikTok", pull TikTok spend/ROAS, or pause/scale TikTok campaigns. Companion to `gigi:meta-ads` and `gigi:google-ads-mcc`.
+description: Read AND operate TikTok Ads for any team brand. Read — accounts, performance reports at account/campaign/adgroup/ad level (spend, purchases, revenue, ROAS, CPA, CTR, CPM), daily trend, and `list` (ids/status/budget). Write — gated mutations: pause/activate a campaign and set its budget (DRY-RUN by default; `--apply` to execute). Brand→accounts uses the canonical Mapping (brand_map.json); the key trick: a single TikTok advertiser (e.g. "ROSSI Nails Romania") runs SEVERAL brands, so spend is attributed by a campaign-name token (e.g. 'GT','APRECIAT','COVORIA'). Creds (advertiser_id + token) from the `metrics` DB. Use to answer "how is brand X doing on TikTok", pull TikTok spend/ROAS, or pause/scale TikTok campaigns. Also `products` — per-product spend split TEST vs SALES (Nomenclator/HA mapping). All amounts in RON (per-day BNR FX from AWBprint.exchange_rates). Companion to `gigi:meta-ads` and `gigi:google-ads-mcc`.
 ---
 
 # TikTok Ads (read + gated writes)
@@ -40,6 +40,7 @@ uv run tiktok.py report "george talent" --level campaign           # only GT cam
 uv run tiktok.py report esteban --level account --range last_14d    # per-account totals (filter-correct)
 uv run tiktok.py trend belasil --range last_14d                     # daily spend/ROAS
 uv run tiktok.py list belasil                                       # campaign ids · status · budget · name
+uv run tiktok.py products magdeal --range last_30d                  # spend per product, VÂNZARE vs TEST
 ```
 Ranges: `today`,`yesterday`,`last_7d`,`last_14d`,`last_30d`,`last_90d`,`this_month`, or `"2026-05-01,2026-06-11"`.
 Metrics use TikTok `complete_payment` (purchases) and `complete_payment_roas`; revenue = spend×ROAS.
@@ -48,6 +49,14 @@ Metrics use TikTok `complete_payment` (purchases) and `complete_payment_roas`; r
 read via `DATABASE_URL_AWBPRINT` (from the KB). If that DB is unreachable it falls back to the fixed
 `CURRENCY_RATES_RON` KB config. Verified vs the team's "Raport Zilnic 2": Belasil/GT/Magdeal match to the
 leu; Nubra (USD) lands within ~0.3% (we use the real daily rate, the sheet a fixed 4.55).
+
+## Products & TEST vs SALES (`products`)
+For multi-product accounts, `products` maps each campaign to a **product** (a `HA-<digits>` code in the
+campaign name, else the **Nomenclator** rules — `ACCOUNT`/`CAMPAIGN_KEYWORD`/`AD_KEYWORD` accent-insensitive
+substring; sync: `uv run prodmap.py sync`) and separates **TEST** (campaign name contains "TEST") from
+**VÂNZARE (sales)**. Shared with `gigi:meta-ads` (same `prodmap.py` / Nomenclator). Most TikTok brands map
+brand-level (`Unmapped`) — the per-product split is mainly an FB/Reflexino thing — but the command works on
+any brand and the totals stay correct.
 
 ## Mutations (writes) — DRY-RUN by default, `--apply` to execute
 TikTok has no server-side validate-only, so dry-run just **shows current vs intended** and makes no change.
