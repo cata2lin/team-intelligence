@@ -209,6 +209,7 @@ def resolve(a):
         o["deliv"] = p.get("st", "?")
         o["skus"] = p.get("skus", "")
         o["cstat"] = p.get("cstat", "")
+        o["awb"] = p.get("awb", "")
 
     # Conversații Richpanel cross-canal
     convos, seen = [], set()
