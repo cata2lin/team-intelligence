@@ -47,6 +47,15 @@ RULES = [  # (categorie, regex pe subiect+prim_mesaj, lowercase, diacritice scoa
     ("plata_factura", r"factura|plata nu|am platit de doua|card.*(debitat|taxat)|chitanta|bon fiscal|\binvoice|faktur"),
     ("presale_intrebare", r"aveti (pe stoc|in stoc)|este pe stoc|cat costa|ce pret|livrati in|cand revine|dimensiuni|este original|mai aveti|se potriveste|disponibil|how much|what.*price|in stock|do you have|available|jaka cena|na sklad"),
     ("comanda_noua", r"vreau sa comand|as dori sa comand|plasez o comanda|cum comand|doresc sa cumpar|i want to order|how (do i|to) order"),
+    ('livrare_wismo', '\\bfirstname:[^\\n]*(colet|comanda (mea|nu)|nu am primit|nu a ajuns)'),
+    ('livrare_wismo', 'cat dureaza (pana )?(sa )?(primesc|ajunge|soseste)|suport clienti &gt; livrare|shipping &amp; delivery &gt;'),
+    ('presale_intrebare', 'cum se numeste (parfumul|produsul)|ma intereseaza sa( i|i)?l cumpar|do you ship international'),
+    ('salut_fara_continut', '^\\s*(chat with us\\s+)?(start a conversation\\s*&gt;\\s*)?chat with us[\\s.!]*$'),
+    ('salut_fara_continut', 'suport clienti &gt; discuta cu un specialist[\\s.!]*$'),
+    ('salut_fara_continut', '^[\\s.,!]*((buna( ziua| seara)?|salut(are)?|neata)[\\s.,!]*){1,2}(am o (nelamurire|intrebare)[\\s.?!]*)?$'),
+    ('formular_contact', 'kapcsolati k[ée]relme|cseveg[ée]s a |aitima( sas)? gia epikoinonia|\\bchat pe \\S'),
+    ('formular_contact', '\\bfirstname:(?![^\\n]*(colet|comand|parfum|produs|retur|factur|buna|\\bcum\\b|unde|cand|vreau|primit))[^\\n]{0,30}\\n[\\s\\S]{0,200}(?m:^(lastname|email|phone):)'),
+    ('formular_contact', '(?m)^email:\\s*\\S+@\\S+\\s*$[\\s\\S]{0,80}^phone:'),
     ("formular_contact", r"cererea dvs\.? de contact|contact form|chat with us|start a conversation|how can we help|shared files?$"),
 ]
 DEACC = str.maketrans("ăâîșşțţ", "aaissttt"[0:7])
