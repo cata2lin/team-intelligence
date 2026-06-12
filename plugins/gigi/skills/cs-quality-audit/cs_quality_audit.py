@@ -38,7 +38,7 @@ AGENTS = {
     "6acebee5-9015-4e63-9646-ebfe32017be9": "Mariana (admin)",
 }
 # categorii de exclus (nu-s CS real)
-NOISE_CAT = {"comentariu_social", "spam_automat", "recenzie_feedback"}
+NOISE_CAT = {"comentariu_social", "spam_automat", "recenzie_feedback", "salut_fara_continut", "formular_contact"}
 
 FRUST = re.compile(r"al\s*(doilea|treilea|patrulea|cincilea|\d+)[- ]?lea\s*(e?mail|mesaj|oar)|"
                    r"a\s*(doua|treia|patra|\d+)[- ]?a?\s*oar[ăa]|de\s*(atatea|cate|cat|nenum)\s*ori|"
