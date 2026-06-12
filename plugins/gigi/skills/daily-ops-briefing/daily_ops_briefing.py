@@ -10,11 +10,32 @@ NU scrie nimic.
 
   uv run daily_ops_briefing.py
 """
-import os, sys, json, subprocess, shlex, urllib.parse
+import os, sys, json, subprocess, shlex, urllib.parse, sqlite3, re
 import pg8000.dbapi
 
 VPS = "root@84.46.242.181"
 HERE = os.path.dirname(os.path.abspath(__file__))
+RP_DB = os.environ.get("RICHPANEL_DB") or os.path.join(HERE, "..", "..", "..", "..", "..", "data", "richpanel_tickets.db")
+_BUY = re.compile(r"cum.*comand|pre[tț]\b|cat\s*cost|cât\s*cost|vreau\s*(si|și)?\s*eu|a[sș]\s*dori|doresc|m[ăa]\s*interes|ave[tț]i\b", re.I)
+_FRUST = re.compile(r"al\s*(doilea|treilea)\s*(e?mail|mesaj)|nu\s*r[ăa]spunde\s*nimeni|nici\s*un\s*r[ăa]spuns|niciun\s*r[ăa]spuns|anpc|v-?am\s*scris", re.I)
+
+
+def richpanel_lines():
+    if not os.path.exists(RP_DB):
+        return ["  🟣 Tichete CS (Richpanel): — (rulează gigi:richpanel-export pull)"]
+    try:
+        c = sqlite3.connect(RP_DB)
+        real = "channel NOT LIKE '%comment%' AND category NOT IN ('spam_automat','recenzie_feedback','comentariu_social')"
+        open_cs = c.execute(f"SELECT COUNT(*) FROM tickets WHERE status='OPEN' AND {real}").fetchone()[0]
+        frust = sum(1 for (t,) in c.execute(f"SELECT COALESCE(first_message,'')||' '||COALESCE(subject,'') FROM tickets WHERE status='OPEN' AND {real}") if _FRUST.search(t or ""))
+        leads = sum(1 for (t,) in c.execute("SELECT COALESCE(first_message,'')||' '||COALESCE(subject,'') FROM tickets WHERE status='OPEN' AND channel LIKE '%comment%'") if _BUY.search(t or ""))
+        c.close()
+        return [
+            "  🟣 Tichete CS deschise (Richpanel): %d  (frustrate/ANPC: %d)   → gigi:cs-quality-audit frustrated" % (open_cs, frust),
+            "  🟢 Lead-uri deschise în comentarii la reclame: %d            → gigi:cs-comment-intelligence leads --open" % leads,
+        ]
+    except Exception as e:
+        return ["  🟣 Tichete CS (Richpanel): eroare citire (%s)" % str(e)[:40]]
 
 
 def secret(k):
@@ -90,8 +111,8 @@ def main():
     print("  🟡 COD de confirmat înainte de livrare (5z): %d        → gigi:cod-confirmation" % d["netr"])
     print("  🟠 Colete blocate în tranzit (>6z): %d                → gigi:cs-proactive-delays" % d["stuck"])
     print("  🔵 RMA deschise (Grandia): %s                          → gigi:returns-rma-report" % rma)
-    # EXTENSIE: linia de tichete Richpanel se adaugă aici când se conectează Richpanel (API).
-    print("  🟣 Tichete CS deschise (Richpanel): — (se conectează în curând)")
+    for ln in richpanel_lines():
+        print(ln)
     print("-" * 60)
 
 
