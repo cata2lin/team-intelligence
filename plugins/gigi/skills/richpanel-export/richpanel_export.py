@@ -182,22 +182,27 @@ def pull(db, mcp, dfrom, dto, quiet=False):
         de = (day + datetime.timedelta(days=1)).isoformat()  # endDate este EXCLUSIV
         if db.execute("SELECT 1 FROM pull_log WHERE day=?", (ds,)).fetchone():
             day += datetime.timedelta(days=1); continue
-        total = 0
-        for status in ("open", "closed"):
-            page = 1
-            while True:
-                d = mcp.call("list_conversations", {"status": status, "startDate": ds, "endDate": de,
-                                                    "per_page": 50, "page": page})
-                ts = d.get("tickets") or []
-                upsert(db, ts); total += len(ts)
-                if len(ts) < 50 or page >= 200:
-                    break
-                page += 1
-                time.sleep(0.4)
-        db.execute("INSERT OR REPLACE INTO pull_log VALUES (?,?,?)", (ds, total, datetime.datetime.now().isoformat()))
-        db.commit()
-        if not quiet:
-            print("  %s: %d tichete" % (ds, total), flush=True)
+        try:
+            total = 0
+            for status in ("open", "closed"):
+                page = 1
+                while True:
+                    d = mcp.call("list_conversations", {"status": status, "startDate": ds, "endDate": de,
+                                                        "per_page": 50, "page": page})
+                    ts = (d.get("tickets") or []) if isinstance(d, dict) else []
+                    upsert(db, ts); total += len(ts)
+                    if len(ts) < 50 or page >= 200:
+                        break
+                    page += 1
+                    time.sleep(0.4)
+            db.execute("INSERT OR REPLACE INTO pull_log VALUES (?,?,?)", (ds, total, datetime.datetime.now().isoformat()))
+            db.commit()
+            if not quiet:
+                print("  %s: %d tichete" % (ds, total), flush=True)
+        except Exception as e:
+            # ziua a eșuat (rețea/MCP/parsare) — NU o marca done; log + CONTINUĂ (se reia la următoarea rulare)
+            print("  %s: EROARE (%s) — sar peste, se reia ulterior" % (ds, str(e)[:70]), flush=True)
+            time.sleep(3)
         day += datetime.timedelta(days=1)
 
 
