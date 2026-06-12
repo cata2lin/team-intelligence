@@ -139,6 +139,7 @@ def main():
     ap.add_argument("--no-pull", action="store_true", help="sari peste export (doar re-enrich)")
     ap.add_argument("--deep", action="store_true", help="rulează și extragerea profundă (lent)")
     ap.add_argument("--deep-all", action="store_true", help="deep pe TOATE tichetele, nu doar sociale")
+    ap.add_argument("--push", action="store_true", help="împinge taguri+notă în Richpanel (richpanel_apply --apply)")
     a = ap.parse_args()
     t0 = time.time()
     print("═" * 64)
@@ -169,6 +170,12 @@ def main():
     store_comment_type()
     store_quality_flags()
     run("8) SYNC → metrics.richpanel_tickets (Postgres partajat)", [os.path.join(HERE, "richpanel_sync.py")])
+
+    if a.push:
+        apply_args = [os.path.join(HERE, "richpanel_apply.py"), "--apply"]
+        if a.recent:  # intraday: doar tichetele schimbate recent
+            apply_args += ["--recent", str(a.recent)]
+        run("9) PUSH → Richpanel (taguri + notă internă, niciun mesaj la client)", apply_args)
 
     print("\n" + "═" * 64)
     print("  ✅ PIPELINE complet în %.0f min. Baza e enrichată — toate skill-urile citesc de aici." % ((time.time() - t0) / 60))
