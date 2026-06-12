@@ -146,7 +146,11 @@ def upsert(db, tickets):
     for t in tickets:
         store, order, cat = derive(t)
         cust = t.get("customer") or {}
-        db.execute("""INSERT OR REPLACE INTO tickets VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+        db.execute("""INSERT OR REPLACE INTO tickets
+            (id, conversation_no, subject, status, priority, assignee_id, channel, from_email, to_email,
+             customer_id, customer_name, customer_email, tags, first_message, comment_count, created_at,
+             updated_at, store, order_name, category, raw)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
             str(t.get("id")), t.get("conversation_no"), clean(t.get("subject")), t.get("status"), t.get("priority"),
             t.get("assignee_id"), t.get("channel"),
             clean((t.get("from") or {}).get("email") or (t.get("from") or {}).get("id") or ""),
