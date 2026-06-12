@@ -34,19 +34,20 @@ ORDER_PFX = {"EST": "Esteban", "GT": "George Talent", "NUB": "Nubra", "GRAND": "
              "ROSSI": "Rossi Nails", "LUX": "Nocturna Lux"}
 ORDER_RE = re.compile(r"\b(EST|GT|NUB|GRAND|GRAN|MAG|OFER|RED|BONBG|BON|CZ|PL|BELA|GEN|CARP|COV|NOC|APR|ROSSI|LUX)[ -]?(\d{4,7})\b")
 
-RULES = [  # (categorie, regex pe subiect+prim_mesaj, lowercase, diacritice scoase)
-    ("spam_automat", r"left a \d star review|left the following|judge\.?me|chargeflow|out of office|automat[ae] reply|do[- ]?not[- ]?reply"),
+RULES = [  # (categorie, regex pe subiect+prim_mesaj, lowercase, diacritice scoase). Ordinea contează (primul match câștigă).
+    ("spam_automat", r"left a \d star review|left the following|judge\.?me|chargeflow|out of office|automat[ae] reply|do[- ]?not[- ]?reply|weekly tiktok|performance report|newsletter|unsubscribe|password reset|verify your email|ordine.*confermato"),
     ("recenzie_feedback", r"ce parere ai|parerea ta|recenzi|review|feedback|multumesc pentru|sunt multumit"),
-    ("retur", r"\bretur|returnez|returna|trimit inapoi|banii inapoi|ramburs(?!.*plata)|refund|vreau banii"),
-    ("schimb_swap", r"schimb produs|schimb cu alt|alt model|alta marime|alta culoare|inlocui|exchange"),
-    ("anulare", r"anulez|anulare|anulati|renunt la comanda|nu mai vreau comanda|cancel"),
-    ("modificare_comanda", r"gresit (nr|numarul|adresa)|schimb (nr|numarul|adresa|telefonul)|modific (comanda|adresa|telefonul)|alta adresa|adresa gresita|actualizez"),
-    ("livrare_wismo", r"unde (e|este|imi)|cand ajunge|coletul|nu a ajuns|nu am primit( inca)?|awb|curier|tracking|livrarea mea|status.*comand|comanda mea.*(ajun|liv)|intarzi"),
-    ("problema_produs", r"defect|stricat|nu functioneaza|lipseste|lipsesc|lipsa (din|produs)|gresit produs|alt produs decat|incomplet|deteriorat|spart|fara (pompita|capac|accesori)"),
+    ("retur", r"\bretur|returnez|returna|trimit inapoi|banii inapoi|ramburs(?!.*plata)|refund|vreau banii|\breturn\b|odstoupeni|\bzwrot|\breso\b"),
+    ("schimb_swap", r"schimb produs|schimb cu alt|alt model|alta marime|alta culoare|inlocui|exchange|wymiana"),
+    ("anulare", r"anulez|anulare|anulati|renunt la comanda|nu mai vreau comanda|cancel|anuluj|zrusit|storno|cancellare"),
+    ("modificare_comanda", r"gresit (nr|numarul|adresa)|schimb (nr|numarul|adresa|telefonul)|modific (comanda|adresa|telefonul)|alta adresa|adresa gresita|actualizez|edit my order|change (my|the) order|change.*address|modify.*order|wrong address|update.*address|zmiana zamowienia"),
+    ("livrare_wismo", r"unde (e|este|imi)|cand ajunge|coletul|nu a ajuns|nu am primit( inca)?|awb|curier|tracking|livrarea mea|status.*comand|comanda mea.*(ajun|liv)|intarzi|where is my order|how long will it take|when will.*(arrive|receive|get)|track.*(order|my)|delivery status|haven'?t received|aktualizace zasilky|kde je (moje|ma)|kdy dorazi|gdzie (jest|moja)|kiedy.*(dotrze|przesylka)|przesylka|dov.* il mio ordine|quando arriva|spedizione"),
+    ("problema_produs", r"defect|stricat|nu functioneaza|lipseste|lipsesc|lipsa (din|produs)|gresit produs|alt produs decat|incomplet|deteriorat|spart|fara (pompita|capac|accesori)|damaged|broken|missing (part|piece)|poskozen|uszkodzon"),
     ("refuz_livrare", r"refuz|nu primesc coletul|nu accept coletul"),
-    ("plata_factura", r"factura|plata nu|am platit de doua|card.*(debitat|taxat)|chitanta|bon fiscal"),
-    ("presale_intrebare", r"aveti (pe stoc|in stoc)|este pe stoc|cat costa|ce pret|livrati in|cand revine|dimensiuni|este original|mai aveti|se potriveste|disponibil"),
-    ("comanda_noua", r"vreau sa comand|as dori sa comand|plasez o comanda|cum comand|doresc sa cumpar"),
+    ("plata_factura", r"factura|plata nu|am platit de doua|card.*(debitat|taxat)|chitanta|bon fiscal|\binvoice|faktur"),
+    ("presale_intrebare", r"aveti (pe stoc|in stoc)|este pe stoc|cat costa|ce pret|livrati in|cand revine|dimensiuni|este original|mai aveti|se potriveste|disponibil|how much|what.*price|in stock|do you have|available|jaka cena|na sklad"),
+    ("comanda_noua", r"vreau sa comand|as dori sa comand|plasez o comanda|cum comand|doresc sa cumpar|i want to order|how (do i|to) order"),
+    ("formular_contact", r"cererea dvs\.? de contact|contact form|chat with us|start a conversation|how can we help|shared files?$"),
 ]
 DEACC = str.maketrans("ăâîșşțţ", "aaissttt"[0:7])
 
