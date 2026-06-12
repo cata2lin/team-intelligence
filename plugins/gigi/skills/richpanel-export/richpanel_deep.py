@@ -174,9 +174,9 @@ def main():
     if os.path.exists(PROFIT_DB):
         pc = sqlite3.connect("file:" + PROFIT_DB + "?mode=ro", uri=True, timeout=30)
         for awb, oname in pc.execute("SELECT awb,order_name FROM profit_orders WHERE awb IS NOT NULL AND awb!=''"):
-            a = str(awb).strip()
-            if a.isdigit() and oname and oname.upper() in name_idx:
-                awb_idx.setdefault(a, name_idx[oname.upper()])
+            aw = str(awb).strip()
+            if aw.isdigit() and oname and oname.upper() in name_idx:
+                awb_idx.setdefault(aw, name_idx[oname.upper()])
         pc.close()
     print(f"  awb-uri: {len(awb_idx)}" + ("" if awb_idx else "  (fără profitability.db local — sar peste AWB)"))
 
