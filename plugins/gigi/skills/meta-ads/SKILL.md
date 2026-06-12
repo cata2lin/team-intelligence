@@ -105,6 +105,18 @@ uv run meta.py budget   belasil <id> --lifetime 2000 # lifetime_budget
   field can 500 ("reduce the amount of data") — request `creative{video_id}` only with a small page size.
 - **`meta_top_ads.py`** — original Belasil ad-ranking + filename-match script (superseded by
   `meta.py creatives --match-folder`, kept for reference).
+- **`nas_creatives.py`** — bridge to the team NAS (core:nas): top Meta ads → the actual creative FILES.
+  Indexes media under `--root` (the NAS mount `~/nas/<share>` or any folder), matches winning ad names to
+  filenames (same normalization as `creatives`), prints full paths and optionally `--copy-to` a staging
+  folder ready for `gigi:google-ads-mcc yt_upload.py --dir` → PMax.
+  ```bash
+  uv run nas_creatives.py find belasil --root ~/nas --range last_90d --top 10
+  uv run nas_creatives.py find belasil --root ~/nas --copy-to "$NAS_ROOT/exports/winners"
+  ```
+  Caveats: the NAS lives on the **office network** (192.168.10.x) — from elsewhere the mount fails
+  (`nas_connect.py` + same LAN/VPN required). Ads with generic names ("AD 1") can't be matched by name —
+  identify those once via `meta_resolve.py` or manually; ads named after files (UGC creators, `99lei_ad_1`)
+  match automatically.
 
 ## Typical uses
 - **Pick winning creatives to reuse on Google** (PMax video): `meta.py creatives <brand>` → take the
