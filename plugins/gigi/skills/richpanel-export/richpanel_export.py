@@ -98,8 +98,15 @@ class MCP:
         return json.loads(lines[-1][5:]) if lines else json.loads(body)
 
     def _init(self):
-        self._post({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-            "protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "arona-export", "version": "1.0"}}})
+        for i in range(6):  # rezilient la 429 pe initialize (rate limit) — backoff exponențial
+            try:
+                self._post({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                    "protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "arona-export", "version": "1.0"}}})
+                return
+            except Exception:
+                if i == 5:
+                    raise
+                time.sleep(min(60, 5 * (2 ** i)))
 
     def call(self, name, args, retries=3):
         for i in range(retries):
@@ -122,7 +129,12 @@ class MCP:
 
 def ensure_db(path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    db = sqlite3.connect(path)
+    db = sqlite3.connect(path, timeout=120)
+    db.execute("PRAGMA busy_timeout=120000")  # mai mulți workeri paraleli pe sub-intervale → așteaptă lock-ul, nu crapă
+    try:
+        db.execute("PRAGMA journal_mode=WAL")  # concurență mai bună la scriere
+    except Exception:
+        pass
     db.execute("""CREATE TABLE IF NOT EXISTS tickets(
         id TEXT PRIMARY KEY, conversation_no INTEGER, subject TEXT, status TEXT, priority TEXT,
         assignee_id TEXT, channel TEXT, from_email TEXT, to_email TEXT,
