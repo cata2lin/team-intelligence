@@ -248,20 +248,31 @@ def main():
     done = nadd = nrem = nnote = 0
     for (tid, conv, add, rem, note, sig, D, had_note) in plan:
         cid = tid
+        ok = True
         if add:
             ids = [i for i in (tag_id(mcp, tagmap, t) for t in add) if i]
             if ids:
-                mcp.call("add_tags_to_conversation", {"conversation_id": cid, "tags": ids}); nadd += 1; cnt.update(add)
+                r = mcp.call("add_tags_to_conversation", {"conversation_id": cid, "tags": ids})
+                if isinstance(r, dict) and r.get("_error"):
+                    ok = False
+                else:
+                    nadd += 1; cnt.update(add)
         if rem:
             ids = [tagmap[t.lower()] for t in rem if t.lower() in tagmap]
             if ids:
                 mcp.call("remove_tags_from_conversation", {"conversation_id": cid, "tags": ids}); nrem += 1
         if note:
             body = note if not had_note else ("🔄 UPDATE\n" + note)
-            mcp.call("add_private_note", {"conversation_id": cid, "body": body}); nnote += 1
-        w.execute("UPDATE tickets SET applied_tags=?, applied_note_sig=? WHERE id=?", (",".join(D), sig, tid))
-        done += 1
-        if done % 100 == 0:
+            r = mcp.call("add_private_note", {"conversation_id": cid, "body": body})
+            if isinstance(r, dict) and r.get("_error"):
+                ok = False
+            else:
+                nnote += 1
+        if ok:  # marchează „aplicat" doar dacă a reușit → reîncearcă data viitoare dacă a picat (429 etc.)
+            w.execute("UPDATE tickets SET applied_tags=?, applied_note_sig=? WHERE id=?", (",".join(D), sig, tid))
+            done += 1
+        time.sleep(0.2)  # pace blând, anti rate-limit
+        if (done + 1) % 100 == 0:
             w.commit(); print("  …%d/%d aplicate" % (done, len(plan)), flush=True)
     w.commit(); w.close()
     print("\n════ %d tichete actualizate | %d cu taguri noi, %d curățate, %d note ════" % (done, nadd, nrem, nnote))
