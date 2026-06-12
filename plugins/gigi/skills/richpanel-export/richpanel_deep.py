@@ -107,6 +107,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int); ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--all", action="store_true", help="TOATE tichetele nelegate (nu doar conversațiile) — job lung")
+    ap.add_argument("--fast", action="store_true", help="DOAR pasul rapid (nume FB, fără MCP) — ieftin, pt pipeline-ul des")
     a = ap.parse_args()
 
     # index metrics
@@ -208,13 +209,13 @@ def main():
     print(f"  PAS RAPID (nume FB, fără MCP): {len(found)} legate din {len(rows)} nelegate")
 
     # ── PAS MCP: pe ce a rămas, citește CORPUL conversației (order# / AWB / email / telefon / nume) ──
-    todo = [(tid, no, store_of(rstore, page), parse_dt(created), cname)
+    todo = [] if a.fast else [(tid, no, store_of(rstore, page), parse_dt(created), cname)
             for (tid, no, cname, created, rstore, page) in rows if tid not in linked]
     if a.limit:
         todo = todo[:a.limit]
-    print(f"→ {len(todo)} thread-uri pt extragere profundă MCP (workers={a.workers})")
+    print(("  (--fast: sar peste MCP)" if a.fast else f"→ {len(todo)} thread-uri pt extragere profundă MCP (workers={a.workers})"))
 
-    mcp = MCP(secret("RICHPANEL_MCP_TOKEN"))
+    mcp = MCP(secret("RICHPANEL_MCP_TOKEN")) if todo else None
 
     def work(row):
         tid, no, store, tdate, cname = row

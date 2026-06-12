@@ -159,13 +159,12 @@ def main():
 
     run("2) CATEGORIZE", [os.path.join(HERE, "richpanel_export.py"), "categorize"])
     run("3) LINK", [os.path.join(HERE, "richpanel_link.py")])
-    if a.deep or a.deep_all:
-        deep_args = [os.path.join(HERE, "richpanel_deep.py")]
-        if a.deep_all:
-            deep_args.append("--all")
-        run("4) DEEP", deep_args)
-    else:
-        print("\n  (4) DEEP sărit — adaugă --deep / --deep-all dacă vrei)")
+    deep_args = [os.path.join(HERE, "richpanel_deep.py")]
+    if a.deep_all:
+        deep_args.append("--all")
+    elif not a.deep:
+        deep_args.append("--fast")  # implicit: doar pasul rapid (nume FB, fără MCP) — ieftin, rulează mereu
+    run("4) DEEP (%s)" % ("MCP complet" if (a.deep or a.deep_all) else "rapid: nume FB"), deep_args)
     store_sentiment()
     store_comment_type()
     store_quality_flags()
