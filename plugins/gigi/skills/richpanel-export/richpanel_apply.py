@@ -32,9 +32,17 @@ import rp_db  # citește enrichment-ul (SQLite local pe VPS)
 
 DPD_TRACK = "https://services.dpd.ro/tracking/?shipmentNumber=%s"
 NOISE_CAT = {"spam_automat", "salut_fara_continut", "formular_contact"}  # nu merită taguite
-FLAG_TAG = {"ESCALADARE": "flag:escaladare", "FRUSTRARE": "flag:frustrare", "LENT": "flag:lent",
-            "VECHI-DESCHIS": "flag:vechi-deschis", "FRICTIUNE": "flag:frictiune"}
+# Richpanel normalizează tagurile (lowercase, scoate „:" și spațiile, păstrează „-").
+# Deci formăm slug-uri cu cratimă: magazin-esteban, magazin-george-talent, flag-frustrare.
+FLAG_TAG = {"ESCALADARE": "escaladare", "FRUSTRARE": "frustrare", "LENT": "lent",
+            "VECHI-DESCHIS": "vechi-deschis", "FRICTIUNE": "frictiune"}
 CTYPE_TAG = {"lead": "lead", "reclamatie": "reclamatie", "testimonial": "testimonial"}
+_TAG_DEACC = str.maketrans("ăâîșşțţ", "aaisstt")
+
+
+def slug(s):
+    s = (s or "").lower().translate(_TAG_DEACC)
+    return re.sub(r"[^a-z0-9]+", "-", s).strip("-")
 
 
 def secret(k):
@@ -106,14 +114,14 @@ def desired_tags(store, cat, sentiment, qflags, ctype, has_awb):
     tags = []
     store = " ".join((store or "").split())  # fără spații la coadă/duble
     if store and store.lower() not in NOT_STORE and store not in ("necunoscut", "?", ""):
-        tags.append("magazin:" + store)
+        tags.append("magazin-" + slug(store))
     if cat and cat not in NOISE_CAT and cat not in ("altele", "", None):
-        tags.append("cat:" + cat)
+        tags.append("cat-" + slug(cat))
     if sentiment in ("negativ", "pozitiv"):
-        tags.append("sentiment:" + sentiment)
+        tags.append("sentiment-" + sentiment)
     for f in (qflags or "").split(","):
         if f in FLAG_TAG:
-            tags.append(FLAG_TAG[f])
+            tags.append("flag-" + FLAG_TAG[f])
     if ctype in CTYPE_TAG:
         tags.append(CTYPE_TAG[ctype])
     if has_awb:
