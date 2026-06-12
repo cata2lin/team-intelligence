@@ -16,7 +16,7 @@ frustrare/escaladare (cs-quality-audit). Citește richpanel_tickets.db (read-onl
   uv run cs_sentiment.py negative --json
 Read-only. NU scrie nimic.
 """
-import os, re, sqlite3, argparse, json, collections, unicodedata
+import os, re, sqlite3, argparse, json, collections, unicodedata, urllib.request, subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", "..", ".."))
@@ -94,10 +94,59 @@ def load():
     return out
 
 
+KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
+
+
+def _secret(k):
+    return os.environ.get(k) or subprocess.run(["uv", "run", KB, "secret-get", k], capture_output=True, text=True).stdout.strip()
+
+
+def _llm(system, user):
+    ak = _secret("ANTHROPIC_API_KEY")
+    if ak:
+        body = {"model": os.environ.get("SENT_MODEL", "claude-3-5-sonnet-20241022"), "max_tokens": 1500,
+                "system": system, "messages": [{"role": "user", "content": user}]}
+        req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=json.dumps(body).encode(),
+                                     headers={"x-api-key": ak, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+        return json.loads(urllib.request.urlopen(req, timeout=90).read())["content"][0]["text"]
+    ok = _secret("OPENAI_API_KEY")
+    if ok:
+        body = {"model": os.environ.get("SENT_MODEL", "gpt-4o-mini"), "temperature": 0,
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+        req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=json.dumps(body).encode(),
+                                     headers={"Authorization": "Bearer " + ok, "content-type": "application/json"})
+        return json.loads(urllib.request.urlopen(req, timeout=90).read())["choices"][0]["message"]["content"]
+    raise SystemExit("Nicio cheie LLM (ANTHROPIC_API_KEY / OPENAI_API_KEY).")
+
+
+def _llm_score(pool):
+    out = []
+    sysp = "Ești analist Customer Service. Evaluează sentimentul CLIENTULUI în fiecare mesaj (RO/CZ/PL/BG/EN)."
+    for i in range(0, len(pool), 15):
+        batch = pool[i:i + 15]
+        listing = "\n".join("%d. %s" % (j, x["text"][:320]) for j, x in enumerate(batch))
+        usr = ("Pentru fiecare tichet, dă: sentiment (negativ/neutru/pozitiv) + intensitate 0-3 "
+               "(0 neutru, 1 ușor nemulțumit, 2 frustrat/insistă, 3 furios/amenință ANPC/juridic) + motiv scurt. "
+               "IMPORTANT: prinde și nemulțumirile CALME, factuale (ex. 'ați trimis alt produs', 'lipsește o piesă') ca NEGATIVE. "
+               'Răspunde DOAR JSON: [{"i":0,"sent":"negativ","inten":2,"reason":"..."}]\n\nTICHETE:\n' + listing)
+        try:
+            resp = _llm(sysp, usr)
+            arr = json.loads(resp[resp.index("["):resp.rindex("]") + 1])
+            m = {d.get("i"): d for d in arr if isinstance(d, dict)}
+        except Exception:
+            m = {}
+        for j, x in enumerate(batch):
+            d = m.get(j, {})
+            y = dict(x); y["sent"] = d.get("sent", "neutru"); y["inten"] = int(d.get("inten", 0) or 0); y["reason"] = d.get("reason", "")
+            out.append(y)
+        print("  …%d/%d scorate" % (min(i + 15, len(pool)), len(pool)))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode", choices=["summary", "negative", "trend"])
-    ap.add_argument("--store"); ap.add_argument("--open", action="store_true"); ap.add_argument("--json", action="store_true")
+    ap.add_argument("mode", choices=["summary", "negative", "trend", "llm"])
+    ap.add_argument("--store"); ap.add_argument("--open", action="store_true"); ap.add_argument("--json", action="store_true"); ap.add_argument("--limit", type=int, default=100)
     a = ap.parse_args()
     if not os.path.exists(DB):
         print("Nu găsesc DB-ul:", DB); return
@@ -133,6 +182,21 @@ def main():
         for x in sel[:60]:
             flag = "🚨" if x["inten"] >= 3 else ("⚠️" if x["inten"] >= 2 else "  ")
             print("  %s #%-7s %-12s %-9s %-6s %s" % (flag, x["no"] or "?", x["store"][:12], x["agent"][:9], (x["status"] or "")[:6], x["text"][:70]))
+    elif a.mode == "llm":
+        pool = [x for x in items if (not a.open or (x["status"] or "").upper() == "OPEN")]
+        pool = pool[:a.limit]
+        print("Scorez %d tichete CS reale cu LLM (prinde și reclamațiile calme)…" % len(pool))
+        scored = _llm_score(pool)
+        dist = collections.Counter(x["sent"] for x in scored)
+        negs = sorted([x for x in scored if x["sent"] == "negativ"], key=lambda x: -x["inten"])
+        if a.json:
+            print(json.dumps(scored, ensure_ascii=False, indent=1, default=str)); return
+        print("\n=== SENTIMENT LLM — %d tichete | neg %d · neutru %d · poz %d ===" % (
+            len(scored), dist["negativ"], dist["neutru"], dist["pozitiv"]))
+        print("🔴 NEGATIVE (sortate după intensitate):")
+        for x in negs[:50]:
+            flag = "🚨" if x["inten"] >= 3 else ("⚠️" if x["inten"] >= 2 else "  ")
+            print("  %s #%-7s %-12s %-8s | %s | %s" % (flag, x["no"] or "?", x["store"][:12], (x["status"] or "")[:6], x.get("reason", "")[:32], x["text"][:50]))
     else:
         by = collections.defaultdict(lambda: collections.Counter())
         for x in items:

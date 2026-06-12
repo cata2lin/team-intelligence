@@ -14,7 +14,12 @@ uv run cs_sentiment.py negative --open         # cele mai negative tichete DESCH
 uv run cs_sentiment.py negative --store Grandia
 uv run cs_sentiment.py trend                   # trend sentiment pe luni
 uv run cs_sentiment.py negative --json         # pt automatizare / alertă
+uv run cs_sentiment.py llm --open --limit 100  # pas LLM: scor precis pe CS real (prinde reclamațiile CALME)
 ```
+
+## Rule-based vs LLM
+- **Rule-based** (summary/negative/trend) — instant, gratis, multilingv. Bun pt triaj rapid. Limită: ratează reclamațiile calme fără cuvinte-cheie (ex. „ați trimis alt produs").
+- **LLM** (`llm`, ANTHROPIC_API_KEY→Claude / OPENAI_API_KEY→gpt, model `SENT_MODEL`) — scor precis (negativ/neutru/pozitiv + intensitate 0-3 + motiv), **prinde nemulțumirile factuale**. Cost mărginit de `--limit` (default 100). Folosește-l pe CS real / deschise pentru triaj de calitate.
 
 ## Cum scorează
 - **Intensitate** (cumulativă): escaladare ANPC/juridic = **3** 🚨, frustrare („nu răspunde nimeni", „al treilea email") = **2** ⚠️, reclamație (dicționar) = **1**.
