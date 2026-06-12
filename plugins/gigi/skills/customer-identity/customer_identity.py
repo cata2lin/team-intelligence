@@ -122,8 +122,8 @@ def ssh_profit(order_names):
         return {}
     lst = json.dumps(list(order_names))
     py = ("import sqlite3,json,sys;ns=json.loads(sys.argv[1]);c=sqlite3.connect('data/profitability.db');"
-          "q='SELECT order_name,status_category,skus,revenue,currency,awb,courier_status FROM profit_orders WHERE order_name IN (%s)'%(','.join('?'*len(ns)));"
-          "print(json.dumps({r[0]:{'st':r[1],'skus':r[2],'rev':r[3],'cur':r[4],'awb':r[5],'cstat':r[6]} for r in c.execute(q,ns)}))")
+          "q='SELECT order_name,status_category,skus,revenue,currency,awb,courier_status,courier_key FROM profit_orders WHERE order_name IN (%s)'%(','.join('?'*len(ns)));"
+          "print(json.dumps({r[0]:{'st':r[1],'skus':r[2],'rev':r[3],'cur':r[4],'awb':r[5],'cstat':r[6],'ck':r[7]} for r in c.execute(q,ns)}))")
     cmd = "cd /root/Scripturi && .venv/bin/python3 -c " + shlex.quote(py) + " " + shlex.quote(lst)
     out = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", VPS, cmd],
                          capture_output=True, text=True, timeout=80).stdout.strip()
@@ -210,6 +210,7 @@ def resolve(a):
         o["skus"] = p.get("skus", "")
         o["cstat"] = p.get("cstat", "")
         o["awb"] = p.get("awb", "")
+        o["courier"] = p.get("ck", "")
 
     # Conversații Richpanel cross-canal
     convos, seen = [], set()
