@@ -36,16 +36,33 @@ ORDER_PFX = {"EST": "Esteban", "GT": "George Talent", "NUB": "Nubra", "GEN": "Ge
              "BON": "Bonhaus RO", "BONBG": "Bonhaus BG", "CZ": "Bonhaus CZ", "PL": "Bonhaus PL", "CARP": "Carpetto",
              "COV": "Covoria", "APR": "Apreciat", "ROSSI": "Rossi Nails"}
 ORDER_RE = re.compile(r"\b(EST|GT|NUB|GRAND|GRAN|MAG|OFER|RED|BONBG|BON|CZ|PL|BELA|GEN|CARP|COV|APR|ROSSI)[ -]?(\d{4,7})\b", re.I)
-DEACC = str.maketrans("ăâîșşțţ", "aaissttt"[0:7])
-CATS = [
-    ("anulare", r"anulez|anulare|renunt la comanda|nu mai vreau|cancel|storno|anuluj"),
-    ("retur", r"\bretur|returnez|banii inapoi|refund|\breturn\b|odstoupeni|zwrot"),
-    ("problema_produs", r"defect|stricat|spart|lipseste|lipsa|deteriorat|gresit produs|alt produs|damaged|broken"),
-    ("modificare_comanda", r"gresit (adresa|nr)|alta adresa|adresa gresita|modific|change.*address"),
-    ("livrare_wismo", r"unde (e|este)|cand ajunge|coletul|nu a ajuns|nu am primit|awb|tracking|intarzi|where is my order"),
-    ("plata_factura", r"factura|am platit|card.*(debitat|taxat)|invoice"),
-    ("presale_intrebare", r"cat costa|ce pret|pe stoc|aveti|disponibil|cum comand|how much|in stock"),
+# Setul COMPLET de reguli, copiat EXACT din richpanel-export/richpanel_export.py
+# (categorie, regex pe subiect+prim_mesaj, lowercase, diacritice scoase). Ordinea contează (primul match câștigă).
+RULES = [
+    ("spam_automat", r"left a \d star review|left the following|judge\.?me|chargeflow|out of office|automat[ae] reply|do[- ]?not[- ]?reply|weekly tiktok|performance report|newsletter|unsubscribe|password reset|verify your email|ordine.*confermato"),
+    ("recenzie_feedback", r"ce parere ai|parerea ta|recenzi|review|feedback|multumesc pentru|sunt multumit"),
+    ("retur", r"\bretur|returnez|returna|trimit inapoi|banii inapoi|ramburs(?!.*plata)|refund|vreau banii|\breturn\b|odstoupeni|\bzwrot|\breso\b"),
+    ("schimb_swap", r"schimb produs|schimb cu alt|alt model|alta marime|alta culoare|inlocui|exchange|wymiana"),
+    ("anulare", r"anulez|anulare|anulati|renunt la comanda|nu mai vreau comanda|cancel|anuluj|zrusit|storno|cancellare"),
+    ("modificare_comanda", r"gresit (nr|numarul|adresa)|schimb (nr|numarul|adresa|telefonul)|modific (comanda|adresa|telefonul)|alta adresa|adresa gresita|actualizez|edit my order|change (my|the) order|change.*address|modify.*order|wrong address|update.*address|zmiana zamowienia"),
+    ("livrare_wismo", r"unde (e|este|imi)|cand ajunge|coletul|nu a ajuns|nu am primit( inca)?|awb|curier|tracking|livrarea mea|status.*comand|comanda mea.*(ajun|liv)|intarzi|where is my order|how long will it take|when will.*(arrive|receive|get)|track.*(order|my)|delivery status|haven'?t received|aktualizace zasilky|kde je (moje|ma)|kdy dorazi|gdzie (jest|moja)|kiedy.*(dotrze|przesylka)|przesylka|dov.* il mio ordine|quando arriva|spedizione"),
+    ("problema_produs", r"defect|stricat|nu functioneaza|lipseste|lipsesc|lipsa (din|produs)|gresit produs|alt produs decat|incomplet|deteriorat|spart|fara (pompita|capac|accesori)|damaged|broken|missing (part|piece)|poskozen|uszkodzon"),
+    ("refuz_livrare", r"refuz|nu primesc coletul|nu accept coletul"),
+    ("plata_factura", r"factura|plata nu|am platit de doua|card.*(debitat|taxat)|chitanta|bon fiscal|\binvoice|faktur"),
+    ("presale_intrebare", r"aveti (pe stoc|in stoc)|este pe stoc|cat costa|ce pret|livrati in|cand revine|dimensiuni|este original|mai aveti|se potriveste|disponibil|how much|what.*price|in stock|do you have|available|jaka cena|na sklad"),
+    ("comanda_noua", r"vreau sa comand|as dori sa comand|plasez o comanda|cum comand|doresc sa cumpar|i want to order|how (do i|to) order"),
+    ('livrare_wismo', '\\bfirstname:[^\\n]*(colet|comanda (mea|nu)|nu am primit|nu a ajuns)'),
+    ('livrare_wismo', 'cat dureaza (pana )?(sa )?(primesc|ajunge|soseste)|suport clienti &gt; livrare|shipping &amp; delivery &gt;'),
+    ('presale_intrebare', 'cum se numeste (parfumul|produsul)|ma intereseaza sa( i|i)?l cumpar|do you ship international'),
+    ('salut_fara_continut', '^\\s*(chat with us\\s+)?(start a conversation\\s*&gt;\\s*)?chat with us[\\s.!]*$'),
+    ('salut_fara_continut', 'suport clienti &gt; discuta cu un specialist[\\s.!]*$'),
+    ('salut_fara_continut', '^[\\s.,!]*((buna( ziua| seara)?|salut(are)?|neata)[\\s.,!]*){1,2}(am o (nelamurire|intrebare)[\\s.?!]*)?$'),
+    ('formular_contact', 'kapcsolati k[ée]relme|cseveg[ée]s a |aitima( sas)? gia epikoinonia|\\bchat pe \\S'),
+    ('formular_contact', '\\bfirstname:(?![^\\n]*(colet|comand|parfum|produs|retur|factur|buna|\\bcum\\b|unde|cand|vreau|primit))[^\\n]{0,30}\\n[\\s\\S]{0,200}(?m:^(lastname|email|phone):)'),
+    ('formular_contact', '(?m)^email:\\s*\\S+@\\S+\\s*$[\\s\\S]{0,80}^phone:'),
+    ("formular_contact", r"cererea dvs\.? de contact|contact form|chat with us|start a conversation|how can we help|shared files?$"),
 ]
+DEACC = str.maketrans("ăâîșşțţ", "aaissttt"[0:7])
 ESCAL = re.compile(r"anpc|protectia consumator|dau in judecat|instanta|avocat|denunt", re.I)
 
 
@@ -57,12 +74,14 @@ def deacc(s):
     return (s or "").lower().translate(DEACC)
 
 
-def categorize(text):
-    t = deacc(text)
-    for cat, pat in CATS:
-        if re.search(pat, t):
+def categorize(subject, first_message="", channel=None):
+    txt = deacc((subject or "") + " " + (first_message or ""))
+    for cat, pat in RULES:
+        if re.search(pat, txt):
             return cat
-    return "general"
+    if channel in ("facebook_feed_comment", "instagram_comment"):
+        return "comentariu_social"
+    return "altele"
 
 
 class MCP:
@@ -119,12 +138,12 @@ def triage(t, vips):
     if not store and "@" in email:
         dom = email.split("@")[-1].split(".")[0]
         store = next((s for p, s in ORDER_PFX.items() if dom in s.lower().replace(" ", "")), None)
-    cat = categorize(blob)
+    cat = categorize(t.get("subject"), t.get("first_message"), t.get("channel"))
     if ESCAL.search(blob):
         prio, why = "URGENT", "escaladare ANPC/juridic"
     elif email and email in vips:
         prio, why = "HIGH", "client VIP (LTV ≥1000)"
-    elif cat in ("retur", "problema_produs", "anulare"):
+    elif cat in ("retur", "problema_produs", "anulare", "refuz_livrare", "schimb_swap"):
         prio, why = "HIGH", cat
     else:
         prio, why = "NORMAL", cat
