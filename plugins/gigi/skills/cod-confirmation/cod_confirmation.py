@@ -66,13 +66,25 @@ def main():
     nlo = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
     rlo = (datetime.date.today() - datetime.timedelta(days=90)).isoformat()
     pf = ("AND prefix=" + repr(prefix)) if prefix else ""
-    # neexpediate (Netrimisa) recente + order_names refuzate (90z) pentru detectarea refuznicilor
-    py = ("import sqlite3,json;c=sqlite3.connect('data/profitability.db');"
-          "nl=" + repr(nlo) + ";rl=" + repr(rlo) + ";"
-          "net=[dict(zip(['o','p','rev'],r)) for r in c.execute(\"SELECT order_name,prefix,revenue FROM profit_orders "
-          "WHERE status_category='Netrimisa' AND substr(created_at,1,10)>=? " + pf + "\",(nl,))];"
-          "refz=[r[0] for r in c.execute(\"SELECT order_name FROM profit_orders WHERE status_category='Refuzata' AND substr(created_at,1,10)>=?\",(rl,))];"
-          "print(json.dumps({'net':net,'refz':refz}))")
+    rf = (datetime.date.today() - datetime.timedelta(days=75)).strftime("%Y-%m")
+    # neexpediate (Netrimisa)+skus + refuzate 90z (refuznici) + PRODUSE-RISC calculate din istoric (refuz >30% si >1.6x media magazinului)
+    py = ("import sqlite3,json,collections\n"
+          "c=sqlite3.connect('data/profitability.db')\n"
+          "net=[dict(zip(['o','p','rev','skus'],r)) for r in c.execute(\"SELECT order_name,prefix,revenue,skus FROM profit_orders WHERE status_category='Netrimisa' AND substr(created_at,1,10)>=%(nl)r %(pf)s\")]\n"
+          "refz=[r[0] for r in c.execute(\"SELECT order_name FROM profit_orders WHERE status_category='Refuzata' AND substr(created_at,1,10)>=%(rl)r\")]\n"
+          "pl=collections.Counter();pr=collections.Counter();prod=collections.defaultdict(lambda:[0,0])\n"
+          "for pfx,st,sk in c.execute(\"SELECT prefix,status_category,skus FROM profit_orders WHERE status_category IN ('Livrata','Refuzata') AND substr(created_at,1,7)>=%(rf)r\"):\n"
+          " (pl if st=='Livrata' else pr)[pfx]+=1\n"
+          " if sk:\n"
+          "  for s in set(x.strip() for x in sk.split(';')):\n"
+          "   if s: prod[(pfx,s)][0 if st=='Livrata' else 1]+=1\n"
+          "red=[]\n"
+          "for (pfx,s),(liv,ref) in prod.items():\n"
+          " tot=liv+ref\n"
+          " if tot>=40 and ref/tot>0.30:\n"
+          "  avg=pr[pfx]/(pl[pfx]+pr[pfx]) if (pl[pfx]+pr[pfx]) else 0\n"
+          "  if avg and ref/tot>1.6*avg: red.append([pfx,s])\n"
+          "print(json.dumps({'net':net,'refz':refz,'red':red}))") % {'nl': nlo, 'pf': pf, 'rl': rlo, 'rf': rf}
     d = ssh(py)
     if not d:
         print("Nu am putut citi comenzile (SSH/DB)."); return
@@ -93,24 +105,39 @@ def main():
         for r in cur.fetchall():
             info[r[0]] = {"name": r[1], "phone": r[2], "city": r[3], "total": float(r[4] or 0)}
     conn.close()
+    red = set((x[0], x[1]) for x in (d.get("red") or []))
+    RANK = {"REFUZAT ÎNAINTE": 0, "PRODUS RISC": 1, "IMPULS 50-100": 2, "VALOARE MARE": 3}
     rows = []
     for o in net:
         c = info.get(o["o"], {}); val = c.get("total") or (o["rev"] or 0)
         phn = "".join(x for x in (c.get("phone") or "") if x.isdigit())[-9:]
-        repeat = phn in risky_phones and phn
-        if not (repeat or val >= a.minv):
+        repeat = bool(phn) and phn in risky_phones
+        skus = o.get("skus") or ""
+        red_hit = next((s.strip() for s in skus.split(";") if (o["p"], s.strip()) in red), None)
+        impulse = skus and ";" not in skus and 50 <= val <= 100
+        if not (repeat or red_hit or impulse or val >= a.minv):
             continue
+        if repeat:
+            risk, why = "REFUZAT ÎNAINTE", "a refuzat în ultimele 90 zile"
+        elif red_hit:
+            risk, why = "PRODUS RISC", "produs cu refuz mare (" + red_hit[:20] + ")"
+        elif impulse:
+            risk, why = "IMPULS 50-100", "1 produs, 50-100 lei (refuz ~22%)"
+        else:
+            risk, why = "VALOARE MARE", "valoare ≥ %.0f lei" % a.minv
         brand, lang = PREFIX.get(o["p"], (o["p"], "ro"))
         rows.append({"o": o["o"], "brand": brand, "lang": lang, "val": val, "name": c.get("name"),
-                     "phone": c.get("phone"), "city": c.get("city"), "risk": "REFUZAT ÎNAINTE" if repeat else "VALOARE MARE"})
-    rows.sort(key=lambda x: (x["risk"] != "REFUZAT ÎNAINTE", -x["val"]))
+                     "phone": c.get("phone"), "city": c.get("city"), "risk": risk, "why": why})
+    rows.sort(key=lambda x: (RANK.get(x["risk"], 9), -x["val"]))
+    nrisk = {k: sum(1 for x in rows if x["risk"] == k) for k in RANK}
     print("=== CONFIRMARE PRE-LIVRARE COD (risc) — neexpediate ultimele %d zile%s ===" % (a.days, (" | " + a.brand) if a.brand else ""))
-    print("De confirmat înainte de expediere: %d (refuznici: %d)\n" % (len(rows), sum(1 for x in rows if x["risk"] == "REFUZAT ÎNAINTE")))
-    print("%-13s %-12s %8s  %-14s %-18s %-12s" % ("comandă", "brand", "valoare", "RISC", "client", "telefon"))
-    print("-" * 86)
+    print("De confirmat: %d  |  refuznici: %d · produs-risc: %d · impuls 50-100: %d · valoare mare: %d\n" % (
+        len(rows), nrisk["REFUZAT ÎNAINTE"], nrisk["PRODUS RISC"], nrisk["IMPULS 50-100"], nrisk["VALOARE MARE"]))
+    print("%-13s %-12s %8s  %-15s %-30s %-12s" % ("comandă", "brand", "valoare", "RISC", "motiv", "telefon"))
+    print("-" * 96)
     for x in rows[:a.limit]:
-        print("%-13s %-12s %8s  %-14s %-18s %-12s" % (x["o"], x["brand"][:12], "{:,.0f}".format(x["val"]),
-              x["risk"], (x["name"] or "—")[:18], (x["phone"] or "—")[:12]))
+        print("%-13s %-12s %8s  %-15s %-30s %-12s" % (x["o"], x["brand"][:12], "{:,.0f}".format(x["val"]),
+              x["risk"], x["why"][:30], (x["phone"] or "—")[:12]))
         if a.draft:
             nm = (x["name"] or "").split()[0] if x["name"] else ""
             print("   → " + MSG.get(x["lang"], MSG["ro"]).format(n=nm, b=x["brand"], o=x["o"], v="{:,.0f}".format(x["val"])))
