@@ -1,6 +1,6 @@
 ---
 name: cod-confirmation
-description: Refusal PREVENTION for Customer Service — the pre-shipping confirmation queue of risky COD orders (still unshipped / status Netrimisa), ranked by risk: customer who has REFUSED a delivery before, or a HIGH-VALUE order. Confirm by phone/SMS BEFORE paying for transport → cut the refusal at the source (the other half of the ~272k RON/month refusal leak — recovery catches it after, this stops it before). Includes a ready-to-send confirmation message per market. Use for "which COD orders to confirm before shipping", "risky orders", "confirmare comenzi inainte de livrare", "prevent refusals", "high-risk COD", "clienti care au mai refuzat". Read-only.
+description: Refusal PREVENTION for Customer Service — the pre-shipping confirmation queue of risky COD orders (still unshipped / status Netrimisa), ranked by 4 data-driven risk signals: (1) customer who REFUSED a delivery before, (2) order contains a HIGH-REFUSAL PRODUCT (computed live from history — products that refuse >30% and >1.6× the store average, e.g. the HA-* deals items at 40-56%), (3) IMPULSE band (single item, 50-100 RON → refuses ~22%), (4) HIGH-VALUE order. Confirm by phone/SMS BEFORE paying for transport → cut the refusal at the source (the ~272k RON/month refusal leak). Includes a ready-to-send confirmation message per market. Use for "which COD orders to confirm before shipping", "risky orders", "confirmare comenzi inainte de livrare", "prevent refusals", "high-risk COD", "produse care se refuza", "clienti care au mai refuzat". Read-only.
 ---
 
 # CS — Confirmare pre-livrare COD (prevenție refuz)
@@ -17,7 +17,11 @@ uv run cod_confirmation.py --days 3 --json                   # pt automatizare (
 
 ## Cum funcționează
 - Neexpediate = `profit_orders.status_category='Netrimisa'` (încă neplecate), recente, din `data/profitability.db` (VPS).
-- **Risc:** clientul a mai refuzat (telefonul apare pe o comandă `Refuzata` în ultimele 90 zile) → marcat „REFUZAT ÎNAINTE" (prioritate maximă); sau valoare ≥ prag → „VALOARE MARE".
+- **4 semnale de risc** (prioritate în această ordine):
+  1. **REFUZAT ÎNAINTE** — telefonul apare pe o comandă `Refuzata` în ultimele 90 zile.
+  2. **PRODUS RISC** — comanda conține un produs cu refuz mare, calculat LIVE din istoric (refuz >30% și >1.6× media magazinului; ex. HA-0431 Seif 56%, HA-0126 Covor Persan ~50%).
+  3. **IMPULS 50-100** — 1 singur produs, 50-100 lei (banda care refuză ~22% vs 16% media).
+  4. **VALOARE MARE** — valoare ≥ prag (`--min-value`).
 - Contact + valoare din `metrics.orders`. Mesaj de confirmare RO/CZ/PL/BG. Read-only.
 
 ## Idee de extins
