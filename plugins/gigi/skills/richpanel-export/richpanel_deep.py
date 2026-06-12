@@ -94,7 +94,7 @@ def main():
     mc.close()
     print(f"  emailuri:{len(email_idx)} telefoane:{len(phone_idx)}")
 
-    con = sqlite3.connect(DB)
+    con = sqlite3.connect("file:" + DB + "?mode=ro", uri=True, timeout=30)
     ph = ",".join("?" * len(SOCIAL))
     q = (f"SELECT id,conversation_no FROM tickets WHERE channel IN ({ph}) "
          "AND (match_order IS NULL OR match_order='')")
@@ -145,7 +145,8 @@ def main():
                 print(f"  …{done}/{len(todo)} | legate nou: {len(found)}")
 
     # scrie in DB
-    con = sqlite3.connect(DB)
+    con = sqlite3.connect(DB, timeout=60)
+    con.execute("PRAGMA busy_timeout=60000")
     for tid, em, phn, oname, store, method in found:
         con.execute("UPDATE tickets SET contact_email=COALESCE(contact_email,?), contact_phone=COALESCE(contact_phone,?), "
                     "match_order=?, resolved_store=COALESCE(NULLIF(resolved_store,''),?), link_method=? WHERE id=?",

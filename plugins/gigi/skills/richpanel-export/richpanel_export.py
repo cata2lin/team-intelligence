@@ -106,6 +106,8 @@ class MCP:
             try:
                 res = self._post({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
                                   "params": {"name": name, "arguments": args}})
+                if res.get("error"):
+                    raise RuntimeError("JSON-RPC error: %s" % res["error"])
                 txt = res.get("result", {}).get("content", [{}])[0].get("text", "")
                 return json.loads(txt) if txt.startswith("{") else {}
             except Exception:
