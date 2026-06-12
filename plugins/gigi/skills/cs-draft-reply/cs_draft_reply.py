@@ -25,7 +25,7 @@ MCP_URL = "https://mcp.richpanel.com/mcp"
 PLAYBOOK = """Ești agent Customer Service la ARONA (magazine Shopify cu plată ramburs: Esteban, George Talent, Nubra, Gento — parfumuri; Grandia, Carpetto, Covoria — casă/mobilă; Bonhaus RO/CZ/PL/BG; Belasil; Reduceri bune, Ofertele Zilei, Magdeal etc.).
 Scrie răspunsul către client respectând EXACT procedurile echipei:
 
-- LIVRARE/WISMO („unde e coletul"): dacă ai AWB în date, dă linkul de tracking DPD: https://tracking.dpd.ro?shipmentNumber=<AWB>. Dacă e întârziat, scuze + estimare. Dacă NU ai AWB/status în date, NU inventa — spune politicos că verifici și revii, sau cere numele+telefonul+nr comenzii.
+- LIVRARE/WISMO („unde e coletul"): dacă ai AWB + curier în date, dă linkul de tracking CORECT după CURIER (folosește câmpul `curier`, NU presupune DPD): DPD → https://tracking.dpd.ro?shipmentNumber=<AWB> ; Sameday → https://www.sameday.ro/#awb=<AWB> ; Packeta/Zasilkovna → https://tracker.packeta.com/ro/?id=<AWB> ; Econt → https://www.econt.com/en/services/track-shipment/<AWB>. Dacă e întârziat, scuze + estimare. Dacă NU știi curierul sau lipsește AWB, NU inventa link — spune politicos că verifici și revii, sau cere numele+telefonul+nr comenzii.
 - RETUR: trimite formularul https://bi.grandia.ro/returns?order=<nr>&email=<email> ; „Suma vă va fi returnată în maximum 14 zile de la ajungerea coletului." Dacă formularul dă eroare, cere IBAN + numele titularului.
 - PRODUS SPART/DETERIORAT (parfum): NU oferi refund. Oferă RETRIMITERE GRATUITĂ: cere care parfum e afectat și anunță că trimiteți o nouă comandă cu cel inițial + un parfum cadou din partea voastră.
 - PRODUS DEFECT/LIPSĂ PIESE (mobilă/casă): cere o poză; dacă produsul e pe stoc → retrimitere/schimb; dacă nu → retur + refund (formularul).
@@ -48,13 +48,24 @@ def mcp(name, args, token):
     h = {"Authorization": "Bearer " + token, "Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
     def post(p):
         req = urllib.request.Request(MCP_URL, data=json.dumps(p).encode(), headers=h)
-        with urllib.request.urlopen(req, timeout=60) as r:
-            body = r.read().decode()
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                body = r.read().decode()
+        except Exception as e:
+            return {"_error": str(e)}
         ln = [l for l in body.splitlines() if l.startswith("data:")]
-        return json.loads(ln[-1][5:]) if ln else json.loads(body)
+        try:
+            return json.loads(ln[-1][5:]) if ln else json.loads(body)
+        except Exception as e:
+            return {"_error": "răspuns ne-parsabil: %s" % e}
     post({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "draft", "version": "1"}}})
     r = post({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}})
-    txt = r["result"]["content"][0]["text"]
+    if isinstance(r, dict) and r.get("_error"):
+        return r
+    try:
+        txt = r["result"]["content"][0]["text"]
+    except Exception:
+        return {"_error": "răspuns neașteptat de la Richpanel"}
     try:
         return json.loads(txt)
     except Exception:
@@ -62,22 +73,25 @@ def mcp(name, args, token):
 
 
 def llm(system, user):
-    ak = secret("ANTHROPIC_API_KEY")
-    if ak:
-        body = {"model": os.environ.get("DRAFT_MODEL", "claude-3-5-sonnet-20241022"), "max_tokens": 1000,
-                "system": system, "messages": [{"role": "user", "content": user}]}
-        req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=json.dumps(body).encode(),
-                                     headers={"x-api-key": ak, "anthropic-version": "2023-06-01", "content-type": "application/json"})
-        r = json.loads(urllib.request.urlopen(req, timeout=90).read())
-        return r["content"][0]["text"], "claude"
-    ok = secret("OPENAI_API_KEY")
-    if ok:
-        body = {"model": os.environ.get("DRAFT_MODEL", "gpt-4o-mini"), "temperature": 0.3,
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
-        req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=json.dumps(body).encode(),
-                                     headers={"Authorization": "Bearer " + ok, "content-type": "application/json"})
-        r = json.loads(urllib.request.urlopen(req, timeout=90).read())
-        return r["choices"][0]["message"]["content"], "openai/gpt"
+    try:
+        ak = secret("ANTHROPIC_API_KEY")
+        if ak:
+            body = {"model": os.environ.get("DRAFT_MODEL", "claude-3-5-sonnet-20241022"), "max_tokens": 1000,
+                    "system": system, "messages": [{"role": "user", "content": user}]}
+            req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=json.dumps(body).encode(),
+                                         headers={"x-api-key": ak, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+            r = json.loads(urllib.request.urlopen(req, timeout=90).read())
+            return r["content"][0]["text"], "claude"
+        ok = secret("OPENAI_API_KEY")
+        if ok:
+            body = {"model": os.environ.get("DRAFT_MODEL", "gpt-4o-mini"), "temperature": 0.3,
+                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+            req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=json.dumps(body).encode(),
+                                         headers={"Authorization": "Bearer " + ok, "content-type": "application/json"})
+            r = json.loads(urllib.request.urlopen(req, timeout=90).read())
+            return r["choices"][0]["message"]["content"], "openai/gpt"
+    except Exception as e:
+        raise SystemExit("Eroare LLM: %s" % e)
     raise SystemExit("Nicio cheie LLM în KB (ANTHROPIC_API_KEY / OPENAI_API_KEY).")
 
 
@@ -116,8 +130,10 @@ def main():
     except Exception:
         cust = {}
     orders = cust.get("orders", [])
-    od = "\n".join("  comanda %s (%s): status=%s, AWB=%s, produse=%s" % (
-        o.get("o"), o.get("brand", o.get("store", "?")), o.get("deliv", "?"), o.get("awb", "") or "—", (o.get("skus") or "")[:40])
+    COURIER = {"dpd-ro": "DPD", "dpd": "DPD", "sameday": "Sameday", "packeta": "Packeta", "econt": "Econt"}
+    od = "\n".join("  comanda %s (%s): status=%s, curier=%s, AWB=%s, produse=%s" % (
+        o.get("o"), o.get("brand", o.get("store", "?")), o.get("deliv", "?"),
+        COURIER.get((o.get("courier") or "").lower(), o.get("courier") or "?"), o.get("awb", "") or "—", (o.get("skus") or "")[:40])
         for o in orders[:8]) or "  (nicio comandă găsită — posibil pre-vânzare / client nou)"
     store = orders[0]["brand"] if orders else (cust.get("emails", [""])[0].split("@")[-1].split(".")[0].title() if cust.get("emails") else "magazinul nostru")
 
