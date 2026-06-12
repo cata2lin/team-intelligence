@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["pg8000>=1.30"]
 # ///
 """
 cs_sentiment.py — SCOR DE SENTIMENT per tichet CS (negativ / neutru / pozitiv + intensitate).
@@ -21,6 +21,10 @@ import os, re, sqlite3, argparse, json, collections, unicodedata, urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", "..", ".."))
 DB = os.environ.get("RICHPANEL_DB") or os.path.join(REPO, "data", "richpanel_tickets.db")
+import sys as _sys
+_sys.path.insert(0, os.path.join(HERE, "..", "richpanel-export"))
+import rp_db  # sursă: SQLite local (pipeline) sau Postgres partajat (agent CS)
+
 
 # ── RO: reclamație + laudă ──
 RO_NEG = re.compile(r"nu\s*recomand|teap[\u0103a]|escroc|prostea|proast|prost\b|ruginit|jale|nasol|naspa|groaznic|"
@@ -84,7 +88,7 @@ AGENTS = {"0964e420-84e7-457f-b0b5-57253b9a0dc8": "Alexandra", "245b9936-837a-4c
 
 
 def load():
-    con = sqlite3.connect("file:" + DB + "?mode=ro", uri=True, timeout=30)
+    con = rp_db.open(DB)
     cols = [r[1] for r in con.execute("PRAGMA table_info(tickets)")]
     sc = "resolved_store" if "resolved_store" in cols else "store"
     rows = con.execute("SELECT conversation_no,%s,assignee_id,status,category,created_at,"
