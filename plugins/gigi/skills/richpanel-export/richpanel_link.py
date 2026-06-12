@@ -67,9 +67,12 @@ prefix2store = {px: max(d, key=d.get) for px, d in prefix_store.items()}
 print(f"  comenzi indexate: {len(rows)} | emailuri:{len(email_idx)} telefoane:{len(phone_idx)} | prefixe:{len(prefix2store)}")
 
 # ── Richpanel tickets ──
-con = sqlite3.connect(DB)
+con = sqlite3.connect(DB, timeout=60)
+con.execute("PRAGMA busy_timeout=60000")
 con.row_factory = sqlite3.Row
 tk = con.execute("SELECT id,channel,first_message,subject,store,order_name,raw FROM tickets").fetchall()
+if not tk:
+    print("Niciun tichet în DB — rulează întâi pull."); raise SystemExit
 print(f"→ {len(tk)} tichete")
 
 # Pas 1: parse raw + rezolva contact/comenzi/store via email/telefon/order (in memorie)
@@ -177,8 +180,8 @@ n = len(tk)
 before_store = con.execute("SELECT COUNT(*) FROM tickets WHERE store IS NOT NULL AND store!='' AND store!='necunoscut'").fetchone()[0]
 after_store = con.execute("SELECT COUNT(*) FROM tickets WHERE resolved_store IS NOT NULL AND resolved_store!=''").fetchone()[0]
 print("\n════ REZULTAT ════")
-print(f"  Tichete legate la un client (comandă): {stats['linked']}/{n} ({100*stats['linked']//n}%)  metode={stats['by_method']}")
-print(f"  Magazin rezolvat: {before_store} → {after_store}/{n} ({100*after_store//n}%)")
+print(f"  Tichete legate la un client (comandă): {stats['linked']}/{n} ({100*stats['linked']//max(n,1)}%)  metode={stats['by_method']}")
+print(f"  Magazin rezolvat: {before_store} → {after_store}/{n} ({100*after_store//max(n,1)}%)")
 print("  Top magazine (resolved):")
 for st, c in con.execute("SELECT resolved_store,COUNT(*) FROM tickets WHERE resolved_store!='' GROUP BY 1 ORDER BY 2 DESC LIMIT 12"):
     print(f"    {st:18} {c}")
