@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["pg8000>=1.30"]
 # ///
 """
 cs_comment_intelligence.py — INTELIGENȚĂ pe comentariile la reclame FB/IG.
@@ -25,6 +25,10 @@ import os, re, sqlite3, argparse, json
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", "..", ".."))
 DB = os.environ.get("RICHPANEL_DB") or os.path.join(REPO, "data", "richpanel_tickets.db")
+import sys as _sys
+_sys.path.insert(0, os.path.join(HERE, "..", "richpanel-export"))
+import rp_db  # sursă: SQLite local (pipeline) sau Postgres partajat (agent CS)
+
 
 # ── reguli de clasificare (fără diacritice, tunate pe exemple reale) ──
 COMPLAINT = re.compile(r"nu\s*recomand|teap[ăa]|tzeap|escroc|prostea|proast|prosti|prost\b|ruginit|"
@@ -89,7 +93,7 @@ LABEL = {"lead": "🟢 lead", "reclamatie": "🔴 reclamație", "testimonial": "
 
 
 def load():
-    con = sqlite3.connect("file:" + DB + "?mode=ro", uri=True, timeout=30)
+    con = rp_db.open(DB)
     has_rs = any(r[1] == "resolved_store" for r in con.execute("PRAGMA table_info(tickets)"))
     sc = "resolved_store" if has_rs else "store"
     rows = con.execute(f"SELECT id,conversation_no,{sc},status,created_at,COALESCE(first_message,'')||' '||COALESCE(subject,'') "
