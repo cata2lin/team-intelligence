@@ -75,6 +75,7 @@ class MCP:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int); ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--all", action="store_true", help="TOATE tichetele nelegate (nu doar conversațiile) — job lung")
     a = ap.parse_args()
 
     # index metrics
@@ -111,10 +112,13 @@ def main():
     print(f"  comenzi:{len(name_idx)} emailuri:{len(email_idx)} telefoane:{len(phone_idx)} nume-unice:{len(person_idx)}")
 
     con = sqlite3.connect("file:" + DB + "?mode=ro", uri=True, timeout=30)
-    ph = ",".join("?" * len(SOCIAL))
-    q = (f"SELECT id,conversation_no FROM tickets WHERE channel IN ({ph}) "
-         "AND (match_order IS NULL OR match_order='')")
-    todo = con.execute(q, SOCIAL).fetchall()
+    if a.all:
+        todo = con.execute("SELECT id,conversation_no FROM tickets WHERE (match_order IS NULL OR match_order='')").fetchall()
+    else:
+        ph = ",".join("?" * len(SOCIAL))
+        q = (f"SELECT id,conversation_no FROM tickets WHERE channel IN ({ph}) "
+             "AND (match_order IS NULL OR match_order='')")
+        todo = con.execute(q, SOCIAL).fetchall()
     con.close()
     if a.limit:
         todo = todo[:a.limit]
