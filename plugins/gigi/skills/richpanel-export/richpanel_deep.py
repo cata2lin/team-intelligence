@@ -29,7 +29,7 @@ ORDER_RE = re.compile(r"\b(EST|GT|NUB|GRAND|GRAN|MAG|OFER|RED|BONBG|BON|CZ|PL|BE
 # „comanda pe numele X" / „numele meu e X" → 2-3 cuvinte cu majusculă (fallback, doar nume UNICE)
 NAME_RE = re.compile(r"(?:pe\s+numele|numele\s+(?:meu\s+)?(?:este|e|de)?|comanda\s+(?:este\s+)?pe)\s*:?\s*"
                      r"([A-ZĂÂÎȘȚ][a-zăâîșț]+(?:\s+[A-ZĂÂÎȘȚ][a-zăâîșț]+){1,2})")
-SOCIAL = ("facebook_message", "messenger", "instagram_message", "email_from_widget")
+SOCIAL = ("facebook_message", "messenger", "instagram_message", "email_from_widget", "email")  # toate canalele de conversație (comentariile la reclame excluse — ~0 contact)
 BAD_EMAIL = ("richpanel", "judgeme", "shopify", "sentry", "facebook", "no-reply", "noreply", "mailer")
 # emailurile AGENȚILOR (apar în transcript ca expeditor — NU sunt clientul)
 AGENT_EMAILS = {"annamariarugina982@gmail.com", "martina.klimcikova@seznam.cz", "staverdaniela1@gmail.com",
