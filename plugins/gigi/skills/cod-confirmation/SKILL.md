@@ -17,12 +17,18 @@ uv run cod_confirmation.py --days 3 --json                   # pt automatizare (
 
 ## Cum funcționează
 - Neexpediate = `profit_orders.status_category='Netrimisa'` (încă neplecate), recente, din `data/profitability.db` (VPS).
-- **4 semnale de risc** (prioritate în această ordine):
+- **5 semnale de risc** (prioritate în această ordine):
   1. **REFUZAT ÎNAINTE** — telefonul apare pe o comandă `Refuzata` în ultimele 90 zile.
   2. **PRODUS RISC** — comanda conține un produs cu refuz mare, calculat LIVE din istoric (refuz >30% și >1.6× media magazinului; ex. HA-0431 Seif 56%, HA-0126 Covor Persan ~50%).
-  3. **IMPULS 50-100** — 1 singur produs, 50-100 lei (banda care refuză ~22% vs 16% media).
-  4. **VALOARE MARE** — valoare ≥ prag (`--min-value`).
-- Contact + valoare din `metrics.orders`. Mesaj de confirmare RO/CZ/PL/BG. Read-only.
+  3. **ZONĂ ROȘIE** — județ/oraș cu refuz mare, **per țară** (RO: Călărași/Giurgiu/Covasna/etc.; BG: Sofia/Plovdiv). Țara se ia din prefix (BONBG→BG, CZ, PL, restul RO).
+  4. **IMPULS 50-100** — 1 singur produs, 50-100 lei (banda care refuză ~22% vs 16% media).
+  5. **VALOARE MARE** — valoare ≥ prag (`--min-value`).
+- Contact + județ + valoare din `metrics.orders`. Mesaj de confirmare RO/CZ/PL/BG. Read-only.
+
+## Mod blacklist (card-only)
+```bash
+uv run cod_confirmation.py --blacklist   # telefoane cu ≥2 refuzuri în 180z → de setat card-only la checkout (~6% refuzuri evitate)
+```
 
 ## Idee de extins
-- Risc pe județ (rată refuz mare per `shippingProvince`); excludere clienți deja confirmați; integrare directă cu dialer/WhatsApp.
+- Excludere clienți deja confirmați; integrare directă cu dialer/WhatsApp; sincronizare blacklist → reguli Shopify checkout.
