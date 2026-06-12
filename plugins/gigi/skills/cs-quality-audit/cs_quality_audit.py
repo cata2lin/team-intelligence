@@ -64,7 +64,7 @@ def parse_ts(v):
 
 
 def load():
-    con = sqlite3.connect(DB)
+    con = sqlite3.connect("file:" + DB + "?mode=ro", uri=True, timeout=30)
     cols = [r[1] for r in con.execute("PRAGMA table_info(tickets)")]
     sc = "resolved_store" if "resolved_store" in cols else "store"
     rows = con.execute(f"SELECT id,conversation_no,{sc},assignee_id,status,category,channel,comment_count,"
