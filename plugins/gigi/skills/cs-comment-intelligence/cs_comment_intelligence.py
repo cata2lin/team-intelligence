@@ -89,7 +89,7 @@ LABEL = {"lead": "🟢 lead", "reclamatie": "🔴 reclamație", "testimonial": "
 
 
 def load():
-    con = sqlite3.connect(DB)
+    con = sqlite3.connect("file:" + DB + "?mode=ro", uri=True, timeout=30)
     has_rs = any(r[1] == "resolved_store" for r in con.execute("PRAGMA table_info(tickets)"))
     sc = "resolved_store" if has_rs else "store"
     rows = con.execute(f"SELECT id,conversation_no,{sc},status,created_at,COALESCE(first_message,'')||' '||COALESCE(subject,'') "
