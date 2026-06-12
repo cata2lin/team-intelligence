@@ -73,6 +73,14 @@ def llm(system, user, want_json=False):
             req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=json.dumps(body).encode(),
                                          headers={"x-api-key": ak, "anthropic-version": "2023-06-01", "content-type": "application/json"})
             return json.loads(urllib.request.urlopen(req, timeout=90).read())["content"][0]["text"]
+        gk = secret("GEMINI_API_KEY") or secret("GOOGLE_AI_API_KEY")
+        if gk:
+            model = os.environ.get("PROFILE_MODEL", "gemini-2.5-flash")
+            url = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s" % (model, gk)
+            body = {"system_instruction": {"parts": [{"text": system}]}, "contents": [{"parts": [{"text": user}]}],
+                    "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1200}}
+            req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={"content-type": "application/json"})
+            return json.loads(urllib.request.urlopen(req, timeout=90).read())["candidates"][0]["content"]["parts"][0]["text"]
         ok = secret("OPENAI_API_KEY")
         if ok:
             body = {"model": os.environ.get("PROFILE_MODEL", "gpt-4o-mini"), "temperature": 0.2,
