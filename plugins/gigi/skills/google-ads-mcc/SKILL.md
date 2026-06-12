@@ -139,6 +139,22 @@ A PMax asset group needs a full set before it serves beyond Shopping. Build with
 - **Pause / fold underperformers.** A separate PMax below target (e.g. a low-AOV product at CPA ≫ target) → pause it and let the main "All Products" PMax cover those products (check listing groups: a single root filter = whole catalog).
 - **Feed real video** (§4) — PMax with strong video beats asset-only; competitors in most niches run video-heavy.
 - **Don't reset learning needlessly:** big budget jumps / new bid targets re-enter learning; move in steps, leave ~2 weeks.
+- **Cold-start: a NEW Search campaign on Maximize Conversions with no conversion history can serve 0 impressions for days** (bids ~0, `BIDDING_STRATEGY_LEARNING`, ads APPROVED). Fix: switch to Maximize Clicks with a CPC ceiling (`targetSpend.cpcBidCeilingMicros` — template **`fix_nonbrand_bidding.py`**), gather ~15–30 conversions, then move to tCPA/Max-conv.
+
+## 6. Conversion goals — when "conversions" explode (wrong primary goals)
+If someone marks Page View / Add to Cart / Begin Checkout as **primary goals** in the UI, every campaign
+using account-default goals starts **bidding and reporting on those** (a PMax can show 1,000 "conversions"
+of which 100 are purchases — budget burns chasing page views). Diagnose and fix via API:
+- **Diagnose:** segment by action — `SELECT segments.conversion_action_name, metrics.conversions FROM campaign WHERE segments.date='…' AND campaign.id=…`. If PV/ATC/BC appear in `metrics.conversions`, goals are wrong.
+- Account-level state: `SELECT customer_conversion_goal.category, customer_conversion_goal.biddable FROM customer_conversion_goal` (absent `biddable` = true!). Campaign overrides: `campaign_conversion_goal`, `conversion_goal_campaign_config` (custom goals).
+- **Fix:** **`fix_conversion_goals.py`** (CIDARG=<cid>, dry-run → `--apply`) — sets `biddable=true` ONLY for PURCHASE, false for everything else, via `customerConversionGoals:mutate`.
+- **Reporting is NOT restated retroactively** — hours already spent keep the inflated counts; bidding is clean from the change onward. Compute the real performance from the per-action segmentation (purchases only).
+- `conversion_action.primary_for_goal` is a separate, action-level flag — the account **goal-category biddability** is what campaigns on default goals actually use.
+
+## 7. Tracking / UTM (correct attribution beyond GA4)
+- **Auto-tagging (GCLID)** should be ON (`customer.auto_tagging_enabled`) — GA4 attributes via the Google Ads link.
+- For Shopify analytics & other tools, set an **account-level `final_url_suffix`**: `utm_source=google&utm_medium=cpc&utm_campaign={campaignid}&utm_content={creative}&utm_term={keyword}` — safe, no learning reset, no re-review.
+- API quirk: CustomerService is `POST /v20/customers/{cid}:mutate` with body `{"operation": {...}}` — **singular** `operation`, unlike every other mutate.
 
 ## Guardrails / hard rules
 - **Never print** the developer token, OAuth secret, or refresh tokens. Read from DB/secret store, use in-process.
