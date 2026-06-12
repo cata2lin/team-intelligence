@@ -25,6 +25,10 @@ KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
 MCP_URL = "https://mcp.richpanel.com/mcp"
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 PHONE_RE = re.compile(r"(?:\+?4?0)\s*7\d{2}[\s.\-]?\d{3}[\s.\-]?\d{3}")
+ORDER_RE = re.compile(r"\b(EST|GT|NUB|GRAND|GRAN|MAG|OFER|RED|BONBG|BON|CZ|PL|BELA|GEN|CARP|COV|APR|ROSSI|LUX)[ -]?(\d{4,7})\b", re.I)
+# „comanda pe numele X" / „numele meu e X" → 2-3 cuvinte cu majusculă (fallback, doar nume UNICE)
+NAME_RE = re.compile(r"(?:pe\s+numele|numele\s+(?:meu\s+)?(?:este|e|de)?|comanda\s+(?:este\s+)?pe)\s*:?\s*"
+                     r"([A-ZĂÂÎȘȚ][a-zăâîșț]+(?:\s+[A-ZĂÂÎȘȚ][a-zăâîșț]+){1,2})")
 SOCIAL = ("facebook_message", "messenger", "instagram_message", "email_from_widget")
 BAD_EMAIL = ("richpanel", "judgeme", "shopify", "sentry", "facebook", "no-reply", "noreply", "mailer")
 # emailurile AGENȚILOR (apar în transcript ca expeditor — NU sunt clientul)
@@ -82,17 +86,29 @@ def main():
     cur = mc.cursor()
     cur.execute("SELECT id,name FROM brands"); brand = {r[0]: r[1] for r in cur.fetchall()}
     cur.execute('SELECT name,email,phone,"shippingPhone","brandId","shippingName" FROM orders')
-    email_idx, phone_idx = {}, {}
+    email_idx, phone_idx, name_idx = {}, {}, {}
+    person_rec, person_ph = {}, {}  # shippingName.lower() -> rec + set telefoane (pt dezambiguizare omonime)
     for name, email, phone, sphone, bid, sname in cur.fetchall():
         rec = (name, brand.get(bid, "?"), sname)
+        if name:
+            name_idx.setdefault(name.upper(), rec)
         if email:
             email_idx.setdefault(email.lower(), rec)
+        ph_any = None
         for p in (phone, sphone):
             k = ph9(p)
             if k:
-                phone_idx.setdefault(k, rec)
+                phone_idx.setdefault(k, rec); ph_any = k
+        if sname and len(sname.split()) >= 2:
+            nl = " ".join(sname.lower().split())
+            person_rec[nl] = rec
+            person_ph.setdefault(nl, set())
+            if ph_any:
+                person_ph[nl].add(ph_any)
+    # DOAR nume care aparțin unui SINGUR client (un singur telefon) — evită omonimele
+    person_idx = {n: r for n, r in person_rec.items() if len(person_ph.get(n, set())) == 1}
     mc.close()
-    print(f"  emailuri:{len(email_idx)} telefoane:{len(phone_idx)}")
+    print(f"  comenzi:{len(name_idx)} emailuri:{len(email_idx)} telefoane:{len(phone_idx)} nume-unice:{len(person_idx)}")
 
     con = sqlite3.connect("file:" + DB + "?mode=ro", uri=True, timeout=30)
     ph = ",".join("?" * len(SOCIAL))
@@ -111,6 +127,13 @@ def main():
         blob = mcp.conv_text(no)
         if not blob:
             return None
+        rec, method, em, phn = None, None, None, None
+        # 1) NUMĂR DE COMANDĂ în text = cel mai direct link (dă și magazinul din prefix)
+        for pfx, dig in ORDER_RE.findall(blob):
+            on = (pfx + dig).upper()
+            if on in name_idx:
+                rec, method = name_idx[on], "deep_order"; break
+        # 2) email, 3) telefon
         emails, phones = set(), set()
         for e in EMAIL_RE.findall(blob):
             el = e.lower()
@@ -120,14 +143,20 @@ def main():
             k = ph9(p)
             if k:
                 phones.add(k)
-        rec, method, em, phn = None, None, None, None
-        for e in emails:
-            if e in email_idx:
-                rec, method, em = email_idx[e], "deep_email", e; break
+        if not rec:
+            for e in emails:
+                if e in email_idx:
+                    rec, method, em = email_idx[e], "deep_email", e; break
         if not rec:
             for p in phones:
                 if p in phone_idx:
                     rec, method, phn = phone_idx[p], "deep_phone", p; break
+        # 4) FALLBACK nume (doar dacă nu am găsit nimic altceva; doar nume UNICE)
+        if not rec:
+            for nm in NAME_RE.findall(blob):
+                nl = " ".join(nm.lower().split())
+                if nl in person_idx:
+                    rec, method = person_idx[nl], "deep_name"; break
         if not rec:
             return None
         return (tid, em or next(iter(emails), None), phn or next(iter(phones), None), rec[0], rec[1], method)
