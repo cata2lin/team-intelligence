@@ -3,7 +3,7 @@
 # dependencies = ["pg8000>=1.30"]
 # ///
 """Bulk-link Richpanel tickets -> Shopify customers + resolve store. Builds customer_identity + enriches tickets."""
-import os, re, json, sqlite3, subprocess, urllib.parse
+import os, re, json, sqlite3, subprocess, urllib.parse, datetime
 import pg8000.dbapi
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -22,6 +22,32 @@ PAGE_OVERRIDE = {
     "1678573069021466": "Orasul Verde", "522811567592063": "Gento", "621560724373069": "Carpetto",
     "680369271815957": "Bonhaus BG", "421367954403103": "Apreciat", "1805415543098993": "Rossi Nails",
 }
+
+
+# domeniu email `to` → MAGAZIN (DOAR domeniile specifice unui magazin). Pe astea, magazinul
+# tichetului e cunoscut din inbox → alege comanda clientului DIN acel magazin.
+STORE_DOMAIN = {
+    "esteban.ro": "Esteban", "nubra.ro": "Nubra", "rossinails.ro": "Rossi Nails",
+    "belasil.ro": "Belasil", "george-talent.ro": "George Talent", "carpetto.ro": "Carpetto",
+    "grandia.ro": "Grandia", "apreciat.ro": "Apreciat", "casaofertelor.ro": "Casa Ofertelor",
+    "bonhaus.bg": "Bonhaus BG", "bonhaus.cz": "Bonhaus CZ", "bonhaus.pl": "Bonhaus PL",
+    "bonhaus.ro": "Bonhaus", "gento.customerdesk.io": "Gento",
+}
+# inboxuri PARTAJATE (primesc tichete pt mai multe magazine) — NU identifică un magazin.
+SHARED_INBOX = {"nocturna.ro", "trynocturna.eu", "nocturna.bg", "nocturna.pl", "nocturna.customerdesk.io", "nocturna.hu"}
+
+
+def skey(s):
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def parse_dt(v):
+    if not v:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(str(v).replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        return None
 
 
 def secret(k):
@@ -84,6 +110,13 @@ def resolve_one(t):
     frm = raw.get("from") or {}
     to = raw.get("to") or {}
     page = to.get("id") if isinstance(to, dict) else None
+    to_email = to.get("email") if isinstance(to, dict) else None
+    dom = to_email.split("@")[-1].lower() if to_email and "@" in to_email else None
+    # magazinul TICHETULUI (din inbox): domeniu specific SAU pagină FB fixă. Inbox partajat → necunoscut.
+    ticket_store = STORE_DOMAIN.get(dom) if dom else None
+    if not ticket_store and page in PAGE_OVERRIDE:
+        ticket_store = PAGE_OVERRIDE[page]
+    tdate = parse_dt(raw.get("created_at"))
     femail = frm.get("email") or (frm.get("id") if isinstance(frm.get("id"), str) and "@" in (frm.get("id") or "") else None)
     emails, phones = set(), set()
     if femail:
@@ -105,14 +138,22 @@ def resolve_one(t):
             if p in phone_idx:
                 matched += phone_idx[p]; method = "phone"
     matched = list({r["o"]: r for r in matched}.values())
-    store = None
+    # ALEGE comanda corectă: întâi cele din MAGAZINUL TICHETULUI, apoi cea mai apropiată de DATA tichetului.
+    chosen = None
     if matched:
-        store = max({r["store"] for r in matched}, key=lambda s: sum(1 for r in matched if r["store"] == s))
-    elif t["order_name"]:
+        pool = [r for r in matched if ticket_store and skey(r["store"]) == skey(ticket_store)]
+        if not pool:
+            pool = matched
+        if tdate:
+            chosen = min(pool, key=lambda r: abs((parse_dt(r["date"]) - tdate).days) if parse_dt(r["date"]) else 10 ** 6)
+        else:
+            chosen = pool[0]
+    store = ticket_store or (chosen["store"] if chosen else None)
+    if not store and t["order_name"]:
         store = prefix2store.get(prefix(t["order_name"])); method = method or ("order" if store else None)
-    cust = next((r["name"] for r in matched if r["name"]), None)
+    cust = (chosen.get("name") if chosen else None) or next((r["name"] for r in matched if r["name"]), None)
     return {"t": t, "page": page, "emails": emails, "phones": phones, "matched": matched,
-            "store": store, "method": method, "cust": cust}
+            "chosen": chosen, "store": store, "method": method, "cust": cust}
 
 parsed = [resolve_one(t) for t in tk]
 
@@ -172,7 +213,7 @@ for r in parsed:
                  ",".join(x["o"] for x in matched), len(matched), method))
     con.execute("UPDATE tickets SET resolved_store=?, contact_email=?, contact_phone=?, match_order=?, link_method=? WHERE id=?",
                 (store, next(iter(r["emails"]), None), next(iter(r["phones"]), None),
-                 (matched[0]["o"] if matched else None), method, t["id"]))
+                 (r["chosen"]["o"] if r.get("chosen") else None), method, t["id"]))
 con.commit()
 
 # ── stats ──
