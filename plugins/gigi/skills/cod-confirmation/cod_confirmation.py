@@ -11,7 +11,7 @@ tai refuzul la sursă (cealaltă jumătate a levierului de ~272k/lună). NU scri
   uv run cod_confirmation.py --days 5
   uv run cod_confirmation.py --brand Grandia --min-value 200 --draft
 """
-import os, sys, json, subprocess, shlex, urllib.parse, argparse, datetime
+import os, sys, json, subprocess, shlex, urllib.parse, argparse, datetime, unicodedata, collections
 import pg8000.dbapi
 
 VPS = "root@84.46.242.181"
@@ -26,6 +26,18 @@ MSG = {
     "pl": "Cześć {n}! Tu {b}. Przygotowaliśmy zamówienie {o} ({v}, za pobraniem). Potwierdź, że je chcesz i że adres jest poprawny. Odpowiedz TAK, a wyślemy dziś. 📦",
     "bg": "Здравейте {n}! Това е {b}. Подготвихме поръчка {o} ({v}, наложен платеж). Потвърдете, че я искате и адресът е верен. Отговорете ДА и я изпращаме днес. 📦",
 }
+
+
+# ȚARA din prefix (fiabil): restul = RO. ZONE ROȘII pe țară (refuz disproporționat din analiza istorică).
+PFX_COUNTRY = {"BONBG": "bg", "CZ": "cz", "PL": "pl"}
+RED_ZONES = {
+    "ro": {"calarasi", "giurgiu", "covasna", "ialomita", "teleorman", "braila"},  # județe sud, refuz 18-20%
+    "bg": {"sofia", "plovdiv", "софия", "пловдив"},                                # Sofia 28% / Plovdiv 23%
+}
+
+
+def _na(s):
+    return "".join(ch for ch in unicodedata.normalize("NFD", (s or "").lower().strip()) if ch.isalnum())
 
 
 def secret(k):
@@ -53,12 +65,43 @@ def mconn():
                                port=u.port or 5432, database=(u.path or "/").lstrip("/"))
 
 
+def blacklist():
+    """Telefoane cu >=2 refuzuri în 180 zile -> de setat card-only la checkout (~6% refuzuri evitate)."""
+    rl = (datetime.date.today() - datetime.timedelta(days=180)).isoformat()
+    py = ("import sqlite3,json\n"
+          "c=sqlite3.connect('data/profitability.db')\n"
+          "print(json.dumps([r[0] for r in c.execute(\"SELECT order_name FROM profit_orders WHERE status_category='Refuzata' AND substr(created_at,1,10)>=%(rl)r\")]))") % {'rl': rl}
+    refz = ssh(py)
+    if refz is None:
+        print("Eroare SSH/DB."); return
+    conn = mconn(); cur = conn.cursor()
+    cnt = collections.Counter()
+    for i in range(0, len(refz), 800):
+        ch = refz[i:i + 800]; ph = ",".join(["%s"] * len(ch))
+        cur.execute('SELECT COALESCE("shippingPhone",phone) FROM orders WHERE name IN (' + ph + ')', ch)
+        for r in cur.fetchall():
+            k = "".join(x for x in (r[0] or "") if x.isdigit())[-9:]
+            if k:
+                cnt[k] += 1
+    conn.close()
+    serial = sorted(((n, p) for p, n in cnt.items() if n >= 2), reverse=True)
+    print("=== BLACKLIST COD (card-only) — telefoane cu ≥2 refuzuri în 180 zile ===")
+    print("Total: %d telefoane → de setat card-only la checkout (taie ~6%% din refuzuri).\n" % len(serial))
+    for n, p in serial[:300]:
+        print("  %s : %d refuzuri" % (p, n))
+    if len(serial) > 300:
+        print("  … încă %d (--json pentru toate)" % (len(serial) - 300))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--brand", default=""); ap.add_argument("--days", type=int, default=5)
     ap.add_argument("--min-value", type=float, default=150, dest="minv"); ap.add_argument("--limit", type=int, default=50)
     ap.add_argument("--draft", action="store_true")
+    ap.add_argument("--blacklist", action="store_true", help="listă telefoane card-only (≥2 refuzuri/180z)")
     a = ap.parse_args()
+    if a.blacklist:
+        return blacklist()
     prefix = ""
     for p, (b, _l) in PREFIX.items():
         if a.brand and a.brand.lower() in b.lower():
@@ -101,12 +144,12 @@ def main():
     nn = [o["o"] for o in net]
     for i in range(0, len(nn), 800):
         ch = nn[i:i + 800]; ph = ",".join(["%s"] * len(ch))
-        cur.execute('SELECT name,"shippingName",COALESCE("shippingPhone",phone),"shippingCity","totalPrice" FROM orders WHERE name IN (' + ph + ')', ch)
+        cur.execute('SELECT name,"shippingName",COALESCE("shippingPhone",phone),"shippingCity","totalPrice","shippingProvince" FROM orders WHERE name IN (' + ph + ')', ch)
         for r in cur.fetchall():
-            info[r[0]] = {"name": r[1], "phone": r[2], "city": r[3], "total": float(r[4] or 0)}
+            info[r[0]] = {"name": r[1], "phone": r[2], "city": r[3], "total": float(r[4] or 0), "prov": r[5]}
     conn.close()
     red = set((x[0], x[1]) for x in (d.get("red") or []))
-    RANK = {"REFUZAT ÎNAINTE": 0, "PRODUS RISC": 1, "IMPULS 50-100": 2, "VALOARE MARE": 3}
+    RANK = {"REFUZAT ÎNAINTE": 0, "PRODUS RISC": 1, "ZONĂ ROȘIE": 2, "IMPULS 50-100": 3, "VALOARE MARE": 4}
     rows = []
     for o in net:
         c = info.get(o["o"], {}); val = c.get("total") or (o["rev"] or 0)
@@ -114,13 +157,17 @@ def main():
         repeat = bool(phn) and phn in risky_phones
         skus = o.get("skus") or ""
         red_hit = next((s.strip() for s in skus.split(";") if (o["p"], s.strip()) in red), None)
+        country = PFX_COUNTRY.get(o["p"], "ro")
+        zone_red = _na(c.get("prov")) in RED_ZONES.get(country, set())
         impulse = skus and ";" not in skus and 50 <= val <= 100
-        if not (repeat or red_hit or impulse or val >= a.minv):
+        if not (repeat or red_hit or zone_red or impulse or val >= a.minv):
             continue
         if repeat:
             risk, why = "REFUZAT ÎNAINTE", "a refuzat în ultimele 90 zile"
         elif red_hit:
             risk, why = "PRODUS RISC", "produs cu refuz mare (" + red_hit[:20] + ")"
+        elif zone_red:
+            risk, why = "ZONĂ ROȘIE", "%s %s (refuz mare)" % (country.upper(), (c.get("prov") or "")[:16])
         elif impulse:
             risk, why = "IMPULS 50-100", "1 produs, 50-100 lei (refuz ~22%)"
         else:
@@ -131,8 +178,8 @@ def main():
     rows.sort(key=lambda x: (RANK.get(x["risk"], 9), -x["val"]))
     nrisk = {k: sum(1 for x in rows if x["risk"] == k) for k in RANK}
     print("=== CONFIRMARE PRE-LIVRARE COD (risc) — neexpediate ultimele %d zile%s ===" % (a.days, (" | " + a.brand) if a.brand else ""))
-    print("De confirmat: %d  |  refuznici: %d · produs-risc: %d · impuls 50-100: %d · valoare mare: %d\n" % (
-        len(rows), nrisk["REFUZAT ÎNAINTE"], nrisk["PRODUS RISC"], nrisk["IMPULS 50-100"], nrisk["VALOARE MARE"]))
+    print("De confirmat: %d  |  refuznici: %d · produs-risc: %d · zonă-roșie: %d · impuls 50-100: %d · valoare mare: %d\n" % (
+        len(rows), nrisk["REFUZAT ÎNAINTE"], nrisk["PRODUS RISC"], nrisk["ZONĂ ROȘIE"], nrisk["IMPULS 50-100"], nrisk["VALOARE MARE"]))
     print("%-13s %-12s %8s  %-15s %-30s %-12s" % ("comandă", "brand", "valoare", "RISC", "motiv", "telefon"))
     print("-" * 96)
     for x in rows[:a.limit]:
