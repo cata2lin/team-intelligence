@@ -25,7 +25,7 @@ def richpanel_lines():
         return ["  🟣 Tichete CS (Richpanel): — (rulează gigi:richpanel-export pull)"]
     try:
         c = sqlite3.connect(RP_DB)
-        real = "channel NOT LIKE '%comment%' AND category NOT IN ('spam_automat','recenzie_feedback','comentariu_social')"
+        real = "channel NOT LIKE '%comment%' AND category NOT IN ('spam_automat','recenzie_feedback','comentariu_social','salut_fara_continut','formular_contact')"
         open_cs = c.execute(f"SELECT COUNT(*) FROM tickets WHERE status='OPEN' AND {real}").fetchone()[0]
         frust = sum(1 for (t,) in c.execute(f"SELECT COALESCE(first_message,'')||' '||COALESCE(subject,'') FROM tickets WHERE status='OPEN' AND {real}") if _FRUST.search(t or ""))
         leads = sum(1 for (t,) in c.execute("SELECT COALESCE(first_message,'')||' '||COALESCE(subject,'') FROM tickets WHERE status='OPEN' AND channel LIKE '%comment%'") if _BUY.search(t or ""))
