@@ -26,7 +26,14 @@ DB = os.environ.get("RICHPANEL_DB") or os.path.join(REPO, "data", "richpanel_tic
 RO_NEG = re.compile(r"nu\s*recomand|teap[\u0103a]|escroc|prostea|proast|prost\b|ruginit|jale|nasol|naspa|groaznic|"
                     r"incult|minciun|in[s\u0219]el|slab|nu\s*(mai\s*)?(funct|merg)|ru[s\u0219]ine|dezamag|oroare|"
                     r"ho[t\u021b]i|bataie de joc|reclama[t\u021b]i|penibil|aiurea|furt|oribil|nu\s*(mai\s*)?cump[\u0103a]r|"
-                    r"prea\s*scump|dezgust|catastrof|de\s*c[\u0103a]cat|nu\s*e(ste)?\s*ceea|inadmisibil|jaf", re.I)
+                    r"prea\s*scump|dezgust|catastrof|de\s*c[\u0103a]cat|nu\s*e(ste)?\s*ceea|inadmisibil|jaf|"
+                    # \u2500\u2500 recall boost: reclama\u021bii reale care lipseau (variante cu/f\u0103r\u0103 diacritice) \u2500\u2500
+                    r"nemul[t\u021b]umit|dezam[\u0103a]g|[i\u00ee]n[s\u0219]el(?:at|[\u0103a]t|[\u0103a]ci|[\u0103a]tor|[\u0103a]ri)|"
+                    r"p[\u0103a]c[\u0103a]lit|nu\s*(ce|ceea\s*ce)\s*am\s*comandat|alt\s*produs(\s*dec[\u0103a\u00e2]t)?|"
+                    r"produs\s*gre[s\u0219]it|nu\s*corespunde|nu\s*(e|este)\s*ca\s*[i\u00ee]n\s*(poz|reclam)|"
+                    r"proast[\u0103a]\s*calit|calitate\s*slab|nu\s*func[t\u021b]ioneaz|nu\s*merge|"
+                    r"lips[\u0103a]\s*(din\s*comand|produs)?|incomplet|b[\u0103a]taie\s*de\s*joc|"
+                    r"\bjaf\b|ho[t\u021b]ie|mizerie|oroare|scandalos|inacceptabil", re.I)
 RO_POS = re.compile(r"recomand\b|recomand cu|super\b|excelent|mul[t\u021b]umesc|f(oarte)?\s*bun|perfect|calitate|"
                     r"frumos|frumoas|mul[t\u021b]umit|de\s*top\b|minunat|genial|ador|imi place|îmi place|deosebit|"
                     r"recomand cu incredere|produs bun|rapid si", re.I)
