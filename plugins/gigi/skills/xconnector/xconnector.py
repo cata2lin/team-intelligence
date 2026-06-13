@@ -257,8 +257,27 @@ def cmd_awb_auto(a):
             rel += r
         if a.apply:
             print("  → ELIBERAT %d comenzi cu adresă validă → Flow creează AWB." % rel)
-        print("  → %d cu adresă proastă RĂMÂN ÎN HOLD (corecție / CS): %s"
-              % (len(bad), ", ".join(o.get("orderName") for o in bad[:10])))
+        # corecția pe cele invalide (cu --correct): repară conservator → cele reparate se eliberează
+        if a.correct and bad:
+            cor = manual = relc = 0
+            print("  — corecție pe %d adrese proaste (conservator)%s:" % (len(bad), "" if a.apply else " [DRY-RUN]"))
+            for o in bad:
+                st, applied, detail = correct_address(xc, o, sh["shopDomain"], apply=a.apply)
+                name = o.get("orderName")
+                if st in ("would-correct", "corrected"):
+                    cor += 1
+                    print("    %s %s → %s" % (name, "✅ corectat" if st == "corrected" else "[ar corecta]", detail))
+                    if a.apply and st == "corrected":
+                        pm = re.match(r"^([A-Za-z]+)", name or "")
+                        stk = toks.get(pm.group(1).upper() if pm else "")
+                        if stk:
+                            r, _ = release_hold(stk["shopDomain"], stk["adminToken"], name); relc += r
+                else:
+                    manual += 1
+            print("    → %d corectabile (%d eliberate după corecție) | %d → CS manual" % (cor, relc, manual))
+        elif bad:
+            print("  → %d cu adresă proastă RĂMÂN ÎN HOLD (rulează cu --correct, sau CS): %s"
+                  % (len(bad), ", ".join(o.get("orderName") for o in bad[:10])))
 
 
 def has_awb(o):
@@ -283,6 +302,84 @@ def verdict(matchers):
     if len(strong) > 1:
         return "⚠️ %d candidați tari → manual" % len(strong), sug
     return "⚠️ niciun candidat ≥0.95 → manual", sug
+
+
+def _digest(obj, n):
+    s = obj if isinstance(obj, str) else json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()[:n]
+
+
+def _fold(s):
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFKD", (s or "")) if not unicodedata.combining(c)).lower().strip()
+
+
+def zip_confirm(xc, zipc):
+    if not zipc:
+        return None
+    t = xc.vtoken()
+    h = {"Authorization": "Bearer " + t} if t else {}
+    s, b = http("GET", VBASE + "/zip-code?countryId=1&zipCode=" + urllib.parse.quote(str(zipc)), h)
+    try:
+        d = json.loads(b)
+        return d if (s == 200 and d) else None
+    except Exception:
+        return None
+
+
+def correct_address(xc, o, shop_domain, apply=False):
+    """CONSERVATOR (după aac): corectează adresa DOAR dacă există UN candidat cu toate core ≥0.95
+    + zip confirmat la /zip-code + numărul casei păstrat. Întoarce (status, applied|None, detalii).
+    status: would-correct | corrected | manual | error:<code>."""
+    oid = o["orderId"]
+    d = xc.by_id(oid)
+    ad = d.get("shippingAddress") or {}
+    ms = xc.match({"country": "Romania", "zipCode": ad.get("zip") or "", "county": ad.get("province") or "",
+                   "city": ad.get("city") or "", "address1": ad.get("address1") or "", "address2": ad.get("address2") or ""})
+    msl = ms if isinstance(ms, list) else (ms.get("matchers") or ms.get("matches") or [])
+    strong = [m for m in msl if all((fscore(m, f)[1] or 0) >= 0.95 for f in ("zipCode", "county", "city", "streetName"))]
+    if len(strong) != 1:
+        return "manual", None, "%d candidați ≥0.95" % len(strong)
+    m = strong[0]
+    czip = str(fscore(m, "zipCode")[0] or "")
+    ccity = fscore(m, "city")[0] or ad.get("city") or ""
+    ccounty = fscore(m, "county")[0] or ad.get("province") or ""
+    tok = m.get("tokenizedAddress") or {}
+    orig_nums = re.findall(r"\b(\d+[A-Za-z]?)\b", ad.get("address1") or "")
+    num = (tok.get("streetNumber") or "").strip()
+    if not num and len(orig_nums) == 1:
+        num = orig_nums[0]
+    if not num or (orig_nums and num not in orig_nums):
+        return "manual", None, "număr casă nesigur"
+    if not zip_confirm(xc, czip):
+        return "manual", None, "zip neconfirmat"
+    # construiește adresa: păstrează TOT, înlocuiește core; strada canonică doar dacă diferă după folding
+    stype = (tok.get("streetType") or "").strip()
+    sname = (tok.get("streetName") or fscore(m, "streetName")[0] or "").strip()
+    new_a1 = ad.get("address1")
+    if _fold(stype + " " + sname) != _fold(ad.get("address1") or ""):
+        new_a1 = ("%s %s Nr. %s" % (stype.title(), sname.title(), num)).strip()
+    applied = dict(ad)
+    applied["country"] = "Romania"
+    if _fold(ccounty) != _fold(ad.get("province") or ""):
+        applied["province"] = ccounty.title()
+    if _fold(ccity) != _fold(ad.get("city") or ""):
+        applied["city"] = ccity.title()
+    applied["zip"] = czip
+    applied["address1"] = new_a1
+    detail = "%s, %s %s (%s)" % (new_a1, applied.get("city"), czip, applied.get("province"))
+    if not apply:
+        return "would-correct", applied, detail
+    body = {"orderId": oid,
+            "idempotencyKey": "aac-%s-%s-%s-%s" % (_digest(shop_domain, 8), oid,
+                              _digest({k: _fold(str(v)) for k, v in ad.items()}, 12), _digest(applied, 12)),
+            "appliedShippingAddress": applied,
+            "expectedAddressHash": d.get("addressHash"), "expectedStatusHash": d.get("statusHash"),
+            "expectedEvidenceHash": d.get("evidenceHash"), "agentClaimedConfidence": 0.96,
+            "agentRationale": "Single canonical candidate, all core fields >=0.95, zip confirmed, house number preserved.",
+            "modelName": "gigi-xconnector", "mcpClientId": "gigi-xconnector"}
+    s, b = http("POST", XBASE + "/api/orders/ai-correct-address", xc.h, body)
+    return ("corrected" if s == 200 else "error:%s" % s), applied, detail
 
 
 def cmd_summary(shops, a):
@@ -338,6 +435,7 @@ def main():
     ap.add_argument("cmd", choices=["summary", "address-issues", "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
     ap.add_argument("--shop"); ap.add_argument("--order"); ap.add_argument("--days", type=int, default=60)
     ap.add_argument("--apply", action="store_true"); ap.add_argument("--json", action="store_true")
+    ap.add_argument("--correct", action="store_true", help="awb-auto: corectează conservator adresele proaste (xConnector ai-correct-address)")
     a = ap.parse_args()
     if a.cmd in ("awb-create", "awb-cancel", "awb-hold"):
         if not a.order:
