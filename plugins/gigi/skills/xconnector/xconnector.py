@@ -8,7 +8,7 @@ xconnector.py — punte READ-ONLY spre xConnector (curierat) pt fluxul ARONA.
 Ce poate AZI (prin cheia API, durabil):
   • address-issues — comenzile NEPORNITE (fără AWB) cu adresă WRONG/UNKNOWN la xConnector,
     cu adresa curentă + ce zice validatorul (candidat + scor) + verdict auto/manual.
-    = semnal de „confirmă/corectează adresa ÎNAINTE de AWB" (prevenție refuzuri), pereche cu gigi:cs-address-guard.
+    = semnal de 'confirmă/corectează adresa ÎNAINTE de AWB" (prevenție refuzuri), pereche cu gigi:cs-address-guard.
   • summary — câte comenzi pe fiecare status, câte fără AWB, per magazin.
 
 Ce NU se poate (încă) prin cheia API: creare AWB / dispatch / facturi — alea-s pe dashboard-ul xConnector
@@ -116,9 +116,10 @@ class XC:
             return []
 
 
-# ── Shopify Admin (pt declanșat Shopify Flow prin tag = create/cancel AWB via xConnector) ──
+# ── Shopify Admin (declanșează Shopify Flow → acțiunea xConnector create/cancel AWB) ──
+# Mecanism: comenzile noi stau pe FULFILLMENT HOLD (Flow Order-created->Hold). Noi eliberăm
+# hold-ul DOAR la comenzile sigure → Flow Fulfillment-hold-released -> xConnector Create AWB.
 SHOPIFY_API = "2026-04"
-AWB_TAGS = {"create": "xc-create-awb", "cancel": "xc-cancel-awb"}
 
 
 def load_shopify_tokens():
@@ -147,41 +148,61 @@ def shopify_gql(shop, token, query):
 
 
 def find_order(shop, token, name):
-    """order GID + tags curente, după orderName (ex GT44004)."""
-    q = 'query{ orders(first:1, query:"name:%s"){ edges{ node{ id name tags displayFulfillmentStatus } } } }' % name.replace('"', "")
+    """nodul comenzii + fulfillmentOrders (id+status), după orderName (ex GT44004)."""
+    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ id name displayFulfillmentStatus '
+         'fulfillmentOrders(first:10){ edges{ node{ id status } } } } } } }') % name.replace('"', "")
     d = shopify_gql(shop, token, q)
     edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
-    return (edges[0]["node"] if edges else None)
+    return edges[0]["node"] if edges else None
 
 
 def cmd_awb(a):
-    """tag-uiește comanda → declanșează Shopify Flow care cheamă acțiunea xConnector (create/cancel AWB)."""
-    action = a.cmd.split("-")[1]  # create | cancel
-    tag = AWB_TAGS[action]
+    """create = ELIBERează hold-ul (→ Flow hold-released -> xConnector Create AWB);
+    hold = pune fulfillment-ul în hold; cancel = info (fără trigger de tag)."""
+    action = a.cmd.split("-")[1]  # create | cancel | hold
     toks = {t["prefix"]: t for t in load_shopify_tokens()}
-    pref = re.match(r"^([A-Za-z]+)", a.order)
-    pref = pref.group(1).upper() if pref else ""
+    pm = re.match(r"^([A-Za-z]+)", a.order)
+    pref = pm.group(1).upper() if pm else ""
     sh = toks.get(pref)
     if not sh:
-        print("Niciun token Shopify pt prefixul '%s' (am: %s). Adaugă-l în KB SHOPIFY_ADMIN_TOKENS." % (pref, list(toks))); return
-    node = find_order(sh["shopDomain"], sh["adminToken"], a.order)
+        print("Niciun token Shopify pt prefixul '%s' (am: %s). Adaugă în KB SHOPIFY_ADMIN_TOKENS." % (pref, list(toks))); return
+    shop, token = sh["shopDomain"], sh["adminToken"]
+    node = find_order(shop, token, a.order)
     if not node:
-        print("Comanda %s negăsită în Shopify (%s)." % (a.order, sh["shopDomain"])); return
-    cur = node.get("tags") or []
-    print("Comandă %s | fulfillment: %s | taguri curente: %s" % (a.order, node.get("displayFulfillmentStatus"), cur))
-    if tag in cur:
-        print("  Tagul '%s' există deja → Flow-ul a fost deja declanșat. Nimic de făcut." % tag); return
+        print("Comanda %s negăsită în Shopify (%s)." % (a.order, shop)); return
+    fos = [e["node"] for e in ((node.get("fulfillmentOrders") or {}).get("edges") or [])]
+    print("Comandă %s | fulfillment: %s | fulfillmentOrders: %s" % (
+        a.order, node.get("displayFulfillmentStatus"), [(f["id"].split("/")[-1], f["status"]) for f in fos]))
+
+    def mut(fo_id, name_):
+        body = ('fulfillmentHold:{reason:OTHER, reasonNotes:"xc-review"}, ' if name_ == "fulfillmentOrderHold" else "")
+        sub = ("fulfillmentOrder{status} " if name_ == "fulfillmentOrderReleaseHold" else "")
+        m = 'mutation{ %s(%sid:"%s"){ %suserErrors{field message} } }' % (name_, body, fo_id, sub)
+        d = shopify_gql(shop, token, m)
+        return (((d.get("data") or {}).get(name_) or {}).get("userErrors")) or d.get("errors")
+
+    if action == "cancel":
+        print("  Anulare AWB: setează un Flow Order-cancelled -> Cancel-shipping-label, sau anulează din dashboard xConnector.")
+        print("  (nu există trigger pe tag pt cancel; hold-release e doar pt create.)"); return
+
+    if action == "hold":
+        tgt = [f for f in fos if f["status"] == "OPEN"]
+        if not tgt:
+            print("  Nimic OPEN de pus în hold (status: %s)." % [f["status"] for f in fos]); return
+        if not a.apply:
+            print("  DRY-RUN: aș pune în hold %d fulfillmentOrder(s)." % len(tgt)); return
+        ok = sum(0 if mut(f["id"], "fulfillmentOrderHold") else 1 for f in tgt)
+        print("  ✅ %d pus în hold." % ok); return
+
+    # create = eliberează hold-ul → Flow 'hold released" → Create AWB
+    held = [f for f in fos if f["status"] == "ON_HOLD"]
+    if not held:
+        print("  Comanda NU e în hold → Flow-ul hold-released nu se declanșează.")
+        print("  → pune-o întâi în hold (Flow Order-created->Hold la comenzi noi, sau `awb-hold --order %s --apply`)." % a.order); return
     if not a.apply:
-        print("  DRY-RUN: aș adăuga tagul '%s' → ar declanșa Flow-ul de %s AWB." % (tag, action))
-        print("  → rulează cu --apply ca să tag-uiești (asigură-te că Flow-ul Shopify e configurat pe acest tag).")
-        return
-    m = 'mutation{ tagsAdd(id:"%s", tags:["%s"]){ node{id} userErrors{field message} } }' % (node["id"], tag)
-    d = shopify_gql(sh["shopDomain"], sh["adminToken"], m)
-    errs = (((d.get("data") or {}).get("tagsAdd") or {}).get("userErrors")) or d.get("errors")
-    if errs:
-        print("  ⚠️ eroare la tagsAdd:", errs)
-    else:
-        print("  ✅ tag '%s' adăugat pe %s → Flow-ul de %s AWB declanșat." % (tag, a.order, action))
+        print("  DRY-RUN: aș ELIBERA hold-ul pe %d fulfillmentOrder(s) → Flow → Create AWB." % len(held)); return
+    ok = sum(0 if mut(f["id"], "fulfillmentOrderReleaseHold") else 1 for f in held)
+    print("  ✅ hold eliberat pe %d → Flow hold-released -> xConnector creează AWB." % ok)
 
 
 def has_awb(o):
@@ -258,11 +279,11 @@ def cmd_issues(shops, a):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["summary", "address-issues", "awb-create", "awb-cancel"])
+    ap.add_argument("cmd", choices=["summary", "address-issues", "awb-create", "awb-cancel", "awb-hold"])
     ap.add_argument("--shop"); ap.add_argument("--order"); ap.add_argument("--days", type=int, default=60)
     ap.add_argument("--apply", action="store_true"); ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
-    if a.cmd in ("awb-create", "awb-cancel"):
+    if a.cmd in ("awb-create", "awb-cancel", "awb-hold"):
         if not a.order:
             print("Dă --order (ex: --order GT44004)."); sys.exit(1)
         cmd_awb(a); return
