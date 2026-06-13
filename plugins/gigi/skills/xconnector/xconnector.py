@@ -205,6 +205,62 @@ def cmd_awb(a):
     print("  ✅ hold eliberat pe %d → Flow hold-released -> xConnector creează AWB." % ok)
 
 
+def release_hold(shop, token, name):
+    """eliberează hold-ul pe fulfillment-order-ele ON_HOLD ale comenzii. (nr eliberate, nr held)"""
+    node = find_order(shop, token, name)
+    if not node:
+        return 0, 0
+    fos = [e["node"] for e in ((node.get("fulfillmentOrders") or {}).get("edges") or [])]
+    held = [f for f in fos if f["status"] == "ON_HOLD"]
+    rel = 0
+    for f in held:
+        m = 'mutation{ fulfillmentOrderReleaseHold(id:"%s"){ userErrors{message} } }' % f["id"]
+        d = shopify_gql(shop, token, m)
+        e = (((d.get("data") or {}).get("fulfillmentOrderReleaseHold") or {}).get("userErrors")) or d.get("errors")
+        if not e:
+            rel += 1
+    return rel, len(held)
+
+
+def cmd_awb_auto(a):
+    """POARTA auto-AWB: validez adresa la xConnector și eliberez hold-ul (→ Flow → Create AWB)
+    DOAR la comenzile fără AWB cu adresă VALIDĂ. WRONG/UNKNOWN rămân în hold (CS / auto-correct)."""
+    import datetime
+    dto = datetime.date.today().isoformat()
+    dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
+    shops = load_shops()
+    toks = {t["prefix"]: t for t in load_shopify_tokens()}
+    for sh in shops:
+        if a.shop and sh["shopDomain"] != a.shop:
+            continue
+        xc = XC(sh["apiKey"])
+        noawb = [o for o in xc.orders(dfrom, dto) if not has_awb(o)]
+        valid = [o for o in noawb if o.get("addressStatus") == "VALID"]
+        bad = [o for o in noawb if o.get("addressStatus") in ("WRONG", "UNKNOWN")]
+        print("═" * 70)
+        print("  %s — %d fără AWB | %d adresă VALIDĂ | %d adresă proastă (rămân în hold)"
+              % (sh["shopDomain"], len(noawb), len(valid), len(bad)))
+        rel = 0
+        for o in valid:
+            name = o.get("orderName")
+            pm = re.match(r"^([A-Za-z]+)", name or "")
+            st = toks.get(pm.group(1).upper() if pm else "")
+            if not st:
+                continue
+            if not a.apply:
+                node = find_order(st["shopDomain"], st["adminToken"], name)
+                fos = [e["node"] for e in ((node or {}).get("fulfillmentOrders", {}).get("edges") or [])] if node else []
+                if any(f["status"] == "ON_HOLD" for f in fos):
+                    print("  [dry] aș elibera %s (adresă validă, în hold) → AWB" % name)
+                continue
+            r, _ = release_hold(st["shopDomain"], st["adminToken"], name)
+            rel += r
+        if a.apply:
+            print("  → ELIBERAT %d comenzi cu adresă validă → Flow creează AWB." % rel)
+        print("  → %d cu adresă proastă RĂMÂN ÎN HOLD (corecție / CS): %s"
+              % (len(bad), ", ".join(o.get("orderName") for o in bad[:10])))
+
+
 def has_awb(o):
     return any((d.get("documentType") == "SHIPPING_LABEL") for d in (o.get("documents") or []) if isinstance(d, dict))
 
@@ -279,7 +335,7 @@ def cmd_issues(shops, a):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["summary", "address-issues", "awb-create", "awb-cancel", "awb-hold"])
+    ap.add_argument("cmd", choices=["summary", "address-issues", "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
     ap.add_argument("--shop"); ap.add_argument("--order"); ap.add_argument("--days", type=int, default=60)
     ap.add_argument("--apply", action="store_true"); ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
@@ -287,6 +343,8 @@ def main():
         if not a.order:
             print("Dă --order (ex: --order GT44004)."); sys.exit(1)
         cmd_awb(a); return
+    if a.cmd == "awb-auto":
+        cmd_awb_auto(a); return
     import datetime
     a.dto = datetime.date.today().isoformat()
     a.dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
