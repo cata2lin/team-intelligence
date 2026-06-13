@@ -140,6 +140,7 @@ def main():
     ap.add_argument("--deep", action="store_true", help="rulează și extragerea profundă (lent)")
     ap.add_argument("--deep-all", action="store_true", help="deep pe TOATE tichetele, nu doar sociale")
     ap.add_argument("--push", action="store_true", help="împinge taguri+notă în Richpanel (richpanel_apply --apply)")
+    ap.add_argument("--llm", action="store_true", help="reclasifică OPEN cu LLM (Gemini) — categorie+sentiment precise")
     a = ap.parse_args()
     t0 = time.time()
     print("═" * 64)
@@ -166,6 +167,11 @@ def main():
         deep_args.append("--fast")  # implicit: doar pasul rapid (nume FB, fără MCP) — ieftin, rulează mereu
     run("4) DEEP (%s)" % ("MCP complet" if (a.deep or a.deep_all) else "rapid: nume FB"), deep_args)
     store_sentiment()
+    if a.llm:  # reclasifică OPEN cu LLM (suprascrie regulile) ÎNAINTE de comment/quality, ca acelea să folosească categoria corectă
+        llm_args = [os.path.join(HERE, "richpanel_llm.py")]
+        if a.recent:
+            llm_args += ["--recent", str(a.recent)]
+        run("5b) LLM reclasificare OPEN (Gemini)", llm_args)
     store_comment_type()
     store_quality_flags()
     run("8) SYNC → metrics.richpanel_tickets (Postgres partajat)", [os.path.join(HERE, "richpanel_sync.py")])
