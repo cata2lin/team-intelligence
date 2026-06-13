@@ -1,36 +1,51 @@
 ---
 name: xconnector
-description: Punte READ-ONLY spre xConnector (curierat) pt magazinele ARONA — scoate comenzile NEPORNITE (fără AWB) cu adresă WRONG/UNKNOWN validată de xConnector, cu adresa curentă + sugestia validatorului + verdict auto/manual, ca să confirmi/corectezi adresa ÎNAINTE să se printeze AWB-ul (prevenție refuzuri). Pereche cu gigi:cs-address-guard (detecție din DB) și cu skill-ul xConnector aac (/agentic-address-correction) pt corecția propriu-zisă. Use pt „ce comenzi au adresă proastă la xconnector", „adrese de confirmat înainte de awb", „xconnector address issues", „comenzi nepornite cu adresă greșită george talent". Read-only — nu creează AWB, nu dispecerează, nu scrie nimic.
+description: Punte spre xConnector (curierat) pt magazinele ARONA. CITEȘTE comenzile fără AWB cu adresă WRONG/UNKNOWN (validate de xConnector) + adresa curentă + sugestia validatorului, ȘI le CORECTEAZĂ automat conservator (aac ai-correct-address) pe cele sigure, sărind comenzile cu tag „duplicata". Comanda `correct` e cron-ul fluxului order-created: adresă proastă rămasă unfulfilled → corecție → VALID → gata de AWB; cele grele → triaj CS. Use pt „corectează adresele proaste george talent", „xconnector address issues", „cron corecție adrese awb", „comenzi fără awb cu adresă greșită". Scrie DOAR corecții de adresă (gate dur), niciodată AWB/dispatch.
 ---
 
 # /xconnector
 
-Citește din **API-ul xConnector** (cheie API per magazin) comenzile cu adresă problemă care **n-au încă AWB**
-(= nepornite) — exact cele unde merită confirmat/corectat adresa înainte ca depozitul să plătească eticheta.
+Punte spre **API-ul xConnector** (cheie API per magazin) pt fluxul de adrese al ARONA. Model actual
+(order-created): comanda nouă → Shopify Flow creează AWB; cele cu **tag „duplicata"** sau **adresă proastă**
+rămân **unfulfilled**. Skill-ul ăsta trece prin cele unfulfilled fără AWB, **corectează** adresele sigure
+(→ devin VALID → gata de AWB) și **triază** restul pt CS.
 
 ## Comenzi
 ```
 uv run xconnector.py summary                                  # per magazin: câte fără AWB, pe ce status
 uv run xconnector.py address-issues [--shop <domain>] [--days 60] [--json]
+uv run xconnector.py correct [--shop <domain>] [--days 60] [--apply]    # CRON
 ```
-- `summary` — per magazin: total comenzi în fereastră, câte FĂRĂ AWB, distribuție status, câte de confirmat.
-- `address-issues` — lista comenzilor nepornite cu adresă `WRONG`/`UNKNOWN`: order, status, **adresa curentă**,
-  **sugestia validatorului** (candidat + locality + zip) și **verdict** (✅ auto-corectabil dacă există UN
-  singur candidat cu toate scorurile ≥0.95; altfel `manual`). `--json` pt dialer/Sheet/altă automatizare.
+- `summary` — per magazin: total în fereastră, câte FĂRĂ AWB, distribuție status.
+- `address-issues` — lista comenzilor nepornite cu adresă `WRONG`/`UNKNOWN` + adresa curentă + sugestia
+  validatorului + verdict. `--json` pt automatizări.
+- **`correct`** (cron-ul) — pt fiecare comandă fără AWB cu adresă `WRONG`/`UNKNOWN`:
+  - tag **„duplicata"** (Shopify) → **skip** (nu corectez, nu trimit la AWB — se anulează separat);
+  - **corectabilă** (gate aac: UN candidat cu zip/oraș/județ ≥0.95 + stradă ≥0.90 + `/zip-code` confirmă +
+    număr casă păstrat) → `ai-correct-address` (cu `--apply`) → adresa devine VALID → gata de AWB;
+  - **grea** (rural fără stradă / fără număr / garbage / ambiguu) → **triaj CS** (cu motiv).
+  Fără `--apply` = **dry-run** (arată ce ar face). Corecția face adresa VALID în xConnector; AWB-ul se
+  (re)creează separat (bulk în dashboard / al doilea Flow) — volumul corectabil e mic.
 
-## Auth (cheie API xConnector, per magazin)
-Sursă, în ordine: secret KB **`XCONNECTOR_SHOPS`** (JSON `[{ "shopDomain":"…","apiKey":"…" }]`), altfel
-`~/.aac/input.json`. Cheia o generezi în xConnector (Profil → API Keys). **Nu se printează niciodată.**
-Cheia costă ~$30/magazin — momentan e activat doar **George Talent** (`ix5bxc-hr.myshopify.com`).
+## Auth (cheie API xConnector + token Shopify Admin, per magazin)
+- xConnector: secret KB **`XCONNECTOR_SHOPS`** (JSON `[{shopDomain,apiKey}]`), altfel `~/.aac/input.json`.
+- Shopify (pt tagul „duplicata"): secret KB **`SHOPIFY_ADMIN_TOKENS`** (JSON `[{prefix,shopDomain,adminToken}]`).
+- Cheile **nu se printează niciodată**. Cheia xConnector costă ~$30/magazin — momentan doar **George Talent**
+  (`ix5bxc-hr.myshopify.com`).
 
-## Ce poate / ce NU poate (important)
-- ✅ **Citire** (durabil, prin cheia API): ce comenzi au adresă WRONG/UNKNOWN, care n-au AWB, connectors, documente.
-- ✅ **Corecția de adrese** o face skill-ul oficial xConnector **`/agentic-address-correction`** (aac, supervised,
-  dry-run→`--apply`, porți de siguranță). Acest skill îți dă SEMNALUL + triajul; corecția fină → aac.
-- ❌ **Creare AWB / dispatch / facturi** — NU prin cheia API: trăiesc pe dashboard-ul xConnector (cookie+CSRF),
-  cheia API primește 403. Când xConnector le expune în API (sau activează `/mcp`), se adaugă aici.
+## Siguranță (corecția de adrese)
+Corecția urmează porțile skill-ului oficial xConnector **aac** (`/agentic-address-correction`), conservator:
+**un singur candidat** (fără competitor) + scoruri pe câmpuri (zip/oraș/județ ≥0.95, stradă ≥0.90) +
+`/zip-code` confirmă + **numărul casei păstrat** + nume/telefon/`address2` păstrate. Regula de aur: *un zip
+greșit pe etichetă e mai rău decât nicio corecție* → incert = lasă la CS. Plasă suplimentară: flow-ul ARONA
+care contactează client+curier dacă o adresă invalidă ajunge la preluare. Cele grele (rural/garbage/ambiguu)
+NU se ating — merg la CS.
 
-## Flux ARONA
-`comandă nouă → adresă posibil greșită → (xConnector validează) → confirmă/corectează ÎNAINTE de AWB → AWB`.
-Folosește-l ca semnal zilnic alături de [gigi:cs-address-guard] (care detectează din DB-ul intern) — xConnector
-aduce validarea reală pe baza de adrese a curierului. Read-only; nu atinge comenzile expediate.
+## Ce NU poate
+❌ Creare AWB / dispatch / facturi prin cheia API — alea-s pe dashboard-ul xConnector (cookie+CSRF), cheia API
+dă 403. AWB-ul se face prin Shopify Flow (acțiunea xConnector „Create shipping label"). Skill-ul ăsta doar
+pregătește adresa (corecție → VALID) ca AWB-ul să reușească.
+
+## Cron (VPS)
+`correct --apply` rulează periodic pe VPS (flock + log): corectează automat ce e sigur, sare duplicatele,
+scoate triajul CS. Vezi `gigi:xconnector` în KB pt detalii deploy. Pereche cu [gigi:cs-address-guard].

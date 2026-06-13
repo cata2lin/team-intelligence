@@ -156,6 +156,18 @@ def find_order(shop, token, name):
     return edges[0]["node"] if edges else None
 
 
+def shopify_order_tags(name, toks):
+    """tagurile comenzii Shopify (lower-case), după orderName (ex GT43675). [] dacă n-o găsesc."""
+    pm = re.match(r"^([A-Za-z]+)", name or "")
+    t = toks.get(pm.group(1).upper()) if pm else None
+    if not t:
+        return []
+    q = 'query{ orders(first:1, query:"name:%s"){ edges{ node{ tags } } } }' % (name or "").replace('"', "")
+    d = shopify_gql(t["shopDomain"], t["adminToken"], q)
+    edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
+    return [str(x).lower() for x in (edges[0]["node"].get("tags") or [])] if edges else []
+
+
 def cmd_awb(a):
     """create = ELIBERează hold-ul (→ Flow hold-released -> xConnector Create AWB);
     hold = pune fulfillment-ul în hold; cancel = info (fără trigger de tag)."""
@@ -337,9 +349,12 @@ def correct_address(xc, o, shop_domain, apply=False):
     ms = xc.match({"country": "Romania", "zipCode": ad.get("zip") or "", "county": ad.get("province") or "",
                    "city": ad.get("city") or "", "address1": ad.get("address1") or "", "address2": ad.get("address2") or ""})
     msl = ms if isinstance(ms, list) else (ms.get("matchers") or ms.get("matches") or [])
-    strong = [m for m in msl if all((fscore(m, f)[1] or 0) >= 0.95 for f in ("zipCode", "county", "city", "streetName"))]
+    # zip/oraș/județ ≥0.95 + stradă ≥0.90 (relaxat — există plasă de siguranță DPD/client la preluare).
+    # UN singur candidat (fără competitor) = nu riscăm o adresă validă-dar-greșită.
+    strong = [m for m in msl if all((fscore(m, f)[1] or 0) >= 0.95 for f in ("zipCode", "county", "city"))
+              and (fscore(m, "streetName")[1] or 0) >= 0.90]
     if len(strong) != 1:
-        return "manual", None, "%d candidați ≥0.95" % len(strong)
+        return "manual", None, "%d candidați (zip/oraș/județ≥0.95, stradă≥0.90)" % len(strong)
     m = strong[0]
     czip = str(fscore(m, "zipCode")[0] or "")
     ccity = fscore(m, "city")[0] or ad.get("city") or ""
@@ -355,7 +370,8 @@ def correct_address(xc, o, shop_domain, apply=False):
         return "manual", None, "zip neconfirmat"
     # construiește adresa: păstrează TOT, înlocuiește core; strada canonică doar dacă diferă după folding
     stype = (tok.get("streetType") or "").strip()
-    sname = (tok.get("streetName") or fscore(m, "streetName")[0] or "").strip()
+    # numele CANONIC al străzii (valoarea matcher-ului), nu forma tokenizată a clientului (aac HARD RULE 5)
+    sname = (fscore(m, "streetName")[0] or tok.get("streetName") or "").strip()
     new_a1 = ad.get("address1")
     if _fold(stype + " " + sname) != _fold(ad.get("address1") or ""):
         new_a1 = ("%s %s Nr. %s" % (stype.title(), sname.title(), num)).strip()
@@ -380,6 +396,55 @@ def correct_address(xc, o, shop_domain, apply=False):
             "modelName": "gigi-xconnector", "mcpClientId": "gigi-xconnector"}
     s, b = http("POST", XBASE + "/api/orders/ai-correct-address", xc.h, body)
     return ("corrected" if s == 200 else "error:%s" % s), applied, detail
+
+
+def cmd_correct(a):
+    """CRON (model order-created): comenzile fără AWB cu adresă WRONG/UNKNOWN →
+    tag 'duplicata' = skip · corectabilă = aac ai-correct-address (cu --apply) · grea = triaj CS.
+    Fără --apply = dry-run (arată ce ar face). Corecția face adresa VALID → gata de AWB (bulk dashboard)."""
+    import datetime
+    dto = datetime.date.today().isoformat()
+    dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
+    shops = load_shops()
+    toks = {t["prefix"]: t for t in load_shopify_tokens()}
+    for sh in shops:
+        if a.shop and sh["shopDomain"] != a.shop:
+            continue
+        xc = XC(sh["apiKey"])
+        bad = [o for o in xc.orders(dfrom, dto) if not has_awb(o) and o.get("addressStatus") in ("WRONG", "UNKNOWN")]
+        corrected = dup = cs = 0
+        cs_rows = []
+        print("═" * 74)
+        print("  %s — %d fără AWB cu adresă WRONG/UNKNOWN (%dz)%s"
+              % (sh["shopDomain"], len(bad), a.days, "" if a.apply else "  [DRY-RUN]"))
+        for o in bad:
+            name = o.get("orderName")
+            st, applied, detail = correct_address(xc, o, sh["shopDomain"], apply=False)
+            if st == "would-correct":
+                if "duplicata" in shopify_order_tags(name, toks):
+                    dup += 1
+                    print("  %s  ⏭  duplicata → skip" % name)
+                    continue
+                if a.apply:
+                    st2, _, det2 = correct_address(xc, o, sh["shopDomain"], apply=True)
+                    if st2 == "corrected":
+                        corrected += 1
+                        print("  %s  ✅ corectat → %s  (VALID, gata de AWB)" % (name, det2))
+                    else:
+                        cs += 1
+                        print("  %s  ⚠ apply %s" % (name, st2))
+                else:
+                    corrected += 1
+                    print("  %s  [ar corecta] → %s" % (name, detail))
+            else:
+                cs += 1
+                cs_rows.append((name, o.get("addressStatus"), detail or ""))
+        print("  → %s%d corectate · %d duplicata skip · %d → CS"
+              % ("APLICAT: " if a.apply else "ar corecta: ", corrected, dup, cs))
+        if cs_rows:
+            print("  Triaj CS (adrese grele — contact client):")
+            for nm, status, why in cs_rows[:40]:
+                print("    %-9s %-8s %s" % (nm, status, why))
 
 
 def cmd_summary(shops, a):
@@ -432,7 +497,7 @@ def cmd_issues(shops, a):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["summary", "address-issues", "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
+    ap.add_argument("cmd", choices=["summary", "address-issues", "correct", "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
     ap.add_argument("--shop"); ap.add_argument("--order"); ap.add_argument("--days", type=int, default=60)
     ap.add_argument("--apply", action="store_true"); ap.add_argument("--json", action="store_true")
     ap.add_argument("--correct", action="store_true", help="awb-auto: corectează conservator adresele proaste (xConnector ai-correct-address)")
@@ -443,6 +508,8 @@ def main():
         cmd_awb(a); return
     if a.cmd == "awb-auto":
         cmd_awb_auto(a); return
+    if a.cmd == "correct":
+        cmd_correct(a); return
     import datetime
     a.dto = datetime.date.today().isoformat()
     a.dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
