@@ -21,7 +21,7 @@ Auth: cheia API xConnector per magazin. Sursă (în ordine): secret KB `XCONNECT
   uv run xconnector.py address-issues [--shop ix5bxc-hr.myshopify.com] [--days 60] [--json]
 Read-only. Nu scrie nimic în xConnector.
 """
-import os, sys, json, re, time, argparse, subprocess, urllib.parse, urllib.request, urllib.error
+import os, sys, json, re, time, hashlib, argparse, subprocess, urllib.parse, urllib.request, urllib.error
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
@@ -116,6 +116,74 @@ class XC:
             return []
 
 
+# ── Shopify Admin (pt declanșat Shopify Flow prin tag = create/cancel AWB via xConnector) ──
+SHOPIFY_API = "2026-04"
+AWB_TAGS = {"create": "xc-create-awb", "cancel": "xc-cancel-awb"}
+
+
+def load_shopify_tokens():
+    """[{prefix, shopDomain, adminToken}] din KB SHOPIFY_ADMIN_TOKENS (sau env)."""
+    raw = os.environ.get("SHOPIFY_ADMIN_TOKENS")
+    if not raw:
+        try:
+            raw = subprocess.run(["uv", "run", KB, "secret-get", "SHOPIFY_ADMIN_TOKENS"],
+                                 capture_output=True, text=True, timeout=30).stdout.strip()
+        except Exception:
+            raw = ""
+    try:
+        return json.loads(raw) if raw.startswith("[") else []
+    except Exception:
+        return []
+
+
+def shopify_gql(shop, token, query):
+    url = "https://%s/admin/api/%s/graphql.json" % (shop, SHOPIFY_API)
+    h = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
+    s, b = http("POST", url, h, {"query": query})
+    try:
+        return json.loads(b)
+    except Exception:
+        return {"_status": s, "_raw": b[:200]}
+
+
+def find_order(shop, token, name):
+    """order GID + tags curente, după orderName (ex GT44004)."""
+    q = 'query{ orders(first:1, query:"name:%s"){ edges{ node{ id name tags displayFulfillmentStatus } } } }' % name.replace('"', "")
+    d = shopify_gql(shop, token, q)
+    edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
+    return (edges[0]["node"] if edges else None)
+
+
+def cmd_awb(a):
+    """tag-uiește comanda → declanșează Shopify Flow care cheamă acțiunea xConnector (create/cancel AWB)."""
+    action = a.cmd.split("-")[1]  # create | cancel
+    tag = AWB_TAGS[action]
+    toks = {t["prefix"]: t for t in load_shopify_tokens()}
+    pref = re.match(r"^([A-Za-z]+)", a.order)
+    pref = pref.group(1).upper() if pref else ""
+    sh = toks.get(pref)
+    if not sh:
+        print("Niciun token Shopify pt prefixul '%s' (am: %s). Adaugă-l în KB SHOPIFY_ADMIN_TOKENS." % (pref, list(toks))); return
+    node = find_order(sh["shopDomain"], sh["adminToken"], a.order)
+    if not node:
+        print("Comanda %s negăsită în Shopify (%s)." % (a.order, sh["shopDomain"])); return
+    cur = node.get("tags") or []
+    print("Comandă %s | fulfillment: %s | taguri curente: %s" % (a.order, node.get("displayFulfillmentStatus"), cur))
+    if tag in cur:
+        print("  Tagul '%s' există deja → Flow-ul a fost deja declanșat. Nimic de făcut." % tag); return
+    if not a.apply:
+        print("  DRY-RUN: aș adăuga tagul '%s' → ar declanșa Flow-ul de %s AWB." % (tag, action))
+        print("  → rulează cu --apply ca să tag-uiești (asigură-te că Flow-ul Shopify e configurat pe acest tag).")
+        return
+    m = 'mutation{ tagsAdd(id:"%s", tags:["%s"]){ node{id} userErrors{field message} } }' % (node["id"], tag)
+    d = shopify_gql(sh["shopDomain"], sh["adminToken"], m)
+    errs = (((d.get("data") or {}).get("tagsAdd") or {}).get("userErrors")) or d.get("errors")
+    if errs:
+        print("  ⚠️ eroare la tagsAdd:", errs)
+    else:
+        print("  ✅ tag '%s' adăugat pe %s → Flow-ul de %s AWB declanșat." % (tag, a.order, action))
+
+
 def has_awb(o):
     return any((d.get("documentType") == "SHIPPING_LABEL") for d in (o.get("documents") or []) if isinstance(d, dict))
 
@@ -190,9 +258,14 @@ def cmd_issues(shops, a):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["summary", "address-issues"])
-    ap.add_argument("--shop"); ap.add_argument("--days", type=int, default=60); ap.add_argument("--json", action="store_true")
+    ap.add_argument("cmd", choices=["summary", "address-issues", "awb-create", "awb-cancel"])
+    ap.add_argument("--shop"); ap.add_argument("--order"); ap.add_argument("--days", type=int, default=60)
+    ap.add_argument("--apply", action="store_true"); ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
+    if a.cmd in ("awb-create", "awb-cancel"):
+        if not a.order:
+            print("Dă --order (ex: --order GT44004)."); sys.exit(1)
+        cmd_awb(a); return
     import datetime
     a.dto = datetime.date.today().isoformat()
     a.dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
