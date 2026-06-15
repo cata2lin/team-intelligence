@@ -103,5 +103,12 @@ Deep detail, exact patterns, and copy templates: **`reference/playbook.md`**.
 The traps that waste hours: **`reference/pitfalls.md`**.
 Drop-in Liquid / JSON-LD: **`reference/snippets.md`**.
 
+## Crawl-based internal-link audit — `linkgraph.py`
+The Admin-API audit above sees pages in isolation; this sees the **link graph**. BFS-crawls from the homepage (seeded with the full sitemap incl. Shopify's `?from=&to=` sub-sitemaps), builds the internal link graph, computes internal **PageRank**, click-depth and inbound counts, and flags **orphan** (0 inbound), **under-linked** (<3), and **too-deep** (>3 clicks) pages. Pure stdlib + requests/bs4, no keys.
+```bash
+uv run linkgraph.py audit --site esteban.ro --max 150 --threads 10
+```
+Typical win it surfaces: **blog articles orphaned** (0 internal inbound) — on esteban.ro every blog post was an orphan, so the AEO/organic content wasn't linked from anywhere. Fix = add contextual internal links from high-PageRank pages (top collections, a blog hub) down to the buried product/collection/blog pages it lists. Pairs with `gigi:shopify-geo` (that orphaned blog content is exactly the AEO play).
+
 ## Logging (team convention)
 After a run: `kb.py log --type skill --action used --name gigi:shopify-seo --summary "…"`.
