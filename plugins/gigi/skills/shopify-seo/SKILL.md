@@ -119,5 +119,20 @@ uv run drift.py history  --url https://esteban.ro/collections/dama
 ```
 Snapshots title/meta/canonical/robots/H1/H2-count/JSON-LD types/OG/word-count + a hash. `compare` flags 🔴 CRITIC (title/canonical/robots-noindex/status/schema removed), 🟡 WARN (meta desc/H1/OG/word-count drop >30%), ℹ️ info. Run `baseline` weekly; `compare` (or re-baseline) to see what changed since. Pairs with GSC `wow` (`gigi:analytics`): wow tells you traffic dropped, drift tells you *which on-page element broke*.
 
+## Apply listing/SEO fixes to a product — `scripts/product_fix.py` (DRY-RUN default)
+The write-layer that turns diagnoses (from `gigi:cro`, `gigi:pricewatch compare`, `gigi:merchant-center-feed`, `gigi:cross-sell`) into actual product changes — **selectively + safely**.
+```bash
+# DRY-RUN (writes nothing) — shows before → after for each fix you pass:
+uv run scripts/product_fix.py --store esteban --product <handle> \
+   --seo-title "..." --seo-description "..." --body-file new.html
+# Grandia & the single 'shopify' app: --app SHOPIFY --store n12w89-yy.myshopify.com
+# Cross-sell metafield:  --metafield "custom.bought_together=gid://shopify/Product/..."
+# Execute only after approval:  add --apply
+```
+- **DRY-RUN by default** — nothing is written without `--apply` (team write-guardrail, like `cs-actions`).
+- **Selective approval** = you pass only the fix flags you approve (`--seo-title`/`--seo-description`/`--body`/`--metafield`); each shows `era → nou`.
+- **Two apps:** `--app SHOPIFY_ARONA` (default: esteban/gt/nubra/labnoir) or `--app SHOPIFY` (the `n12w89-yy.myshopify.com` store = Grandia etc.).
+- **Scope (all / low-sellers / specific):** the *selection* of which products comes from the diagnosis skills (cross-sell low-sellers, merchant-feed disapprovals, pricewatch compare) — state in chat which set + how many you're acting on; `product_fix` applies per product. Verified DRY-RUN: Grandia "raft-depozitare…" had an **empty SEO description** → the writer would fill it.
+
 ## Logging (team convention)
 After a run: `kb.py log --type skill --action used --name gigi:shopify-seo --summary "…"`.
