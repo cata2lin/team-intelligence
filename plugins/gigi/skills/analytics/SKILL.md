@@ -69,6 +69,9 @@ uv run gsc.py wow      --brand esteban         # WEEK-OVER-WEEK: last 7d vs prio
 uv run gsc.py wow      --all --days 7          # WoW one-liner for every site — "did our SEO work move anything?"
 uv run gsc.py rank     --brand gt --query "parfumuri barbati|parfum barbati"   # OUR position for exact keywords + ranking page
 uv run gsc.py rank     --brand esteban --contains "parfum"                      # every keyword we appear for that contains a term
+uv run gsc.py opportunities --brand grandia          # non-brand QUICK-WINS: striking-distance (pos 5-20) + low-CTR keywords
+uv run gsc.py opportunities --all --min-impr 50      # opportunity scan across every site
+uv run gsc.py index    --brand esteban --url "https://esteban.ro/collections/dama|https://esteban.ro/"   # is the page indexed?
 ```
 Flags: `--brand <name>` (mapped to its `sc-domain:`) or `--site <domain>`; `--days` (default 28; `wow` default 7); `--limit`. Data lags ~2–3 days (range ends 3 days ago).
 
@@ -79,6 +82,8 @@ Flags: `--brand <name>` (mapped to its `sc-domain:`) or `--site <domain>`; `--da
 | `summary` | site-level SEO health (clicks/impr/CTR/position), `--all` to compare every brand |
 | **`wow`** | last N days vs prior N — clicks/impr/position deltas **split brand vs non-brand**, daily trend, top non-brand queries. The "did last week's SEO work move anything?" view. Non-brand = the real SEO signal; brand-name typos (estaban/numbra/berasil…) are fuzzy-matched into *brand* so they don't fake non-brand wins. |
 | **`rank`** | **OUR position** for given keywords: `--query "a\|b"` (exact, returns avg position + clicks + the page that ranks) or `--contains "term"` (every keyword we appear for containing that term). Answers "how do we situate on keyword X". *Caveat:* GSC only shows keywords we already get impressions for — `(nu apărem / 0 impr)` means we're not ranking high enough to register, NOT that we're #1. For the full SERP / who outranks us / keywords we don't appear for, you need a SERP source (see below). |
+| **`opportunities`** | non-brand SEO **quick-wins**: STRIKING-DISTANCE keywords (position 5–20 with real impressions → nudge to page 1 = traffic) + LOW-CTR-despite-top-rank (pos ≤5 but CTR <20% → rewrite title/meta). Brand/typos excluded. The "where do I get the most SEO for the least effort" view. `--all`, `--min-impr`. |
+| **`index`** | URL index status via GSC **URL Inspection** — `--url "https://…\|…"` → coverage state (indexed / crawled-not-indexed / excluded) + last crawl date. Use to confirm new/optimized pages got indexed before expecting them to rank. |
 
 > **GSC `rank` vs the live SERP:** `rank` is free + authoritative for *our* position on keywords we already surface for (e.g. GT is pos ~11 on "parfumuri barbati", Grandia pos ~8–12 on product terms — page 1–2 "striking distance"). It does NOT show competitors or keywords where we don't appear. For that you need a SERP API (DataForSEO/SerpApi — paid, none configured) or a live browser SERP scrape (chrome-devtools, fragile, spot-checks only).
 

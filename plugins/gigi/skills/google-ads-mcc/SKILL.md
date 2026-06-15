@@ -46,6 +46,13 @@ uv run gads.py report --customer 7566352958 --query "SELECT campaign.name, campa
 `costMicros` is shown ÷1e6 (RON). Ranges: TODAY, YESTERDAY, LAST_7_DAYS, LAST_14_DAYS, LAST_30_DAYS, THIS_MONTH.
 Useful signals: `campaign.primary_status_reasons` = `BUDGET_CONSTRAINED` (→ scale), bidding strategy, asset group listing groups.
 
+### Keyword research (Keyword Planner) — also doubles as an SEO keyword tool
+```bash
+uv run gads.py keywords --customer 9069610821 --seed "parfum barbati,parfumuri dama" --limit 40
+uv run gads.py keywords --customer 9069610821 --url "https://george-talent.ro/collections/barbati"   # ideas from a page
+```
+Returns each keyword's **avg monthly searches** + competition (HIGH/MEDIUM/LOW), Romania/Romanian by default (`--geo 2642 --lang 1032`). `--customer` can be any account under the MCC. Use to size demand and find NEW keywords to target — pairs with `gigi:analytics gsc.py rank/opportunities` (which show where you already rank) to build an SEO content plan: e.g. "parfum barbati" = 27k searches/mo and GT sits at position ~11 → a clear target.
+
 ## 2. Mutations — **dry-run by default, add `--apply` to execute**
 Treat a write to a live ad account like a destructive DB write: dry-run, confirm with the user, then `--apply`.
 ```bash

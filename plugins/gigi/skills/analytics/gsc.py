@@ -286,6 +286,57 @@ def cmd_wow(creds, args):
     for c, i, pos, q in nbL[:10]:
         print(f"    {c:>5,} cl {i:>6,} imp  pos {pos:>4.1f}  {q[:55]}")
 
+def _opps_for(token, site, tokens, days, min_impr):
+    start, end = _range(days)
+    rows = _sa_query(token, site, {"startDate": start, "endDate": end, "dimensions": ["query"], "rowLimit": 25000}).get("rows", [])
+    strike, lowctr = [], []
+    for r in rows:
+        c = int(r["clicks"]); i = int(r["impressions"]); pos = r["position"]; ctr = r["ctr"]; q = r["keys"][0]
+        if _is_brand(q, tokens) or i < min_impr:
+            continue
+        if 5 <= pos <= 20:
+            strike.append((i, pos, c, ctr, q))
+        if pos <= 5 and ctr < 0.20:
+            lowctr.append((i, pos, c, ctr, q))
+    strike.sort(reverse=True); lowctr.sort(reverse=True)
+    return strike, lowctr
+
+def cmd_opportunities(creds, args):
+    targets = ([(bk, s) for s, bk in {v: k for k, v in SITES.items()}.items()] if args.all
+              else [(args.brand, _site(args))])
+    for bk, site in sorted(targets, key=lambda x: x[1]):
+        toks = _tokens_for(bk, site)
+        strike, lowctr = _opps_for(creds.token, site, toks, args.days, args.min_impr)
+        print(f"\n{'='*70}\n{site}   non-brand SEO opportunities   (last {args.days}d, impr>={args.min_impr})\n{'='*70}")
+        print(f"  STRIKING DISTANCE (pos 5-20 → push to page 1), by impressions:")
+        if not strike: print("    (none)")
+        for i, pos, c, ctr, q in strike[:15]:
+            print(f"    pos {pos:>4.1f}  {i:>6,} imp  {c:>4,} cl  {100*ctr:>4.1f}%  {q[:52]}")
+        print(f"  LOW CTR despite TOP rank (pos<=5, CTR<20% → rewrite title/meta):")
+        if not lowctr: print("    (none)")
+        for i, pos, c, ctr, q in lowctr[:8]:
+            print(f"    pos {pos:>4.1f}  {i:>6,} imp  {100*ctr:>4.1f}% CTR  {q[:52]}")
+
+def cmd_index(creds, args):
+    site = _site(args)
+    urls = [u.strip() for u in (args.url or "").split("|") if u.strip()]
+    if not urls:
+        sys.exit('Pass --url "https://site/page|https://site/page2"')
+    print(f"\nIndex status — {site}")
+    print(f"  {'coverage':<40}{'last crawl':<12} url")
+    for u in urls:
+        body = {"inspectionUrl": u, "siteUrl": site, "languageCode": "ro"}
+        ok = False
+        for _ in range(4):
+            r = requests.post("https://searchconsole.googleapis.com/v1/urlInspection/index:inspect",
+                              headers={"Authorization": f"Bearer {creds.token}"}, json=body, timeout=120)
+            if r.status_code in (429, 500, 502, 503, 504): continue
+            ok = True; break
+        if not ok or r.status_code != 200:
+            print(f"  ERR {r.status_code}: {r.text[:90]}  {u}"); continue
+        idx = r.json().get("inspectionResult", {}).get("indexStatusResult", {})
+        print(f"  {idx.get('coverageState','?')[:38]:<40}{(idx.get('lastCrawlTime','—') or '—')[:10]:<12} {u[:60]}")
+
 def main():
     ap = argparse.ArgumentParser(description="Pull Google Search Console (keywords/pages/position) for the team.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -311,6 +362,13 @@ def main():
     rk.add_argument("--query"); rk.add_argument("--contains")
     rk.add_argument("--days", type=int, default=28); rk.add_argument("--limit", type=int, default=50)
     rk.set_defaults(fn=cmd_rank)
+    op = sub.add_parser("opportunities", help="non-brand SEO quick-wins: striking-distance + low-CTR keywords")
+    op.add_argument("--brand"); op.add_argument("--site"); op.add_argument("--all", action="store_true")
+    op.add_argument("--days", type=int, default=28); op.add_argument("--min-impr", type=int, default=30, dest="min_impr")
+    op.set_defaults(fn=cmd_opportunities)
+    ix = sub.add_parser("index", help="URL index status (is a page indexed?) via GSC URL Inspection")
+    ix.add_argument("--brand"); ix.add_argument("--site"); ix.add_argument("--url", required=True)
+    ix.set_defaults(fn=cmd_index)
 
     args = ap.parse_args()
     args.fn(load_creds(), args)
