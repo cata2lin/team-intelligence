@@ -91,15 +91,18 @@ def cmd_gap(args):
             for f in flows if f.get('attributes',{}).get('status') == 'live']
     allnames = [(f.get('attributes',{}).get('name','') or '').lower() for f in flows]
     print(f"\nLifecycle flow GAP audit — {args.store}  ({len(flows)} flows, {len(live)} live)")
+    # flows often handled OUTSIDE Klaviyo (don't count as a Klaviyo gap)
+    EXTERNAL = {"Review request": "de regulă prin Judge.me (are flow propriu — nu Klaviyo)"}
     have = miss = 0
     for label, kws in STD_FLOWS.items():
         is_live = any(any(k in n for k in kws) for n in live)
         exists = any(any(k in n for k in kws) for n in allnames)
         if is_live: mark, note = "✅", "live"; have += 1
+        elif label in EXTERNAL: mark, note = "↗️", EXTERNAL[label]
         elif exists: mark, note = "🟡", "EXISTĂ dar nu e live (draft/manual)"
         else: mark, note = "❌", "LIPSEȘTE — bani lăsați pe masă"; miss += 1
         print(f"  {mark} {label:<24} {note}")
-    print(f"\n  {have}/10 active. {miss} lipsesc complet. Flow-urile aduc tipic 30-40%+ din venitul de email — fiecare lipsă = pierdere.")
+    print(f"\n  {have} active în Klaviyo · {miss} lipsesc · ↗️ = acoperit extern. Flow-urile aduc tipic 30-40%+ din venitul de email.")
 
 def cmd_campaigns(args):
     j = _get(args.store, "/campaigns/", {"filter": "equals(messages.channel,'email')",

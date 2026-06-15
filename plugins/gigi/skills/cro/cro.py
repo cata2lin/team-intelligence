@@ -62,9 +62,11 @@ def cmd_audit(args):
     # description depth (product)
     wc = len(body.split())
     sig["description"] = (1 if wc >= 120 else 0, 6 if ptype=="product" else 2, f"{wc} cuvinte conținut" + ("" if wc>=120 else " — descriere subțire"))
-    # email capture
-    cap = bool(soup.find("input", attrs={"type": "email"})) or has(low, "newsletter", "abonează", "aboneaza", "10% reducere", "-10%")
-    sig["email_capture"] = (1 if cap else 0, 6, "captură email/newsletter prezentă" if cap else "fără captură de email (newsletter/popup -10%) = lead-uri pierdute")
+    # email capture (popup-urile se încarcă prin JS — caut și loaderul Klaviyo/popup în HTML brut)
+    cap = (bool(soup.find("input", attrs={"type": "email"})) or has(low, "newsletter", "abonează", "aboneaza", "10% reducere", "-10%")
+           or has(html, "klaviyo", "_learnq", "klaviyoonsite", "static.klaviyo", "/onsite/", "privy", "justuno", "omnisend"))
+    note = "captură email/popup prezentă (input sau loader Klaviyo/onsite)" if cap else "popup de email nu apare în HTML static (se încarcă prin JS — verifică vizual, poate exista)"
+    sig["email_capture"] = (1 if cap else 0, 6, note)
     # mobile viewport
     mv = bool(soup.find("meta", attrs={"name": "viewport"}))
     sig["mobile_viewport"] = (1 if mv else 0, 4, "viewport mobil ok" if mv else "lipsă meta viewport (mobil)")
