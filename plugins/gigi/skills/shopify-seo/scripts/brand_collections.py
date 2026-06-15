@@ -17,8 +17,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--store", default="esteban"); ap.add_argument("--min", type=int, default=3)
     ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--brand-name", default=None, help="numele magazinului în SEO (implicit: shop.name)")
     a = ap.parse_args()
     st = Store(a.store)
+    shop_name = a.brand_name or st.gql("{ shop { name } }")["shop"]["name"]
     prods = st.gql_all("products", "title")
     brands = {}
     for p in prods:
@@ -49,7 +51,7 @@ def main():
         handle = "parfumuri-inspirate-" + re.sub(r"[^a-z0-9]+", "-", b.lower()).strip("-")
         inp = {"title": f"Parfumuri inspirate din {b}", "handle": handle,
                "descriptionHtml": f"<p>Alternative accesibile inspirate din parfumurile {b} — aceleași note olfactive, persistență 12h+, la o fracțiune din preț. 2+1 gratis, plata la livrare.</p>",
-               "seo": {"title": f"Parfumuri inspirate din {b} | Maison d'Esteban", "description": f"Alternative la parfumurile {b}: aceleași note, 12h+, fracțiune din preț. Livrare rapidă, plata la livrare."[:160]},
+               "seo": {"title": f"Parfumuri inspirate din {b} | {shop_name}", "description": f"Alternative la parfumurile {b}: aceleași note, 12h+, fracțiune din preț. Livrare rapidă, plata la livrare."[:160]},
                "ruleSet": {"appliedDisjunctively": False, "rules": [{"column": "TITLE", "relation": "CONTAINS", "condition": f"by {b}"}]}}
         r = st.gql(M, {"i": inp})["collectionCreate"]
         errs = r["userErrors"]
