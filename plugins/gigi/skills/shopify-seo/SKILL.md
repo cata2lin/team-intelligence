@@ -134,5 +134,15 @@ uv run scripts/product_fix.py --store esteban --product <handle> \
 - **Two apps:** `--app SHOPIFY_ARONA` (default: esteban/gt/nubra/labnoir) or `--app SHOPIFY` (the `n12w89-yy.myshopify.com` store = Grandia etc.).
 - **Scope (all / low-sellers / specific):** the *selection* of which products comes from the diagnosis skills (cross-sell low-sellers, merchant-feed disapprovals, pricewatch compare) — state in chat which set + how many you're acting on; `product_fix` applies per product. Verified DRY-RUN: Grandia "raft-depozitare…" had an **empty SEO description** → the writer would fill it.
 
+## Catalog/nav structure — `scripts/brand_collections.py` + `scripts/menu_addbrands.py`
+For dupe/inspired-by catalogs: build **smart collections by inspiration brand** (SEO hubs + internal-link targets) and a **"După Brand" menu dropdown**.
+```bash
+uv run scripts/brand_collections.py --store esteban --min 3            # DRY-RUN: brands (from "...by <Brand>" titles) → proposed smart collections
+uv run scripts/brand_collections.py --store esteban --min 3 --apply    # create smart collections (rule: title contains "by <Brand>", case-insensitive)
+uv run scripts/menu_addbrands.py    --store esteban --top 8            # DRY-RUN: add a top-level "După Brand" item with the top-N brands
+uv run scripts/menu_addbrands.py    --store esteban --top 8 --apply    # menuUpdate (preserves the whole existing tree)
+```
+DRY-RUN by default. `menu_addbrands` keeps only the **top-N brands by product count** in the menu (the rest stay as collections for SEO/links — don't dump 21 items in the nav). Done on Esteban (Jun 2026): 21 brand collections + "După Brand" menu with top 8.
+
 ## Logging (team convention)
 After a run: `kb.py log --type skill --action used --name gigi:shopify-seo --summary "…"`.
