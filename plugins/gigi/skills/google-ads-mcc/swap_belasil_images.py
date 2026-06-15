@@ -6,7 +6,7 @@
 import os, sys, json
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
-API="v20"; CID="7566352958"; AG="customers/7566352958/assetGroups/6570957552"; AGID="6570957552"
+API="v24"; CID="7566352958"; AG="customers/7566352958/assetGroups/6570957552"; AGID="6570957552"
 REMOVE_SQUARES=8
 _PG_OK={"host","port","dbname","user","password","sslmode","sslrootcert","sslcert","sslkey","connect_timeout","application_name","options","channel_binding"}
 def clean(d):

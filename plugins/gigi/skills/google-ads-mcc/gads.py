@@ -3,7 +3,7 @@
 # dependencies = ["psycopg2-binary>=2.9", "requests>=2.31"]
 # ///
 """
-gads.py — Google Ads API v20 via the team MCC.
+gads.py — Google Ads API v24 via the team MCC (version overridable via env GADS_API_VERSION).
 
 Reads the MCC connection (developer token, login-customer-id, OAuth client +
 refresh token) from the `metrics` DB (table google_ads_connections), refreshes
@@ -19,7 +19,7 @@ import argparse, json, os, sys
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
 
-API = "v20"
+API = os.environ.get("GADS_API_VERSION", "v24")  # v20 deprecated/blocked Jun 2026; latest is v24; override via env
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 _PG_OK = {"host","hostaddr","port","dbname","user","password","sslmode","sslrootcert",
           "sslcert","sslkey","connect_timeout","application_name","options","channel_binding"}

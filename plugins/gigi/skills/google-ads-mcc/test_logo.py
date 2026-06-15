@@ -5,7 +5,7 @@
 import os, sys, json
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
-API="v20"; CID="7566352958"; CAMP="customers/7566352958/campaigns/22478321481"
+API="v24"; CID="7566352958"; CAMP="customers/7566352958/campaigns/22478321481"
 _PG_OK={"host","port","dbname","user","password","sslmode","sslrootcert","sslcert","sslkey","connect_timeout","application_name","options","channel_binding"}
 def clean(d):
     p=urlsplit(d)

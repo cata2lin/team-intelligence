@@ -1,6 +1,6 @@
 ---
 name: google-ads-mcc
-description: Read and operate any Google Ads account linked under the team MCC (API v20) — live performance reports, budget/bidding/status/keyword/negative mutations, full Search campaign creation, and the end-to-end video pipeline (upload to YouTube + attach to Performance Max). Plus an optimization playbook. Credentials (MCC developer token + OAuth refresh token) come from the `metrics` DB; no per-account login. Read-only by default; mutations are dry-run unless explicitly applied. Use for any live Google Ads work on a brand (Esteban, Belasil, Grandia, …) without screenshots.
+description: Read and operate any Google Ads account linked under the team MCC (API v24, overridable via env GADS_API_VERSION) — live performance reports, budget/bidding/status/keyword/negative mutations, full Search campaign creation, and the end-to-end video pipeline (upload to YouTube + attach to Performance Max). Plus an optimization playbook. Credentials (MCC developer token + OAuth refresh token) come from the `metrics` DB; no per-account login. Read-only by default; mutations are dry-run unless explicitly applied. Use for any live Google Ads work on a brand (Esteban, Belasil, Grandia, …) without screenshots.
 ---
 
 # Google Ads via the team MCC
@@ -29,6 +29,8 @@ KB=~/.claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py
 export DATABASE_URL_METRICS="$(uv run "$KB" secret-get DATABASE_URL_METRICS)"
 ```
 All scripts run with `uv` (deps declared inline).
+
+> **API version:** scripts call Google Ads **v24** (latest as of Jun 2026). v20 was deprecated and is being blocked. `gads.py` reads the version from env `GADS_API_VERSION` (default `v24`) — when Google deprecates v24, bump with `export GADS_API_VERSION=v25` (no code change) or update the default.
 
 ---
 
@@ -154,7 +156,7 @@ of which 100 are purchases — budget burns chasing page views). Diagnose and fi
 ## 7. Tracking / UTM (correct attribution beyond GA4)
 - **Auto-tagging (GCLID)** should be ON (`customer.auto_tagging_enabled`) — GA4 attributes via the Google Ads link.
 - For Shopify analytics & other tools, set an **account-level `final_url_suffix`**: `utm_source=google&utm_medium=cpc&utm_campaign={campaignid}&utm_content={creative}&utm_term={keyword}` — safe, no learning reset, no re-review.
-- API quirk: CustomerService is `POST /v20/customers/{cid}:mutate` with body `{"operation": {...}}` — **singular** `operation`, unlike every other mutate.
+- API quirk: CustomerService is `POST /v24/customers/{cid}:mutate` with body `{"operation": {...}}` — **singular** `operation`, unlike every other mutate.
 
 ## Guardrails / hard rules
 - **Never print** the developer token, OAuth secret, or refresh tokens. Read from DB/secret store, use in-process.

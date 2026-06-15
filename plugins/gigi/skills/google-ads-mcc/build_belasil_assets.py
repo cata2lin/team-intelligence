@@ -6,7 +6,7 @@
 import os, sys, json
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
-API="v20"; CID="7566352958"; AG="customers/7566352958/assetGroups/6570957552"
+API="v24"; CID="7566352958"; AG="customers/7566352958/assetGroups/6570957552"
 HEADLINES=["Detergent Gel Concentrat","200 de Spălări pe Bidon","Doar 0,49 lei pe Spălare","10L la 99 lei, de la 255",
  "Direct de la Producător","Balsam Inclus în Detergent","Spală Alb și Color","Detergent Rufe Premium",
  "4,7/5 din 1.250+ Recenzii","Parfum de Lungă Durată","Gel Dens, Delicat cu Tine","Transport Gratuit 150 lei",
