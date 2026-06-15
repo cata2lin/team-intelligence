@@ -142,7 +142,7 @@ uv run scripts/brand_collections.py --store esteban --min 3 --apply    # create 
 uv run scripts/menu_addbrands.py    --store esteban --top 8            # DRY-RUN: add a top-level "După Brand" item with the top-N brands
 uv run scripts/menu_addbrands.py    --store esteban --top 8 --apply    # menuUpdate (preserves the whole existing tree)
 ```
-DRY-RUN by default. `menu_addbrands` keeps only the **top-N brands by product count** in the menu (the rest stay as collections for SEO/links — don't dump 21 items in the nav). Done on Esteban (Jun 2026): 21 brand collections + "După Brand" menu with top 8.
+DRY-RUN by default. `menu_addbrands` keeps only the **top-N brands by product count** in the menu (the rest stay as collections for SEO/links — don't dump 21 items in the nav). `brand_collections --apply` **auto-publishes each new collection to ALL sales channels** (golden rule #6 — new collections default to ZERO channels → 404 on storefront + invisible on Google/Shop; this bit us once: 21 collections created but unpublished → all 404 until `publishablePublish` on every channel). Done on Esteban (Jun 2026): 21 brand collections + "După Brand" menu with top 8.
 
 ## Logging (team convention)
 After a run: `kb.py log --type skill --action used --name gigi:shopify-seo --summary "…"`.

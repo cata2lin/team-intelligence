@@ -40,7 +40,11 @@ def main():
         print("\n  DRY-RUN — nimic creat. Adaugă --apply ca să creez colecțiile smart."); return
 
     print("\n  CREEZ colecții smart:")
+    # GOLDEN RULE #6: colecțiile noi default la ZERO canale → 404 pe storefront + invizibile pe Google/Shop.
+    # Publicăm pe TOATE canalele imediat după creare.
+    pubs = [{"publicationId": p["id"]} for p in st.gql("{ publications(first:25){ nodes{ id name } } }")["publications"]["nodes"]]
     M = """mutation($i:CollectionInput!){collectionCreate(input:$i){collection{id handle}userErrors{field message}}}"""
+    P = """mutation($id:ID!,$pubs:[PublicationInput!]!){publishablePublish(id:$id,input:$pubs){userErrors{field message}}}"""
     for b, t in sorted(elig.items(), key=lambda x: -len(x[1])):
         handle = "parfumuri-inspirate-" + re.sub(r"[^a-z0-9]+", "-", b.lower()).strip("-")
         inp = {"title": f"Parfumuri inspirate din {b}", "handle": handle,
@@ -49,7 +53,11 @@ def main():
                "ruleSet": {"appliedDisjunctively": False, "rules": [{"column": "TITLE", "relation": "CONTAINS", "condition": f"by {b}"}]}}
         r = st.gql(M, {"i": inp})["collectionCreate"]
         errs = r["userErrors"]
-        print(f"    {b:<28} {'OK /collections/'+r['collection']['handle'] if not errs else 'ERR '+str(errs)[:80]}")
+        if errs:
+            print(f"    {b:<28} ERR {str(errs)[:80]}"); continue
+        cid = r["collection"]["id"]
+        perr = st.gql(P, {"id": cid, "pubs": pubs})["publishablePublish"]["userErrors"]
+        print(f"    {b:<28} OK /collections/{r['collection']['handle']}  {'· publicat pe toate canalele ✅' if not perr else '· PUBLICARE ERR '+str(perr)[:60]}")
 
 if __name__ == "__main__":
     main()
