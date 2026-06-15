@@ -88,18 +88,24 @@ first (mockup the structure), apply after sign-off. The owner corrected the menu
 labels ("Fresh" not "Proaspete") and a wrongly-noindexed collection post-hoc; both
 were avoidable with an upfront yes/no.
 
-## 12. Product description: SHORT (stripped) vs FULL (raw HTML)
-Many themes render the description **twice** with different filters. On Ella/Halo:
-- `snippets/product-short-description.liquid` (near the title/buy button) does
-  `{{ desc | strip_html | truncatewords: n }}` → **strips ALL tags + truncates**.
-  Links/bold NEVER show here, and adjacent `</p><p>` paragraphs glue together
-  ("word.Next" with no space). A `c_f.short_description` metafield can override it.
-- The **full description tab** (lower) renders `product.description` **raw** → bold,
-  lists, and **links ARE clickable here**. Verify with a real `<strong>` in the
-  served HTML before concluding "HTML doesn't work".
-So: a link injected into the description **is** clickable — just not in the top
-summary. If you need a clean summary, mind the strip+truncate; inserting a space at
-paragraph boundaries (`</p> <p>`) survives strip_html and prevents glued sentences.
+## 12. Product description renders via `strip_html` — a link there is NOT clickable until you fix the snippet
+On Esteban's Ella/Halo theme the ONLY place the product description shows is
+`snippets/product-short-description.liquid`:
+```liquid
+{{ desc | strip_html | truncatewords: word_number }}
+```
+`strip_html` removes ALL tags → an `<a>` becomes plain text (un-clickable), `<strong>`
+won't bold, and adjacent `</p><p>` paragraphs glue ("word.Next", no space). There is
+**no separate full-HTML description tab** on this layout — verify in the **browser
+DOM** (`.productView-desc` → `querySelector('a')`), not just `curl` (a stray raw
+`<strong>` in served HTML can be a hidden/schema block, not the visible description).
+A `c_f.short_description` metafield can override `desc` (also stripped).
+
+To make an in-description link clickable + bold render: edit the snippet to
+`{{ desc }}` (raw). Trade-off: the FULL description then shows by the buy button with
+no truncation — fine if descriptions are concise (ours are). Back up the snippet
+first; it's a sitewide visible change. Also insert a space at paragraph boundaries
+(`</p> <p>`) so even a stripped render doesn't glue sentences.
 
 ## 13. Mutation field types that mismatch (silent until you hit them)
 - `articleUpdate(article:{body})` → **HTML!**
