@@ -123,7 +123,10 @@ uv run dataforseo.py keywords  --domain notino.ro --limit 40   # what a competit
 uv run dataforseo.py backlinks --domain esteban.ro             # backlinks + referring domains summary
 uv run dataforseo.py balance                                   # account balance
 ```
-⚠️ **Account state:** the account must be **verified** (app.dataforseo.com) and **funded** before data endpoints work — otherwise calls return `40104 "Please verify your account"` / insufficient balance (auth + `balance` still work). Run **monthly via cron + cache results in metrics** to pay per query, not per look.
+⚠️ **Account state & access tiers (Jun 2026):**
+- ✅ **Available now** (small balance): `serp` (live Google RO SERP) and `keywords` (competitor ranked-keywords). These cover the SERP + competitor gaps. ~$0.0035 per SERP query.
+- ⛔ **Gated behind a balance top-up:** `backlinks` needs **≥ $100** balance; AI/LLM-mentions needs **≥ $200** (not yet topped up). Until then: use the **free proxies** — `authority.py` (Open PageRank) for authority instead of backlinks, and `gigi:shopify-geo` for AEO citability instead of LLM-mention tracking.
+- Run **monthly via cron + cache results in metrics** to pay per query, not per look.
 
 ## Validation note (Jun 2026)
 GA4 vs Shopify on Esteban agreed closely (organic share 11.7% vs 11.6%, paid social 78% vs 77.6%) — so the two sources are directionally consistent, but **don't mix them at decimal precision** in one comparison; label the source per brand. GA4's edge: it separates PMax/Shopping correctly and gives conversions.
