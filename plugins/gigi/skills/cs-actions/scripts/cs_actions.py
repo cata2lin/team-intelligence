@@ -150,36 +150,47 @@ def addr_from_xconnector(order_name):
             "provinceCode": a.get("provinceCode"), "countryCode": "RO", "phone": a.get("phone")}
 
 
-def addr_from_frisbo(prefix, order_name):
-    """Restul magazinelor: adresa din Frisbo (org token după domeniu). Best-effort."""
-    raw = _kb_secret("FRISBO_ORG_TOKENS")
-    try:
-        orgs = json.loads(raw)
-    except Exception:
+FRISBO_BASE = "https://ingest.apis.store-view.frisbo.dev"
+# prefix magazin (stores.csv) → org Frisbo (FRISBO_ORG_TOKENS name)
+FRISBO_BY_PREFIX = {
+    "EST": "esteban.ro", "ROSSI": "rossinails.ro", "NOC": "nocturna.ro", "LUX": "nocturnalux.ro",
+    "GT": "georgetalent.ro", "BELA": "belasil.ro", "APR": "apreciat.ro", "GEN": "gento.ro",
+    "CARP": "carpetto.ro", "RED": "reduceribune.ro", "COV": "covoria.ro", "BON": "casaofertelor.ro",
+    "PAT": "cepatai.ro", "OFER": "ofertelezilei.ro", "GRAN": "grandia.ro", "MAG": "magdeal.ro",
+    "PL": "bonhaus.pl", "CZ": "bonhaus.cz", "BONBG": "bonhaus.bg", "BG": "nocturna.bg",
+}
+
+
+def _frisbo_token(prefix):
+    org = FRISBO_BY_PREFIX.get(prefix.upper())
+    if not org:
         return None
-    shop = store_of(prefix)[0]
-    # mapează magazinul la un org Frisbo prin potrivire grosieră de nume (.ro)
-    tok = None
-    for o in orgs:
-        nm = (o.get("name") or "").lower()
-        if nm and (nm.split(".")[0] in shop or prefix.lower() in nm):
-            tok = o.get("token"); break
+    try:
+        for o in json.loads(_kb_secret("FRISBO_ORG_TOKENS")):
+            if (o.get("name") or "").lower() == org:
+                return o.get("token")
+    except Exception:
+        pass
+    return None
+
+
+def addr_from_frisbo(prefix, order_name=None, phone=None):
+    """Adresa de livrare din Frisbo (org token per magazin), după nr comandă (reference) sau telefon."""
+    tok = _frisbo_token(prefix)
     if not tok:
         return None
-    base = (_kb_secret("ORQESTRA_API_BASE") or "https://ingest.apis.store-view.frisbo.dev").rstrip("/")
-    h = {"Authorization": "Bearer " + tok}
-    s, d = _http("GET", base + "/orders/search?reference=" + urllib.parse.quote(order_name), h)
-    items = (d.get("data") or d.get("orders") or []) if isinstance(d, dict) else (d if isinstance(d, list) else [])
-    if not items:
+    q = ("reference=" + urllib.parse.quote(order_name)) if order_name else ("phone_number=" + urllib.parse.quote(phone or ""))
+    s, d = _http("GET", FRISBO_BASE + "/orders/search?limit=1&" + q, {"Authorization": "Bearer " + tok})
+    items = ((d.get("data") or {}).get("orders") or []) if isinstance(d, dict) else []
+    if not isinstance(items, list) or not items:
         return None
-    o = items[0]
-    a = o.get("shipping_address") or o.get("address") or o.get("recipient") or {}
-    a1 = a.get("address") or a.get("address1") or a.get("street")
-    if not a1:
+    a = items[0].get("shipping_address") or {}
+    if not a.get("address1"):
         return None
-    return {"firstName": a.get("first_name") or a.get("firstName"), "lastName": a.get("last_name") or a.get("lastName"),
-            "address1": a1, "city": a.get("city") or a.get("locality"), "zip": a.get("zip") or a.get("postal_code"),
-            "countryCode": "RO", "phone": a.get("phone")}
+    return {"firstName": a.get("first_name"), "lastName": a.get("last_name"), "address1": a.get("address1"),
+            "address2": a.get("address2"), "city": a.get("city"), "zip": a.get("zip"),
+            "provinceCode": a.get("province_code"), "countryCode": a.get("country_code") or "RO",
+            "phone": a.get("phone"), "email": a.get("email")}
 
 
 def resolve_address(order_name):
@@ -192,9 +203,18 @@ def resolve_address(order_name):
 # ───────────────────────── lookups Shopify ─────────────────────────
 def get_order(prefix, name):
     q = ('query($q:String!){ orders(first:1, query:$q){ edges{ node{ id name displayFinancialStatus '
-         'displayFulfillmentStatus cancelledAt } } } }')
+         'displayFulfillmentStatus cancelledAt lineItems(first:50){ edges{ node{ id title sku quantity } } } } } } }')
     e = sgql(prefix, q, {"q": "name:%s" % name})["orders"]["edges"]
     return e[0]["node"] if e else None
+
+
+def _items_list(spec, default_qty=1):
+    out = []
+    for part in [p for p in re.split(r"[;,]", spec or "") if p.strip()]:
+        term, _, qty = part.rpartition(":")
+        term = (term or part).strip()
+        out.append((term, int(qty) if qty.strip().isdigit() else default_qty))
+    return out
 
 
 def find_variant(prefix, term):
@@ -319,33 +339,110 @@ def op_resend(a, agent):
 
 
 def op_modify(a, agent):
+    """Modifică adresa (REST) și/sau produsele (orderEdit add/remove/set), pre-fulfillment."""
     pref = (a.store or prefix_of_order(a.order)).upper()
     o = get_order(pref, a.order)
     if not o:
         sys.exit("Nu găsesc %s." % a.order)
-    if o["displayFulfillmentStatus"] not in ("UNFULFILLED", "PARTIALLY_FULFILLED"):
-        print("  ⚠ %s e %s — modificarea adresei poate să nu mai conteze." % (a.order, o["displayFulfillmentStatus"]))
-    if not a.address:
-        sys.exit("modify: deocamdată doar adresa — dă --address (+ --city --zip --phone).")
-    new = {k: v for k, v in (("address1", a.address), ("city", a.city), ("zip", a.zip), ("phone", a.phone)) if v}
+    ful = o["displayFulfillmentStatus"]
+    if ful not in ("UNFULFILLED", "PARTIALLY_FULFILLED", "ON_HOLD", "OPEN", "SCHEDULED"):
+        print("  ⚠ %s e %s — modificarea poate să nu mai conteze (deja expediată)." % (a.order, ful))
+    existing = [(le["node"]["id"], le["node"].get("title", ""), (le["node"].get("sku") or "")) for le in o["lineItems"]["edges"]]
+    adds = _items_list(a.add) if a.add else []
+    rems = _items_list(a.remove, default_qty=0) if a.remove else []
+    sets = _items_list(a.set_qty) if a.set_qty else []
+    new_addr = {k: v for k, v in (("address1", a.address), ("city", a.city), ("zip", a.zip), ("phone", a.phone)) if v} if a.address else None
+    if not (adds or rems or sets or new_addr):
+        sys.exit("modify: dă --address și/sau --add/--remove/--set.")
     print("─" * 64)
-    print("  %s MODIFIC adresa %s → %s" % ("" if a.apply else "[DRY-RUN]", a.order, json.dumps(new, ensure_ascii=False)))
+    print("  %s MODIFIC %s (%s)" % ("" if a.apply else "[DRY-RUN]", a.order, ful))
+    plan_add = []
+    for term, q in adds:
+        vid, lbl, _ = find_variant(pref, term)
+        plan_add.append((vid, lbl, q)); print("    + %d × %s" % (q, lbl))
+    plan_set = []
+    for term, q in rems + sets:
+        e = next((x for x in existing if term.lower() in (x[1].lower() + " " + x[2].lower())), None)
+        if not e:
+            print("    ⚠ negăsit în comandă: %s" % term); continue
+        plan_set.append((term, q)); print("    %s %s" % ("− scot" if q == 0 else "→ qty=%d" % q, e[1][:40]))
+    if new_addr:
+        print("    adresă → %s" % json.dumps(new_addr, ensure_ascii=False))
     if not a.apply:
-        print("  → --apply."); return
-    num = o["id"].rsplit("/", 1)[-1]
-    s, d = srest(pref, "PUT", "orders/%s.json" % num, {"order": {"id": int(num), "shipping_address": new}})
-    if s != 200:
-        sys.exit("  modify REST %s: %s" % (s, json.dumps(d, ensure_ascii=False)[:200]))
-    sgql(pref, "mutation($id:ID!,$t:[String!]!){ tagsAdd(id:$id, tags:$t){ userErrors{ message } } }", {"id": o["id"], "t": [agent, "adresa-modificata"]})
-    print("  ✅ ADRESĂ MODIFICATĂ %s (tag %s)" % (a.order, agent))
+        print("  → --apply ca să modifici."); return
+    if new_addr:
+        num = o["id"].rsplit("/", 1)[-1]
+        s, d = srest(pref, "PUT", "orders/%s.json" % num, {"order": {"id": int(num), "shipping_address": new_addr}})
+        if s != 200:
+            print("  ⚠ adresă REST %s: %s" % (s, json.dumps(d, ensure_ascii=False)[:160]))
+    if plan_add or plan_set:
+        beg = sgql(pref, "mutation($id:ID!){ orderEditBegin(id:$id){ calculatedOrder{ id lineItems(first:100){ edges{ node{ id title sku } } } } userErrors{ message } } }", {"id": o["id"]})["orderEditBegin"]
+        if beg["userErrors"]:
+            sys.exit("  orderEditBegin: %s" % json.dumps(beg["userErrors"], ensure_ascii=False))
+        cid = beg["calculatedOrder"]["id"]
+        calc = [(le["node"]["id"], le["node"].get("title", ""), (le["node"].get("sku") or "")) for le in beg["calculatedOrder"]["lineItems"]["edges"]]
+        for vid, lbl, q in plan_add:
+            r = sgql(pref, "mutation($id:ID!,$v:ID!,$q:Int!){ orderEditAddVariant(id:$id, variantId:$v, quantity:$q){ userErrors{ message } } }", {"id": cid, "v": vid, "q": q})["orderEditAddVariant"]
+            if r["userErrors"]: print("  ⚠ add %s: %s" % (lbl, json.dumps(r["userErrors"], ensure_ascii=False)))
+        for term, q in plan_set:
+            cl = next((c for c in calc if term.lower() in (c[1].lower() + " " + c[2].lower())), None)
+            if not cl: continue
+            r = sgql(pref, "mutation($id:ID!,$li:ID!,$q:Int!){ orderEditSetQuantity(id:$id, lineItemId:$li, quantity:$q){ userErrors{ message } } }", {"id": cid, "li": cl[0], "q": q})["orderEditSetQuantity"]
+            if r["userErrors"]: print("  ⚠ set %s: %s" % (term, json.dumps(r["userErrors"], ensure_ascii=False)))
+        cm = sgql(pref, "mutation($id:ID!){ orderEditCommit(id:$id, notifyCustomer:false){ order{ name } userErrors{ message } } }", {"id": cid})["orderEditCommit"]
+        if cm["userErrors"]: sys.exit("  orderEditCommit: %s" % json.dumps(cm["userErrors"], ensure_ascii=False))
+    sgql(pref, "mutation($id:ID!,$t:[String!]!){ tagsAdd(id:$id, tags:$t){ userErrors{ message } } }", {"id": o["id"], "t": [agent, "modificata-cs"]})
+    print("  ✅ MODIFICAT %s (tag %s, modificata-cs)" % (a.order, agent))
 
 
 def op_invoice(a, agent):
+    """Factură fiscală prin SmartBill (per magazin). KB SMARTBILL_STORES=[{prefix,email,token,cif,series}]."""
+    import base64, datetime
     pref = (a.store or prefix_of_order(a.order)).upper()
-    if pref != "GT":
-        print("  Factura prin xConnector e momentan doar pt GT. Pt %s: din dashboard/SmartBill." % pref); return
-    print("  (info) Factura GT: skill-ul gigi:xconnector are document/invoice + invoice/link. "
-          "Generarea nouă nu e expusă în API — pt cerere client, atașez factura existentă / o trimite SmartBill.")
+    raw = _kb_secret("SMARTBILL_STORES")
+    try:
+        creds = {c["prefix"].upper(): c for c in json.loads(raw)} if raw.startswith("[") else {}
+    except Exception:
+        creds = {}
+    c = creds.get(pref)
+    if not c:
+        print("  Factura SmartBill nu e activă pt %s." % pref)
+        print('  Activare: KB secret SMARTBILL_STORES = [{"prefix","email","token","cif","series"}] (creds există pe server).')
+        return
+    q = ('query($q:String!){ orders(first:1, query:$q){ edges{ node{ name email '
+         'lineItems(first:50){ edges{ node{ title quantity originalUnitPriceSet{ shopMoney{ amount } } } } } } } } }')
+    e = sgql(pref, q, {"q": "name:%s" % a.order})["orders"]["edges"]
+    if not e:
+        sys.exit("Nu găsesc %s." % a.order)
+    od = e[0]["node"]
+    cust = resolve_address(a.order) or {}
+    cname = " ".join(filter(None, [cust.get("firstName"), cust.get("lastName")])) or od.get("email") or "Client"
+    products = []
+    for li in od["lineItems"]["edges"]:
+        n = li["node"]
+        products.append({"name": n["title"][:200], "isService": False, "measuringUnitName": "buc", "currency": "RON",
+                         "quantity": n["quantity"], "price": float(n["originalUnitPriceSet"]["shopMoney"]["amount"]),
+                         "isTaxIncluded": True, "taxName": "Normala", "taxPercentage": 19, "saveToDb": False})
+    body = {"companyVatCode": c["cif"], "seriesName": c.get("series", ""), "isDraft": False,
+            "issueDate": datetime.date.today().isoformat(),
+            "client": {"name": cname, "vatCode": "", "isTaxPayer": False, "country": "Romania",
+                       "city": cust.get("city") or "", "address": cust.get("address1") or "",
+                       "email": od.get("email") or cust.get("email") or ""},
+            "products": products}
+    print("─" * 64)
+    print("  %s FACTURĂ SmartBill %s — %s, %d produse" % ("" if a.apply else "[DRY-RUN]", a.order, cname, len(products)))
+    if not a.apply:
+        print("  → --apply (ATENȚIE: emite factură fiscală REALĂ)."); return
+    auth = base64.b64encode(("%s:%s" % (c["email"], c["token"])).encode()).decode()
+    hb = {"Authorization": "Basic " + auth, "Content-Type": "application/json", "Accept": "application/json"}
+    s, d = _http("POST", "https://ws.smartbill.ro/SBORO/api/invoice", hb, body)
+    if s != 200 or (isinstance(d, dict) and d.get("errorText")):
+        sys.exit("  SmartBill %s: %s" % (s, json.dumps(d, ensure_ascii=False)[:220]))
+    ser, num = d.get("series") or c.get("series"), d.get("number")
+    if od.get("email"):
+        _http("POST", "https://ws.smartbill.ro/SBORO/api/document/send", hb,
+              {"companyVatCode": c["cif"], "seriesName": ser, "number": num, "type": "factura", "to": od["email"]})
+    print("  ✅ FACTURĂ %s%s emisă%s (agent %s)" % (ser or "", num or "", " + trimisă pe email" if od.get("email") else "", agent))
 
 
 # ───────────────────────── main ─────────────────────────
@@ -357,6 +454,8 @@ def main():
     ap.add_argument("--items"); ap.add_argument("--name"); ap.add_argument("--phone"); ap.add_argument("--email")
     ap.add_argument("--address"); ap.add_argument("--city"); ap.add_argument("--zip")
     ap.add_argument("--reason", default="customer"); ap.add_argument("--refund", action="store_true"); ap.add_argument("--no-restock", action="store_true")
+    ap.add_argument("--add", help='modify: adaugă produse "term:qty;..."'); ap.add_argument("--remove", help='modify: scoate produse "term;..."')
+    ap.add_argument("--set", dest="set_qty", help='modify: schimbă cantități "term:qty;..."')
     ap.add_argument("--note"); ap.add_argument("--apply", action="store_true")
     a = ap.parse_args()
 
