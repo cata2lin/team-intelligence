@@ -105,5 +105,13 @@ Query via the `postgres-metrics` MCP. Table **`shopify_analytics_traffic_daily`*
 2. **Uneven sync coverage** — confirm `MAX(date)` per brand and reconcile vs `shopify_analytics_daily` on overlapping dates before trusting %. (Historically Grandia channel data went stale, Esteban had only an 8-day window; GT/Nubra were current to the prior day.)
 3. **`product_sync` ambiguity** — see above; it's paid, not organic.
 
+## Domain authority — `authority.py` (Open PageRank, free)
+Backlink/authority **proxy** (not a referring-domains list). Key in KB secret `OPENPAGERANK_API_KEY`.
+```bash
+export OPENPAGERANK_API_KEY="$(uv run "$KB" secret-get OPENPAGERANK_API_KEY)"
+uv run authority.py --ours --vs notino.ro,sephora.ro,douglas.ro    # our 5 stores vs competitors
+```
+Returns Open PageRank score (0–10) + global rank per domain. **Finding (Jun 2026):** our stores return OPR ~0/n/a while competitors sit ~2.5 — i.e. near-zero measurable domain authority (real backlink gap) AND Open PageRank barely indexes `.ro`/newer sites, so for an actual backlink graph we still need DataForSEO/Ahrefs (paid). Use this for competitor authority benchmarking, not as our own backlink truth.
+
 ## Validation note (Jun 2026)
 GA4 vs Shopify on Esteban agreed closely (organic share 11.7% vs 11.6%, paid social 78% vs 77.6%) — so the two sources are directionally consistent, but **don't mix them at decimal precision** in one comparison; label the source per brand. GA4's edge: it separates PMax/Shopping correctly and gives conversions.
