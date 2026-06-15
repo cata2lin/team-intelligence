@@ -110,5 +110,14 @@ uv run linkgraph.py audit --site esteban.ro --max 150 --threads 10
 ```
 Typical win it surfaces: **blog articles orphaned** (0 internal inbound) — on esteban.ro every blog post was an orphan, so the AEO/organic content wasn't linked from anywhere. Fix = add contextual internal links from high-PageRank pages (top collections, a blog hub) down to the buried product/collection/blog pages it lists. Pairs with `gigi:shopify-geo` (that orphaned blog content is exactly the AEO play).
 
+## SEO drift baseline — `drift.py`
+Catches **silent regressions**: a theme update or app that quietly drops a title/canonical/schema or flips a page to `noindex`. Snapshots the SEO-critical fields into local SQLite (`~/.cache/arona-seo/drift.db`) and diffs later — the complement to GSC week-over-week (which sees traffic, not the cause). Pure stdlib + requests/bs4.
+```bash
+uv run drift.py baseline --site esteban.ro --max 40        # snapshot top pages (weekly, e.g. cron)
+uv run drift.py compare  --url https://esteban.ro/collections/dama   # diff vs last snapshot
+uv run drift.py history  --url https://esteban.ro/collections/dama
+```
+Snapshots title/meta/canonical/robots/H1/H2-count/JSON-LD types/OG/word-count + a hash. `compare` flags 🔴 CRITIC (title/canonical/robots-noindex/status/schema removed), 🟡 WARN (meta desc/H1/OG/word-count drop >30%), ℹ️ info. Run `baseline` weekly; `compare` (or re-baseline) to see what changed since. Pairs with GSC `wow` (`gigi:analytics`): wow tells you traffic dropped, drift tells you *which on-page element broke*.
+
 ## Logging (team convention)
 After a run: `kb.py log --type skill --action used --name gigi:shopify-seo --summary "…"`.
