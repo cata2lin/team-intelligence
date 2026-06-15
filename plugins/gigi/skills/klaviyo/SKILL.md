@@ -14,7 +14,11 @@ uv run klaviyo.py account   --store esteban     # org / industry / timezone
 uv run klaviyo.py flows     --store esteban     # all flows + status (live/draft) + trigger
 uv run klaviyo.py gap       --store esteban     # the 10-flow lifecycle GAP audit (what's missing)
 uv run klaviyo.py campaigns --store esteban     # recent email campaigns
+uv run klaviyo.py report    --store esteban     # Klaviyo-reported revenue vs GA4 'Email' channel = attribution INFLATION
 ```
+
+## `report` — Klaviyo revenue vs GA4 (the inflation check)
+Klaviyo over-attributes email revenue (generous click/open window). `report` pulls Klaviyo's flow + campaign revenue (Placed Order, last 30d) and compares to GA4's `Email` channel `purchaseRevenue` for the same store. **Esteban (Jun 2026): Klaviyo claims ~148k RON vs GA4 Email ~12k → ~12× inflation.** Truth is in between (GA4 only counts UTM-tagged email sessions, so it under-counts; Klaviyo over-counts) — but the size of the gap is what to watch. Uses `GA4_SA_JSON` from KB; GA4 property map in `GA4_PROP`.
 
 ## The 10-flow lifecycle checklist (`gap`)
 Welcome · Abandoned Cart · Abandoned Checkout · Browse Abandonment · **Post-purchase** · Winback/Sunset · **Review request** · Replenishment · Birthday · VIP/Loyalty. Matched by EN + RO keywords against live/draft flow names. **Esteban (Jun 2026): 4/10 live; missing browse-abandon, post-purchase, review, replenishment, birthday, VIP** — post-purchase + review are the highest-value gaps for a fragrance brand.
