@@ -30,17 +30,28 @@ import requests
 
 SCOPES = ["https://www.googleapis.com/auth/analytics.readonly"]
 
-# brand -> GA4 property id. GT/Nubra GA4 were installed Jun 2026 (little history yet —
-# use the Shopify source for them until they accumulate; see SKILL.md).
+# brand -> GA4 property id (SA looker-sheets is Viewer on all of these, Jun 2026).
+# NOTE: George Talent's property exists but its GA4 tag isn't firing yet (0 sessions) — use Shopify for GT.
 BRANDS = {
-    "esteban":       "510626424",
-    "grandia":       "510760223",
-    "nubra":         "541249929",
-    "george-talent": "541255080",
-    "gt":            "541255080",
+    "esteban":        "510626424",
+    "grandia":        "510760223",
+    "nubra":          "541249929",
+    "george-talent":  "541255080", "gt": "541255080",
+    "belasil":        "487042770",
+    "gento":          "486992931",
+    "covoria":        "491785347",
+    "casa-ofertelor": "501613337",
+    "rossi":          "402470642",
+    "nocturna":       "460807314",
+    "nocturna-lux":   "460815169",
+    "nocturna-pl":    "460756036",
+    "nocturna-gr":    "460798022",
+    "nocturna-bg":    "460803922",
 }
-ALL_BRANDS = [("Grandia", "510760223"), ("Esteban", "510626424"),
-              ("George Talent", "541255080"), ("Nubra", "541249929")]
+ALL_BRANDS = [("Esteban", "510626424"), ("Grandia", "510760223"), ("Nubra", "541249929"),
+              ("Belasil", "487042770"), ("George Talent", "541255080"), ("Gento", "486992931"),
+              ("Covoria", "491785347"), ("Casa Ofertelor", "501613337"), ("Rossi", "402470642"),
+              ("Nocturna", "460807314")]
 
 # ---------- credentials ----------
 def _find_kb():
