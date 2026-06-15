@@ -27,6 +27,22 @@ ORDER BY o."shopifyCreatedAt" DESC LIMIT 10;
 Mapează `shopifyDomain → prefix` (din `stores.csv`: ex `n12w89-yy…→GRAN`, `6f9e22-9d…→EST`) și dă-l ca `--store`
 (numele comenzii poate avea alt prefix: `GRAND17148` e magazinul `GRAN`). Mai mulți candidați → confirmă cu agentul.
 
+## Pasul 1.5 — produs pe mai multe magazine (ex. HA), fără --store → alegi TU
+Produsele **HA-** (deals) sunt același titlu pe magazinele de oferte, fiecare cu SKU propriu:
+**RO** = Casa ofertelor (`BON`=bonhaus.myshopify.com) · Reduceri bune (`RED`) · Ofertele zilei (`OFER`) · Magdeal ·
+**BG** = Bonhaus (`BONBG`=ux1x6n-n2) · **CZ** = Bonhaus.cz (`CZ`). Nu te baza pe nume — **alege după STOC real**.
+Dacă agentul dă produsul fără magazin, rezolvă din `metrics`:
+```sql
+SELECT s."shopifyDomain", li.sku, MAX(v."inventoryQuantity") AS stoc
+FROM order_line_items li JOIN orders o ON o.id=li."orderId"
+  JOIN shopify_stores s ON s."brandId"=o."brandId"
+  JOIN variants v ON v.sku=li.sku AND v."brandId"=o."brandId"
+WHERE li.title ILIKE '%<produs>%' GROUP BY 1,2 ORDER BY stoc DESC;
+```
+Filtrează după **PIAȚA clientului** (prefix telefon: `+40`→RO, `+359`→BG, `+420`→CZ, `+48`→PL):
+RO → magazine RO (RED/BON/GT/EST/GRAN/…) · BG → BG/BONBG · CZ → CZ · PL → PL. Alege magazinul **cu cel mai mult
+stoc** din piața clientului și folosește **SKU-ul ACELUI magazin** la `--items`. Două candidate RO cu stoc → confirmă scurt.
+
 ## Pasul 2 — execută (DRY-RUN întâi, apoi --apply)
 ```
 cs_actions.py cancel  --order GRAND17148 --store GRAN [--reason customer|inventory|declined|fraud|other] [--refund] [--no-restock]
