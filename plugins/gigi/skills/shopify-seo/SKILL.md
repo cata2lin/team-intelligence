@@ -138,12 +138,12 @@ uv run scripts/product_fix.py --store esteban --product <handle> \
 ## Catalog/nav structure — `scripts/brand_collections.py` + `scripts/menu_addbrands.py`
 For dupe/inspired-by catalogs: build **smart collections by inspiration brand** (SEO hubs + internal-link targets) and a **"După Brand" menu dropdown**.
 ```bash
-uv run scripts/brand_collections.py --store esteban --min 3            # DRY-RUN: brands (from "...by <Brand>" titles) → proposed smart collections
-uv run scripts/brand_collections.py --store esteban --min 3 --apply    # create smart collections (rule: title contains "by <Brand>", case-insensitive)
-uv run scripts/menu_addbrands.py    --store esteban --top 8            # DRY-RUN: add a top-level "După Brand" item with the top-N brands
-uv run scripts/menu_addbrands.py    --store esteban --top 8 --apply    # menuUpdate (preserves the whole existing tree)
+uv run scripts/brand_collections.py --store esteban --min 3 [--brand-name "Nubra"]  # DRY-RUN: brands (from "...by <Brand>" titles) → proposed smart collections
+uv run scripts/brand_collections.py --store esteban --min 3 --apply                 # create + auto-publish to all channels
+uv run scripts/menu_addbrands.py    --store nubra --top 8 --title "Inspirate din" --after "Unisex"        # DRY-RUN
+uv run scripts/menu_addbrands.py    --store nubra --top 8 --title "Inspirate din" --after "Unisex" --apply # menuUpdate (preserves the whole tree)
 ```
-DRY-RUN by default. `menu_addbrands` keeps only the **top-N brands by product count** in the menu (the rest stay as collections for SEO/links — don't dump 21 items in the nav). `brand_collections --apply` **auto-publishes each new collection to ALL sales channels** (golden rule #6 — new collections default to ZERO channels → 404 on storefront + invisible on Google/Shop; this bit us once: 21 collections created but unpublished → all 404 until `publishablePublish` on every channel). Done on Esteban (Jun 2026): 21 brand collections + "După Brand" menu with top 8.
+DRY-RUN by default. `menu_addbrands` keeps only the **top-N brands by product count** in the menu (rest stay as collections for SEO/links — don't dump 21 items in nav); `--title` names the item, `--after "<menu item title>"` controls placement (default "Toate parfumurile"; falls back to front if not found). `brand_collections --brand-name` overrides the shop name in SEO (default = `shop.name`); `--apply` **auto-publishes each new collection to ALL sales channels** (golden rule #6 — new collections default to ZERO channels → 404 + invisible on Google/Shop; this bit us once). Proven on **Esteban** (21 collections + "Inspirate din" menu) and **Nubra** (17 collections + menu). **Per-store caveat:** how a store encodes the inspiration varies — Esteban/Nubra titles carry "... by <Brand>" (title-CONTAINS rule), but **GT** has no brand in the title (it's in `custom.inspired_by` = "Miss by Dior") and its existing brand collections use a **TAG EQUALS <Brand>** rule. Check the title format + an existing brand collection's `ruleSet` before running.
 
 ## Internal linking — `scripts/internal_links.py` (DRY-RUN default)
 Distribuie PageRank intern + de-orfanizează conținut. **Fără emoji** în textul inserat (convenție echipă). Toate inserțiile sunt **idempotente** (un marker regex șterge blocul anterior înainte de re-adăugare) și fiecare `collectionUpdate` retrimite SEO title+description existente (golden rule #1). Trei moduri:

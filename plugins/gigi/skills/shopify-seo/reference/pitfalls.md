@@ -167,3 +167,23 @@ niche = **Unisex**, not the gender collection they sit in). `sex`/`note_parfum` 
 `list.single_line_text_field` → set value as a JSON array string via `metafieldsSet`.
 A frequent import artifact: `sex = ["Unisex","Femei","Barbati"]` (all three) on niche
 unisex perfumes — collapse to `["Unisex"]`.
+
+## 19. Each store is a different theme — re-check rendering before replicating
+The same owner's perfume stores run **different themes** with different behaviour;
+don't assume Esteban's fixes transfer 1:1. Check per store before mass-editing:
+- **Description rendering:** Esteban (Ella/Halo) renders the description via a
+  `strip_html` short snippet → needs the `{{ desc }}` edit for clickable links
+  (§12). **Nubra** (an Online Store 2.0 theme) renders `{{ closest.product.description }}`
+  **raw** in a `blocks/product-description.liquid` → links/bold work natively, no edit.
+- **Spec table:** Esteban builds it from a `custom_liquid` block in `templates/product.json`
+  (the `| join` + `align-items` bug, §15). **Nubra** has no such block (renders metafields
+  via a native OS2.0 block) → nothing to fix.
+- **Brand encoding (for `brand_collections`):** Esteban/Nubra carry "... by <Brand>" in
+  the product title; **GT** has no brand in the title (it's in `custom.inspired_by`) and
+  its brand collections use a **TAG EQUALS** rule, not title-CONTAINS.
+- **Volume metafield key** even varies: `custom.volum` (Esteban/Nubra) vs
+  `custom.volum_ml_` (GT).
+Playbook order that worked for a store (Esteban, Nubra): brand collections (+publish)
+→ menu → internal-link cluster → copy rewrite (6-agent fan-out, see §16) → brand link
+on PDPs → de-orphan blog articles (per-store `deorphan_<store>.json` map) → fill
+metafield/SEO gaps.
