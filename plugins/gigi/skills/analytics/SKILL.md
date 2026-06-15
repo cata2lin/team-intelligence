@@ -67,6 +67,8 @@ uv run gsc.py summary  --brand grandia         # totals: clicks / impressions / 
 uv run gsc.py summary  --all                   # one-line totals for every connected site
 uv run gsc.py wow      --brand esteban         # WEEK-OVER-WEEK: last 7d vs prior 7d, brand vs non-brand + daily trend
 uv run gsc.py wow      --all --days 7          # WoW one-liner for every site — "did our SEO work move anything?"
+uv run gsc.py rank     --brand gt --query "parfumuri barbati|parfum barbati"   # OUR position for exact keywords + ranking page
+uv run gsc.py rank     --brand esteban --contains "parfum"                      # every keyword we appear for that contains a term
 ```
 Flags: `--brand <name>` (mapped to its `sc-domain:`) or `--site <domain>`; `--days` (default 28; `wow` default 7); `--limit`. Data lags ~2–3 days (range ends 3 days ago).
 
@@ -76,6 +78,9 @@ Flags: `--brand <name>` (mapped to its `sc-domain:`) or `--site <domain>`; `--da
 | `pages` | which pages rank / earn organic clicks |
 | `summary` | site-level SEO health (clicks/impr/CTR/position), `--all` to compare every brand |
 | **`wow`** | last N days vs prior N — clicks/impr/position deltas **split brand vs non-brand**, daily trend, top non-brand queries. The "did last week's SEO work move anything?" view. Non-brand = the real SEO signal; brand-name typos (estaban/numbra/berasil…) are fuzzy-matched into *brand* so they don't fake non-brand wins. |
+| **`rank`** | **OUR position** for given keywords: `--query "a\|b"` (exact, returns avg position + clicks + the page that ranks) or `--contains "term"` (every keyword we appear for containing that term). Answers "how do we situate on keyword X". *Caveat:* GSC only shows keywords we already get impressions for — `(nu apărem / 0 impr)` means we're not ranking high enough to register, NOT that we're #1. For the full SERP / who outranks us / keywords we don't appear for, you need a SERP source (see below). |
+
+> **GSC `rank` vs the live SERP:** `rank` is free + authoritative for *our* position on keywords we already surface for (e.g. GT is pos ~11 on "parfumuri barbati", Grandia pos ~8–12 on product terms — page 1–2 "striking distance"). It does NOT show competitors or keywords where we don't appear. For that you need a SERP API (DataForSEO/SerpApi — paid, none configured) or a live browser SERP scrape (chrome-devtools, fragile, spot-checks only).
 
 > ⚠️ **Reading `wow` honestly:** at perfume/brand stores ~all organic is **brand search** (incl. misspellings) driven by ad demand, not on-page SEO — judge SEO on **non-brand** clicks/impressions + position. SEO changes take 1–4 weeks; a few days post-change is an early read (impressions/position move before clicks). Grandia is the exception with real non-brand product queries.
 

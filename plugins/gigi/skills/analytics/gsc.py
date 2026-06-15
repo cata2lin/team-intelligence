@@ -195,6 +195,40 @@ def cmd_summary(creds, args):
     else:
         _summary_for(creds.token, _site(args), start, end)
 
+def _sa_query(token, site, body):
+    url = f"https://www.googleapis.com/webmasters/v3/sites/{urllib.parse.quote(site, safe='')}/searchAnalytics/query"
+    return _req("POST", url, token, body)
+
+def cmd_rank(creds, args):
+    site = _site(args); start, end = _range(args.days)
+    if args.contains:
+        body = {"startDate": start, "endDate": end, "dimensions": ["query"], "rowLimit": args.limit,
+                "dimensionFilterGroups": [{"filters": [{"dimension": "query", "operator": "contains",
+                                                         "expression": args.contains.lower()}]}]}
+        rows = _sa_query(creds.token, site, body).get("rows", [])
+        rows.sort(key=lambda r: -r["impressions"])
+        print(f"\n{site}   query CONTAINS '{args.contains}'   {start}..{end}   ({len(rows)} keywords)")
+        print(f"  {'pos':>5}{'clicks':>8}{'impr':>8}{'CTR':>7}  query")
+        for r in rows:
+            print(f"  {r['position']:>5.1f}{int(r['clicks']):>8,}{int(r['impressions']):>8,}{100*r['ctr']:>6.1f}%  {r['keys'][0][:55]}")
+        return
+    kws = [k.strip() for k in (args.query or "").split("|") if k.strip()]
+    if not kws:
+        sys.exit('Pass --query "kw1|kw2" (exact) or --contains "term" (keyword group).')
+    print(f"\n{site}   poziția noastră pe cuvinte cheie   {start}..{end}")
+    print(f"  {'pos':>5}{'clicks':>7}{'impr':>7}{'CTR':>7}  keyword  ->  ranking page")
+    for kw in kws:
+        body = {"startDate": start, "endDate": end, "dimensions": ["query", "page"], "rowLimit": 25,
+                "dimensionFilterGroups": [{"filters": [{"dimension": "query", "operator": "equals",
+                                                        "expression": kw.lower()}]}]}
+        rows = _sa_query(creds.token, site, body).get("rows", [])
+        if not rows:
+            print(f"  {'—':>5}{0:>7}{0:>7}{'—':>7}  {kw}  ->  (nu apărem / 0 impresii)")
+            continue
+        b = max(rows, key=lambda r: r["impressions"])
+        page = b["keys"][1].replace("https://", "").replace("http://", "")
+        print(f"  {b['position']:>5.1f}{int(b['clicks']):>7,}{int(b['impressions']):>7,}{100*b['ctr']:>6.1f}%  {kw}  ->  {page[:46]}")
+
 def _totals(token, site, s, e):
     r = _query(token, site, s, e, None, 1).get("rows", [])
     return r[0] if r else {"clicks": 0, "impressions": 0, "ctr": 0, "position": 0}
@@ -272,6 +306,11 @@ def main():
     ww.add_argument("--brand"); ww.add_argument("--site"); ww.add_argument("--all", action="store_true")
     ww.add_argument("--days", type=int, default=7)
     ww.set_defaults(fn=cmd_wow)
+    rk = sub.add_parser("rank", help="our position for exact keywords (--query \"a|b\") or a group (--contains)")
+    rk.add_argument("--brand"); rk.add_argument("--site")
+    rk.add_argument("--query"); rk.add_argument("--contains")
+    rk.add_argument("--days", type=int, default=28); rk.add_argument("--limit", type=int, default=50)
+    rk.set_defaults(fn=cmd_rank)
 
     args = ap.parse_args()
     args.fn(load_creds(), args)
