@@ -49,13 +49,16 @@ cs_actions.py cancel  --order GRAND17148 --store GRAN [--reason customer|invento
 cs_actions.py place   --store GT --name "Ion Pop" --phone 0750... --address "Str X 1" --city Ploiesti --zip 100294 --items "SKU:2;termen:1"
 cs_actions.py swap    --from-order EST188351 --items "GD-BR-6660:1"        # copiază adresa + tag swap
 cs_actions.py resend  --from-order GT44004  --items "SKU:1"               # retrimitere GRATIS (100% discount) + tag resend
-cs_actions.py modify  --order EST188351 --store EST --address "Str Noua 9" --city Cluj --zip 400001   # schimbă adresa (pre-fulfillment)
-cs_actions.py invoice --order GT44004                                     # factură (GT via xConnector)
+cs_actions.py modify  --order EST188351 --store EST [--address "Str Noua 9" --city Cluj --zip 400001] \
+                      [--add "SKU:1"] [--remove "termen"] [--set "termen:3"]    # adresă ȘI/SAU produse (orderEdit)
+cs_actions.py invoice --order GT44004                                     # factură fiscală SmartBill
 ```
 - **Fără `--apply` = DRY-RUN** (arată exact ce ar face). Arată sumarul agentului, confirmă, apoi rulează cu `--apply`.
 - **COD**: `place/swap/resend` creează comandă neplătită (`paymentPending`) → se expediază, plătește la livrare.
 - **Produse**: `--items "termen:cantitate;..."` (termen = SKU exact sau titlu). Ambiguu → scriptul cere SKU-ul.
-- **Adresa la swap/resend**: din xConnector (GT) / Frisbo (restul). Dacă n-o găsește → dă `--address --city --zip`.
+- **modify** schimbă adresa (REST, pre-fulfillment) și/sau produsele (`--add`/`--remove`/`--set` prin orderEdit→commit).
+- **Adresa la swap/resend**: xConnector (GT) / **Frisbo** (restul — org per magazin, mapat în `FRISBO_BY_PREFIX`). Fallback: `--address --city --zip`.
+- **invoice**: SmartBill per magazin — necesită KB `SMARTBILL_STORES`=`[{prefix,email,token,cif,series}]`. ⚠ emite document fiscal REAL — testează pe o comandă întâi.
 - **Taguri**: agentul mereu; `swap`/`resend`/`garantie`/`anulat-cs`/`adresa-modificata` după caz.
 
 ## Auth (nimic nu se printează)
