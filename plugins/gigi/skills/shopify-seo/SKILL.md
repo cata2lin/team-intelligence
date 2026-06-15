@@ -36,6 +36,7 @@ avoids the same traps.
 6. **Publish to ALL sales channels, not just Online Store.** New smart collections
    default to Online Store only → invisible on Google & YouTube / Shop / etc.
 7. **Never print a secret or token.** Fetch via `kb.py secret-get`, pipe into the process.
+8. **Description renders twice:** a SHORT summary (`strip_html`+truncate → no links/bold) and a FULL tab (raw HTML → links work). Spec tables are usually a **Custom Liquid block in `templates/*.json`**, not a snippet — list metafields there need `| join: ", "`. Mutation types bite: `articleUpdate.body`=HTML!, `productUpdate.descriptionHtml`=String!. Pages may render **client-side** (curl shows nothing → use chrome-devtools) and **never inspect a draft product**. See `reference/pitfalls.md` §12-16.
 
 ## Auth / setup
 

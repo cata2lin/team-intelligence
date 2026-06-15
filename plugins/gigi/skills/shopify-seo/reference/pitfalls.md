@@ -87,3 +87,54 @@ Menus, homepage content blocks, redirects, noindex, breadcrumb styling — propo
 first (mockup the structure), apply after sign-off. The owner corrected the menu
 labels ("Fresh" not "Proaspete") and a wrongly-noindexed collection post-hoc; both
 were avoidable with an upfront yes/no.
+
+## 12. Product description: SHORT (stripped) vs FULL (raw HTML)
+Many themes render the description **twice** with different filters. On Ella/Halo:
+- `snippets/product-short-description.liquid` (near the title/buy button) does
+  `{{ desc | strip_html | truncatewords: n }}` → **strips ALL tags + truncates**.
+  Links/bold NEVER show here, and adjacent `</p><p>` paragraphs glue together
+  ("word.Next" with no space). A `c_f.short_description` metafield can override it.
+- The **full description tab** (lower) renders `product.description` **raw** → bold,
+  lists, and **links ARE clickable here**. Verify with a real `<strong>` in the
+  served HTML before concluding "HTML doesn't work".
+So: a link injected into the description **is** clickable — just not in the top
+summary. If you need a clean summary, mind the strip+truncate; inserting a space at
+paragraph boundaries (`</p> <p>`) survives strip_html and prevents glued sentences.
+
+## 13. Mutation field types that mismatch (silent until you hit them)
+- `articleUpdate(article:{body})` → **HTML!**
+- `productUpdate(input:{descriptionHtml})` → **String!**  (opposite of articleUpdate)
+- `collectionUpdate`/`productUpdate` `seo{}` **REPLACES** — always re-send title+desc.
+- New collections publish to **0 channels** → 404 on storefront; `publishablePublish`
+  to every `publications` node (see golden rule #6).
+
+## 14. Pages can render client-side — curl won't see them
+On JS-heavy themes/apps the product content (tabs, spec tables) is built in the
+browser. `curl` returns a shell with the text **absent**. Use chrome-devtools
+(`evaluate_script`) to inspect the real DOM, computed styles, and class names.
+**Never inspect a `status:draft` product** for rendering — it won't render at all
+(wasted a debugging loop on a draft once). Filter `status:active` first.
+
+## 15. Spec tables are often a Custom Liquid block in templates/*.json, not a snippet
+A grepping pass over `.liquid` finds nothing because the block lives in
+`templates/product.json` (and variants) as a `custom_liquid` section setting
+(also check `config/settings_data.json`). Grep the **`.json`** assets for the CSS
+class (e.g. `specs-container`). Edit it by parsing the JSON, replacing the block's
+`settings.custom_liquid`, and `asset_put` the whole template back (back it up first).
+Two real bugs we fixed on Esteban's spec grid:
+- **list metafields without `| join`** (`custom.sex` etc.) render glued:
+  "UnisexFemeiBarbati". Add `| join: ", "` (safe no-op on string metafields too).
+- grid misaligns when a value wraps to 2 lines → add `align-items: start;`.
+Spec metafields on Esteban: `custom.note_parfum`/`sex`/`mom_zi` =
+`list.single_line_text_field` (JSON array value); `varf`/`note_inima`/`note_baza` =
+`multi_line_text_field` (plain comma string); `volum` = `number_integer`.
+Gift-set templates (`set-3`/`set-6`/`kit`/`parfum-cadou`) disable the spec block —
+don't expect a fragrance pyramid there.
+
+## 16. Copy voice for mass-market RO (perfume)
+The owner's bar: **no niche jargon** ("siaj"/"sillage" — even the DOOM-correct
+"siaj" reads as connoisseur-speak), **few adjectives** (cut "cremoasă, învăluitoare,
+catifelată" pile-ups), **no "flacon"**, and **don't repeat the on-page offer**
+("2+1 gratis" already shows above the description). Keep notes faithful to the
+original — never invent a fragrance pyramid. Format: 2-3 short `<p>` with a bold
+`Profil olfactiv:`. Pair with `gigi:ai-scrub` for the de-AI pass.
