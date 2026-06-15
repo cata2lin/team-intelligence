@@ -144,3 +144,26 @@ catifelată" pile-ups), **no "flacon"**, and **don't repeat the on-page offer**
 ("2+1 gratis" already shows above the description). Keep notes faithful to the
 original — never invent a fragrance pyramid. Format: 2-3 short `<p>` with a bold
 `Profil olfactiv:`. Pair with `gigi:ai-scrub` for the de-AI pass.
+
+## 17. CDN cache makes a live fix look broken ("nu merge" was just stale cache)
+Shopify's full-page cache serves **stale, even inconsistent-per-URL** HTML: one
+`?a=1` render showed the new raw description, a sibling `?b=2` still showed the old
+stripped one — same product, same moment. We burned several rounds because a theme
+fix "didn't work" when it was only cache. **Before concluding a change failed:**
+1. Read the change back from the **theme asset** (`asset_get`) — is the source right?
+2. In the browser, **reload with `ignoreCache: true`** (or Cmd+Shift+R / incognito)
+   and re-check the DOM, not a normal navigation.
+3. Touching the product (`productUpdate`) busts that product's page cache.
+Adding `?nc=<rand>` busts collection pages but **not always product pages**. If the
+asset is correct and an ignore-cache reload shows the fix, it IS live — tell the
+owner to hard-refresh; it propagates on its own in minutes.
+
+## 18. Filling missing perfume metafields
+Audit gaps per key across `status:active` products; most "gaps" are gift
+sets/bundles (different template, spec block disabled) — exclude them. Real single
+perfumes usually miss only `sex` or `note_parfum`, fillable accurately from the
+known original (e.g. Tom Ford Private Blend, MFK, Sospiro, Kilian, Nasomatto, Xerjoff
+niche = **Unisex**, not the gender collection they sit in). `sex`/`note_parfum` are
+`list.single_line_text_field` → set value as a JSON array string via `metafieldsSet`.
+A frequent import artifact: `sex = ["Unisex","Femei","Barbati"]` (all three) on niche
+unisex perfumes — collapse to `["Unisex"]`.
