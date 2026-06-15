@@ -78,6 +78,68 @@ def extract(url):
         currency = (t.get("content") if t else None) or "RON"
     return {"price": price, "currency": currency, "availability": avail or "?", "title": title, "status": r.status_code}
 
+def extract_listing(url):
+    r = requests.get(url, headers=UA, timeout=30)
+    soup = BeautifulSoup(r.text, "html.parser")
+    name = desc = None; images = []; price = None; currency = "RON"; avail = "?"
+    for tag in soup.find_all("script", {"type": "application/ld+json"}):
+        try: data = json.loads(tag.string or "{}")
+        except Exception: continue
+        for obj in (data if isinstance(data, list) else [data]):
+            for o in (obj.get("@graph", [obj]) if isinstance(obj, dict) else [obj]):
+                if not isinstance(o, dict): continue
+                t = o.get("@type", "")
+                if ("Product" in (t if isinstance(t, str) else "".join(t))) or o.get("offers"):
+                    name = name or o.get("name")
+                    desc = desc or o.get("description")
+                    img = o.get("image")
+                    if img: images += [i.get("url") if isinstance(i, dict) else i for i in (img if isinstance(img, list) else [img])]
+                    off = o.get("offers"); off = off[0] if isinstance(off, list) else off
+                    if isinstance(off, dict):
+                        price = price or _num(off.get("price") or off.get("lowPrice"))
+                        currency = off.get("priceCurrency") or currency
+                        if avail == "?": avail = (off.get("availability") or "?").split("/")[-1]
+    if not name: name = (soup.title.get_text(strip=True) if soup.title else "")
+    if not desc:
+        m = soup.find("meta", attrs={"name": "description"}); desc = (m.get("content") if m else "") or ""
+    for m in soup.find_all("meta", attrs={"property": "og:image"}):
+        if m.get("content"): images.append(m["content"])
+    images = [i for i in dict.fromkeys(images) if i]
+    bullets = [li.get_text(" ", strip=True) for li in soup.select("[class*=desc] li, [class*=product] li, .rte li, [itemprop=description] li")]
+    bullets = [b for b in dict.fromkeys(bullets) if 3 < len(b) < 160][:10]
+    dtext = BeautifulSoup(desc or "", "html.parser").get_text(" ", strip=True)
+    return {"name": (name or "")[:80], "price": price, "currency": currency, "availability": avail,
+            "desc_words": len(dtext.split()), "desc": dtext, "images": images, "bullets": bullets}
+
+def cmd_listing(args):
+    e = extract_listing(args.url)
+    print(f"\nListing — {args.url}")
+    print(f"  titlu: {e['name']}")
+    print(f"  preț:  {e['price']} {e['currency']} ({e['availability']})")
+    print(f"  poze:  {len(e['images'])}")
+    for u in e["images"][:10]: print(f"     {u}")
+    print(f"  descriere: {e['desc_words']} cuvinte")
+    if e["bullets"]:
+        print(f"  bullets/specs ({len(e['bullets'])}):")
+        for b in e["bullets"]: print(f"     • {b[:90]}")
+    print(f"  extras descriere: {e['desc'][:240]}")
+
+def cmd_compare(args):
+    comp = extract_listing(args.comp); our = extract_listing(args.our_url)
+    print(f"\nListing compare — al nostru vs concurent")
+    print(f"  {'':<14}{'AL NOSTRU':>12}{'CONCURENT':>12}")
+    print(f"  {'poze':<14}{len(our['images']):>12}{len(comp['images']):>12}")
+    print(f"  {'descriere (cuv)':<14}{our['desc_words']:>12}{comp['desc_words']:>12}")
+    print(f"  {'bullets/specs':<14}{len(our['bullets']):>12}{len(comp['bullets']):>12}")
+    print(f"  {'preț':<14}{str(our['price']):>12}{str(comp['price']):>12}")
+    gaps = []
+    if len(comp["images"]) > len(our["images"]): gaps.append(f"concurentul are {len(comp['images'])} poze vs {len(our['images'])} — adaugă imagini (unghiuri/lifestyle/scale)")
+    if comp["desc_words"] > our["desc_words"] * 1.3: gaps.append(f"descriere concurent {comp['desc_words']} cuv vs {our['desc_words']} — extinde + adaugă beneficii/utilizare")
+    if len(comp["bullets"]) > len(our["bullets"]): gaps.append(f"concurentul listează {len(comp['bullets'])} bullets/specs vs {len(our['bullets'])} — adaugă tabel de specificații")
+    print("\n  Ce să îmbunătățim la listingul nostru:")
+    for g in gaps or ["(listingul nostru e cel puțin la fel de bogat ca al concurentului)"]:
+        print(f"    - {g}")
+
 def cmd_add(args):
     c = _db()
     e = extract(args.url)
@@ -133,6 +195,8 @@ def main():
     sub.add_parser("check").set_defaults(fn=cmd_check)
     sub.add_parser("list").set_defaults(fn=cmd_list)
     h = sub.add_parser("history"); h.add_argument("--url", required=True); h.set_defaults(fn=cmd_history)
+    ls = sub.add_parser("listing", help="extract a listing (title/desc/images/bullets)"); ls.add_argument("--url", required=True); ls.set_defaults(fn=cmd_listing)
+    cp = sub.add_parser("compare", help="our listing vs a competitor's → improvement gaps"); cp.add_argument("--our-url", dest="our_url", required=True); cp.add_argument("--comp", required=True); cp.set_defaults(fn=cmd_compare)
     args = ap.parse_args(); args.fn(args)
 
 if __name__ == "__main__":
