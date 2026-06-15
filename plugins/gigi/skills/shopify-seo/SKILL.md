@@ -144,5 +144,18 @@ uv run scripts/menu_addbrands.py    --store esteban --top 8 --apply    # menuUpd
 ```
 DRY-RUN by default. `menu_addbrands` keeps only the **top-N brands by product count** in the menu (the rest stay as collections for SEO/links — don't dump 21 items in the nav). `brand_collections --apply` **auto-publishes each new collection to ALL sales channels** (golden rule #6 — new collections default to ZERO channels → 404 on storefront + invisible on Google/Shop; this bit us once: 21 collections created but unpublished → all 404 until `publishablePublish` on every channel). Done on Esteban (Jun 2026): 21 brand collections + "După Brand" menu with top 8.
 
+## Internal linking — `scripts/internal_links.py` (DRY-RUN default)
+Distribuie PageRank intern + de-orfanizează conținut. **Fără emoji** în textul inserat (convenție echipă). Toate inserțiile sunt **idempotente** (un marker regex șterge blocul anterior înainte de re-adăugare) și fiecare `collectionUpdate` retrimite SEO title+description existente (golden rule #1). Trei moduri:
+```bash
+uv run scripts/internal_links.py cluster   --store esteban --top 8           # interlink top-N colecții de brand (fiecare -> 3 frați circular)
+uv run scripts/internal_links.py pdp-brand --store esteban --top 0 --apply    # link spre colecția de brand pe TOATE produsele (top 0 = toate brandurile)
+uv run scripts/internal_links.py deorphan  --store esteban --map deorphan.json --apply  # colecție<->articol bidirecțional dintr-un JSON
+```
+- **cluster**: huburile de brand se leagă între ele -> crawl + flux PageRank. Ancoră = numele brandului.
+- **pdp-brand**: pe fiecare produs „... by <Brand>" adaugă la finalul descrierii `Vezi toate <a>parfumurile inspirate din <Brand></a>` (ancoră = brandul, țintă = colecția lui). `--top 0` = toate brandurile (Esteban: **133 produse**); `--top 8` = doar topurile.
+- **deorphan**: dă fiecărui articol orfan un inbound dintr-o colecție-hub tematică (colecțiile sunt în meniu => PageRank mare) + un CTA înapoi din articol. Maparea (colecție↔articole) e specifică magazinului -> fișier JSON: `[{"collection":"dama","label":"Damă","articles":[{"handle":"...","title":"..."}]}]`.
+
+Făcut pe Esteban (Jun 2026): cluster top-8 + de-orfanizate toate 15 articolele blog (bidirecțional colecție↔articol) + link de brand pe toate 133 produse. **`mutation` type-uri care înșeală:** `articleUpdate.body` = **HTML!**, `productUpdate.descriptionHtml` = **String!** (opuse — nu le confunda).
+
 ## Logging (team convention)
 After a run: `kb.py log --type skill --action used --name gigi:shopify-seo --summary "…"`.

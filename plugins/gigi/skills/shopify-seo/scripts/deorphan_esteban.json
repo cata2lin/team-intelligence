@@ -1,0 +1,30 @@
+[
+  {"collection": "parfumuri-inspirate-tom-ford", "label": "Tom Ford", "articles": [
+    {"handle": "profiluri-tom-ford-maison-esteban", "title": "Alternative Tom Ford: Lost Cherry, Tobacco Vanille, Tuscan Leather"}]},
+  {"collection": "parfumuri-inspirate-dior", "label": "Dior", "articles": [
+    {"handle": "parfumuri-inspirate-chanel-lancome-dior-femei", "title": "Parfumuri inspirate din Chanel, Lancôme și Dior pentru femei"}]},
+  {"collection": "parfumuri-inspirate-jean-paul-gaultier", "label": "Jean Paul Gaultier", "articles": [
+    {"handle": "de-la-scandal-la-good-girl-parfumuri-florale-dulci-femei", "title": "De la Scandal la Good Girl: parfumuri florale-dulci de femei"}]},
+  {"collection": "dama", "label": "Damă", "articles": [
+    {"handle": "5-alternative-parfumuri-de-lux-femei-zilnic", "title": "5 alternative la parfumuri de lux pe care le porți zilnic"},
+    {"handle": "cele-mai-bune-parfumuri-dama-2026", "title": "Cele mai bune parfumuri de damă în 2026"}]},
+  {"collection": "cele-mai-vandute-femei", "label": "Cele mai vândute | Femei", "articles": [
+    {"handle": "cele-mai-vandute-parfumuri-femei-maison-desteban", "title": "Cele mai vândute parfumuri de femei"}]},
+  {"collection": "parfumuri-de-seara", "label": "Parfumuri de seară", "articles": [
+    {"handle": "top-parfumuri-de-seara-pentru-barbati", "title": "Top 5 parfumuri de seară pentru bărbați"}]},
+  {"collection": "seturi-de-cadou", "label": "Seturi de cadou", "articles": [
+    {"handle": "ghid-cadou-seturi-3-parfumuri-cum-alegi", "title": "Ghid de cadou: seturile de 3 parfumuri și cum alegi corect"}]},
+  {"collection": "parfumuri-fresh", "label": "Parfumuri proaspete (fresh)", "articles": [
+    {"handle": "parfumuri-de-vara-profiluri-fresh-citrice", "title": "Parfumuri de vară: profiluri fresh și citrice"}]},
+  {"collection": "parfumuri-arabesti-orientale", "label": "Parfumuri arabești & orientale", "articles": [
+    {"handle": "parfumuri-arabesti-orientale-ghid", "title": "Parfumuri arabești și orientale: ghidul complet"}]},
+  {"collection": "parfumuri-lemnoase", "label": "Parfumuri lemnoase", "articles": [
+    {"handle": "parfumuri-lemnoase-barbati", "title": "Parfumuri lemnoase pentru bărbați"}]},
+  {"collection": "parfumuri-dulci", "label": "Parfumuri dulci & gourmand", "articles": [
+    {"handle": "parfumuri-dulci-gourmand", "title": "Parfumuri dulci și gourmand: vanilie, caramel și note delicioase"}]},
+  {"collection": "unisex", "label": "Unisex", "articles": [
+    {"handle": "parfumuri-unisex-ghid", "title": "Parfumuri unisex: cum alegi o aromă pentru el și pentru ea"}]},
+  {"collection": "toate-parfumurile", "label": "Toate parfumurile", "articles": [
+    {"handle": "familii-olfactive-cum-alegi-parfumul", "title": "Familii olfactive explicate: cum îți alegi parfumul după gust"},
+    {"handle": "ce-inseamna-persistenta-12h-si-de-ce-conteaza", "title": "Ce înseamnă persistența 12h+ și de ce contează cu adevărat"}]}
+]
