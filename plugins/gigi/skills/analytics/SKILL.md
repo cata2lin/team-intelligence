@@ -113,5 +113,17 @@ uv run authority.py --ours --vs notino.ro,sephora.ro,douglas.ro    # our 5 store
 ```
 Returns Open PageRank score (0–10) + global rank per domain. **Finding (Jun 2026):** our stores return OPR ~0/n/a while competitors sit ~2.5 — i.e. near-zero measurable domain authority (real backlink gap) AND Open PageRank barely indexes `.ro`/newer sites, so for an actual backlink graph we still need DataForSEO/Ahrefs (paid). Use this for competitor authority benchmarking, not as our own backlink truth.
 
+## DataForSEO — `dataforseo.py` (PAID: live SERP, competitor keywords, backlinks)
+Fills the SERP + backlinks + competitor gaps. Creds in KB `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD` (Basic auth, **no IP whitelist needed**). Pay-as-you-go — every call costs money; default market Romania/Romanian.
+```bash
+export DATAFORSEO_LOGIN="$(uv run "$KB" secret-get DATAFORSEO_LOGIN)"
+export DATAFORSEO_PASSWORD="$(uv run "$KB" secret-get DATAFORSEO_PASSWORD)"
+uv run dataforseo.py serp      --keyword "parfumuri barbati"   # who ranks top in Google RO (+ flags our stores)
+uv run dataforseo.py keywords  --domain notino.ro --limit 40   # what a competitor ranks for (keyword mining / gap)
+uv run dataforseo.py backlinks --domain esteban.ro             # backlinks + referring domains summary
+uv run dataforseo.py balance                                   # account balance
+```
+⚠️ **Account state:** the account must be **verified** (app.dataforseo.com) and **funded** before data endpoints work — otherwise calls return `40104 "Please verify your account"` / insufficient balance (auth + `balance` still work). Run **monthly via cron + cache results in metrics** to pay per query, not per look.
+
 ## Validation note (Jun 2026)
 GA4 vs Shopify on Esteban agreed closely (organic share 11.7% vs 11.6%, paid social 78% vs 77.6%) — so the two sources are directionally consistent, but **don't mix them at decimal precision** in one comparison; label the source per brand. GA4's edge: it separates PMax/Shopping correctly and gives conversions.
