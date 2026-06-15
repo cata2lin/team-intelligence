@@ -23,6 +23,7 @@ def ser(node):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--store", default="esteban"); ap.add_argument("--apply", action="store_true")
     ap.add_argument("--top", type=int, default=8, help="câte branduri (top după nr. produse) în meniu")
+    ap.add_argument("--title", default="Inspirate din", help="titlul punctului de meniu top-level")
     a = ap.parse_args()
     st = Store(a.store)
     d = st.gql("""{ menus(first:20){ nodes{ id handle title
@@ -40,17 +41,18 @@ def main():
                 for c in cols]
 
     items = [ser(it) for it in menu["items"]]
-    # idempotent: reuse an existing "După Brand" top-level item if present
-    dupa = next((it for it in items if it["title"].strip().lower() in ("după brand", "dupa brand", "după brand 🏷️")), None)
+    # idempotent: reuse the existing brand top-level item (match old + new titles) if present
+    ALIASES = ("după brand", "dupa brand", "după brand 🏷️", a.title.strip().lower())
+    dupa = next((it for it in items if it["title"].strip().lower() in ALIASES), None)
     if dupa:
-        dupa["items"] = new_kids; dupa["type"] = "COLLECTION"; dupa["resourceId"] = toate; dupa.pop("url", None)
+        dupa["title"] = a.title; dupa["items"] = new_kids; dupa["type"] = "COLLECTION"; dupa["resourceId"] = toate; dupa.pop("url", None)
     else:
-        node = {"title": "După Brand", "type": "COLLECTION", "resourceId": toate, "items": new_kids}
+        node = {"title": a.title, "type": "COLLECTION", "resourceId": toate, "items": new_kids}
         # insert right after "Toate parfumurile" (or at front)
         idx = next((i for i, it in enumerate(items) if it["title"].strip().lower() == PARENT), -1)
         items.insert(idx + 1, node)
 
-    print(f"Main menu — nou punct top-level 'După Brand' cu {len(new_kids)} subitemuri (branduri):")
+    print(f"Main menu — punct top-level '{a.title}' cu {len(new_kids)} subitemuri (branduri):")
     print("  ", ", ".join(k["title"] for k in new_kids))
     print("  top-level după modificare:", " | ".join(it["title"] for it in items))
     if not a.apply:
