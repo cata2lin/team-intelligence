@@ -65,14 +65,19 @@ uv run gsc.py queries  --site grandia.ro --days 90 --limit 40
 uv run gsc.py pages    --brand esteban         # top landing pages from Google search
 uv run gsc.py summary  --brand grandia         # totals: clicks / impressions / CTR / avg position
 uv run gsc.py summary  --all                   # one-line totals for every connected site
+uv run gsc.py wow      --brand esteban         # WEEK-OVER-WEEK: last 7d vs prior 7d, brand vs non-brand + daily trend
+uv run gsc.py wow      --all --days 7          # WoW one-liner for every site — "did our SEO work move anything?"
 ```
-Flags: `--brand <name>` (mapped to its `sc-domain:`) or `--site <domain>`; `--days` (default 28); `--limit`. Data lags ~2–3 days (range ends 3 days ago).
+Flags: `--brand <name>` (mapped to its `sc-domain:`) or `--site <domain>`; `--days` (default 28; `wow` default 7); `--limit`. Data lags ~2–3 days (range ends 3 days ago).
 
 | Command | What you get |
 |---|---|
 | `queries` | the actual keywords people Google → clicks, impressions, CTR, **avg position** |
 | `pages` | which pages rank / earn organic clicks |
 | `summary` | site-level SEO health (clicks/impr/CTR/position), `--all` to compare every brand |
+| **`wow`** | last N days vs prior N — clicks/impr/position deltas **split brand vs non-brand**, daily trend, top non-brand queries. The "did last week's SEO work move anything?" view. Non-brand = the real SEO signal; brand-name typos (estaban/numbra/berasil…) are fuzzy-matched into *brand* so they don't fake non-brand wins. |
+
+> ⚠️ **Reading `wow` honestly:** at perfume/brand stores ~all organic is **brand search** (incl. misspellings) driven by ad demand, not on-page SEO — judge SEO on **non-brand** clicks/impressions + position. SEO changes take 1–4 weeks; a few days post-change is an early read (impressions/position move before clicks). Grandia is the exception with real non-brand product queries.
 
 Connected sites (all **Domain** properties, Full access): esteban, grandia, nubra, george-talent, belasil, gento, covoria, carpetto, labnoir, apreciat, casa-ofertelor (casaofertelor.ro), oriceredus, reduceribune, bonhaus.bg/cz/pl, nocturna.bg.
 > **Brand vs non-brand:** GSC reveals how much "organic" is just people Googling the brand name. E.g. Esteban's top queries are ~all "esteban / esteban parfum" (position ~1, CTR 80%+) → most organic clicks are **brand search**, not non-brand SEO. Use `queries` to size that split before claiming SEO wins. **GT note:** GT has real GSC organic (thousands of clicks) even though its GA4 is dead — so GSC is the way to measure GT's organic.

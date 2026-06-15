@@ -20,7 +20,7 @@ Usage:
     uv run gsc.py summary --brand esteban        # totals (clicks/impr/ctr/position)
     uv run gsc.py summary --all                  # totals for every known site
 """
-import argparse, datetime as dt, json, os, subprocess, sys, urllib.parse
+import argparse, datetime as dt, json, os, re, subprocess, sys, urllib.parse
 from google.oauth2 import service_account
 from google.auth.transport.requests import Request
 import requests
@@ -39,6 +39,54 @@ SITES = {
     "bonhaus-bg": "sc-domain:bonhaus.bg", "bonhaus-cz": "sc-domain:bonhaus.cz",
     "bonhaus-pl": "sc-domain:bonhaus.pl", "nocturna-bg": "sc-domain:nocturna.bg",
 }
+
+# brand-name tokens for the brand vs non-brand split (fuzzy, so typos like
+# "estaban"/"numbra"/"berasil" still count as brand search, not SEO wins).
+BRAND_TOKENS = {
+    "esteban": ["esteban", "maison esteban"], "grandia": ["grandia"], "nubra": ["nubra"],
+    "gt": ["georgetalent", "george talent", "gt"], "george-talent": ["georgetalent", "george talent", "gt"],
+    "belasil": ["belasil"], "gento": ["gento"], "covoria": ["covoria"], "carpetto": ["carpetto"],
+    "labnoir": ["labnoir", "lab noir"], "apreciat": ["apreciat"],
+    "casa-ofertelor": ["casaofertelor", "casa ofertelor"], "oriceredus": ["oriceredus", "orice redus"],
+    "reduceribune": ["reduceribune", "reduceri bune"], "nocturna-bg": ["nocturna"],
+    "bonhaus-bg": ["bonhaus"], "bonhaus-cz": ["bonhaus"], "bonhaus-pl": ["bonhaus"],
+}
+
+def _norm(s): return re.sub(r"[^a-z0-9]", "", s.lower())
+
+def _lev(a, b):
+    if a == b: return 0
+    if not a or not b: return max(len(a), len(b))
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+def _tokens_for(brand_key, site):
+    if brand_key and brand_key.lower() in BRAND_TOKENS:
+        return BRAND_TOKENS[brand_key.lower()]
+    stem = site.replace("sc-domain:", "").replace("https://", "").replace("http://", "").split("/")[0].split(".")[0]
+    return [stem, stem.replace("-", " "), stem.replace("-", "")]
+
+def _is_brand(query, tokens):
+    ql = query.lower(); comp = _norm(query)
+    for t in tokens:
+        tn = _norm(t)
+        if t in ql or (tn and tn in comp): return True
+        if tn and len(comp) <= len(tn) + 3 and _lev(comp, tn) <= 2: return True
+    for w in re.findall(r"[a-z0-9]+", ql):
+        if len(w) >= 4:
+            for t in tokens:
+                tn = _norm(t)
+                if tn and abs(len(w) - len(tn)) <= 2 and _lev(w, tn) <= 2: return True
+    return False
+
+def _pct(cur, prev):
+    if prev == 0: return "  —  " if cur == 0 else " new "
+    return f"{100*(cur-prev)/prev:+5.0f}%"
 
 def _find_kb():
     for c in [os.environ.get("KB_PY"),
@@ -147,6 +195,63 @@ def cmd_summary(creds, args):
     else:
         _summary_for(creds.token, _site(args), start, end)
 
+def _totals(token, site, s, e):
+    r = _query(token, site, s, e, None, 1).get("rows", [])
+    return r[0] if r else {"clicks": 0, "impressions": 0, "ctr": 0, "position": 0}
+
+def _brand_split(token, site, s, e, tokens):
+    nb_c = nb_i = b_c = 0; nb = []
+    for r in _query(token, site, s, e, ["query"], 25000).get("rows", []):
+        c = int(r["clicks"]); i = int(r["impressions"]); q = r["keys"][0]
+        if _is_brand(q, tokens):
+            b_c += c
+        else:
+            nb_c += c; nb_i += i; nb.append((c, i, r["position"], q))
+    nb.sort(reverse=True)
+    return nb_c, nb_i, b_c, nb
+
+def cmd_wow(creds, args):
+    n = args.days
+    end = dt.date.today() - dt.timedelta(days=3)             # GSC lag
+    Ls, Le = (end - dt.timedelta(days=n - 1)).isoformat(), end.isoformat()
+    Ps, Pe = (end - dt.timedelta(days=2 * n - 1)).isoformat(), (end - dt.timedelta(days=n)).isoformat()
+    tok = creds.token
+    if args.all:
+        print(f"Search Console WoW — last{n}d ({Ls}..{Le}) vs prior{n}d   [cur/prev Δ]")
+        print(f"  {'site':<24}{'clicks':>22}{'impressions':>22}{'nb-clicks':>20}{'pos':>13}")
+        seen = {}
+        for bk, site in SITES.items():
+            seen.setdefault(site, bk)
+        for site, bk in sorted(seen.items()):
+            cL, cP = _totals(tok, site, Ls, Le), _totals(tok, site, Ps, Pe)
+            toks = _tokens_for(bk, site)
+            nbL = _brand_split(tok, site, Ls, Le, toks)[0]; nbP = _brand_split(tok, site, Ps, Pe, toks)[0]
+            print(f"  {site.replace('sc-domain:',''):<24}"
+                  f"{int(cL['clicks']):>6,}/{int(cP['clicks']):<6,}{_pct(cL['clicks'],cP['clicks']):>6}"
+                  f"{int(cL['impressions']):>7,}/{int(cP['impressions']):<7,}{_pct(cL['impressions'],cP['impressions']):>6}"
+                  f"{nbL:>5,}/{nbP:<5,}{_pct(nbL,nbP):>5}{cL['position']:>6.1f}/{cP['position']:<5.1f}")
+        return
+    site = _site(args); toks = _tokens_for(args.brand, site)
+    cL, cP = _totals(tok, site, Ls, Le), _totals(tok, site, Ps, Pe)
+    nbcL, nbiL, bcL, nbL = _brand_split(tok, site, Ls, Le, toks)
+    nbcP, nbiP, bcP, _ = _brand_split(tok, site, Ps, Pe, toks)
+    print(f"\n{site}   last{n}d ({Ls}..{Le}) vs prior{n}d ({Ps}..{Pe})")
+    print(f"  clicks       {int(cL['clicks']):>8,} vs {int(cP['clicks']):>8,}  {_pct(cL['clicks'],cP['clicks'])}")
+    print(f"  impressions  {int(cL['impressions']):>8,} vs {int(cP['impressions']):>8,}  {_pct(cL['impressions'],cP['impressions'])}")
+    print(f"  CTR          {100*cL['ctr']:>7.1f}% vs {100*cP['ctr']:>6.1f}%")
+    better = 'better' if cL['position'] < cP['position'] else 'worse' if cL['position'] > cP['position'] else 'flat'
+    print(f"  avg position {cL['position']:>8.1f} vs {cP['position']:>8.1f}  ({better})")
+    print(f"  -- non-brand (the real SEO signal; brand-typos folded into brand) --")
+    print(f"  nb clicks    {nbcL:>8,} vs {nbcP:>8,}  {_pct(nbcL,nbcP)}")
+    print(f"  nb impr      {nbiL:>8,} vs {nbiP:>8,}  {_pct(nbiL,nbiP)}")
+    print(f"  brand clicks {bcL:>8,} vs {bcP:>8,}  {_pct(bcL,bcP)}  (demand, not SEO)")
+    days = [(r["keys"][0][5:], int(r["clicks"])) for r in _query(tok, site, Ps, Le, ["date"], 1000).get("rows", [])]
+    if days:
+        print("  daily clicks: " + " ".join(f"{d}:{c}" for d, c in days))
+    print("  top non-brand queries (last window):")
+    for c, i, pos, q in nbL[:10]:
+        print(f"    {c:>5,} cl {i:>6,} imp  pos {pos:>4.1f}  {q[:55]}")
+
 def main():
     ap = argparse.ArgumentParser(description="Pull Google Search Console (keywords/pages/position) for the team.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -163,6 +268,10 @@ def main():
     pg.add_argument("--limit", type=int, default=25); pg.set_defaults(fn=cmd_pages)
     sm = sub.add_parser("summary", help="totals clicks/impr/ctr/position"); common(sm, all_opt=True)
     sm.set_defaults(fn=cmd_summary)
+    ww = sub.add_parser("wow", help="week-over-week: last N days vs prior N, brand vs non-brand split")
+    ww.add_argument("--brand"); ww.add_argument("--site"); ww.add_argument("--all", action="store_true")
+    ww.add_argument("--days", type=int, default=7)
+    ww.set_defaults(fn=cmd_wow)
 
     args = ap.parse_args()
     args.fn(load_creds(), args)
