@@ -32,17 +32,20 @@ pick the hero (PIL montage — see the recon snippet below).
 > on a dark banner. Prefer an **amber/coloured/glass** bottle, a render with a
 > light label panel, or rely on the glow.
 
-> **Verify the LABEL ERA before you commit — brands rebrand.** Old NAS shoots often
-> show retired packaging. Check the brand's `label_current` in `BRAND_REFERENCE` and
-> glance at the **live site** to confirm what the current bottle label reads, then
-> Read candidate photos at full resolution to confirm the label matches. (Esteban
-> rebranded to **"Maison d'Esteban"**: only `01_EDITS/2025 12 04 - Colorate`
-> [DSC01490/487 single, DSC01516/523 trio] shows the new label — every other folder,
-> and even esteban.ro's product photos, still show the old "Esteban / Essential"
-> label. Picking an old-label hero meant redoing the whole set.) The bottle label and
-> the banner wordmark must agree. Flat-lay (lying-down) single-bottle shots are fine —
-> `cutout.py` callers can auto-upright them (cv2 `minAreaRect` deskew + cap-up by
-> narrower-end heuristic).
+> **The live site's PRODUCT PAGE is the source of truth for the current bottle.**
+> Brands rebrand and shoot many variants; old NAS folders + the homepage hero +
+> gift-set thumbnails often lag. The fastest correct hero is usually the official
+> product image itself: open a single-product page on the store and grab the main
+> gallery image (Shopify: `og:image` / `img_product_1.jpg` etc., often a clean
+> single bottle on white → trivial cutout). Confirm the label matches `label_current`
+> in `BRAND_REFERENCE`, and the bottle label must agree with the banner wordmark.
+> (Esteban: the *amber/gold* "Maison d'Esteban" bottles in NAS `Colorate` are a
+> different styling than the *black-label, black-cap, clear-glass* bottle on
+> esteban.ro's product page — using the NAS one looked wrong; the site image was
+> right. Cost a full redo.) A near-black bottle can still read on a dark banner if the
+> cutout keeps the **silver glass edges + white label text** (they catch the glow);
+> verify on a dark panel before committing. Flat-lay shots are fine — `cutout.py
+> --upright` auto-stands them (cv2 `minAreaRect` deskew + cap-up heuristic).
 
 ### 2. Remove the background → transparent cutout
 One-time env setup (rembg won't `pip install` cleanly on Python 3.13 because
