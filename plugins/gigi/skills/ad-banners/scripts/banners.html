@@ -1,0 +1,79 @@
+<!doctype html><html lang="ro"><head><meta charset="utf-8">
+<!--
+  Premium "dark + cutout + glow" banner template for Google Ads PMax / Performance assets.
+  Fill the CONFIG block below from the brand's BRAND_REFERENCE (kb.py / brandref.py):
+    accent   -> brand_color (gold/rose/…)
+    wordmark -> shop_name (uppercased)
+    bottles  -> transparent PNGs produced by cutout.py (place next to this file)
+    concepts -> [headline, subtitle] pairs (RO, short; headline <= ~22 chars for square)
+    render   -> which banners to emit (id, w, h, format, concept, bottle)
+  Then: open in Chrome (chrome-devtools MCP), take_snapshot, screenshot EACH banner
+  element by its uid at native size (1200x628 / 1200x1200). DO NOT pad with sips.
+-->
+<style>
+  body{margin:0;background:#e9e9ec;font-family:Georgia,'Times New Roman',serif}
+  .wrap{padding:24px;display:flex;flex-wrap:wrap;gap:30px;align-items:flex-start}
+  .banner{position:relative;overflow:hidden;color:#fff;box-shadow:0 8px 26px rgba(0,0,0,.3)}
+  .glow{position:absolute;border-radius:50%;filter:blur(4px)}
+  .bottle{position:absolute;filter:drop-shadow(0 18px 30px rgba(0,0,0,.55))}
+  .tz{position:absolute;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center}
+  .wordmark{font-weight:400;letter-spacing:.26em;color:#fff;white-space:nowrap;padding-bottom:7px;align-self:flex-start}
+  .head{font-weight:700;line-height:1.06;letter-spacing:.01em}
+  .sub{font-style:italic;opacity:.9}
+  .pill{display:inline-block;font-weight:700;border-radius:2px;align-self:flex-start;letter-spacing:.08em;text-transform:uppercase}
+</style></head>
+<body><div class="wrap" id="wrap"></div>
+<script>
+/* ============================ CONFIG ============================ */
+const CFG = {
+  accent: "#C9A86A",                       // brand_color
+  wordmark: "MAISON D'ESTEBAN",             // shop_name, uppercased
+  cta: "Descoperă acum",
+  // dark backdrop gradient (keep it dark so the cutout + glow pop)
+  bg: "radial-gradient(125% 95% at 74% 46%, #25252b 0%, #16161b 46%, #0d0d11 100%)",
+  bottles: {                               // transparent PNGs from cutout.py; ar = width/height
+    amber: {src:"bottle_amber.png", ar:0.641},
+    b44:   {src:"bottle_44.png",    ar:0.723},
+  },
+  concepts: {                              // [headline, subtitle]
+    feminin: ["Parfumuri de Damă","esența care contează"],
+    oferta:  ["2+1 Gratis la Toate","50 ml · de la 45 lei"],
+    persist: ["12h+ Persistență","parfumul care rezistă"],
+    colectie:["Peste 120 de Arome","damă & unisex"],
+  },
+  // format presets: bh = bottle height as % of banner; mr = right margin %
+  formats: { ls:{pad:62,logo:21,head:60,sub:28,cta:23,bh:0.90,mr:0.05},
+             sq:{pad:66,logo:23,head:58,sub:30,cta:25,bh:0.74,mr:0.03} },
+  render: [
+    ["est_ls_feminin",1200,628, "ls","feminin","amber"],
+    ["est_ls_persist",1200,628, "ls","persist","b44"],
+    ["est_sq_feminin",1200,1200,"sq","feminin","amber"],
+    ["est_sq_oferta", 1200,1200,"sq","oferta", "b44"],
+  ],
+};
+/* ========================== /CONFIG ============================ */
+
+function make(id,w,h,fk,ck,bk){
+ const s=CFG.formats[fk]; const [head,sub]=CFG.concepts[ck]; const b=CFG.bottles[bk];
+ const bh=Math.round(h*s.bh), bw=Math.round(bh*b.ar);
+ const bx=w-bw-Math.round(w*s.mr), by=Math.round((h-bh)/2);
+ const cx=bx+bw/2, cy=h*0.5, gr=Math.round(bh*0.62);
+ const tw=bx-Math.round(w*0.015);
+ const hexA=(hex,a)=>{const n=parseInt(hex.slice(1),16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`;};
+ const glow=`radial-gradient(closest-side, ${hexA(CFG.accent,.34)}, ${hexA(CFG.accent,.10)} 55%, ${hexA(CFG.accent,0)} 74%)`;
+ const el=document.createElement("div");el.className="banner";
+ el.style.cssText=`width:${w}px;height:${h}px;background:${CFG.bg}`;
+ el.setAttribute("role","img");el.setAttribute("aria-label",id);
+ el.innerHTML=`
+   <div class="glow" style="left:${cx-gr}px;top:${cy-gr}px;width:${gr*2}px;height:${gr*2}px;background:${glow}"></div>
+   <img class="bottle" src="${b.src}" style="left:${bx}px;top:${by}px;height:${bh}px">
+   <div class="tz" style="left:0;top:0;width:${tw}px;height:${h}px;padding:${s.pad}px">
+     <div class="wordmark" style="font-size:${s.logo}px;border-bottom:1px solid ${CFG.accent}">${CFG.wordmark}</div>
+     <div class="head" style="font-size:${s.head}px;margin-top:${s.pad*0.34}px">${head}</div>
+     <div class="sub" style="font-size:${s.sub}px;margin-top:${s.pad*0.3}px">${sub}</div>
+     <div class="pill" style="font-size:${s.cta}px;padding:${s.cta*0.55}px ${s.cta*1.05}px;margin-top:${s.pad*0.62}px;border:1px solid ${CFG.accent};color:${CFG.accent}">${CFG.cta}</div>
+   </div>`;
+ document.getElementById("wrap").appendChild(el);
+}
+CFG.render.forEach(x=>make(...x));
+</script></body></html>
