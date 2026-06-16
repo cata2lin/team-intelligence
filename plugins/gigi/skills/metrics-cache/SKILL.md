@@ -63,10 +63,39 @@ anne:ha-refuz, cs-* risk scoring.
 `product_basket_pairs`, `rma_signal_daily`, `daily_brand_pnl` (replaces SSH `daily_perf.db`),
 `dataforseo_cache` (the only pay-per-call source).
 
-## Refresh / cron
-Schedule on the VPS that already runs the team crons (see memory
-`profitability-marketing-feed-fix`): e.g. `customer_agg` daily, `order_enriched` hourly
-once it exists. One line per table: `uv run build_cache.py --table <t> --apply`.
+## Freshness — ALWAYS know what you're reading (it's a snapshot, not live)
+The cache is materialized on demand; between refreshes it goes stale. Every refresh is
+recorded in **`cache.refresh_log`** and exposed via the view **`cache.freshness`**
+(rows, refreshed_at, age_hours, max_age_hours, **stale**, **data_from**, **data_to**).
+
+```bash
+uv run scripts/build_cache.py --status      # human table: age + STALE flag + DATA COVERS period
+```
+```
+TABLE                  ROWS  AGE(h) STATUS    DATA COVERS
+order_outcome        294293     0.0 fresh     2025-12-31 → 2026-06-10   (delivery outcome lags ~days)
+daily_ad_spend_ron      300     0.0 fresh     2026-04-07 → 2026-06-16   (ad insights retain ~2 months)
+customer_agg         106925     0.0 fresh     2025-01-23 → 2026-06-16
+order_enriched       122057     0.0 fresh     2025-01-23 → 2026-06-16
+product_refusal_rate   1337     0.0 fresh     (all-time, no date)
+```
+**Reader contract:** any skill (and any answer to a user) built on `cache.*` MUST first
+`SELECT * FROM cache.freshness` and surface "data as of {refreshed_at}, covers {data_from}→{data_to};
+STALE — refresh" when `stale`. Don't present cached numbers as live without the as-of line.
+Note the **coverage windows differ** per table (above): e.g. ad spend only goes back ~2 months,
+delivery outcome trails real-time by a few days — say so when it matters.
+
+## Refresh (easy, one command)
+```bash
+uv run scripts/build_cache.py --all --apply        # refresh every table (dependency-ordered)
+uv run scripts/build_cache.py --table <t> --apply  # just one
+```
+Automate on the VPS that runs the team crons (see memory `profitability-marketing-feed-fix`),
+e.g. nightly:
+```cron
+0 5 * * *  cd <repo>/plugins/gigi/skills/metrics-cache/scripts && uv run build_cache.py --all --apply
+```
+`--all` order is fixed so `order_outcome` builds before the tables that LEFT JOIN it.
 
 ## Adding a table
 Add an entry to `TABLES` in `build_cache.py` with its `ddl`, column list, and refresh

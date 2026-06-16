@@ -55,6 +55,75 @@ def clean_dsn(dsn):
     q = [(k, v) for k, v in parse_qsl(u.query) if k in keep]
     return urlunsplit((u.scheme, u.netloc, u.path, urlencode(q), u.fragment))
 
+# Recommended freshness window per table (hours) — drives the STALE flag in cache.freshness.
+MAX_AGE = {
+  "order_outcome": 24, "customer_agg": 24, "daily_ad_spend_ron": 24,
+  "product_refusal_rate": 24, "order_enriched": 12,
+}
+# Per-table date span (min,max) so readers know WHICH PERIOD the cache covers.
+# None = table has no time dimension (e.g. all-time per-SKU aggregate).
+SPAN_SQL = {
+  "order_outcome":        "SELECT min(created_at)::date, max(created_at)::date FROM cache.order_outcome",
+  "customer_agg":         "SELECT min(first_order), max(last_order) FROM cache.customer_agg",
+  "daily_ad_spend_ron":   "SELECT min(date), max(date) FROM cache.daily_ad_spend_ron",
+  "order_enriched":       "SELECT min(placed_at)::date, max(placed_at)::date FROM cache.order_enriched",
+  "product_refusal_rate": None,
+}
+
+CACHE_META_DDL = """
+CREATE SCHEMA IF NOT EXISTS cache;
+CREATE TABLE IF NOT EXISTS cache.refresh_log (
+  table_name   text PRIMARY KEY,
+  rows         int,
+  refreshed_at timestamptz DEFAULT now(),
+  max_age_hours int,
+  data_from    date,
+  data_to      date
+);
+ALTER TABLE cache.refresh_log ADD COLUMN IF NOT EXISTS data_from date;
+ALTER TABLE cache.refresh_log ADD COLUMN IF NOT EXISTS data_to   date;
+CREATE OR REPLACE VIEW cache.freshness AS
+SELECT table_name, rows, refreshed_at,
+  round(extract(epoch FROM (now()-refreshed_at))/3600.0, 1) AS age_hours,
+  max_age_hours,
+  (now()-refreshed_at) > make_interval(hours => max_age_hours) AS stale,
+  data_from, data_to
+FROM cache.refresh_log
+ORDER BY stale DESC, age_hours DESC;
+"""
+
+def log_refresh(cur, table, rows):
+    cur.execute(CACHE_META_DDL)
+    dfrom = dto = None
+    span = SPAN_SQL.get(table)
+    if span:
+        cur.execute(span); r = cur.fetchone()
+        if r: dfrom, dto = r[0], r[1]
+    cur.execute(
+        "INSERT INTO cache.refresh_log (table_name,rows,refreshed_at,max_age_hours,data_from,data_to) "
+        "VALUES (%s,%s,now(),%s,%s,%s) "
+        "ON CONFLICT (table_name) DO UPDATE SET rows=EXCLUDED.rows, refreshed_at=now(), "
+        "max_age_hours=EXCLUDED.max_age_hours, data_from=EXCLUDED.data_from, data_to=EXCLUDED.data_to",
+        (table, rows, MAX_AGE.get(table, 24), dfrom, dto))
+
+def show_status():
+    dsn = secret("DATABASE_URL_METRICS")
+    conn = psycopg2.connect(clean_dsn(dsn)); cur = conn.cursor()
+    cur.execute(CACHE_META_DDL); conn.commit()
+    cur.execute("SELECT table_name, rows, age_hours, max_age_hours, stale, data_from, data_to FROM cache.freshness")
+    rows = cur.fetchall(); conn.close()
+    if not rows:
+        print("No cache tables refreshed yet. Run: uv run build_cache.py --all --apply"); return
+    print(f"{'TABLE':22} {'ROWS':>9} {'AGE(h)':>7} {'STATUS':<16} DATA COVERS")
+    any_stale = False
+    for t, n, age, mx, stale, dfrom, dto in rows:
+        flag = "STALE-refresh!" if stale else "fresh"
+        if stale: any_stale = True
+        period = f"{dfrom} → {dto}" if dfrom else "(all-time, no date)"
+        print(f"{t:22} {n:>9} {age:>7} {flag:<16} {period}")
+    if any_stale:
+        print("\n>>> Some tables are STALE. Refresh:  uv run build_cache.py --all --apply")
+
 # ---- cache table definitions: (ddl, refresh_select) ----
 CUSTOMER_AGG_DDL = """
 CREATE SCHEMA IF NOT EXISTS cache;
@@ -178,7 +247,53 @@ FROM li JOIN cache.order_outcome oo ON oo.order_name=li.order_name
 GROUP BY li.sku, li.brand_id;
 """
 
+ORDER_ENRICHED_DDL = """
+CREATE SCHEMA IF NOT EXISTS cache;
+DROP TABLE IF EXISTS cache.order_enriched CASCADE;
+CREATE TABLE cache.order_enriched (
+  order_id           text PRIMARY KEY,
+  order_name         text,
+  brand_id           text,
+  phone              text,
+  email              text,
+  customer_name      text,
+  financial_status   text,
+  fulfillment_status text,
+  total_price        numeric,
+  total_refunded     numeric,
+  placed_at          timestamp,
+  cancelled_at       timestamp,
+  status_category    text,
+  delivery_status    text,
+  is_refusal         boolean,
+  awb                text,
+  courier_status     text,
+  computed_at        timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS order_enriched_name_idx  ON cache.order_enriched(order_name);
+CREATE INDEX IF NOT EXISTS order_enriched_phone_idx ON cache.order_enriched(phone);
+"""
+ORDER_ENRICHED_SELECT = """
+SELECT o.id, o."name", o."brandId",
+  NULLIF(regexp_replace(COALESCE(o."phone",o."shippingPhone",''),'[^0-9]','','g'),''),
+  lower(NULLIF(o."email",'')),
+  COALESCE(o."shippingName",o."name"),
+  o."financialStatus"::text, o."fulfillmentStatus"::text,
+  o."totalPrice", o."totalRefunded",
+  o."shopifyCreatedAt", o."cancelledAt",
+  oo.status_category, oo.delivery_status, oo.is_refusal, oo.awb, oo.courier_status
+FROM public.orders o
+LEFT JOIN cache.order_outcome oo ON oo.order_name = o."name"
+WHERE o."deletedAt" IS NULL;
+"""
+
 TABLES = {
+  "order_enriched": {
+    "ddl": ORDER_ENRICHED_DDL,
+    "cols": "(order_id,order_name,brand_id,phone,email,customer_name,financial_status,fulfillment_status,total_price,total_refunded,placed_at,cancelled_at,status_category,delivery_status,is_refusal,awb,courier_status)",
+    "select": ORDER_ENRICHED_SELECT,
+    "count_sql": "SELECT COUNT(*) FROM (" + ORDER_ENRICHED_SELECT.rstrip().rstrip(';') + ") q",
+  },
   "daily_ad_spend_ron": {
     "ddl": DAILY_AD_SPEND_DDL,
     "cols": "(date,brand_id,platform,spend_ron)",
@@ -298,6 +413,7 @@ def run_order_outcome(apply):
     """)
     cur.execute("SELECT COUNT(*), COUNT(*) FILTER (WHERE is_refusal) FROM cache.order_outcome")
     tot, ref = cur.fetchone()
+    log_refresh(cur, "order_outcome", tot)
     conn.commit(); conn.close()
     print(f"[order_outcome] APPLIED — cache.order_outcome has {tot} rows ({ref} refusals).")
 
@@ -327,18 +443,23 @@ def run(table, apply):
     cur.execute(f"INSERT INTO cache.{table} {spec['cols']} " + spec["select"])
     cur.execute(f"SELECT COUNT(*) FROM cache.{table}")
     written = cur.fetchone()[0]
+    log_refresh(cur, table, written)
     conn.commit(); conn.close()
     print(f"[{table}] APPLIED — cache.{table} now has {written} rows.")
 
 if __name__ == "__main__":
-    ALL = list(TABLES) + ["order_outcome"]
+    # dependency order: order_outcome first (the others LEFT JOIN it)
+    ALL = ["order_outcome", "daily_ad_spend_ron", "product_refusal_rate", "customer_agg", "order_enriched"]
     ap = argparse.ArgumentParser()
     ap.add_argument("--table", choices=ALL)
     ap.add_argument("--all", action="store_true")
+    ap.add_argument("--status", action="store_true", help="show freshness + data period of every cache table")
     ap.add_argument("--apply", action="store_true", help="write to prod (default is dry-run)")
     a = ap.parse_args()
+    if a.status:
+        show_status(); sys.exit(0)
     targets = ALL if a.all else ([a.table] if a.table else [])
     if not targets:
-        print("specify --table <name> or --all"); sys.exit(1)
+        print("specify --table <name>, --all, or --status"); sys.exit(1)
     for t in targets:
         run(t, a.apply)
