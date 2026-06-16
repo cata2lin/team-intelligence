@@ -16,6 +16,25 @@ An RSA at **AVERAGE with 15 headlines and 0 pins** is not short on quantity — 
   matched its own keywords → all AVERAGE. Differentiating each to its theme is the fix.)
 - Over-pinning (pins kill diversity) or too few descriptions (<4) — check those too.
 
+## ⚠ Reality check — ad strength ≠ performance (read before chasing EXCELLENT)
+**Ad Strength is a Google *guidance* label, not a performance metric.** An AVERAGE asset group can
+deliver **ROAS 37** (real: Esteban Damă is AVERAGE and prints ROAS 37); a GOOD RSA can outconvert an
+EXCELLENT one. Don't optimise the label at the expense of money.
+- **Maxed ≠ EXCELLENT.** Assets with 15 headlines / 5 long / 5 descriptions / images in all ratios /
+  video / extensions, all genuinely diverse, **still sit at AVERAGE** — because EXCELLENT is Google's
+  opaque holistic call. Many top accounts run at GOOD. You cannot always reach EXCELLENT, period.
+- **Don't churn performing/learning campaigns for the label.** Rewriting copy → ad strength recompute
+  (PENDING) AND, on PMax, contributes to learning. Forcing "more diversity" onto a campaign that's
+  *working* can reset learning and *lower* real performance for a cosmetic badge. Esteban PMax stayed
+  AVERAGE after maxing every lever — correct move was to **leave it and scale budget** (ROAS 37, was
+  budget-capped), not to keep rewriting.
+- **When it IS worth a diversity pass:** a NEW/underperforming RSA that's AVERAGE with genuinely
+  repetitive or off-keyword headlines (e.g. Belasil's 3 Non-Brand ad groups that shared identical
+  copy). Fix those. Leave the winners alone.
+- **Two different "learnings":** asset-strength recompute (PENDING, from any asset/text change) is
+  separate from **bidding learning** (from budget/tROAS changes). A tROAS change reset Belasil PMax's
+  *bidding* (ROAS −65% → hold ~2 weeks); a headline swap only re-scores ad strength, not bidding.
+
 ## The angle framework (cover 5–6 distinct angles across the 15)
 1. **Offer / price** — 2+1 gratis, 0,49 lei/spălare, -36%, 10L la 99 lei
 2. **Benefit / outcome** — 200 de spălări, persistă 12h, parfum de durată
