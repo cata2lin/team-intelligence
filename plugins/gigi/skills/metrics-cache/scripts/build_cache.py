@@ -43,8 +43,16 @@ def _kb():
     raise FileNotFoundError("kb.py not found; set KB_PATH")
 
 def secret(key):
-    return subprocess.run(["uv", "run", _kb(), "secret-get", key],
-                          capture_output=True, text=True).stdout.strip()
+    # env-first (works on servers that have the value in their .env / environment, no uv/KB needed),
+    # then fall back to the SharedClaude KB via kb.py (the onboarded-workstation path).
+    v = os.environ.get(key)
+    if v:
+        return v.strip()
+    try:
+        return subprocess.run(["uv", "run", _kb(), "secret-get", key],
+                              capture_output=True, text=True, timeout=60).stdout.strip()
+    except Exception:
+        return ""
 
 def clean_dsn(dsn):
     """Strip Prisma-style query params psycopg2 rejects (schema, pgbouncer,
@@ -435,8 +443,30 @@ def _ssh_pull_tsv():
     if e: print(f"[remote stderr] {e[:300]}", file=sys.stderr)
     return data
 
+def _local_db_path():
+    import os
+    for p in (os.environ.get("PROFITABILITY_DB"), "/root/Scripturi/data/profitability.db"):
+        if p and os.path.exists(p):
+            return p
+    return None
+
+def _local_pull_tsv(path):
+    # Runs on the VPS itself (profit_orders is local) — no SSH needed.
+    import sqlite3
+    p = sqlite3.connect(path)
+    def cl(x):
+        return "" if x is None else str(x).replace("\t", " ").replace("\r", " ").replace("\n", " ")
+    q = ("SELECT shop, prefix, order_name, created_at, status_category, shopify_delivery_status, "
+         "awb, courier_key, courier_status, payment_status, fulfillment_status "
+         "FROM profit_orders WHERE order_name IS NOT NULL AND order_name<>''")
+    return "\n".join("\t".join(cl(c) for c in r) for r in p.execute(q))
+
+def _pull_tsv():
+    lp = _local_db_path()
+    return _local_pull_tsv(lp) if lp else _ssh_pull_tsv()
+
 def run_order_outcome(apply):
-    tsv = _ssh_pull_tsv()
+    tsv = _pull_tsv()
     rows = [l.split("\t") for l in tsv.splitlines() if l]
     print(f"[order_outcome] pulled {len(rows)} rows from profit_orders")
     if not apply:
@@ -515,16 +545,19 @@ def run(table, apply):
 if __name__ == "__main__":
     # dependency order: order_outcome first (the others LEFT JOIN it)
     ALL = ["order_outcome", "daily_ad_spend_ron", "product_refusal_rate", "customer_agg", "order_enriched"]
+    # named groups for cron cadences (see SKILL.md): cs = intraday CS-facing; ads = current-day spend
+    GROUPS = {"cs": ["order_enriched", "customer_agg"], "ads": ["daily_ad_spend_ron"], "all": ALL}
     ap = argparse.ArgumentParser()
     ap.add_argument("--table", choices=ALL)
     ap.add_argument("--all", action="store_true")
+    ap.add_argument("--group", choices=list(GROUPS), help="refresh a named group (cs|ads|all)")
     ap.add_argument("--status", action="store_true", help="show freshness + data period of every cache table")
     ap.add_argument("--apply", action="store_true", help="write to prod (default is dry-run)")
     a = ap.parse_args()
     if a.status:
         show_status(); sys.exit(0)
-    targets = ALL if a.all else ([a.table] if a.table else [])
+    targets = ALL if a.all else (GROUPS[a.group] if a.group else ([a.table] if a.table else []))
     if not targets:
-        print("specify --table <name>, --all, or --status"); sys.exit(1)
+        print("specify --table <name>, --group <cs|ads|all>, --all, or --status"); sys.exit(1)
     for t in targets:
         run(t, a.apply)
