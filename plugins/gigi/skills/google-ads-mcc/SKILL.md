@@ -1,6 +1,6 @@
 ---
 name: google-ads-mcc
-description: Read and operate any Google Ads account linked under the team MCC (API v24, overridable via env GADS_API_VERSION) — live performance reports, budget/bidding/status/keyword/negative mutations, full Search campaign creation, and the end-to-end video pipeline (upload to YouTube + attach to Performance Max). Plus an optimization playbook. Credentials (MCC developer token + OAuth refresh token) come from the `metrics` DB; no per-account login. Read-only by default; mutations are dry-run unless explicitly applied. Use for any live Google Ads work on a brand (Esteban, Belasil, Grandia, …) without screenshots.
+description: Read and operate any Google Ads account linked under the team MCC (API v21) — live performance reports, budget/bidding/status/keyword/negative mutations, full Search campaign creation, and the end-to-end video pipeline (upload to YouTube + attach to Performance Max). Plus an optimization playbook and PMax asset-group asset management. Credentials (MCC developer token + OAuth refresh token) come from the `metrics` DB; no per-account login. Read-only by default; mutations are dry-run unless explicitly applied. Use for any live Google Ads work on a brand (Esteban, Belasil, Grandia, …) without screenshots.
 ---
 
 # Google Ads via the team MCC
@@ -20,6 +20,34 @@ under the MCC** — you only need the child account's **customer ID**.
 
 List all child accounts anytime: `uv run gads.py accounts`.
 
+## Campaign & asset-group map (Esteban + Belasil)
+
+Run `uv run audit_campaigns.py` for a live view with `▶ ENABLED / ⏸ PAUSED / ✗ REMOVED` icons.
+
+**Esteban (5229815058)**
+| Status | Campaign ID | Name | Type | Active AGs |
+|---|---|---|---|---|
+| ▶ | `23924430848` | Performance Max | PMax | Bărbați (6720372855), Unisex (6720373641), Damă (6720398494) |
+| ▶ | `23928558931` | Search - Brand | Search | Brand (1 ad) |
+| ⏸ | `23918558286` | Campaign #1 | PMax | Asset Group 1 (6720307893) — PAUSED, nu servește |
+| ⏸ | `23923794365` | Performance Max-2 | PMax | Performance Max-2 AG — PAUSED |
+| ⏸ | `23924003975` | Search - By-original | Search | 20 AGs inspirate după parfum — PAUSED |
+| ⏸ | `23924008511` | Search - Inspirate | Search | Generic/Pret/Cadou/Persistenta — PAUSED |
+| ⏸ | `23924029121` | Search - Conquesting | Search | Concurenti — PAUSED |
+
+**Belasil (7566352958)**
+| Status | Campaign ID | Name | Type | Active AGs |
+|---|---|---|---|---|
+| ▶ | `22478321481` | All Products | PMax | [ALS] P.Max (6570957552) |
+| ▶ | `22485577197` | Brand Protect | Search | Ad group 1 (1 ad) |
+| ▶ | `23927269391` | Non-Brand - Detergent | Search | 3 AGs (cantitate/gel/ieftin) |
+| ⏸ | `23312943064` | Allsoft P.Max Laveta | PMax | Asset Group 1 (6638306494) — PAUSED |
+| ⏸ | `22928099453` | AllSoft Search Brand | Search | Ad group 1 — PAUSED |
+| ✗ | `22478291976` | Campaign #1 | PMax | AG1 (6570921716) — REMOVED, nu mai există |
+
+> **ATENȚIE:** `asset_group.status='ENABLED'` în GAQL returnează AGs și din campanii REMOVED/PAUSED.
+> Filtrează mereu și după statusul campaniei înainte să faci mutații: `audit_campaigns.py` face asta automat.
+
 ## Credentials & prerequisites (don't print secrets)
 `metrics` DB, table **`google_ads_connections`** (active row): `developerToken`,
 `loginCustomerId` (MCC), `oauthClientId`, `oauthClientSecret`, `refreshToken`. Scope is full
@@ -29,8 +57,6 @@ KB=~/.claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py
 export DATABASE_URL_METRICS="$(uv run "$KB" secret-get DATABASE_URL_METRICS)"
 ```
 All scripts run with `uv` (deps declared inline).
-
-> **API version:** scripts call Google Ads **v24** (latest as of Jun 2026). v20 was deprecated and is being blocked. `gads.py` reads the version from env `GADS_API_VERSION` (default `v24`) — when Google deprecates v24, bump with `export GADS_API_VERSION=v25` (no code change) or update the default.
 
 ---
 
@@ -45,13 +71,6 @@ uv run gads.py report --customer 7566352958 --query "SELECT campaign.name, campa
 ```
 `costMicros` is shown ÷1e6 (RON). Ranges: TODAY, YESTERDAY, LAST_7_DAYS, LAST_14_DAYS, LAST_30_DAYS, THIS_MONTH.
 Useful signals: `campaign.primary_status_reasons` = `BUDGET_CONSTRAINED` (→ scale), bidding strategy, asset group listing groups.
-
-### Keyword research (Keyword Planner) — also doubles as an SEO keyword tool
-```bash
-uv run gads.py keywords --customer 9069610821 --seed "parfum barbati,parfumuri dama" --limit 40
-uv run gads.py keywords --customer 9069610821 --url "https://george-talent.ro/collections/barbati"   # ideas from a page
-```
-Returns each keyword's **avg monthly searches** + competition (HIGH/MEDIUM/LOW), Romania/Romanian by default (`--geo 2642 --lang 1032`). `--customer` can be any account under the MCC. Use to size demand and find NEW keywords to target — pairs with `gigi:analytics gsc.py rank/opportunities` (which show where you already rank) to build an SEO content plan: e.g. "parfum barbati" = 27k searches/mo and GT sits at position ~11 → a clear target.
 
 ## 2. Mutations — **dry-run by default, add `--apply` to execute**
 Treat a write to a live ad account like a destructive DB write: dry-run, confirm with the user, then `--apply`.
@@ -115,11 +134,9 @@ Don't bulk-upload everything — pick the **proven winners** (see §5). PMax wan
 - Verify: `SELECT asset.name FROM asset_group_asset WHERE asset_group.id=… AND asset_group_asset.field_type='YOUTUBE_VIDEO'`.
 - **Images** (unlike video) CAN be uploaded raw via API (`imageAsset.data` = base64 bytes) and linked with field types `MARKETING_IMAGE` (1.91:1) / `SQUARE_MARKETING_IMAGE` (1:1) / `PORTRAIT_MARKETING_IMAGE` (4:5).
 
-### 4d. Pick the winners from Meta — use the **`gigi:meta-ads`** skill
-Don't guess which creatives to upload. The companion **`gigi:meta-ads`** skill reads Meta ad performance
-(same `metrics` DB token) and ranks a brand's ads by ROAS/purchases:
-`uv run meta.py creatives <brand> --range last_90d` → take the top-ROAS ads with real volume → upload + attach here.
-It also does audience breakdowns (`breakdown <brand> --by age,gender`) that inform PMax audience signals.
+### 4d. Pick the winners from Meta — `meta_top_ads.py`
+The Meta API (token in `metrics` DB, accounts by name `ILIKE '%brand%'`) ranks ads by ROAS/purchases so you upload
+only the proven creatives. `meta_resolve.py` maps ad → creative video → source title (note: heavy creative fields can 500 — request `creative{video_id}` only, small page size).
 
 ## 4e. PMax asset groups — text, images, logos (Brand Guidelines)
 A PMax asset group needs a full set before it serves beyond Shopping. Build with `assets:mutate`
@@ -127,16 +144,21 @@ A PMax asset group needs a full set before it serves beyond Shopping. Build with
 
 **Field types & where they go:**
 - Asset group: `HEADLINE` (≤30, max **15**), `LONG_HEADLINE` (≤90, max **5**), `DESCRIPTION` (≤90, max **5**, one ≤60), `MARKETING_IMAGE` (1.91:1), `SQUARE_MARKETING_IMAGE` (1:1), `PORTRAIT_MARKETING_IMAGE` (4:5), `YOUTUBE_VIDEO`.
-- **Campaign** (when Brand Guidelines is ON): `BUSINESS_NAME` (text), `LOGO` (**exact 1:1**), `LANDSCAPE_LOGO` (4:1).
+- **Campaign** (when Brand Guidelines is ON): `BUSINESS_NAME` (text ≤25), `LOGO` (**exact 1:1**), `LANDSCAPE_LOGO` (4:1). Via `campaignAssets:mutate`, NOT `assetGroupAssets:mutate`.
 
-**Gotchas (each cost real time on Belasil):**
+**Gotchas (each cost real time on Belasil + Esteban):**
 - **Brand Guidelines enabled** → the campaign requires a `BUSINESS_NAME` + square `LOGO` linked as **CampaignAssets** before *any* asset-group asset will link (`REQUIRED_BUSINESS_NAME_ASSET_NOT_LINKED` / `REQUIRED_LOGO_ASSET_NOT_LINKED`). `brandGuidelinesEnabled` **cannot be turned off via API** (400). So satisfy it.
+- **Brand Guidelines ON → LOGO/BN/LANDSCAPE_LOGO sunt BLOCATE la nivel asset group.** Dacă încerci `assetGroupAssets:mutate` cu aceste tipuri, primești `Brand Guidelines is enabled. Performance Max campaigns with Brand Guidelines enabled must link business name and logo assets as CampaignAssets.` Soluție: folosește `campaignAssets:mutate` (același pattern create/remove, dar cu `campaign` în loc de `assetGroup`). Template: `fix_esteban_logos_videos.py`.
+- **Swap BN la nivel campanie** (atomic, partialFailure=False): `campaignAssets:mutate` cu `[{"remove": "customers/{cid}/campaignAssets/{camp_id}~{asset_id}~BUSINESS_NAME"}, {"create": {"campaign": camp_rn, "asset": new_bn_rn, "fieldType": "BUSINESS_NAME"}}]`. O singură cerere, fără intermediate state cu 0 BN-uri.
 - **Logo must be EXACTLY 1:1** (a 2304×2400 screenshot fails `ASPECT_RATIO_NOT_ALLOWED`). Pad to square: `sips --padToHeightWidth 2400 2400 --padColor FFFFFF logo.png --out logo.png`.
 - After logo+name are in, the asset group still needs **≥1 `MARKETING_IMAGE` + ≥1 `SQUARE_MARKETING_IMAGE`** (`NOT_ENOUGH_MARKETING_IMAGE_ASSET`) before text links.
 - Images upload raw via API (`imageAsset.data` = base64). The Ads UI **"Generate images" (Gemini)** is UI-only (no API) — the fastest way to get on-brand images; have a human click it, then add text via API.
 - Errors hide in `partialFailureError.details` (the call returns 200). Read it. Send `partialFailure` only on bulk creates; omit it on single updates (some endpoints reject the field).
 - **Image cap = 20 per asset group** (all ratios combined). Over it → `resourceCountLimitExceededError: RESOURCE_LIMIT` (the whole add silently no-ops under partialFailure). To add more, **remove some first** (`{"remove":"<asset_group_asset resource_name>"}`) in a prior call, then create. Aim for a balanced mix (~8 landscape / 8 square / 3 portrait), not 14 of one ratio. Template: **`swap_belasil_images.py`**.
 - Removed links still appear in reports — filter **`asset_group_asset.status='ENABLED'`** to count what's live.
+- **`asset_group.status='ENABLED'` nu e suficient** — AGs dintr-o campanie REMOVED/PAUSED tot apar. Join pe `campaign.status` sau rulează `audit_campaigns.py` ca să știi ce servește cu adevărat.
+- **API version**: folosim **v21** (v20 deprecat iunie 2026). `API="v21"` în `gads.py` și toate scripturile.
+- **Python 3.14 argparse**: `%` în help strings trebuie escaped ca `%%` (altfel `ValueError: badly formed help string`).
 - The UI **"Generate images" (Gemini)** is the fast way to satisfy the image minimum (UI-only, on-brand from the site); a human clicks it, you add text via API. Branded copy-on-image banners (Chrome-rendered, exact 1.91:1 / 1:1 / 4:5 — pad with `sips --padToHeightWidth`) complement Gemini's product shots: template **`add_belasil_banners.py`** + `belasil-creatives/banners.html`.
 - Verify: `SELECT asset_group_asset.field_type FROM asset_group_asset WHERE asset_group.id=… AND asset_group_asset.status='ENABLED'` (count per type).
 
@@ -148,28 +170,6 @@ A PMax asset group needs a full set before it serves beyond Shopping. Build with
 - **Pause / fold underperformers.** A separate PMax below target (e.g. a low-AOV product at CPA ≫ target) → pause it and let the main "All Products" PMax cover those products (check listing groups: a single root filter = whole catalog).
 - **Feed real video** (§4) — PMax with strong video beats asset-only; competitors in most niches run video-heavy.
 - **Don't reset learning needlessly:** big budget jumps / new bid targets re-enter learning; move in steps, leave ~2 weeks.
-- **Cold-start: a NEW Search campaign on Maximize Conversions with no conversion history can serve 0 impressions for days** (bids ~0, `BIDDING_STRATEGY_LEARNING`, ads APPROVED). Fix: switch to Maximize Clicks with a CPC ceiling (`targetSpend.cpcBidCeilingMicros` — template **`fix_nonbrand_bidding.py`**), gather ~15–30 conversions, then move to tCPA/Max-conv.
-- **Brand vs non-brand on PMax** — PMax blends both. Split it: `SELECT campaign_search_term_insight.category_label, metrics.conversions, metrics.conversions_value FROM campaign_search_term_insight WHERE segments.date BETWEEN … AND campaign.id=<pmax>`. Categories containing the brand name = brand harvest; `(altele)`/null = non-brand Shopping. A perfume PMax can be ~80% non-brand Shopping (real acquisition, ROAS holds) — don't over-tighten tROAS on the blended number or you strangle the incremental non-brand. A detergent PMax can be ~0% brand (no "belasil" search volume) = pure prospecting — judge it on incremental ROAS, not a brand-inflated blend.
-- **Budget-limited vs rank-limited** — before raising budget, check impression share: `metrics.search_budget_lost_impression_share` (→ raise budget) vs `metrics.search_rank_lost_impression_share` (→ bids/quality/feed, NOT budget). PMax has no IS, but a day spending <100% of budget while still soft is rank/auction-limited — more budget won't help. Brand-search losing IS purely to budget (0% rank) at high ROAS = the cleanest scale-up there is.
-- **Feed is PMax fuel.** When PMax is rank/feed-limited, disapproved/dark products throttle it more than budget. Audit Merchant Center (skill **`gigi:merchant-center-feed`**): `landing_page_error` = 404 (unpublished/deleted products lingering in the feed, or a free 0-price gift still on the Google channel → unpublish via **`gigi:shopify-stores`** `publishableUnpublish`), plus missing GTIN/brand. Most "dark" SKUs are intentionally-removed products MC hasn't expired yet, NOT live products being blocked — verify (check the product's `onlineStoreUrl`/storefront 404) before alarming.
-
-## 6. Conversion goals — when "conversions" explode (wrong primary goals)
-If someone marks Page View / Add to Cart / Begin Checkout as **primary goals** in the UI, every campaign
-using account-default goals starts **bidding and reporting on those** (a PMax can show 1,000 "conversions"
-of which 100 are purchases — budget burns chasing page views). Diagnose and fix via API:
-- **Diagnose:** segment by action — `SELECT segments.conversion_action_name, metrics.conversions FROM campaign WHERE segments.date='…' AND campaign.id=…`. If PV/ATC/BC appear in `metrics.conversions`, goals are wrong.
-- Account-level state: `SELECT customer_conversion_goal.category, customer_conversion_goal.biddable FROM customer_conversion_goal` (absent `biddable` = true!). Campaign overrides: `campaign_conversion_goal`, `conversion_goal_campaign_config` (custom goals).
-- **Fix:** **`fix_conversion_goals.py`** (CIDARG=<cid>, dry-run → `--apply`) — sets `biddable=true` ONLY for PURCHASE, false for everything else, via `customerConversionGoals:mutate`.
-- **Reporting is NOT restated retroactively** — hours already spent keep the inflated counts; bidding is clean from the change onward. Compute the real performance from the per-action segmentation (purchases only).
-- `conversion_action.primary_for_goal` is a separate, action-level flag — the account **goal-category biddability** is what campaigns on default goals actually use.
-- **The bug recurs per account** — this exact mis-set (PV/ATC/Begin-Checkout/App-Download/YouTube-engagement all biddable) was found on BOTH Esteban and Belasil. Run `fix_conversion_goals.py` on every account, not just the one you spotted.
-- **Reconcile before betting budget on a too-good ROAS.** Google Ads over-reports vs GA4 last-click — a Google ROAS of ~30× is typically ~24× by GA4 (≈1.3×, NORMAL: data-driven attribution + view-through + modeled conversions, heaviest on PMax). Not a bug. Rule: discount Google ROAS ~30% (×0.7) for the conservative read; anchor to GA4 `ecommercePurchases` or Shopify. Compare GA4 `sessionSource/sessionMedium = google / cpc` purchases to the same-window Google Ads purchases — only worry about a >2× gap.
-- **Double-count vs single-action over-attribution:** `SELECT conversion_action.name, conversion_action.counting_type, conversion_action.include_in_conversions_metric, conversion_action.primary_for_goal FROM conversion_action WHERE conversion_action.category='PURCHASE'`. Several PURCHASE actions can coexist (Shopify-app gtag + GA4 import + manual); only those with `include_in_conversions_metric=true` add to the Conversions column. Two `true` → double-count (keep one). One `true` → the inflation is attribution/modeling, not double-count (no config fix, just discount per above).
-
-## 7. Tracking / UTM (correct attribution beyond GA4)
-- **Auto-tagging (GCLID)** should be ON (`customer.auto_tagging_enabled`) — GA4 attributes via the Google Ads link.
-- For Shopify analytics & other tools, set an **account-level `final_url_suffix`**: `utm_source=google&utm_medium=cpc&utm_campaign={campaignid}&utm_content={creative}&utm_term={keyword}` — safe, no learning reset, no re-review.
-- API quirk: CustomerService is `POST /v24/customers/{cid}:mutate` with body `{"operation": {...}}` — **singular** `operation`, unlike every other mutate.
 
 ## Guardrails / hard rules
 - **Never print** the developer token, OAuth secret, or refresh tokens. Read from DB/secret store, use in-process.
