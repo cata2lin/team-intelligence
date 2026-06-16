@@ -160,6 +160,8 @@ A PMax asset group needs a full set before it serves beyond Shopping. Build with
 - **API version**: folosim **v21** (v20 deprecat iunie 2026). `API="v21"` în `gads.py` și toate scripturile.
 - **Python 3.14 argparse**: `%` în help strings trebuie escaped ca `%%` (altfel `ValueError: badly formed help string`).
 - The UI **"Generate images" (Gemini)** is the fast way to satisfy the image minimum (UI-only, on-brand from the site); a human clicks it, you add text via API. Branded copy-on-image banners (Chrome-rendered, exact 1.91:1 / 1:1 / 4:5 — pad with `sips --padToHeightWidth`) complement Gemini's product shots: template **`add_belasil_banners.py`** + `belasil-creatives/banners.html`.
+- **Premium cutout banners (preferred over copy-on-a-box):** use the **`gigi:ad-banners`** skill to background-remove a real product photo from the NAS (rembg) and place it on a dark "cutout + glow" layout, captured at native size (no sips padding). Upload any local PNGs with **`add_pmax_images.py`** (env `CIDARG` / `AGARG` / `DIRARG` / `IMGSARG=[["file.png","MARKETING_IMAGE"],…]`, dry-run → `--apply`). At the 20-image cap, do the remove-then-add swap in one atomic `assetGroupAssets:mutate` and look up the new image assets by `asset.name` to avoid duplicates.
+- **Account-level Search extensions** (sitelinks + callouts + structured snippet) lift every RSA's ad strength + ad rank at once: **`add_search_extensions.py`** (per-account DATA, `CIDARG`, `customerAssets:mutate`). **Extend RSAs to 15 headlines**: **`add_rsa_headlines.py`**.
 - Verify: `SELECT asset_group_asset.field_type FROM asset_group_asset WHERE asset_group.id=… AND asset_group_asset.status='ENABLED'` (count per type).
 
 ## 5. Optimization playbook (what to actually do)
