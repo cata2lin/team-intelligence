@@ -135,6 +135,15 @@ uv run scripts/product_fix.py --store esteban --product <handle> \
 - **Two apps:** `--app SHOPIFY_ARONA` (default: esteban/gt/nubra/labnoir) or `--app SHOPIFY` (the `n12w89-yy.myshopify.com` store = Grandia etc.).
 - **Scope (all / low-sellers / specific):** the *selection* of which products comes from the diagnosis skills (cross-sell low-sellers, merchant-feed disapprovals, pricewatch compare) — state in chat which set + how many you're acting on; `product_fix` applies per product. Verified DRY-RUN: Grandia "raft-depozitare…" had an **empty SEO description** → the writer would fill it.
 
+## Perfume "inspired-by" catalog — full playbook in `reference/perfume-catalog-playbook.md`
+For a dupe/"inspirat din" perfume store (Esteban, Nubra, GT, LabNoir…) the **complete, ordered,
+per-theme process** lives in `reference/perfume-catalog-playbook.md` — brand collections, menu,
+**collection sidebar ("După brand"+"Categorii") per theme**, internal linking, copy rewrite,
+**note/metafield verification vs the real original** (`scripts/verify-perfume-notes.workflow.js`),
+**dynamic FAQ + FAQPage schema**, the inspired_by brand link (+ the EmptyDrop `products_count`
+bug), and the description=blog / sidebar=collections split. **Read it before re-deriving any of
+this.** The scripts below are the building blocks.
+
 ## Catalog/nav structure — `scripts/brand_collections.py` + `scripts/menu_addbrands.py`
 For dupe/inspired-by catalogs: build **smart collections by inspiration brand** (SEO hubs + internal-link targets) and a **"După Brand" menu dropdown**.
 ```bash

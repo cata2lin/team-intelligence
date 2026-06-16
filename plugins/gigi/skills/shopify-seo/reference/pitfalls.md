@@ -168,6 +168,19 @@ niche = **Unisex**, not the gender collection they sit in). `sex`/`note_parfum` 
 A frequent import artifact: `sex = ["Unisex","Femei","Barbati"]` (all three) on niche
 unisex perfumes — collapse to `["Unisex"]`.
 
+## 20. `collections[handle]` for a missing collection throws on `.products_count > 0`
+`collections['does-not-exist']` returns an EmptyDrop whose `.products_count` is an **empty
+string**, so `{% if bcol.products_count > 0 %}` throws `Liquid error: comparison of String
+with 0 failed` on the live page (hit it on a product whose brand had no collection, e.g.
+Louis Vuitton). Guard with `{% if bcol != blank and bcol.id %}` instead — never compare a
+possibly-empty drop field with a number.
+
+## 21. The full perfume-catalog process is documented — don't re-derive it
+For inspired-by perfume stores, the entire ordered, per-theme playbook (brand collections →
+menu → sidebar → internal links → copy → note verification → FAQ → inspired_by link) is in
+`reference/perfume-catalog-playbook.md`, with the Esteban-vs-Nubra theme matrix and the
+note-verification workflow (`scripts/verify-perfume-notes.workflow.js`). Read it first.
+
 ## 19. Each store is a different theme — re-check rendering before replicating
 The same owner's perfume stores run **different themes** with different behaviour;
 don't assume Esteban's fixes transfer 1:1. Check per store before mass-editing:
