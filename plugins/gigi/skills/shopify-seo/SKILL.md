@@ -36,6 +36,7 @@ avoids the same traps.
 6. **Publish to ALL sales channels, not just Online Store.** New smart collections
    default to Online Store only → invisible on Google & YouTube / Shop / etc.
 7. **Never print a secret or token.** Fetch via `kb.py secret-get`, pipe into the process.
+8. **Description renders twice:** a SHORT summary (`strip_html`+truncate → no links/bold) and a FULL tab (raw HTML → links work). Spec tables are usually a **Custom Liquid block in `templates/*.json`**, not a snippet — list metafields there need `| join: ", "`. Mutation types bite: `articleUpdate.body`=HTML!, `productUpdate.descriptionHtml`=String!. Pages may render **client-side** (curl shows nothing → use chrome-devtools) and **never inspect a draft product**. See `reference/pitfalls.md` §12-16.
 
 ## Auth / setup
 
@@ -133,6 +134,38 @@ uv run scripts/product_fix.py --store esteban --product <handle> \
 - **Selective approval** = you pass only the fix flags you approve (`--seo-title`/`--seo-description`/`--body`/`--metafield`); each shows `era → nou`.
 - **Two apps:** `--app SHOPIFY_ARONA` (default: esteban/gt/nubra/labnoir) or `--app SHOPIFY` (the `n12w89-yy.myshopify.com` store = Grandia etc.).
 - **Scope (all / low-sellers / specific):** the *selection* of which products comes from the diagnosis skills (cross-sell low-sellers, merchant-feed disapprovals, pricewatch compare) — state in chat which set + how many you're acting on; `product_fix` applies per product. Verified DRY-RUN: Grandia "raft-depozitare…" had an **empty SEO description** → the writer would fill it.
+
+## Perfume "inspired-by" catalog — full playbook in `reference/perfume-catalog-playbook.md`
+For a dupe/"inspirat din" perfume store (Esteban, Nubra, GT, LabNoir…) the **complete, ordered,
+per-theme process** lives in `reference/perfume-catalog-playbook.md` — brand collections, menu,
+**collection sidebar ("După brand"+"Categorii") per theme**, internal linking, copy rewrite,
+**note/metafield verification vs the real original** (`scripts/verify-perfume-notes.workflow.js`),
+**dynamic FAQ + FAQPage schema**, the inspired_by brand link (+ the EmptyDrop `products_count`
+bug), and the description=blog / sidebar=collections split. **Read it before re-deriving any of
+this.** The scripts below are the building blocks.
+
+## Catalog/nav structure — `scripts/brand_collections.py` + `scripts/menu_addbrands.py`
+For dupe/inspired-by catalogs: build **smart collections by inspiration brand** (SEO hubs + internal-link targets) and a **"După Brand" menu dropdown**.
+```bash
+uv run scripts/brand_collections.py --store esteban --min 3 [--brand-name "Nubra"]  # DRY-RUN: brands (from "...by <Brand>" titles) → proposed smart collections
+uv run scripts/brand_collections.py --store esteban --min 3 --apply                 # create + auto-publish to all channels
+uv run scripts/menu_addbrands.py    --store nubra --top 8 --title "Inspirate din" --after "Unisex"        # DRY-RUN
+uv run scripts/menu_addbrands.py    --store nubra --top 8 --title "Inspirate din" --after "Unisex" --apply # menuUpdate (preserves the whole tree)
+```
+DRY-RUN by default. `menu_addbrands` keeps only the **top-N brands by product count** in the menu (rest stay as collections for SEO/links — don't dump 21 items in nav); `--title` names the item, `--after "<menu item title>"` controls placement (default "Toate parfumurile"; falls back to front if not found). `brand_collections --brand-name` overrides the shop name in SEO (default = `shop.name`); `--apply` **auto-publishes each new collection to ALL sales channels** (golden rule #6 — new collections default to ZERO channels → 404 + invisible on Google/Shop; this bit us once). Proven on **Esteban** (21 collections + "Inspirate din" menu) and **Nubra** (17 collections + menu). **Per-store caveat:** how a store encodes the inspiration varies — Esteban/Nubra titles carry "... by <Brand>" (title-CONTAINS rule), but **GT** has no brand in the title (it's in `custom.inspired_by` = "Miss by Dior") and its existing brand collections use a **TAG EQUALS <Brand>** rule. Check the title format + an existing brand collection's `ruleSet` before running.
+
+## Internal linking — `scripts/internal_links.py` (DRY-RUN default)
+Distribuie PageRank intern + de-orfanizează conținut. **Fără emoji** în textul inserat (convenție echipă). Toate inserțiile sunt **idempotente** (un marker regex șterge blocul anterior înainte de re-adăugare) și fiecare `collectionUpdate` retrimite SEO title+description existente (golden rule #1). Trei moduri:
+```bash
+uv run scripts/internal_links.py cluster   --store esteban --top 8           # interlink top-N colecții de brand (fiecare -> 3 frați circular)
+uv run scripts/internal_links.py pdp-brand --store esteban --top 0 --apply    # link spre colecția de brand pe TOATE produsele (top 0 = toate brandurile)
+uv run scripts/internal_links.py deorphan  --store esteban --map deorphan.json --apply  # colecție<->articol bidirecțional dintr-un JSON
+```
+- **cluster**: huburile de brand se leagă între ele -> crawl + flux PageRank. Ancoră = numele brandului.
+- **pdp-brand**: pe fiecare produs „... by <Brand>" adaugă la finalul descrierii `Vezi toate <a>parfumurile inspirate din <Brand></a>` (ancoră = brandul, țintă = colecția lui). `--top 0` = toate brandurile (Esteban: **133 produse**); `--top 8` = doar topurile.
+- **deorphan**: dă fiecărui articol orfan un inbound dintr-o colecție-hub tematică (colecțiile sunt în meniu => PageRank mare) + un CTA înapoi din articol. Maparea (colecție↔articole) e specifică magazinului -> fișier JSON: `[{"collection":"dama","label":"Damă","articles":[{"handle":"...","title":"..."}]}]`.
+
+Făcut pe Esteban (Jun 2026): cluster top-8 + de-orfanizate toate 15 articolele blog (bidirecțional colecție↔articol) + link de brand pe toate 133 produse. **`mutation` type-uri care înșeală:** `articleUpdate.body` = **HTML!**, `productUpdate.descriptionHtml` = **String!** (opuse — nu le confunda).
 
 ## Logging (team convention)
 After a run: `kb.py log --type skill --action used --name gigi:shopify-seo --summary "…"`.
