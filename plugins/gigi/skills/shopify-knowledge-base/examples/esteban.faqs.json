@@ -1,0 +1,28 @@
+{
+  "store": "Esteban (Maison d'Esteban)",
+  "admin_handle": "6f9e22-9d",
+  "lang": "ro",
+  "source": "shop policies + delivery settings + Richpanel tickets + payment gateways (2026-06-16)",
+  "faqs": [
+    { "q": "Cât costă transportul?", "a": "Transportul se face prin curier DPD și costă 20 de lei. Pentru comenzile de peste 150 de lei, livrarea este complet gratuită, așa că merită să profitați când comandați mai multe produse." },
+    { "q": "Oferiți transport gratuit?", "a": "Da. Orice comandă care depășește 150 de lei beneficiază de livrare gratuită, iar reducerea se aplică automat la finalizarea comenzii — nu este nevoie de niciun cod special." },
+    { "q": "În cât timp ajunge comanda?", "a": "De regulă, comenzile ajung în 2-3 zile lucrătoare (de luni până vineri) și sunt livrate prin curier DPD. Vă recomandăm să lăsați un număr de telefon valid, pentru ca acesta să vă poată contacta înainte de livrare." },
+    { "q": "Cum îmi urmăresc comanda?", "a": "Imediat ce comanda este expediată, primiți pe e-mail numărul AWB și un link de urmărire, cu care puteți vedea în orice moment unde se află coletul pe site-ul DPD. Dacă nu găsiți acest e-mail, scrieți-ne la contact@esteban.ro și vă trimitem noi toate detaliile." },
+    { "q": "Livrați și în străinătate?", "a": "Da, livrăm în peste 20 de țări, printre care Germania, Franța, Italia, Spania, Marea Britanie și Austria. Taxa de transport internațional este de 90 de lei, indiferent de destinația aleasă." },
+    { "q": "Există livrare expres?", "a": "Folosim livrarea standard prin curier DPD, cu ajungere în 2-3 zile lucrătoare, și nu avem momentan un serviciu expres separat. În schimb, procesăm comenzile rapid după confirmare, astfel încât să ajungă la dvs. cât mai repede." },
+    { "q": "Ce metode de plată acceptați?", "a": "Puteți alege între plata ramburs (în numerar, direct curierului la livrare) și plata online cu cardul, în mod securizat, la finalizarea comenzii. Ambele opțiuni sunt disponibile pentru orice comandă." },
+    { "q": "Pot plăti ramburs, la livrare?", "a": "Da, plata ramburs este disponibilă. Achitați comanda în numerar curierului DPD în momentul în care primiți coletul, fără nicio formalitate suplimentară." },
+    { "q": "Cum returnez un produs?", "a": "Aveți dreptul de retur în 14 zile de la primirea comenzii, conform OUG 34/2014. Este suficient să ne scrieți la contact@esteban.ro cu numărul comenzii și datele dvs., iar produsul trebuie să fie nefolosit și în starea originală în care l-ați primit." },
+    { "q": "Pot returna un parfum desigilat sau folosit?", "a": "Din motive de igienă și de protecție a sănătății, nu acceptăm la retur parfumurile și produsele de îngrijire personală care au fost desigilate, testate sau folosite. Returul rămâne posibil doar pentru produsele sigilate, în ambalajul lor original." },
+    { "q": "Cine plătește transportul pentru retur?", "a": "Costul transportului pentru returul produselor este suportat de client, conform legislației în vigoare. Singura excepție este atunci când produsul primit este neconform sau a fost livrat greșit — în acest caz, transportul retur este pe contul nostru." },
+    { "q": "În cât timp primesc banii înapoi după retur?", "a": "Rambursarea se face în cel mult 14 zile de la momentul în care ne-ați comunicat decizia de retur. Suma este returnată după ce primim coletul înapoi și verificăm produsul." },
+    { "q": "Pot anula comanda?", "a": "Da, puteți anula comanda atât timp cât aceasta nu a fost încă expediată. Scrieți-ne cât mai repede la contact@esteban.ro, menționând numărul comenzii, și o oprim înainte de a fi predată curierului." },
+    { "q": "Am greșit adresa sau datele comenzii. Le pot modifica?", "a": "Da, putem actualiza datele dacă ne anunțați înainte de expediere. Trimiteți-ne adresa corectă sau numărul de telefon la contact@esteban.ro, împreună cu numărul comenzii, și facem noi modificarea." },
+    { "q": "Aveți magazin fizic?", "a": "Esteban este o maison exclusiv online, așa că momentan nu avem puncte de vânzare fizice. Toate comenzile se plasează pe esteban.ro și ajung la dvs. prin curier, oriunde v-ați afla." },
+    { "q": "Cum vă pot contacta?", "a": "Ne puteți scrie oricând la contact@esteban.ro, prin formularul de contact de pe site sau pe paginile noastre de social media. Vă răspundem cât mai repede, de obicei chiar în aceeași zi lucrătoare." },
+    { "q": "Cât rezistă parfumurile Esteban?", "a": "Parfumurile noastre sunt create cu o concentrație ridicată de esențe, ceea ce le oferă o persistență de peste 12 ore pe piele. Veți simți aroma pe parcursul întregii zile, la fel ca în cazul unui parfum de designer." },
+    { "q": "Sunt parfumuri originale de designer?", "a": "Parfumurile Esteban sunt creații proprii, inspirate deschis de compoziții celebre și realizate cu esențe de înaltă calitate. Vă oferim astfel experiența și persistența unui parfum de designer, la o fracțiune din prețul originalului." },
+    { "q": "Aveți reduceri sau coduri promoționale active?", "a": "Da, avem frecvent promoții, printre care îndrăgita ofertă 2+1. Codurile de reducere se aplică direct în coș, la finalizarea comenzii, iar dacă vă abonați la newsletter veți fi printre primii care află de fiecare ofertă nouă." },
+    { "q": "Oferiți comenzi en-gros sau colaborări?", "a": "Da, pentru comenzi în cantități mari sau pentru colaborări ne puteți scrie la contact@esteban.ro. Revenim cu o ofertă personalizată, adaptată nevoilor dvs." }
+  ]
+}
