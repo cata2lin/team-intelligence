@@ -1,4 +1,4 @@
-# /// script
+﻿# /// script
 # requires-python = ">=3.10"
 # dependencies = ["psycopg2-binary>=2.9", "requests>=2.31"]
 # ///
@@ -6,7 +6,7 @@
 import os, sys, json
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
-API="v24"; CID="7566352958"; AG="customers/7566352958/assetGroups/6570957552"; URL="https://belasil.ro/"
+API="v21"; CID="7566352958"; AG="customers/7566352958/assetGroups/6570957552"; URL="https://belasil.ro/"
 VIDS={"iWh_ReD3mJ4":"Belasil - 99lei ad 1","zSnRxkkCS1A":"Belasil - 99 lei ad 2 (subtitrat)",
       "OHcOiWI5SIo":"Belasil - ad 1","DUTm825dWew":"Belasil - proba 1 (vertical)",
       "A5zoYFDhiS8":"Belasil - proba 2 (vertical)","KFT-OKV0EkI":"Belasil - UGC Madalina"}

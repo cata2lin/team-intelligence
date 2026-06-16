@@ -1,4 +1,4 @@
-# /// script
+﻿# /// script
 # requires-python = ">=3.10"
 # dependencies = ["psycopg2-binary>=2.9", "requests>=2.31"]
 # ///
@@ -6,7 +6,7 @@
 import os, sys, json, base64
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
-API="v24"; CID="7566352958"; AG="customers/7566352958/assetGroups/6570957552"
+API="v21"; CID="7566352958"; AG="customers/7566352958/assetGroups/6570957552"
 DIR="/Users/gheorghebeschea/Downloads/Scripturi/belasil-creatives"
 IMGS=[("bel_ls_spalari.png","MARKETING_IMAGE"),("bel_ls_pret.png","MARKETING_IMAGE"),
  ("bel_ls_producator.png","MARKETING_IMAGE"),("bel_ls_recenzii.png","MARKETING_IMAGE"),

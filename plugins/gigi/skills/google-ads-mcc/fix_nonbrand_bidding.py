@@ -1,4 +1,4 @@
-# /// script
+﻿# /// script
 # requires-python = ">=3.10"
 # dependencies = ["psycopg2-binary>=2.9", "requests>=2.31"]
 # ///
@@ -6,7 +6,7 @@
 import os, sys, json
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
-API="v24"; CID=os.environ.get("CIDARG","7566352958"); CAMP=os.environ.get("CAMPARG","23927269391")
+API="v21"; CID=os.environ.get("CIDARG","7566352958"); CAMP=os.environ.get("CAMPARG","23927269391")
 CPC_CEIL=os.environ.get("CPCARG","3000000")  # 3.0 RON cap
 _PG_OK={"host","port","dbname","user","password","sslmode","sslrootcert","sslcert","sslkey","connect_timeout","application_name","options","channel_binding"}
 def clean(d):

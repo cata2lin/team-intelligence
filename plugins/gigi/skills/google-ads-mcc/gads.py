@@ -3,7 +3,7 @@
 # dependencies = ["psycopg2-binary>=2.9", "requests>=2.31"]
 # ///
 """
-gads.py — Google Ads API v24 via the team MCC (version overridable via env GADS_API_VERSION).
+gads.py — Google Ads API v20 via the team MCC.
 
 Reads the MCC connection (developer token, login-customer-id, OAuth client +
 refresh token) from the `metrics` DB (table google_ads_connections), refreshes
@@ -19,7 +19,7 @@ import argparse, json, os, sys
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
 
-API = os.environ.get("GADS_API_VERSION", "v24")  # v20 deprecated/blocked Jun 2026; latest is v24; override via env
+API = "v21"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 _PG_OK = {"host","hostaddr","port","dbname","user","password","sslmode","sslrootcert",
           "sslcert","sslkey","connect_timeout","application_name","options","channel_binding"}
@@ -80,26 +80,6 @@ def mutate(c: dict, customer_id: str, service: str, operations: list, apply: boo
     r=requests.post(url, headers=_headers(c,tok), json=body, timeout=60)
     if r.status_code!=200: sys.exit(f"Google Ads API {r.status_code}: {r.text[:900]}")
     return r.json()
-
-def keyword_ideas(c: dict, customer_id: str, seeds: list, geo: str, lang: str, page_url: str = "") -> list[dict]:
-    tok = access_token(c)
-    url = f"https://googleads.googleapis.com/{API}/customers/{_digits(customer_id)}:generateKeywordIdeas"
-    body = {"language": f"languageConstants/{lang}", "geoTargetConstants": [f"geoTargetConstants/{geo}"],
-            "keywordPlanNetwork": "GOOGLE_SEARCH", "includeAdultKeywords": False}
-    if page_url and seeds:
-        body["keywordAndUrlSeed"] = {"url": page_url, "keywords": seeds}
-    elif page_url:
-        body["urlSeed"] = {"url": page_url}
-    else:
-        body["keywordSeed"] = {"keywords": seeds}
-    out = []; page = None
-    while True:
-        if page: body["pageToken"] = page
-        r = requests.post(url, headers=_headers(c, tok), json=body, timeout=60)
-        if r.status_code != 200: sys.exit(f"Google Ads API {r.status_code}: {r.text[:700]}")
-        d = r.json(); out += d.get("results", []) or []; page = d.get("nextPageToken")
-        if not page or len(out) >= 800: break
-    return out
 
 # ---- report presets (GAQL). {r} = date range macro ----
 PRESETS = {
@@ -178,7 +158,7 @@ def main():
     ss.add_argument("--status", required=True, choices=["ENABLED","PAUSED"]); ss.add_argument("--apply", action="store_true"); ss.add_argument("--mcc")
     st=sub.add_parser("set-troas", help="set target ROAS on a Max-conv-value campaign (dry-run unless --apply)")
     st.add_argument("--customer", required=True); st.add_argument("--campaign", required=True)
-    st.add_argument("--roas", type=float, required=True, help="multiplier, e.g. 4.8 = 480%"); st.add_argument("--apply", action="store_true"); st.add_argument("--mcc")
+    st.add_argument("--roas", type=float, required=True, help="multiplier, e.g. 4.8 = 480%%"); st.add_argument("--apply", action="store_true"); st.add_argument("--mcc")
     sc=sub.add_parser("set-tcpa", help="switch to Max conversions + target CPA (dry-run unless --apply)")
     sc.add_argument("--customer", required=True); sc.add_argument("--campaign", required=True)
     sc.add_argument("--cpa", type=float, required=True, help="RON"); sc.add_argument("--apply", action="store_true"); sc.add_argument("--mcc")
@@ -191,11 +171,6 @@ def main():
     ak.add_argument("--customer", required=True); ak.add_argument("--adgroup", required=True)
     ak.add_argument("--terms", required=True, help="comma-separated"); ak.add_argument("--match", default="PHRASE", choices=["EXACT","PHRASE","BROAD"])
     ak.add_argument("--apply", action="store_true"); ak.add_argument("--mcc")
-    kw=sub.add_parser("keywords", help="Keyword Planner: search volume + new keyword ideas (default Romania/Romanian)")
-    kw.add_argument("--customer", required=True, help="any account under the MCC, e.g. 9069610821")
-    kw.add_argument("--seed", help="comma-separated seed keywords"); kw.add_argument("--url", help="seed from a landing page URL")
-    kw.add_argument("--geo", default="2642"); kw.add_argument("--lang", default="1032")  # Romania / Romanian
-    kw.add_argument("--limit", type=int, default=40); kw.add_argument("--format", default="table", choices=["table","json"]); kw.add_argument("--mcc")
     args=ap.parse_args()
 
     if args.cmd=="report":
@@ -210,22 +185,6 @@ def main():
     elif args.cmd=="accounts":
         c=get_connection(args.mcc); q,cols=PRESETS["accounts"]
         res=search(c, _digits(c["mcc"]), q); print_rows(res, cols, args.format)
-    elif args.cmd=="keywords":
-        c=get_connection(args.mcc)
-        seeds=[s.strip() for s in (args.seed or "").split(",") if s.strip()]
-        if not seeds and not args.url: sys.exit("--seed \"a,b\" or --url required")
-        res=keyword_ideas(c, args.customer, seeds, args.geo, args.lang, args.url or "")
-        rows=[]
-        for it in res:
-            m=it.get("keywordIdeaMetrics") or {}
-            rows.append((int(m.get("avgMonthlySearches") or 0), it.get("text",""), m.get("competition","") or ""))
-        rows.sort(reverse=True)
-        if args.format=="json":
-            print(json.dumps([{"keyword":t,"avgMonthlySearches":v,"competition":cmp} for v,t,cmp in rows[:args.limit]], ensure_ascii=False, indent=1))
-        else:
-            print(f"{'avg/mo':>9}  {'competition':<11} keyword")
-            for v,t,cmp in rows[:args.limit]:
-                print(f"{v:>9,}  {cmp:<11} {t[:62]}")
     elif args.cmd=="set-budget":
         c=get_connection(args.mcc)
         # find the campaign's budget resource
