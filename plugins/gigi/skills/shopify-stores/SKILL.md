@@ -189,6 +189,25 @@ storefront cart that "auto-adds a gift" often does **not** live in the theme at 
 the COD form). Flows are **not** readable or editable via API — only in
 admin → Apps → Flow.
 
+### noindex a single page (keep it off Google)
+Shopify has **no per-page noindex toggle** in admin. The only API way is a
+conditional `<meta robots>` in `layout/theme.liquid`. Use **`scripts/noindex_page.py`**:
+```bash
+uv run noindex_page.py --prefix BON --path /policies/contact-information          # dry-run
+uv run noindex_page.py --prefix BON --path /policies/contact-information --apply   # add
+uv run noindex_page.py --prefix BON --path /policies/contact-information --remove --apply
+```
+It injects `{%- if request.path contains '<PATH>' -%}<meta name="robots" content="noindex, nofollow">{%- endif -%}`
+after `<head>` (idempotent, backs the file up). Works for the auto-generated
+**contact policy page** `/policies/contact-information` (the ARONA-SRL page) too —
+that page renders through the theme like any storefront page.
+- **`noindex` ≠ `nofollow` ≠ robots.txt `Disallow`.** Only `noindex` removes a page
+  from search results. `nofollow` just stops link-following; robots.txt `Disallow`
+  can *prevent* deindexing (Google can't crawl the page to see the noindex). So keep
+  the page **crawlable** and rely on `noindex`.
+- Deindex is not instant — it drops on the next crawl (days–weeks). For speed, file a
+  temporary removal in Google Search Console (team has GSC via `gigi:analytics`).
+
 ## 6. Rate limits (don't get 429'd)
 
 - **GraphQL**: cost-based leaky bucket. Read `extensions.cost.throttleStatus`
