@@ -183,29 +183,52 @@ FROM base WHERE identity IS NOT NULL
 GROUP BY identity;
 """
 
-# daily_ad_spend_ron is an ETL from AWBprint.marketing_daily_costs (sheet-fed: 'Raport Zilnic 2'
-# + 'Grandia'), which includes TikTok (the metrics TikTok API sync is dead) and is already in RON.
-# Source has a ~1-2 day human-entry lag (data_to ≈ today-2) — reflected in cache.freshness.
+# daily_ad_spend_ron = closed days from AWBprint.marketing_daily_costs (sheet-fed 'Raport Zilnic 2',
+# ~1-2 day human-entry lag) + a CURRENT-DAY overlay read live from the consolidated "Facebook Azi"
+# sheet tab (public CSV, no auth). Includes TikTok (the metrics TikTok API sync is dead). RON.
+# Grandia is not in these sheets (its spend comes from the Grandia pipeline).
+SHEET_ID = "1IVg0fI-_Rm7IptmOl3BmGrqtyyzn3auf0ZPuftr9vQo"
+AZI_TAB  = "Facebook Azi"   # consolidated current-day per-brand table (FB+TikTok+Google), all brands
+STORE_OVERRIDES = {"casaofertelor.ro": "bonhaus"}  # Casa Ofertelor = the RO Bonhaus storefront
+
 DAILY_AD_SPEND_DDL = """
 CREATE SCHEMA IF NOT EXISTS cache;
 DROP TABLE IF EXISTS cache.daily_ad_spend_ron CASCADE;
 CREATE TABLE cache.daily_ad_spend_ron (
   date        date,
-  store_name  text,    -- AWBprint store domain (e.g. esteban.ro)
-  brand_id    text,    -- mapped via brands.slug (+ STORE_OVERRIDES); NULL if no metrics brand
+  store_name  text,    -- AWBprint store domain (closed days) or '<brand>.azi' (overlay)
+  brand_id    text,    -- mapped via brands.slug/name (+ STORE_OVERRIDES); NULL if no metrics brand
   platform    text,    -- meta / google / tiktok
   spend_ron   numeric,
+  source      text,    -- 'awbprint' (closed days) | 'sheet_today' (live current day)
   computed_at timestamptz DEFAULT now(),
   PRIMARY KEY (date, store_name, platform)
 );
 CREATE INDEX IF NOT EXISTS daily_ad_spend_brand_idx ON cache.daily_ad_spend_ron(brand_id, date);
 """
-# Store domains whose slug doesn't auto-match a brand (different storefront name).
-STORE_OVERRIDES = {"casaofertelor.ro": "bonhaus"}  # Casa Ofertelor = the RO Bonhaus storefront
+
+def _ro_num(s):
+    s = (s or "").strip().replace("\xa0", "")
+    if not s: return 0.0
+    if "," in s and "." in s: s = s.replace(".", "").replace(",", ".")
+    elif "," in s: s = s.replace(",", ".")
+    try: return float(s)
+    except ValueError: return 0.0
+
+def _fetch_azi():
+    import urllib.request
+    url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=" + urllib.request.quote(AZI_TAB)
+    for _ in range(4):
+        try:
+            return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=45).read().decode("utf-8", "ignore")
+        except Exception:
+            continue
+    return None
 
 def run_daily_ad_spend(apply):
-    import re
+    import re, csv, io, datetime
     from psycopg2.extras import execute_values
+    norm = lambda s: re.sub(r"[^a-z0-9]", "", (s or "").strip().lower())
     mdsn = secret("DATABASE_URL_METRICS"); adsn = secret("DATABASE_URL_AWBPRINT")
     if not adsn:
         print("!! DATABASE_URL_AWBPRINT not in secret store"); sys.exit(1)
@@ -214,20 +237,42 @@ def run_daily_ad_spend(apply):
         base = parts[0] if len(parts) == 1 else ("".join(parts[:-1]) if parts[-1] == "ro" else "".join(parts))
         return re.sub(r"[^a-z0-9]", "", base)
     mconn = psycopg2.connect(clean_dsn(mdsn)); mcur = mconn.cursor()
-    mcur.execute("SELECT id, slug FROM brands WHERE slug IS NOT NULL")
-    bmap = {re.sub(r"[^a-z0-9]", "", slug.lower()): bid for bid, slug in mcur.fetchall()}
-    ovr = {dom: bmap.get(re.sub(r"[^a-z0-9]", "", slug)) for dom, slug in STORE_OVERRIDES.items()}
+    mcur.execute("SELECT id, slug, name FROM brands")
+    bslug, bname = {}, {}
+    for bid, slug, name in mcur.fetchall():
+        if slug: bslug[norm(slug)] = bid
+        if name: bname[norm(name)] = bid
+    ovr = {dom: bslug.get(norm(slug)) for dom, slug in STORE_OVERRIDES.items()}
+    # 1) closed days from AWBprint
     aconn = psycopg2.connect(clean_dsn(adsn)); acur = aconn.cursor()
     acur.execute("SELECT cost_date, store_name, facebook, tiktok, google FROM marketing_daily_costs")
-    rows, unmapped = [], set()
+    rows, unmapped, brand_store, awb_max = [], set(), {}, None
     for d, store, fb, tk, gg in acur.fetchall():
-        bid = ovr.get((store or "").strip().lower()) or bmap.get(skey(store))
+        bid = ovr.get((store or "").strip().lower()) or bslug.get(skey(store))
         if bid is None: unmapped.add(store)
+        else: brand_store.setdefault(bid, store)
+        if awb_max is None or d > awb_max: awb_max = d
         for plat, val in (("meta", fb), ("tiktok", tk), ("google", gg)):
             if val is not None:
-                rows.append((d, store, bid, plat, float(val)))
+                rows.append((d, store, bid, plat, float(val), "awbprint"))
     aconn.close()
-    print(f"[daily_ad_spend_ron] {len(rows)} rows from AWBprint.marketing_daily_costs; "
+    # 2) current-day overlay from the live sheet tab (only dates AWBprint doesn't have yet)
+    overlay = 0; azi = _fetch_azi()
+    if azi:
+        rd = list(csv.reader(io.StringIO(azi))); idx = {h: i for i, h in enumerate(rd[0])}
+        for r in rd[1:]:
+            try: dd = datetime.datetime.strptime(r[idx["Data"]].strip(), "%d.%m.%Y").date()
+            except Exception: continue
+            if awb_max and dd <= awb_max: continue   # AWBprint is authoritative for closed days
+            bn = norm(r[idx["Brand"]])
+            bid = bname.get(bn) or (bname.get(bn[:-2]) if bn.endswith("ro") else None)
+            store = brand_store.get(bid) or (bn + ".azi")
+            for plat, col in (("meta", "Facebook"), ("tiktok", "Tiktok"), ("google", "Google")):
+                if col in idx:
+                    rows.append((dd, store, bid, plat, _ro_num(r[idx[col]]), "sheet_today")); overlay += 1
+    else:
+        print("[daily_ad_spend_ron] WARN: current-day sheet tab unreachable; AWBprint-only this run")
+    print(f"[daily_ad_spend_ron] {len(rows)} rows (AWBprint thru {awb_max} + {overlay} sheet-overlay); "
           f"unmapped stores: {sorted(unmapped) or 'none'}")
     if not apply:
         mconn.rollback(); mconn.close()
@@ -235,7 +280,7 @@ def run_daily_ad_spend(apply):
     mcur.execute(DAILY_AD_SPEND_DDL)
     mcur.execute("TRUNCATE cache.daily_ad_spend_ron")
     execute_values(mcur,
-        "INSERT INTO cache.daily_ad_spend_ron (date,store_name,brand_id,platform,spend_ron) VALUES %s",
+        "INSERT INTO cache.daily_ad_spend_ron (date,store_name,brand_id,platform,spend_ron,source) VALUES %s",
         rows, page_size=2000)
     mcur.execute("SELECT COUNT(*) FROM cache.daily_ad_spend_ron"); n = mcur.fetchone()[0]
     log_refresh(mcur, "daily_ad_spend_ron", n)
