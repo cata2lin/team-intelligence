@@ -32,11 +32,15 @@ Goal: two link blocks **below** the native filters, in the collection's left sid
   of the snippet (after the filter section) so it sits below the filters. Reuse the theme's
   `.sidebarBlock`/`.sidebarBlock-heading` classes.
 - **Nubra (Online Store 2.0, "nubra v1.1"):** the facets are in `blocks/filters.liquid`
-  (~1485 lines). The **desktop pane** (`{% if should_show_pane %}` → `{{ rendered_filters }}`)
-  does **NOT** render on the live page — the visible desktop sidebar comes from the
-  **DRAWER** path (the `{%- for filter in filters -%}` loop rendered with `in_drawer: true`,
-  ~line 442). Inject your block right **after that drawer loop's `{%- endfor -%}`**, before
-  its `</div>`. (Injecting into the desktop pane = invisible; spent 3 attempts learning this.)
+  (~1485 lines). The **desktop sidebar** is the pane that outputs `{{ rendered_filters }}`
+  (the `{% else %}` / non-horizontal branch, ~line 219). **Inject your static block right
+  after `{{ rendered_filters }}`** — that renders in the desktop left sidebar. The `in_drawer`
+  loop (~line 442) is the **mobile filter drawer** — optionally inject there too for mobile,
+  but it is hidden on desktop. **Hard-won gotcha:** while iterating, `curl` showed "0
+  occurrences" for the desktop injection and made it look like it wasn't rendering — that was
+  **CDN cache**, not reality. Always verify with a `collectionUpdate` bust + a **full-page
+  browser screenshot**, never `curl` (and don't "clean up" a block you think is dead until a
+  busted screenshot confirms it).
 - **Limit the NOTE facet**: section setting `max_item_per_filter` (default 10) → set to ~6 so
   the sidebar isn't a mile long; the rest collapse behind "Vezi tot".
 - After ANY collection-template/snippet edit, the storefront is **CDN-cached** — see §Cache.
