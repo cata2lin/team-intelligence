@@ -174,6 +174,21 @@ A PMax asset group needs a full set before it serves beyond Shopping. Build with
 - **Feed real video** (§4) — PMax with strong video beats asset-only; competitors in most niches run video-heavy.
 - **Don't reset learning needlessly:** big budget jumps / new bid targets re-enter learning; move in steps, leave ~2 weeks.
 
+## 6. Change history — track an agency / who changed what
+For accounts an **external agency** runs (e.g. Grandia = SkilledPPC, `matei@skilledppc.com`)
+or to audit any change, use **`change_history.py`** — reads the `change_event` resource and
+prints *when · who (+ client WEB/API/BULK) · operation · resource · changed fields old→new*,
+with campaign names resolved and `*Micros` shown in RON.
+```bash
+uv run change_history.py --customer 9069610821                 # last 14 days, detailed
+uv run change_history.py --customer 9069610821 --days 30        # max Google retains
+uv run change_history.py --customer 9069610821 --summary        # who/what/operation counts
+uv run change_history.py --customer 9069610821 --by matei@skilledppc.com
+```
+- `client_type`: **`GOOGLE_ADS_API`** = the MCC/our scripts; **`GOOGLE_ADS_WEB_CLIENT` / `BULK` / `EDITOR`** = a human in the UI. Quick way to prove "did *we* touch this account?" — filter API vs not.
+- **Google only keeps 30 days** of change history. To track longer, run this on a cron and snapshot to a table/file (e.g. the metrics DB or NAS) — otherwise older agency moves are lost.
+- Reads only; safe on any account, including ones we don't manage.
+
 ## Guardrails / hard rules
 - **Never print** the developer token, OAuth secret, or refresh tokens. Read from DB/secret store, use in-process.
 - **Reports are read-only.** Mutations are **dry-run by default**; require `--apply` AND user confirmation before touching a live account.
