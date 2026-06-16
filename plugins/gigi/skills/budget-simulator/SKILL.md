@@ -41,6 +41,10 @@ conv, revenue, ROAS, profit) + breakeven ROAS + a scale/ceiling verdict.
 ## Caveats
 - It's an **estimate**, not a guarantee — elasticity is a model, demand/competition/seasonality move.
   Use it to *size* a move, then verify with `ads-anomalies` after.
+- **Verify utilisation before trusting a "scale" verdict.** Budget-lost IS can be **intraday** (caps on
+  busy days) even when the *average* daily spend is below budget — Belasil Brand Protect showed 22%
+  IS-lost but spent ~30 of a 45 budget on average, capping only on peak days. Pull daily spend vs
+  budget (7d) and raise only if it actually caps; a campaign not spending its budget won't use more.
 - PMax doesn't expose budget-lost IS → elasticity defaults conservative; treat PMax projections as
   rougher. Step budgets ~20–30% and leave 1–2 weeks (learning), per `gigi:google-ads-mcc`.
 - Pairs with **`product-matrix`** (which products to scale), **`weekly-insights`** (real revenue), and
