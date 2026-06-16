@@ -30,8 +30,19 @@ pick the hero (PIL montage — see the recon snippet below).
 
 > **Pick a hero that survives a dark background.** A matte-black bottle disappears
 > on a dark banner. Prefer an **amber/coloured/glass** bottle, a render with a
-> light label panel, or rely on the glow. (For Esteban the gold-cap amber
-> `poza_sticla.jpg` reads beautifully; the matte "Essential" black bottle does not.)
+> light label panel, or rely on the glow.
+
+> **Verify the LABEL ERA before you commit — brands rebrand.** Old NAS shoots often
+> show retired packaging. Check the brand's `label_current` in `BRAND_REFERENCE` and
+> glance at the **live site** to confirm what the current bottle label reads, then
+> Read candidate photos at full resolution to confirm the label matches. (Esteban
+> rebranded to **"Maison d'Esteban"**: only `01_EDITS/2025 12 04 - Colorate`
+> [DSC01490/487 single, DSC01516/523 trio] shows the new label — every other folder,
+> and even esteban.ro's product photos, still show the old "Esteban / Essential"
+> label. Picking an old-label hero meant redoing the whole set.) The bottle label and
+> the banner wordmark must agree. Flat-lay (lying-down) single-bottle shots are fine —
+> `cutout.py` callers can auto-upright them (cv2 `minAreaRect` deskew + cap-up by
+> narrower-end heuristic).
 
 ### 2. Remove the background → transparent cutout
 One-time env setup (rembg won't `pip install` cleanly on Python 3.13 because
