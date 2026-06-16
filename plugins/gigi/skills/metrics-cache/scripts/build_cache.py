@@ -183,40 +183,64 @@ FROM base WHERE identity IS NOT NULL
 GROUP BY identity;
 """
 
+# daily_ad_spend_ron is an ETL from AWBprint.marketing_daily_costs (sheet-fed: 'Raport Zilnic 2'
+# + 'Grandia'), which includes TikTok (the metrics TikTok API sync is dead) and is already in RON.
+# Source has a ~1-2 day human-entry lag (data_to ≈ today-2) — reflected in cache.freshness.
 DAILY_AD_SPEND_DDL = """
 CREATE SCHEMA IF NOT EXISTS cache;
 DROP TABLE IF EXISTS cache.daily_ad_spend_ron CASCADE;
 CREATE TABLE cache.daily_ad_spend_ron (
   date        date,
-  brand_id    text,
-  platform    text,   -- meta / google / tiktok
+  store_name  text,    -- AWBprint store domain (e.g. esteban.ro)
+  brand_id    text,    -- mapped via brands.slug (+ STORE_OVERRIDES); NULL if no metrics brand
+  platform    text,    -- meta / google / tiktok
   spend_ron   numeric,
   computed_at timestamptz DEFAULT now(),
-  PRIMARY KEY (date, brand_id, platform)
+  PRIMARY KEY (date, store_name, platform)
 );
 CREATE INDEX IF NOT EXISTS daily_ad_spend_brand_idx ON cache.daily_ad_spend_ron(brand_id, date);
 """
-# RON is already precomputed in the insights tables (spendRon/costRon) — no FX needed.
-# Caveat: an ad account shared across brands (campaignFilter) attributes full account
-# spend to each mapped brand (insights are account-level, not campaign-level).
-DAILY_AD_SPEND_SELECT = """
-SELECT date, brand_id, platform, ROUND(SUM(spend_ron),2)
-FROM (
-  SELECT i.date, m."brandId" AS brand_id, 'meta' AS platform, i."spendRon" AS spend_ron
-  FROM meta_ad_insights_daily i JOIN brand_meta_ad_accounts m
-    ON m."adAccountId"=i."adAccountId" AND m."isActive"
-  UNION ALL
-  SELECT i.date, g."brandId", 'google', i."costRon"
-  FROM google_ads_insights_daily i JOIN brand_google_ads_accounts g
-    ON g."customerAccountId"=i."customerAccountId" AND g."isActive"
-  UNION ALL
-  SELECT i.date, t."brandId", 'tiktok', i."spendRon"
-  FROM tiktok_ad_insights_daily i JOIN brand_tiktok_ad_accounts t
-    ON t."adAccountId"=i."adAccountId" AND t."isActive"
-) s
-WHERE spend_ron IS NOT NULL
-GROUP BY date, brand_id, platform;
-"""
+# Store domains whose slug doesn't auto-match a brand (different storefront name).
+STORE_OVERRIDES = {"casaofertelor.ro": "bonhaus"}  # Casa Ofertelor = the RO Bonhaus storefront
+
+def run_daily_ad_spend(apply):
+    import re
+    from psycopg2.extras import execute_values
+    mdsn = secret("DATABASE_URL_METRICS"); adsn = secret("DATABASE_URL_AWBPRINT")
+    if not adsn:
+        print("!! DATABASE_URL_AWBPRINT not in secret store"); sys.exit(1)
+    def skey(s):
+        s = (s or "").strip().lower(); parts = s.split(".")
+        base = parts[0] if len(parts) == 1 else ("".join(parts[:-1]) if parts[-1] == "ro" else "".join(parts))
+        return re.sub(r"[^a-z0-9]", "", base)
+    mconn = psycopg2.connect(clean_dsn(mdsn)); mcur = mconn.cursor()
+    mcur.execute("SELECT id, slug FROM brands WHERE slug IS NOT NULL")
+    bmap = {re.sub(r"[^a-z0-9]", "", slug.lower()): bid for bid, slug in mcur.fetchall()}
+    ovr = {dom: bmap.get(re.sub(r"[^a-z0-9]", "", slug)) for dom, slug in STORE_OVERRIDES.items()}
+    aconn = psycopg2.connect(clean_dsn(adsn)); acur = aconn.cursor()
+    acur.execute("SELECT cost_date, store_name, facebook, tiktok, google FROM marketing_daily_costs")
+    rows, unmapped = [], set()
+    for d, store, fb, tk, gg in acur.fetchall():
+        bid = ovr.get((store or "").strip().lower()) or bmap.get(skey(store))
+        if bid is None: unmapped.add(store)
+        for plat, val in (("meta", fb), ("tiktok", tk), ("google", gg)):
+            if val is not None:
+                rows.append((d, store, bid, plat, float(val)))
+    aconn.close()
+    print(f"[daily_ad_spend_ron] {len(rows)} rows from AWBprint.marketing_daily_costs; "
+          f"unmapped stores: {sorted(unmapped) or 'none'}")
+    if not apply:
+        mconn.rollback(); mconn.close()
+        print("DRY-RUN — nothing written. Re-run with --apply."); return
+    mcur.execute(DAILY_AD_SPEND_DDL)
+    mcur.execute("TRUNCATE cache.daily_ad_spend_ron")
+    execute_values(mcur,
+        "INSERT INTO cache.daily_ad_spend_ron (date,store_name,brand_id,platform,spend_ron) VALUES %s",
+        rows, page_size=2000)
+    mcur.execute("SELECT COUNT(*) FROM cache.daily_ad_spend_ron"); n = mcur.fetchone()[0]
+    log_refresh(mcur, "daily_ad_spend_ron", n)
+    mconn.commit(); mconn.close()
+    print(f"[daily_ad_spend_ron] APPLIED — cache.daily_ad_spend_ron now has {n} rows.")
 
 PRODUCT_REFUSAL_DDL = """
 CREATE SCHEMA IF NOT EXISTS cache;
@@ -293,12 +317,6 @@ TABLES = {
     "cols": "(order_id,order_name,brand_id,phone,email,customer_name,financial_status,fulfillment_status,total_price,total_refunded,placed_at,cancelled_at,status_category,delivery_status,is_refusal,awb,courier_status)",
     "select": ORDER_ENRICHED_SELECT,
     "count_sql": "SELECT COUNT(*) FROM (" + ORDER_ENRICHED_SELECT.rstrip().rstrip(';') + ") q",
-  },
-  "daily_ad_spend_ron": {
-    "ddl": DAILY_AD_SPEND_DDL,
-    "cols": "(date,brand_id,platform,spend_ron)",
-    "select": DAILY_AD_SPEND_SELECT,
-    "count_sql": "SELECT COUNT(*) FROM (" + DAILY_AD_SPEND_SELECT.rstrip().rstrip(';') + ") q",
   },
   "product_refusal_rate": {
     "ddl": PRODUCT_REFUSAL_DDL,
@@ -420,6 +438,8 @@ def run_order_outcome(apply):
 def run(table, apply):
     if table == "order_outcome":
         return run_order_outcome(apply)
+    if table == "daily_ad_spend_ron":
+        return run_daily_ad_spend(apply)
     spec = TABLES[table]
     dsn = secret("DATABASE_URL_METRICS")
     if not dsn:
