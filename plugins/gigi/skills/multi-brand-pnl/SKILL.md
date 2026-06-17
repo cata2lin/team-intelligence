@@ -1,13 +1,20 @@
 ---
 name: multi-brand-pnl
-description: Live all-in P&L for ANY or ALL of the 16+ Arona brands (Esteban, GT, Nubra, Bonhaus RO/CZ/PL/BG, Ofertele Zilei, Reduceri bune, Magdeal, Belasil, Gento, Carpetto, Covoria, Nocturna, Rossi Nails, Apreciat...) for a date range — revenue, FB/Google/TikTok ad spend, COGS, transport, contribution profit, ROAS, MER, CPA, AOV — from the Scripturi daily_perf.db (sourced from 'Raport Zilnic 2'). One brand, the portfolio ranked by profit/margin, or a consolidated company-wide P&L, plus a one-line --today snapshot. Use for 'P&L all brands', 'company-wide profit', 'which brands are profitable this month', 'brand profitability ranking', 'portfolio MER/ROAS', 'exec snapshot'.
+description: All-in P&L for ANY or ALL of the 16+ Arona brands (Esteban, GT, Nubra, Bonhaus RO/CZ/PL/BG, Ofertele Zilei, Reduceri bune, Magdeal, Belasil, Gento, Carpetto, Covoria, Nocturna, Rossi Nails, Apreciat...). DEFAULT = REAL net profit from the canonical Scripturi profitability engine (cache.brand_pnl_monthly): revenue = DELIVERED orders only, EX-VAT, minus COGS + transport + marketing — MONTHLY granularity. One brand, the portfolio ranked by net profit/margin, or a consolidated company-wide P&L. The old daily_perf view (gross-with-VAT, all orders, FB/Google/TikTok split, daily + --today) is available via --estimat but OVERSTATES profit. Use for 'real profit per brand', 'P&L all brands', 'company-wide profit', 'which brands are profitable', 'what % of profit is perfumes', 'brand profitability ranking'.
 ---
 
 # multi-brand-pnl
 
-P&L "all-in" live pentru oricare sau toate brandurile Arona, pe un interval de date.
-Pentru fiecare brand: venit, ads (FB+Google+TikTok), COGS, transport, **profit de
-contributie** (= venit − COGS − transport − total_spend), MER, ROAS, CPA, AOV.
+P&L "all-in" pentru oricare sau toate brandurile Arona.
+
+**DEFAULT = profit REAL** din engine-ul canonic de profitabilitate Scripturi
+(`cache.brand_pnl_monthly`): venit = comenzi **LIVRATE**, **fără TVA**, minus COGS +
+transport + marketing → **PROFIT NET**, marjă, MER, CPA, AOV. Granularitate **LUNARĂ**
+(profitul real se știe doar după ce livrarea se așază; luna curentă e incompletă).
+
+`--estimat` / `--today` = sursa veche `cache.daily_brand_pnl` (oglinda daily_perf): venit
+**brut cu TVA, toate comenzile**, split FB/Google/TikTok, zilnic. **Supraestimează** profitul
+— folosește doar pt tendință zilnică / defalcare pe platforme, nu pt profitul real.
 
 ## How to run
 
