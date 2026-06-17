@@ -57,10 +57,14 @@ Per `sku × brand_id`: distinct-order `delivered, refused, refusal_pct`. Matches
 "HA-* products refuse 40-56%" reality. Readers: cod-confirmation, product-quality-radar,
 anne:ha-refuz, cs-* risk scoring.
 
+### `cache.product_basket_pairs`  (in-DB market-basket, last 180d, co-count ≥ 3)
+Per `brand × product_a × product_b`: `co_count, conf_a_to_b, conf_b_to_a, lift` + titles.
+"Frequently bought together" — powers PDP cross-sell, Klaviyo post-purchase flows, 2+1 pairings.
+Readers: gigi:cross-sell, PDP FBT blocks, klaviyo flows.
+
 ### Roadmap (from skills-audit.md), add as `--table`:
-`order_enriched` (per-order join of orders+outcome+customer for one-row CS lookups),
 `ticket_order_link` (mostly already in `richpanel_tickets` cols),
-`product_basket_pairs`, `rma_signal_daily`, `daily_brand_pnl` (replaces SSH `daily_perf.db`),
+`rma_signal_daily`, `daily_brand_pnl` (replaces SSH `daily_perf.db`),
 `dataforseo_cache` (the only pay-per-call source).
 
 ## Freshness — ALWAYS know what you're reading (it's a snapshot, not live)

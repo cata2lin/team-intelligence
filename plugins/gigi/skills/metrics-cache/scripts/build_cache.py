@@ -66,7 +66,7 @@ def clean_dsn(dsn):
 # Recommended freshness window per table (hours) — drives the STALE flag in cache.freshness.
 MAX_AGE = {
   "order_outcome": 24, "customer_agg": 24, "daily_ad_spend_ron": 24,
-  "product_refusal_rate": 24, "order_enriched": 12,
+  "product_refusal_rate": 24, "order_enriched": 12, "product_basket_pairs": 48,
 }
 # Per-table date span (min,max) so readers know WHICH PERIOD the cache covers.
 # None = table has no time dimension (e.g. all-time per-SKU aggregate).
@@ -76,6 +76,7 @@ SPAN_SQL = {
   "daily_ad_spend_ron":   "SELECT min(date), max(date) FROM cache.daily_ad_spend_ron",
   "order_enriched":       "SELECT min(placed_at)::date, max(placed_at)::date FROM cache.order_enriched",
   "product_refusal_rate": None,
+  "product_basket_pairs": None,
 }
 
 CACHE_META_DDL = """
@@ -364,7 +365,60 @@ LEFT JOIN cache.order_outcome oo ON oo.order_name = o."name"
 WHERE o."deletedAt" IS NULL;
 """
 
+# Market-basket "frequently bought together" per brand (last 180 days, co-count >= 3).
+# Powers PDP cross-sell blocks, Klaviyo post-purchase flows, and 2+1 surprise pairings.
+PRODUCT_BASKET_DDL = """
+CREATE SCHEMA IF NOT EXISTS cache;
+DROP TABLE IF EXISTS cache.product_basket_pairs CASCADE;
+CREATE TABLE cache.product_basket_pairs (
+  brand_id     text,
+  product_a    text,
+  product_b    text,
+  title_a      text,
+  title_b      text,
+  co_count     int,       -- orders containing both products
+  conf_a_to_b  numeric,   -- P(B | A)
+  conf_b_to_a  numeric,   -- P(A | B)
+  lift         numeric,
+  window_days  int,
+  computed_at  timestamptz DEFAULT now(),
+  PRIMARY KEY (brand_id, product_a, product_b)
+);
+CREATE INDEX IF NOT EXISTS basket_brand_co_idx ON cache.product_basket_pairs(brand_id, co_count DESC);
+"""
+PRODUCT_BASKET_SELECT = """
+WITH items AS (
+  SELECT DISTINCT o."brandId" AS brand_id, oli."orderId" AS oid, oli."productId" AS pid
+  FROM order_line_items oli JOIN orders o ON o.id=oli."orderId"
+  WHERE o."deletedAt" IS NULL AND o."shopifyCreatedAt" >= now()-interval '180 days'
+    AND oli."productId" IS NOT NULL AND oli."productId"<>''
+),
+titles AS (SELECT "productId" pid, MAX(title) title FROM order_line_items WHERE "productId" IS NOT NULL GROUP BY 1),
+bo AS (SELECT brand_id, COUNT(DISTINCT oid) n FROM items GROUP BY 1),
+pc AS (SELECT brand_id, pid, COUNT(DISTINCT oid) c FROM items GROUP BY 1,2),
+pairs AS (
+  SELECT a.brand_id, a.pid pa, b.pid pb, COUNT(*) co
+  FROM items a JOIN items b ON a.oid=b.oid AND a.pid<b.pid
+  GROUP BY 1,2,3 HAVING COUNT(*) >= 3
+)
+SELECT p.brand_id, p.pa, p.pb, ta.title, tb.title, p.co,
+  ROUND(p.co::numeric/ca.c,4), ROUND(p.co::numeric/cb.c,4),
+  ROUND((p.co::numeric*bo.n)/(ca.c*cb.c),3), 180
+FROM pairs p
+JOIN bo ON bo.brand_id=p.brand_id
+JOIN pc ca ON ca.brand_id=p.brand_id AND ca.pid=p.pa
+JOIN pc cb ON cb.brand_id=p.brand_id AND cb.pid=p.pb
+LEFT JOIN titles ta ON ta.pid=p.pa
+LEFT JOIN titles tb ON tb.pid=p.pb;
+"""
+
 TABLES = {
+  "product_basket_pairs": {
+    "ddl": PRODUCT_BASKET_DDL,
+    "cols": "(brand_id,product_a,product_b,title_a,title_b,co_count,conf_a_to_b,conf_b_to_a,lift,window_days)",
+    "select": PRODUCT_BASKET_SELECT,
+    "count_sql": "SELECT COUNT(*) FROM (" + PRODUCT_BASKET_SELECT.rstrip().rstrip(';') + ") q",
+  },
   "order_enriched": {
     "ddl": ORDER_ENRICHED_DDL,
     "cols": "(order_id,order_name,brand_id,phone,email,customer_name,financial_status,fulfillment_status,total_price,total_refunded,placed_at,cancelled_at,status_category,delivery_status,is_refusal,awb,courier_status)",
@@ -544,7 +598,7 @@ def run(table, apply):
 
 if __name__ == "__main__":
     # dependency order: order_outcome first (the others LEFT JOIN it)
-    ALL = ["order_outcome", "daily_ad_spend_ron", "product_refusal_rate", "customer_agg", "order_enriched"]
+    ALL = ["order_outcome", "daily_ad_spend_ron", "product_refusal_rate", "product_basket_pairs", "customer_agg", "order_enriched"]
     # named groups for cron cadences (see SKILL.md): cs = intraday CS-facing; ads = current-day spend
     GROUPS = {"cs": ["order_enriched", "customer_agg"], "ads": ["daily_ad_spend_ron"], "all": ALL}
     ap = argparse.ArgumentParser()
