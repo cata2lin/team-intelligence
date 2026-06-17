@@ -67,7 +67,7 @@ def clean_dsn(dsn):
 MAX_AGE = {
   "order_outcome": 24, "customer_agg": 24, "daily_ad_spend_ron": 24,
   "product_refusal_rate": 24, "order_enriched": 12, "product_basket_pairs": 48,
-  "product_ad_spend": 24,
+  "product_ad_spend": 24, "daily_brand_pnl": 24,
 }
 # Per-table date span (min,max) so readers know WHICH PERIOD the cache covers.
 # None = table has no time dimension (e.g. all-time per-SKU aggregate).
@@ -79,6 +79,7 @@ SPAN_SQL = {
   "product_refusal_rate": None,
   "product_basket_pairs": None,
   "product_ad_spend": "SELECT min(date), max(date) FROM cache.product_ad_spend",
+  "daily_brand_pnl": "SELECT min(date), max(date) FROM cache.daily_brand_pnl",
 }
 
 CACHE_META_DDL = """
@@ -635,9 +636,103 @@ def run_order_outcome(apply):
     conn.commit(); conn.close()
     print(f"[order_outcome] APPLIED — cache.order_outcome has {tot} rows ({ref} refusals).")
 
+# ---- daily_brand_pnl: mirror the VPS daily_perf.db (per-brand daily P&L) into the warehouse
+#      so multi-brand-pnl / agency-audit / daily-ops READ it from metrics instead of SSHing the SQLite.
+DAILY_BRAND_PNL_DDL = """
+CREATE SCHEMA IF NOT EXISTS cache;
+DROP TABLE IF EXISTS cache.daily_brand_pnl CASCADE;
+CREATE TABLE cache.daily_brand_pnl (
+  date         date,
+  brand_name   text,
+  brand_id     text,
+  orders       int,
+  revenue      numeric,
+  cogs         numeric,
+  transport    numeric,
+  fb_spend     numeric,
+  tk_spend     numeric,
+  google_spend numeric,
+  total_spend  numeric,
+  contribution_margin numeric,   -- daily_perf.profit = revenue - cogs - transport - total_spend
+  roas         numeric,
+  cpa          numeric,
+  aov          numeric,
+  computed_at  timestamptz DEFAULT now(),
+  PRIMARY KEY (date, brand_name)
+);
+CREATE INDEX IF NOT EXISTS daily_brand_pnl_brand_idx ON cache.daily_brand_pnl(brand_id, date);
+"""
+DAILY_PERF_REMOTE = r"""
+import sqlite3,sys
+p=sqlite3.connect('/root/Scripturi/data/daily_perf.db')
+def cl(x): return '' if x is None else str(x).replace('\t',' ').replace('\n',' ')
+q='''SELECT date,brand,orders,revenue,cogs,transport,fb_spend,tk_spend,google_spend,
+            total_spend,profit,roas,cpa,aov FROM daily_perf'''
+for r in p.execute(q): sys.stdout.write('\t'.join(cl(c) for c in r)+'\n')
+"""
+def _pull_daily_perf():
+    import os
+    lp = os.environ.get("DAILY_PERF_DB") or "/root/Scripturi/data/daily_perf.db"
+    if os.path.exists(lp):
+        import sqlite3
+        p=sqlite3.connect(lp)
+        q=("SELECT date,brand,orders,revenue,cogs,transport,fb_spend,tk_spend,google_spend,"
+           "total_spend,profit,roas,cpa,aov FROM daily_perf")
+        return [tuple(r) for r in p.execute(q)]
+    # SSH fallback (running off the VPS)
+    import paramiko
+    pwd=secret("PROFIT_SSH_PASS")
+    cli=paramiko.SSHClient(); cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    cli.connect(secret("PROFIT_SSH_HOST") or "84.46.242.181", username=secret("PROFIT_SSH_USER") or "root", password=pwd, timeout=30)
+    sftp=cli.open_sftp()
+    with sftp.open("/tmp/_dpp.py","w") as f: f.write(DAILY_PERF_REMOTE)
+    sftp.close()
+    _,out,_=cli.exec_command("/root/Scripturi/.venv/bin/python /tmp/_dpp.py", timeout=120)
+    data=out.read().decode("utf-8","replace"); cli.close()
+    rows=[]
+    for ln in data.splitlines():
+        if not ln: continue
+        rows.append(tuple((ln.split("\t")+[""]*14)[:14]))
+    return rows
+
+def run_daily_brand_pnl(apply):
+    import re
+    from psycopg2.extras import execute_values
+    norm=lambda s: re.sub(r"[^a-z0-9]","",(s or "").strip().lower())
+    src=_pull_daily_perf()
+    mconn=psycopg2.connect(clean_dsn(secret("DATABASE_URL_METRICS"))); mcur=mconn.cursor()
+    mcur.execute("SELECT id,name FROM brands WHERE name IS NOT NULL")
+    bname={norm(n):i for i,n in mcur.fetchall()}
+    def num(x):
+        try: return float(x) if x not in (None,"") else None
+        except: return None
+    rows=[]; unmatched=set()
+    for r in src:
+        d,brand,orders,rev,cogs,tr,fb,tk,gg,tot,profit,roas,cpa,aov=r
+        bn=norm(brand); bid=bname.get(bn) or (bname.get(bn[:-2]) if bn.endswith("ro") else None)
+        if bid is None: unmatched.add(brand)
+        rows.append((d or None, brand, bid, int(float(orders)) if orders not in (None,"") else None,
+                     num(rev),num(cogs),num(tr),num(fb),num(tk),num(gg),num(tot),num(profit),num(roas),num(cpa),num(aov)))
+    print(f"[daily_brand_pnl] {len(rows)} rows from daily_perf; brands unmatched to metrics: {sorted(unmatched) or 'none'}")
+    if not apply:
+        mconn.rollback(); mconn.close(); print("DRY-RUN — nothing written."); return
+    mcur.execute(DAILY_BRAND_PNL_DDL); mcur.execute("TRUNCATE cache.daily_brand_pnl")
+    execute_values(mcur,
+        "INSERT INTO cache.daily_brand_pnl (date,brand_name,brand_id,orders,revenue,cogs,transport,"
+        "fb_spend,tk_spend,google_spend,total_spend,contribution_margin,roas,cpa,aov) VALUES %s "
+        "ON CONFLICT (date,brand_name) DO NOTHING", rows, page_size=2000)
+    mcur.execute("SELECT COUNT(*) FROM cache.daily_brand_pnl"); n=mcur.fetchone()[0]
+    log_refresh(mcur,"daily_brand_pnl",n)
+    mconn.commit(); mconn.close()
+    print(f"[daily_brand_pnl] APPLIED — cache.daily_brand_pnl now has {n} rows.")
+
 def run(table, apply):
     if table == "order_outcome":
         return run_order_outcome(apply)
+    if table == "daily_brand_pnl":
+        return run_daily_brand_pnl(apply)
+    if table == "daily_ad_spend_ron":
+        return run_daily_ad_spend(apply)
     if table == "daily_ad_spend_ron":
         return run_daily_ad_spend(apply)
     if table == "product_ad_spend":
@@ -671,7 +766,7 @@ def run(table, apply):
 
 if __name__ == "__main__":
     # dependency order: order_outcome first (the others LEFT JOIN it)
-    ALL = ["order_outcome", "daily_ad_spend_ron", "product_ad_spend", "product_refusal_rate", "product_basket_pairs", "customer_agg", "order_enriched"]
+    ALL = ["order_outcome", "daily_brand_pnl", "daily_ad_spend_ron", "product_ad_spend", "product_refusal_rate", "product_basket_pairs", "customer_agg", "order_enriched"]
     # named groups for cron cadences (see SKILL.md): cs = intraday CS-facing; ads = current-day spend
     GROUPS = {"cs": ["order_enriched", "customer_agg"], "ads": ["daily_ad_spend_ron"], "all": ALL}
     ap = argparse.ArgumentParser()
