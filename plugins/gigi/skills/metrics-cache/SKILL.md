@@ -74,9 +74,14 @@ per-SKU mapping is a **TODO** (campaign/ad data isn't in the warehouse). Feeds p
 **Replaces the SSH dependency**: multi-brand-pnl / agency-audit / daily-ops can read this from metrics
 instead of SSHing the SQLite. 9,392 rows, 29 brands, current. (Read locally on the VPS cron host.)
 
+### `cache.ticket_order_link`  (in-DB; refreshed in `--group cs` intraday)
+Per Richpanel ticket with an order: `order_name, resolved_store, ticket_status, category, contact_*` +
+the linked order's delivery outcome (`status_category, is_refusal, delivery_status, awb`). Lets CS
+triage/profile/draft see "is this ticket about a refused/stuck order" instantly. ~30k links.
+Readers: cs-conversation-profile, cs-draft-reply, richpanel-auto-triage.
+
 ### Roadmap (from skills-audit.md), add as `--table`:
-`ticket_order_link` (mostly already in `richpanel_tickets` cols), `rma_signal_daily`,
-`dataforseo_cache` (the only pay-per-call source).
+`rma_signal_daily`, `dataforseo_cache` (the only pay-per-call source).
 
 ## Freshness — ALWAYS know what you're reading (it's a snapshot, not live)
 The cache is materialized on demand; between refreshes it goes stale. Every refresh is
