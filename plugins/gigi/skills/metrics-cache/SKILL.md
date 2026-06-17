@@ -62,6 +62,13 @@ Per `brand × product_a × product_b`: `co_count, conf_a_to_b, conf_b_to_a, lift
 "Frequently bought together" — powers PDP cross-sell, Klaviyo post-purchase flows, 2+1 pairings.
 Readers: gigi:cross-sell, PDP FBT blocks, klaviyo flows.
 
+### `cache.product_ad_spend`  (per-SKU ad spend "parity")
+`date × sku × platform → spend_ron` (+ brand_id, product_title, source). **Google** is native
+per-product (current, all Google-advertised SKUs) via `google_ads_product_insights_daily`
+(productItemId `shopify_zz_<prod>_<variant>` → `variants.sku`). **FB/TikTok** only from
+`AWBprint.sku_ad_spend_daily` (HA-* SKUs, built from campaign-name parsing) — general Meta/TikTok
+per-SKU mapping is a **TODO** (campaign/ad data isn't in the warehouse). Feeds product_economics/POAS.
+
 ### Roadmap (from skills-audit.md), add as `--table`:
 `ticket_order_link` (mostly already in `richpanel_tickets` cols),
 `rma_signal_daily`, `daily_brand_pnl` (replaces SSH `daily_perf.db`),
