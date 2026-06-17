@@ -20,9 +20,17 @@ lose money. Labels act on profit, not revenue. Next step (v2): write the label t
 `custom_label_0` (Merchant feed / Shopify metafield) so PMax can split asset groups by label.
 """
 import os, sys, argparse, collections, json
+from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
-import psycopg2, psycopg2.extras, requests
-API=os.environ.get("GADS_API_VERSION","v21")
+import psycopg2, psycopg2.extras
+# shared Google Ads MCC client (Ads creds+OAuth+search) — google-ads-mcc/gads.py.
+# cx below stays for the variants/margin query (metrics DB), which gads doesn't cover.
+_here = Path(__file__).resolve()
+for _up in range(1, 6):
+    _cand = _here.parents[_up] / "google-ads-mcc"
+    if (_cand / "gads.py").exists():
+        sys.path.insert(0, str(_cand)); break
+import gads
 _PG_OK={"host","port","dbname","user","password","sslmode","sslrootcert","sslcert","sslkey","connect_timeout","application_name","options","channel_binding"}
 def clean(d):
     p=urlsplit(d)
@@ -50,23 +58,18 @@ def main():
         except Exception: sys.exit("--bundle format: '2+1'")
     cx=psycopg2.connect(clean(os.environ["DATABASE_URL_METRICS"])); cx.set_session(readonly=True)
     c=cx.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    c.execute('SELECT "developerToken" dev,"loginCustomerId" mcc,"oauthClientId" cid,"oauthClientSecret" csec,"refreshToken" rt FROM google_ads_connections WHERE "isActive"=true'); r=c.fetchone()
-    tok=requests.post("https://oauth2.googleapis.com/token",data={"grant_type":"refresh_token","client_id":r["cid"],"client_secret":r["csec"],"refresh_token":r["rt"]},timeout=20).json()["access_token"]
-    H={"Authorization":f"Bearer {tok}","developer-token":r["dev"],"login-customer-id":"".join(ch for ch in str(r["mcc"]) if ch.isdigit()),"Content-Type":"application/json"}
+    conn=gads.get_connection()
 
     # 1) live product performance
     q=(f"SELECT segments.product_item_id, segments.product_title, metrics.cost_micros, metrics.conversions, "
        f"metrics.conversions_value, metrics.clicks, metrics.impressions FROM shopping_performance_view "
        f"WHERE segments.date DURING LAST_{a.days}_DAYS")
-    rr=requests.post(f"https://googleads.googleapis.com/{API}/customers/{a.customer}/googleAds:searchStream",headers=H,json={"query":q},timeout=120)
-    if rr.status_code!=200: sys.exit(f"Ads API {rr.status_code}: {rr.text[:300]}")
     agg={}
-    for b in rr.json():
-        for row in b.get("results",[]):
-            s=row["segments"]; m=row["metrics"]; pid=s.get("productItemId","")
-            d=agg.setdefault(pid,{"title":s.get("productTitle",""),"spend":0.0,"conv":0.0,"val":0.0,"clicks":0,"impr":0})
-            d["spend"]+=float(m.get("costMicros",0))/1e6; d["conv"]+=float(m.get("conversions",0))
-            d["val"]+=float(m.get("conversionsValue",0)); d["clicks"]+=int(m.get("clicks",0)); d["impr"]+=int(m.get("impressions",0))
+    for row in gads.search(conn, a.customer, q):
+        s=row["segments"]; m=row["metrics"]; pid=s.get("productItemId","")
+        d=agg.setdefault(pid,{"title":s.get("productTitle",""),"spend":0.0,"conv":0.0,"val":0.0,"clicks":0,"impr":0})
+        d["spend"]+=float(m.get("costMicros",0))/1e6; d["conv"]+=float(m.get("conversions",0))
+        d["val"]+=float(m.get("conversionsValue",0)); d["clicks"]+=int(m.get("clicks",0)); d["impr"]+=int(m.get("impressions",0))
 
     # 2) margin/stock from metrics, by brand
     vmap={}
