@@ -80,8 +80,12 @@ the linked order's delivery outcome (`status_category, is_refusal, delivery_stat
 triage/profile/draft see "is this ticket about a refused/stuck order" instantly. ~30k links.
 Readers: cs-conversation-profile, cs-draft-reply, richpanel-auto-triage.
 
-### Roadmap (from skills-audit.md), add as `--table`:
-`rma_signal_daily`, `dataforseo_cache` (the only pay-per-call source).
+### `cache.product_returns`  (cross-DB from Grandia RMA)
+Per `brand × sku`: `return_requests, return_qty, top_reason, last_return` (180d). Grandia-only (the
+only brand with structured RMA). Feeds product-quality-radar / returns reporting. 143 SKUs.
+
+### Roadmap (from skills-audit.md):
+`dataforseo_cache` (on-call TTL cache, belongs in gigi:analytics, not this batch builder).
 
 ## Freshness — ALWAYS know what you're reading (it's a snapshot, not live)
 The cache is materialized on demand; between refreshes it goes stale. Every refresh is

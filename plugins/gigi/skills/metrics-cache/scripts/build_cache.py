@@ -67,7 +67,7 @@ def clean_dsn(dsn):
 MAX_AGE = {
   "order_outcome": 24, "customer_agg": 24, "daily_ad_spend_ron": 24,
   "product_refusal_rate": 24, "order_enriched": 12, "product_basket_pairs": 48,
-  "product_ad_spend": 24, "daily_brand_pnl": 24, "ticket_order_link": 12,
+  "product_ad_spend": 24, "daily_brand_pnl": 24, "ticket_order_link": 12, "product_returns": 48,
 }
 # Per-table date span (min,max) so readers know WHICH PERIOD the cache covers.
 # None = table has no time dimension (e.g. all-time per-SKU aggregate).
@@ -81,6 +81,7 @@ SPAN_SQL = {
   "product_ad_spend": "SELECT min(date), max(date) FROM cache.product_ad_spend",
   "daily_brand_pnl": "SELECT min(date), max(date) FROM cache.daily_brand_pnl",
   "ticket_order_link": None,
+  "product_returns": "SELECT min(last_return), max(last_return) FROM cache.product_returns",
 }
 
 CACHE_META_DDL = """
@@ -771,6 +772,61 @@ def run_daily_brand_pnl(apply):
     mconn.commit(); mconn.close()
     print(f"[daily_brand_pnl] APPLIED — cache.daily_brand_pnl now has {n} rows.")
 
+# ---- product_returns: per-SKU returns + top reason from the Grandia RMA pipeline (cross-DB).
+#      Grandia is the only brand with structured RMA. Feeds product-quality-radar / returns reporting.
+PRODUCT_RETURNS_DDL = """
+CREATE SCHEMA IF NOT EXISTS cache;
+DROP TABLE IF EXISTS cache.product_returns CASCADE;
+CREATE TABLE cache.product_returns (
+  brand_id        text,
+  sku             text,
+  title           text,
+  return_requests int,
+  return_qty      int,
+  top_reason      text,
+  last_return     date,
+  window_days     int,
+  computed_at     timestamptz DEFAULT now(),
+  PRIMARY KEY (brand_id, sku)
+);
+CREATE INDEX IF NOT EXISTS product_returns_qty_idx ON cache.product_returns(return_qty DESC);
+"""
+PRODUCT_RETURNS_GRANDIA_SQL = """
+WITH ri AS (
+  SELECT i.sku, i.title, i.quantity, i."requestId", r.reason, r."createdAt"
+  FROM rma_request_items i JOIN rma_requests r ON r.id = i."requestId"
+  WHERE i.sku IS NOT NULL AND i.sku<>'' AND r."createdAt" >= now()-interval '180 days'
+)
+SELECT sku, MAX(title), COUNT(DISTINCT "requestId")::int, COALESCE(SUM(quantity),0)::int,
+       mode() WITHIN GROUP (ORDER BY reason), MAX("createdAt")::date
+FROM ri GROUP BY sku
+"""
+
+def run_product_returns(apply):
+    from psycopg2.extras import execute_values
+    gdsn = secret("DATABASE_URL_GRANDIA"); mdsn = secret("DATABASE_URL_METRICS")
+    if not gdsn:
+        print("[product_returns] WARN: no DATABASE_URL_GRANDIA — skipped"); return
+    mconn = psycopg2.connect(clean_dsn(mdsn)); mcur = mconn.cursor()
+    mcur.execute("SELECT id FROM brands WHERE slug='grandia' LIMIT 1")
+    r0 = mcur.fetchone(); bid = r0[0] if r0 else None
+    gconn = psycopg2.connect(clean_dsn(gdsn)); gcur = gconn.cursor()
+    gcur.execute(PRODUCT_RETURNS_GRANDIA_SQL)
+    rows = [(bid, sku, title, reqs, qty, reason, last, 180)
+            for sku, title, reqs, qty, reason, last in gcur.fetchall()]
+    gconn.close()
+    print(f"[product_returns] {len(rows)} Grandia SKUs with returns (180d)")
+    if not apply:
+        mconn.rollback(); mconn.close(); print("DRY-RUN — nothing written."); return
+    mcur.execute(PRODUCT_RETURNS_DDL); mcur.execute("TRUNCATE cache.product_returns")
+    execute_values(mcur,
+        "INSERT INTO cache.product_returns (brand_id,sku,title,return_requests,return_qty,top_reason,"
+        "last_return,window_days) VALUES %s", rows, page_size=2000)
+    mcur.execute("SELECT COUNT(*) FROM cache.product_returns"); n = mcur.fetchone()[0]
+    log_refresh(mcur, "product_returns", n)
+    mconn.commit(); mconn.close()
+    print(f"[product_returns] APPLIED — cache.product_returns now has {n} rows.")
+
 def run(table, apply):
     if table == "order_outcome":
         return run_order_outcome(apply)
@@ -778,10 +834,10 @@ def run(table, apply):
         return run_daily_brand_pnl(apply)
     if table == "daily_ad_spend_ron":
         return run_daily_ad_spend(apply)
-    if table == "daily_ad_spend_ron":
-        return run_daily_ad_spend(apply)
     if table == "product_ad_spend":
         return run_product_ad_spend(apply)
+    if table == "product_returns":
+        return run_product_returns(apply)
     spec = TABLES[table]
     dsn = secret("DATABASE_URL_METRICS")
     if not dsn:
@@ -811,7 +867,7 @@ def run(table, apply):
 
 if __name__ == "__main__":
     # dependency order: order_outcome first (the others LEFT JOIN it)
-    ALL = ["order_outcome", "daily_brand_pnl", "daily_ad_spend_ron", "product_ad_spend", "product_refusal_rate", "product_basket_pairs", "customer_agg", "order_enriched", "ticket_order_link"]
+    ALL = ["order_outcome", "daily_brand_pnl", "daily_ad_spend_ron", "product_ad_spend", "product_refusal_rate", "product_basket_pairs", "customer_agg", "order_enriched", "ticket_order_link", "product_returns"]
     # named groups for cron cadences (see SKILL.md): cs = intraday CS-facing; ads = current-day spend
     GROUPS = {"cs": ["order_enriched", "customer_agg", "ticket_order_link"], "ads": ["daily_ad_spend_ron"], "all": ALL}
     ap = argparse.ArgumentParser()
