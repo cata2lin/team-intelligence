@@ -1,7 +1,7 @@
 ---
 name: apps-script-deploy
 description: Create, read and WRITE Google Apps Script (.gs) code for the team programmatically — create a new script project (standalone or bound to a Sheet/Doc), and deploy/patch an existing project's source via the Apps Script API, using the shared looker-sheets service account + domain-wide delegation (impersonating the owner). No more manual copy-paste into the Apps Script editor. Safe by design — push/create are DRY-RUN by default, push always backs up the current code first, and read-back-verifies after writing. Use for "push apps script", "deploy gs code", "create a new apps script", "creaza un google apps script nou", "edit/update Google Apps Script programmatically", "patch the daily report script", "pune codul in apps script", "actualizeaza scriptul Raport Zilnic", "modifica functia adaugaRandZilnic2", "Apps Script API", "container-bound / standalone script source".
-argument-hint: "list | get --script-id <id> | push --script-id <id> --as owner@domain --file Code=new.gs [--apply] | create --title T --as owner@domain [--parent <sheetId>] --file Code=code.gs [--apply]"
+argument-hint: "list | get --script-id <id> | push --script-id <id> --as owner@domain --file Code=new.gs [--apply] | create --title T --as owner@domain [--parent <sheetId>] --file Code=code.gs [--apply] | trash --script-id <id> --as owner@domain [--apply]"
 ---
 
 # apps-script-deploy
@@ -38,6 +38,10 @@ uv run scripts/gas_deploy.py push --script-id <ID> --as gheorghe.beschea@overhea
 uv run scripts/gas_deploy.py create --title "My Script" --as gheorghe.beschea@overheat.agency --file Code=code.gs           # DRY-RUN
 uv run scripts/gas_deploy.py create --title "My Script" --as gheorghe.beschea@overheat.agency --file Code=code.gs --apply   # creates + prints scriptId + editor URL
 uv run scripts/gas_deploy.py create --title "Bound to sheet" --as <owner> --parent <SPREADSHEET_ID> --file Code=code.gs --apply
+
+# 5. trash a project (Drive trash — reversible ~30 days; DRY-RUN default, refuses non-script files)
+uv run scripts/gas_deploy.py trash --script-id <ID> --as gheorghe.beschea@overheat.agency           # DRY-RUN
+uv run scripts/gas_deploy.py trash --script-id <ID> --as gheorghe.beschea@overheat.agency --apply
 ```
 `--file NAME=path` → `NAME` is the file name **inside the project, no extension** (e.g. `Code`, `appsscript`).
 Repeat `--file` for multiple files. Pass `appsscript=manifest.json` only if you intend to change the manifest.
@@ -70,9 +74,10 @@ Repeat `--file` for multiple files. Pass `appsscript=manifest.json` only if you 
 - **`create`** makes a standalone project, or a **bound** one with `--parent <driveFileId>` (the Sheet/
   Doc/Form id) — the impersonated owner must be able to edit that container. New projects start with a
   default `Code` + `appsscript`; the tool overwrites `Code` (and adds any extra `--file`).
-- **No programmatic delete:** the Apps Script API can't delete a project; deletion = trashing the Drive
-  file, which needs DWD also authorized for `https://www.googleapis.com/auth/drive` (currently only
-  `script.projects` is). So clean up throwaway projects from Drive by hand, or add the drive scope to DWD.
+- **Delete = `trash`:** the Apps Script API can't delete a project, so `trash` moves the Drive file to
+  trash (reversible ~30 days). It needs DWD also authorized for `https://www.googleapis.com/auth/drive`
+  (already added alongside `script.projects`). `trash` is DRY-RUN by default and refuses anything that
+  isn't an `application/vnd.google-apps.script` file (won't touch a Sheet/Doc by mistake).
 - **Running a function** via the API (`scripts.run`) needs the script deployed as an API executable
   with a matching GCP project + scopes; this skill covers *code deploy*, not execution — run from the
   editor / a trigger after pushing.

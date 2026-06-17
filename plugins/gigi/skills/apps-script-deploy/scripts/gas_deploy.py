@@ -34,6 +34,7 @@ import argparse, json, os, sys, datetime
 SCOPES_RO = ["https://www.googleapis.com/auth/drive.readonly",
              "https://www.googleapis.com/auth/script.projects"]
 SCOPE_RW = ["https://www.googleapis.com/auth/script.projects"]
+SCOPE_DRIVE = ["https://www.googleapis.com/auth/drive"]
 
 def _creds(scopes, subject=None):
     from google.oauth2 import service_account
@@ -160,6 +161,21 @@ def cmd_create(a):
         print(f"  continut initial scris: {[f['name'] for f in out]}")
     print(f"  editor: https://script.google.com/d/{sid}/edit")
 
+def cmd_trash(a):
+    if not a.as_user:
+        sys.exit("trash needs --as <owner-email> (Drive trash via impersonation).")
+    from googleapiclient.discovery import build
+    drive = build("drive", "v3", credentials=_creds(SCOPE_DRIVE, a.as_user))
+    meta = drive.files().get(fileId=a.script_id, fields="id,name,mimeType,trashed").execute()
+    print(f"mod: {'APLIC (--apply)' if a.apply else 'DRY-RUN (nimic sters)'}")
+    print(f"  tinta: {meta['name']!r}  ({meta['mimeType']}, trashed={meta.get('trashed')})")
+    if meta["mimeType"] != "application/vnd.google-apps.script":
+        sys.exit("  ABORT: nu e un proiect Apps Script — refuz sa-l ating.")
+    if not a.apply:
+        print("\n  DRY-RUN. Adauga --apply ca sa-l muti la cos (reversibil din Drive)."); return
+    drive.files().update(fileId=a.script_id, body={"trashed": True}).execute()
+    print(f"\n  TRASHED -> {a.script_id} (recuperabil din Drive Trash ~30 zile)")
+
 def main():
     ap = argparse.ArgumentParser(description="Deploy/patch Google Apps Script code (dry-run default).")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -178,8 +194,12 @@ def main():
     g.add_argument("--parent", default=None, help="Drive file id of a Sheet/Doc/Form -> bound script (else standalone)")
     g.add_argument("--file", action="append", default=[], help="NAME=path initial content (repeatable)")
     g.add_argument("--apply", action="store_true")
+    g = sub.add_parser("trash")
+    g.add_argument("--script-id", required=True, help="scriptId / Drive file id of the project to trash")
+    g.add_argument("--as", dest="as_user", required=True, help="owner email to impersonate (needs DWD drive scope)")
+    g.add_argument("--apply", action="store_true")
     a = ap.parse_args()
-    {"list": cmd_list, "get": cmd_get, "push": cmd_push, "create": cmd_create}[a.cmd](a)
+    {"list": cmd_list, "get": cmd_get, "push": cmd_push, "create": cmd_create, "trash": cmd_trash}[a.cmd](a)
 
 if __name__ == "__main__":
     main()
