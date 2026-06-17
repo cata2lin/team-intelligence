@@ -528,9 +528,11 @@ CREATE TABLE IF NOT EXISTS cache.order_outcome (
   courier_status      text,
   payment_status      text,
   fulfillment_status  text,
+  revenue             numeric,   -- order revenue from profit_orders (for refused-revenue metrics)
   computed_at         timestamptz DEFAULT now(),
   PRIMARY KEY (shop, order_name)
 );
+ALTER TABLE cache.order_outcome ADD COLUMN IF NOT EXISTS revenue numeric;
 CREATE INDEX IF NOT EXISTS order_outcome_name_idx ON cache.order_outcome(order_name);
 CREATE INDEX IF NOT EXISTS order_outcome_refusal_idx ON cache.order_outcome(is_refusal) WHERE is_refusal;
 """
@@ -544,7 +546,7 @@ def cl(x):
     return str(x).replace('\t',' ').replace('\r',' ').replace('\n',' ')
 q='''SELECT shop, prefix, order_name, created_at, status_category,
             shopify_delivery_status, awb, courier_key, courier_status,
-            payment_status, fulfillment_status
+            payment_status, fulfillment_status, revenue
      FROM profit_orders WHERE order_name IS NOT NULL AND order_name<>'' '''
 import sys
 for r in p.execute(q):
@@ -583,7 +585,7 @@ def _local_pull_tsv(path):
     def cl(x):
         return "" if x is None else str(x).replace("\t", " ").replace("\r", " ").replace("\n", " ")
     q = ("SELECT shop, prefix, order_name, created_at, status_category, shopify_delivery_status, "
-         "awb, courier_key, courier_status, payment_status, fulfillment_status "
+         "awb, courier_key, courier_status, payment_status, fulfillment_status, revenue "
          "FROM profit_orders WHERE order_name IS NOT NULL AND order_name<>''")
     return "\n".join("\t".join(cl(c) for c in r) for r in p.execute(q))
 
@@ -609,24 +611,24 @@ def run_order_outcome(apply):
     import io
     buf = io.StringIO()
     for r in rows:
-        r = (r + [""] * 11)[:11]
+        r = (r + [""] * 12)[:12]
         buf.write("\t".join(r) + "\n")
     buf.seek(0)
     cur.copy_expert(
         "COPY _oo_stage (shop,prefix,order_name,created_at,status_category,delivery_status,"
-        "awb,courier_key,courier_status,payment_status,fulfillment_status) "
+        "awb,courier_key,courier_status,payment_status,fulfillment_status,revenue) "
         "FROM STDIN WITH (FORMAT text, NULL '')", buf)
     cur.execute("TRUNCATE cache.order_outcome")
     cur.execute("""
       INSERT INTO cache.order_outcome
         (shop,prefix,order_name,created_at,status_category,delivery_status,is_refusal,
-         awb,courier_key,courier_status,payment_status,fulfillment_status)
+         awb,courier_key,courier_status,payment_status,fulfillment_status,revenue)
       SELECT DISTINCT ON (shop,order_name)
         shop,prefix,order_name,
         created_at,
         status_category,delivery_status,
         (status_category='Refuzata'),
-        awb,courier_key,courier_status,payment_status,fulfillment_status
+        awb,courier_key,courier_status,payment_status,fulfillment_status,revenue
       FROM _oo_stage
       ORDER BY shop, order_name, created_at DESC NULLS LAST
     """)
