@@ -34,7 +34,8 @@ CATEGORIES = {
 
 # Shared libs to REUSE (don't duplicate) — see shared/skills-audit.md
 SHARED = """Reuse, do NOT re-implement (core/scripts or the owning skill):
-  pg_dsn / clean_dsn  (the Prisma '?schema=' DSN cleaner — duplicated in ~40 files)
+  core/scripts/arona_pg.py  ← secret() (env-first+KB) + clean_dsn() + connect(readonly) + query()
+                              THE shared Postgres/secret helper. Import it; never re-inline _clean_dsn.
   shopify_lib.Store   (shopify-seo: ARONA app token + gql/gql_all + assets)
   gads_client         (google-ads-mcc/gads.py: MCC OAuth + GAQL search/mutate)
   fx_ron              (metrics.fx_rates already exists — read it, don't re-derive FX)
