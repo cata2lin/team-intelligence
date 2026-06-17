@@ -109,6 +109,7 @@ def main():
     print("=" * 60)
     print("  BRIEF OPERAȚIUNI ARONA — %s" % d["yd"])
     print("=" * 60)
+    print("(contribuție = ESTIMAT daily_perf, venit brut cu TVA; profit REAL livrat-fara-TVA: gigi:multi-brand-pnl)")
     print("IERI (%s):" % d["yd"])
     print("  venit %s | reclame %s | contribuție %s | MER %.1f | comenzi %d" % (
         f(y[0]), f(y[1]), f(contrib(y)), mer(y), int(y[4])))

@@ -69,10 +69,20 @@ per-product (current, all Google-advertised SKUs) via `google_ads_product_insigh
 `AWBprint.sku_ad_spend_daily` (HA-* SKUs, built from campaign-name parsing) — general Meta/TikTok
 per-SKU mapping is a **TODO** (campaign/ad data isn't in the warehouse). Feeds product_economics/POAS.
 
-### `cache.daily_brand_pnl`  (mirror of the VPS `daily_perf.db`, per-brand daily P&L)
+### `cache.daily_brand_pnl`  (mirror of the VPS `daily_perf.db`, per-brand daily P&L — ESTIMATE)
 `date × brand → orders, revenue, cogs, transport, fb/tk/google/total spend, contribution_margin, roas, cpa, aov`.
-**Replaces the SSH dependency**: multi-brand-pnl / agency-audit / daily-ops can read this from metrics
-instead of SSHing the SQLite. 9,392 rows, 29 brands, current. (Read locally on the VPS cron host.)
+Daily granularity + FB/Google/TikTok split. ⚠ **GROSS revenue (with VAT) on ALL orders** — this
+OVERSTATES profit (does not account for COD non-delivery or VAT). Good for daily trend / platform
+split, NOT for real profit. 9,392 rows, 29 brands. (Read locally on the VPS cron host.)
+
+### `cache.brand_pnl_monthly`  (CANONICAL real P&L — from the Scripturi profitability engine)
+`month × brand → delivered_orders, sent_parcels, revenue_exvat, cogs_exvat, transport_exvat,
+marketing, net_profit, margin_pct`. Built by running the real engine `api.profitability.get_report`
+on the VPS (revenue = **DELIVERED orders only, EX-VAT**, minus COGS + transport + marketing).
+This is the **REAL net profit** — use it for "profit per brand", "% of profit", P&L. MONTHLY
+granularity (delivered status settles over weeks; current month is incomplete). 118 rows (~20
+brands × 6 months). Refresh key `brand_pnl_real`. Reader: **multi-brand-pnl** (default).
+Validated to the cent vs the Scripturi app (Apr net 1,161,124 / May 1,392,955).
 
 ### `cache.ticket_order_link`  (in-DB; refreshed in `--group cs` intraday)
 Per Richpanel ticket with an order: `order_name, resolved_store, ticket_status, category, contact_*` +

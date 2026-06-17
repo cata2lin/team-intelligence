@@ -8,18 +8,22 @@ multi_brand_pnl.py — P&L live "all-in" pentru ORICARE sau TOATE cele 16+ brand
 Magdeal, Belasil, Gento, Carpetto, Covoria, Nocturna, Rossi Nails, Apreciat...) pentru un
 interval de date.
 
-Sursa = cache.daily_brand_pnl din warehouse-ul metrics (oglinda daily_perf.db, reimprospatata
-de gigi:metrics-cache pe cron). Inainte foloseam SSH la daily_perf.db direct; acum citim din
-cache (aceleasi cifre, fara dependenta de SSH). Pentru fiecare brand agreghează: venit,
-cheltuiala FB/Google/TikTok, COGS, transport, profit de contributie, MER, ROAS, CPA, AOV.
+SURSA DEFAULT = cache.brand_pnl_monthly = profitul REAL din engine-ul de profitabilitate
+Scripturi (api/profitability.py): venit = comenzi LIVRATE, FARA TVA, minus COGS + transport
+(colete plecate x cost) + marketing. Granularitate LUNARA. Reimprospatat de gigi:metrics-cache
+(--table brand_pnl_real) pe cron, ruland engine-ul real pe VPS.
 
-Citeste DOAR (SELECT). Verifica prospetimea cu: gigi:metrics-cache --status (cache.freshness).
+--estimat / --today => sursa VECHE cache.daily_brand_pnl (oglinda daily_perf): venit BRUT cu TVA,
+TOATE comenzile, split FB/Google/TikTok, zilnic. SUPRAESTIMEAZA profitul (nu tine cont de livrare
+/ TVA) — buna doar pt tendinta zilnica si defalcarea pe platforme, NU pt profitul real.
+
+Citeste DOAR (SELECT). Verifica prospetimea cu: gigi:metrics-cache --status (brand_pnl_real).
 
 Folosire:
-  uv run multi_brand_pnl.py --today
-  uv run multi_brand_pnl.py --brands all --from 2026-06-01 --to 2026-06-11
-  uv run multi_brand_pnl.py --brands esteban,nubra,gt --from 2026-06-01 --to 2026-06-11
-  uv run multi_brand_pnl.py --brands all --from 2026-06-01 --to 2026-06-11 --consolidated
+  uv run multi_brand_pnl.py --brands all --from 2026-05-01 --to 2026-05-31 --consolidated  # profit REAL
+  uv run multi_brand_pnl.py --brands esteban,nubra,gt --from 2026-04-01 --to 2026-05-31
+  uv run multi_brand_pnl.py --today                 # snapshot zilnic (estimat daily_perf)
+  uv run multi_brand_pnl.py --estimat --from 2026-06-01 --to 2026-06-11   # vedere veche zilnica
 """
 import sys
 import os
@@ -252,40 +256,179 @@ def print_today(rows_y, rows_m, yday, first_m, today):
             fmt(tm["rev"]), fmt(tm["spend"]), fmt(tm["contrib"]), f1(tm["mer"])))
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# SURSA CANONICA (default): cache.brand_pnl_monthly — profitul REAL din engine-ul
+# de profitabilitate Scripturi (venit = comenzi LIVRATE, FARA TVA, minus COGS +
+# transport + marketing). Granularitate LUNARA. daily_brand_pnl (--estimat) e
+# oglinda daily_perf = venit brut, toate comenzile, cu TVA → supraestimeaza profitul.
+# ═══════════════════════════════════════════════════════════════════════
+def months_in_range(dfrom, dto):
+    """Lista lunilor YYYY-MM acoperite de interval (inclusiv capetele)."""
+    y, m = int(dfrom[:4]), int(dfrom[5:7])
+    ey, em = int(dto[:4]), int(dto[5:7])
+    out = []
+    while (y, m) <= (ey, em):
+        out.append("%04d-%02d" % (y, m))
+        m += 1
+        if m == 13:
+            m = 1; y += 1
+    return out
+
+
+def run_canonical(months, mode, frags):
+    where = ["month = ANY(%s)"]
+    params = [months]
+    if mode == "list" and frags:
+        where.append("(" + " OR ".join(["LOWER(brand_name) LIKE %s"] * len(frags)) + ")")
+        params += ["%" + f + "%" for f in frags]
+    sql = (
+        "SELECT brand_name AS brand, SUM(delivered_orders)::int o, "
+        "SUM(revenue_exvat)::float8 rev, SUM(cogs_exvat)::float8 cogs, "
+        "SUM(transport_exvat)::float8 tr, SUM(marketing)::float8 sp, "
+        "SUM(net_profit)::float8 profit, COUNT(DISTINCT month)::int months, "
+        "SUM(sent_parcels)::int sent "
+        "FROM cache.brand_pnl_monthly WHERE " + " AND ".join(where) + " "
+        "GROUP BY brand_name HAVING SUM(revenue_exvat) > 0 OR SUM(marketing) > 0 "
+        "ORDER BY brand_name")
+    try:
+        conn = arona_pg.connect("DATABASE_URL_METRICS")
+    except Exception as e:
+        sys.exit("EROARE conexiune metrics: " + str(e)[:200])
+    cur = conn.cursor()
+    cur.execute(sql, params)
+    cols = [d[0] for d in cur.description]
+    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def enrich_canonical(r):
+    rev = r.get("rev") or 0.0
+    sp = r.get("sp") or 0.0
+    o = r.get("o") or 0
+    net = r.get("profit") or 0.0
+    return {
+        "brand": r["brand"], "months": r.get("months") or 0, "orders": o,
+        "rev": rev, "spend": sp, "cogs": r.get("cogs") or 0.0, "transport": r.get("tr") or 0.0,
+        "contrib": net, "margin": (net / rev * 100) if rev else 0.0,
+        "mer": (rev / sp) if sp else 0.0, "roas": (rev / sp) if sp else 0.0,
+        "cpa": (sp / o) if o else 0.0, "aov": (rev / o) if o else 0.0,
+        "sent": r.get("sent") or 0,
+    }
+
+
+def consolidate_canonical(rows):
+    agg = {"rev": 0.0, "spend": 0.0, "cogs": 0.0, "transport": 0.0, "orders": 0}
+    for r in rows:
+        for k in agg:
+            agg[k] += r[k]
+    net = agg["rev"] - agg["cogs"] - agg["transport"] - agg["spend"]
+    return {
+        "orders": agg["orders"], "rev": agg["rev"], "spend": agg["spend"], "cogs": agg["cogs"],
+        "transport": agg["transport"], "contrib": net,
+        "margin": (net / agg["rev"] * 100) if agg["rev"] else 0.0,
+        "mer": (agg["rev"] / agg["spend"]) if agg["spend"] else 0.0,
+        "cpa": (agg["spend"] / agg["orders"]) if agg["orders"] else 0.0,
+        "aov": (agg["rev"] / agg["orders"]) if agg["orders"] else 0.0,
+    }
+
+
+def print_table_canonical(rows, title):
+    rows = sorted(rows, key=lambda r: r["contrib"], reverse=True)
+    print("=== %s ===" % title)
+    print("(profit REAL: venit livrat FARA TVA - COGS - transport - marketing)")
+    hdr = "%-16s%7s%11s%10s%9s%9s%12s%7s%6s" % (
+        "brand", "livr", "venit(fT)", "mkt", "COGS", "transp", "PROFIT NET", "marja%", "mer")
+    print(hdr)
+    print("-" * len(hdr))
+    for r in rows:
+        print("%-16s%7d%11s%10s%9s%9s%12s%7s%6s" % (
+            r["brand"][:16], r["orders"], fmt(r["rev"]), fmt(r["spend"]), fmt(r["cogs"]),
+            fmt(r["transport"]), fmt(r["contrib"]), f1(r["margin"]), f1(r["mer"])))
+    t = consolidate_canonical(rows)
+    print("-" * len(hdr))
+    print("%-16s%7d%11s%10s%9s%9s%12s%7s%6s" % (
+        "TOTAL", t["orders"], fmt(t["rev"]), fmt(t["spend"]), fmt(t["cogs"]),
+        fmt(t["transport"]), fmt(t["contrib"]), f1(t["margin"]), f1(t["mer"])))
+    prof = sum(1 for r in rows if r["contrib"] > 0)
+    print("\n%d branduri | %d profitabile | %d in pierdere" % (len(rows), prof, len(rows) - prof))
+
+
+def print_consolidated_canonical(rows, months):
+    t = consolidate_canonical(rows)
+    print("=== P&L CONSOLIDAT ARONA (REAL)  luni: %s ===" % ", ".join(months))
+    print("  (venit = comenzi LIVRATE, fara TVA; profit net all-in)")
+    print("  Branduri:                %12d" % len(rows))
+    print("  Comenzi livrate:         %12s" % fmt(t["orders"]))
+    print("  Venit livrat (fara TVA): %12s RON" % fmt(t["rev"]))
+    print("  Marketing:               %12s" % fmt(t["spend"]))
+    print("  COGS:                    %12s" % fmt(t["cogs"]))
+    print("  Transport:               %12s" % fmt(t["transport"]))
+    print("  =")
+    print("  PROFIT NET:              %12s RON" % fmt(t["contrib"]))
+    print("  Marja neta:              %12s %%" % f1(t["margin"]))
+    print("  MER (venit/mkt):         %12s" % f1(t["mer"]))
+    print("  CPA:                     %12s" % fmt(t["cpa"]))
+    print("  AOV:                     %12s" % fmt(t["aov"]))
+
+
 def main():
-    ap = argparse.ArgumentParser(description="P&L all-in pentru brandurile Arona (daily_perf.db)")
+    ap = argparse.ArgumentParser(description="P&L pentru brandurile Arona — DEFAULT: profit REAL (engine profitabilitate, lunar)")
     ap.add_argument("--brands", default="all", help="all sau csv: esteban,gt,nubra,belasil...")
-    ap.add_argument("--from", dest="dfrom", help="data start YYYY-MM-DD")
-    ap.add_argument("--to", dest="dto", help="data final YYYY-MM-DD")
+    ap.add_argument("--from", dest="dfrom", help="data start YYYY-MM-DD (rotunjit la luni)")
+    ap.add_argument("--to", dest="dto", help="data final YYYY-MM-DD (rotunjit la luni)")
     ap.add_argument("--consolidated", action="store_true", help="un singur P&L pe toata compania")
-    ap.add_argument("--today", action="store_true", help="snapshot: ieri + MTD, o linie/brand")
+    ap.add_argument("--today", action="store_true", help="snapshot zilnic ieri + MTD (sursa estimat daily_perf)")
+    ap.add_argument("--estimat", action="store_true",
+                    help="sursa VECHE daily_perf (zilnic, BRUT cu TVA, toate comenzile, split FB/Google/TikTok) "
+                         "in loc de profitul REAL lunar. Supraestimeaza — foloseste pt tendinta zilnica, nu pt profit.")
     a = ap.parse_args()
 
     today = datetime.date.today()
 
+    # ---- sursa estimat (daily_perf): doar la cerere (--estimat / --today) ----
     if a.today:
         yday = today - datetime.timedelta(days=1)
         first_m = today.replace(day=1)
         rows_y = [enrich(r) for r in run_remote(yday.isoformat(), yday.isoformat(), "all", None)]
         rows_m = [enrich(r) for r in run_remote(first_m.isoformat(), yday.isoformat(), "all", None)]
+        print("(SURSA ESTIMAT daily_perf — brut cu TVA, toate comenzile; nu e profitul real livrat)")
         print_today(rows_y, rows_m, yday.isoformat(), first_m.isoformat(), today.isoformat())
         return
 
-    # interval implicit = luna curenta pana azi
+    if a.estimat:
+        dfrom = a.dfrom or today.replace(day=1).isoformat()
+        dto = a.dto or today.isoformat()
+        mode, frags = resolve_brands(a.brands)
+        rows = [enrich(r) for r in run_remote(dfrom, dto, mode, frags)]
+        if not rows:
+            print("Nicio activitate (%s -> %s, branduri=%s)." % (dfrom, dto, a.brands)); return
+        print("(SURSA ESTIMAT daily_perf — brut cu TVA, toate comenzile; pt profit REAL ruleaza fara --estimat)")
+        if a.consolidated:
+            print_consolidated(rows, dfrom, dto)
+        else:
+            scope = "TOATE brandurile" if mode == "all" else ", ".join(frags)
+            print_table(rows, "P&L Arona (estimat)  %s -> %s  (%s)" % (dfrom, dto, scope))
+        return
+
+    # ---- DEFAULT: profit REAL canonic (cache.brand_pnl_monthly), granularitate lunara ----
     dfrom = a.dfrom or today.replace(day=1).isoformat()
     dto = a.dto or today.isoformat()
+    months = months_in_range(dfrom, dto)
     mode, frags = resolve_brands(a.brands)
-    raw = run_remote(dfrom, dto, mode, frags)
-    rows = [enrich(r) for r in raw]
+    rows = [enrich_canonical(r) for r in run_canonical(months, mode, frags)]
     if not rows:
-        print("Nicio activitate pentru selectia data (%s -> %s, branduri=%s)." % (dfrom, dto, a.brands))
+        print("Nicio activitate pentru selectie (luni=%s, branduri=%s). "
+              "Cache gol? Verifica: gigi:metrics-cache --status (brand_pnl_real)." % (", ".join(months), a.brands))
         return
 
     if a.consolidated:
-        print_consolidated(rows, dfrom, dto)
+        print_consolidated_canonical(rows, months)
     else:
         scope = "TOATE brandurile" if mode == "all" else ", ".join(frags)
-        print_table(rows, "P&L Arona  %s -> %s  (%s)" % (dfrom, dto, scope))
+        print_table_canonical(rows, "P&L REAL Arona  luni: %s  (%s)" % (", ".join(months), scope))
+    print("\n(profit REAL livrat-fara-TVA, granularitate LUNARA. Luna curenta = incompleta "
+          "[comenzi inca nelivrate]. Pt tendinta zilnica/split FB-Google-TikTok: --estimat.)")
 
 
 if __name__ == "__main__":

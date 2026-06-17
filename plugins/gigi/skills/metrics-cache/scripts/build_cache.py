@@ -68,6 +68,7 @@ MAX_AGE = {
   "order_outcome": 24, "customer_agg": 24, "daily_ad_spend_ron": 24,
   "product_refusal_rate": 24, "order_enriched": 12, "product_basket_pairs": 48,
   "product_ad_spend": 24, "daily_brand_pnl": 24, "ticket_order_link": 12, "product_returns": 48,
+  "brand_pnl_real": 48,
 }
 # Per-table date span (min,max) so readers know WHICH PERIOD the cache covers.
 # None = table has no time dimension (e.g. all-time per-SKU aggregate).
@@ -82,6 +83,7 @@ SPAN_SQL = {
   "daily_brand_pnl": "SELECT min(date), max(date) FROM cache.daily_brand_pnl",
   "ticket_order_link": None,
   "product_returns": "SELECT min(last_return), max(last_return) FROM cache.product_returns",
+  "brand_pnl_real": "SELECT to_date(min(month),'YYYY-MM'), to_date(max(month),'YYYY-MM') FROM cache.brand_pnl_monthly",
 }
 
 CACHE_META_DDL = """
@@ -827,7 +829,150 @@ def run_product_returns(apply):
     mconn.commit(); mconn.close()
     print(f"[product_returns] APPLIED — cache.product_returns now has {n} rows.")
 
+# ---- brand_pnl_real: CANONICAL monthly P&L per brand from the Scripturi profitability engine
+#      (api.profitability.get_report). Revenue = DELIVERED orders only, EX-VAT, minus COGS,
+#      transport (parcels sent x cost, ex-VAT) and marketing. This is the REAL net profit —
+#      unlike daily_brand_pnl (mirror of daily_perf = gross revenue, ALL orders, inflated).
+#      Runs the engine on the VPS (where profit_orders + the app live); skipped gracefully off-VPS.
+# prefix -> brand name (canonical, from Scripturi core/brands.py; small + stable, inlined to avoid
+# coupling build_cache to the private app package).
+PREFIX_TO_BRAND = {
+  "APR":"Apreciat","BELA":"Belasil","BONBG":"Bonhaus BG","CZ":"Bonhaus CZ","PL":"Bonhaus PL",
+  "BON":"Bonhaus RO","CARP":"Carpetto","PAT":"Ce Pat Ai","COV":"Covoria","EST":"Esteban",
+  "GEN":"Gento","GT":"George Talent","MAG":"Magdeal","NOC":"Nocturna","BG":"Nocturna BG",
+  "LUX":"Nocturna Lux","NUB":"Nubra","OFER":"Ofertele Zilei","RED":"Reduceri bune",
+  "ROSSI":"Rossi Nails","GRAN":"Grandia","GRAND":"Grandia",
+}
+BRAND_PNL_MONTHLY_DDL = """
+CREATE SCHEMA IF NOT EXISTS cache;
+DROP TABLE IF EXISTS cache.brand_pnl_monthly CASCADE;
+CREATE TABLE cache.brand_pnl_monthly (
+  month            text,   -- YYYY-MM
+  prefix           text,
+  brand_name       text,
+  brand_id         text,
+  delivered_orders int,
+  sent_parcels     int,
+  revenue_exvat    numeric,  -- delivered only, ex-VAT (incasari_fara_tva)
+  cogs_exvat       numeric,
+  transport_exvat  numeric,
+  marketing        numeric,
+  net_profit       numeric,  -- revenue_exvat - cogs_exvat - transport_exvat - marketing
+  margin_pct       numeric,
+  computed_at      timestamptz DEFAULT now(),
+  PRIMARY KEY (month, prefix)
+);
+CREATE INDEX IF NOT EXISTS brand_pnl_monthly_brand_idx ON cache.brand_pnl_monthly(brand_id, month);
+"""
+# Remote snippet (runs on the VPS under the Scripturi venv): emit canonical per-(month,prefix) P&L TSV.
+BRAND_PNL_REMOTE = r'''
+import sys, os, asyncio
+sys.path.insert(0, "/root/Scripturi"); os.chdir("/root/Scripturi")
+from datetime import date
+from api.profitability import get_report
+def last_months(n):
+    y, m = date.today().year, date.today().month; out = []
+    for _ in range(n):
+        out.append("%04d-%02d" % (y, m)); m -= 1
+        if m == 0: m = 12; y -= 1
+    return out
+async def main():
+    for mo in last_months(6):
+        try:
+            r = await get_report(month=mo, from_date=None, to_date=None)
+        except Exception as e:
+            sys.stderr.write("%s ERR %s\n" % (mo, str(e)[:150])); continue
+        deliv = {d["prefix"]: d for d in (r.get("deliverability") or [])}
+        for p in (r.get("profitability") or []):
+            pfx = p.get("prefix", ""); d = deliv.get(pfx, {})
+            inc = p.get("incasari_fara_tva") or 0; cg = p.get("cogs_fara_tva") or 0
+            tr = p.get("transport_fara_tva") or 0; mk = p.get("marketing_fara_tva") or 0
+            sys.stdout.write("\t".join([mo, pfx, str(d.get("livrata") or 0), str(p.get("plecate") or 0),
+                "%.2f" % inc, "%.2f" % cg, "%.2f" % tr, "%.2f" % mk, "%.2f" % (inc - cg - tr - mk)]) + "\n")
+asyncio.run(main())
+'''
+def _pull_brand_pnl():
+    import os, subprocess
+    base = os.environ.get("SCRIPTURI_DIR") or "/root/Scripturi"
+    pybin = os.path.join(base, ".venv", "bin", "python")
+    if os.path.exists(os.path.join(base, "api", "profitability.py")) and os.path.exists(pybin):
+        # on the VPS: run the engine via its own venv (isolated subprocess)
+        with open("/tmp/_bpnl.py", "w") as f:
+            f.write(BRAND_PNL_REMOTE)
+        out = subprocess.run([pybin, "/tmp/_bpnl.py"], capture_output=True, text=True, timeout=900, cwd=base)
+        if out.stderr.strip():
+            print("[brand_pnl_real remote stderr] " + out.stderr.strip()[:400], file=sys.stderr)
+        return out.stdout
+    # off-VPS: SSH and run the engine on the VPS
+    pwd = secret("PROFIT_SSH_PASS")
+    if not pwd:
+        print("[brand_pnl_real] not on VPS and no PROFIT_SSH_PASS — skipped (not an error).")
+        return ""
+    import paramiko
+    cli = paramiko.SSHClient(); cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    cli.connect(secret("PROFIT_SSH_HOST") or "84.46.242.181",
+                username=secret("PROFIT_SSH_USER") or "root", password=pwd, timeout=30)
+    sftp = cli.open_sftp()
+    with sftp.open("/tmp/_bpnl.py", "w") as f:
+        f.write(BRAND_PNL_REMOTE)
+    sftp.close()
+    _, o, e = cli.exec_command("cd /root/Scripturi && /root/Scripturi/.venv/bin/python /tmp/_bpnl.py", timeout=900)
+    data = o.read().decode("utf-8", "replace"); err = e.read().decode().strip(); cli.close()
+    if err:
+        print("[brand_pnl_real remote stderr] " + err[:400], file=sys.stderr)
+    return data
+
+def run_brand_pnl_real(apply):
+    import re
+    from psycopg2.extras import execute_values
+    norm = lambda s: re.sub(r"[^a-z0-9]", "", (s or "").strip().lower())
+    tsv = _pull_brand_pnl()
+    raw = [l.split("\t") for l in tsv.splitlines() if l]
+    print(f"[brand_pnl_real] {len(raw)} (month,prefix) rows from the profitability engine")
+    if not raw:
+        print("[brand_pnl_real] no rows (engine not reachable here) — skipped.")
+        return
+    if not apply:
+        from collections import defaultdict
+        bymo = defaultdict(float)
+        for r in raw:
+            if len(r) >= 9:
+                try: bymo[r[0]] += float(r[8])
+                except Exception: pass
+        print("[brand_pnl_real] net profit total per month:", {k: round(v) for k, v in sorted(bymo.items())})
+        print("DRY-RUN — nothing written. Re-run with --apply to materialize.")
+        return
+    mconn = psycopg2.connect(clean_dsn(secret("DATABASE_URL_METRICS"))); mcur = mconn.cursor()
+    mcur.execute("SELECT id,name FROM brands WHERE name IS NOT NULL")
+    bid_by = {norm(n): i for i, n in mcur.fetchall()}
+    def f(x):
+        try: return float(x) if x not in (None, "") else 0.0
+        except Exception: return 0.0
+    def iv(x):
+        try: return int(float(x)) if x not in (None, "") else 0
+        except Exception: return 0
+    rows = []
+    for r in raw:
+        mo, pfx, deliv, sent, inc, cg, tr, mk, net = (r + [""] * 9)[:9]
+        bn = PREFIX_TO_BRAND.get(pfx, pfx)
+        nbn = norm(bn)
+        bid = bid_by.get(nbn) or (bid_by.get(nbn[:-2]) if nbn.endswith("ro") else None)
+        inc_f, net_f = f(inc), f(net)
+        margin = round(100.0 * net_f / inc_f, 1) if inc_f > 0 else None
+        rows.append((mo, pfx, bn, bid, iv(deliv), iv(sent), inc_f, f(cg), f(tr), f(mk), net_f, margin))
+    mcur.execute(BRAND_PNL_MONTHLY_DDL); mcur.execute("TRUNCATE cache.brand_pnl_monthly")
+    execute_values(mcur,
+        "INSERT INTO cache.brand_pnl_monthly (month,prefix,brand_name,brand_id,delivered_orders,"
+        "sent_parcels,revenue_exvat,cogs_exvat,transport_exvat,marketing,net_profit,margin_pct) VALUES %s "
+        "ON CONFLICT (month,prefix) DO NOTHING", rows, page_size=2000)
+    mcur.execute("SELECT COUNT(*) FROM cache.brand_pnl_monthly"); n = mcur.fetchone()[0]
+    log_refresh(mcur, "brand_pnl_real", n)
+    mconn.commit(); mconn.close()
+    print(f"[brand_pnl_real] APPLIED — cache.brand_pnl_monthly now has {n} rows.")
+
 def run(table, apply):
+    if table == "brand_pnl_real":
+        return run_brand_pnl_real(apply)
     if table == "order_outcome":
         return run_order_outcome(apply)
     if table == "daily_brand_pnl":
@@ -867,7 +1012,7 @@ def run(table, apply):
 
 if __name__ == "__main__":
     # dependency order: order_outcome first (the others LEFT JOIN it)
-    ALL = ["order_outcome", "daily_brand_pnl", "daily_ad_spend_ron", "product_ad_spend", "product_refusal_rate", "product_basket_pairs", "customer_agg", "order_enriched", "ticket_order_link", "product_returns"]
+    ALL = ["order_outcome", "daily_brand_pnl", "brand_pnl_real", "daily_ad_spend_ron", "product_ad_spend", "product_refusal_rate", "product_basket_pairs", "customer_agg", "order_enriched", "ticket_order_link", "product_returns"]
     # named groups for cron cadences (see SKILL.md): cs = intraday CS-facing; ads = current-day spend
     GROUPS = {"cs": ["order_enriched", "customer_agg", "ticket_order_link"], "ads": ["daily_ad_spend_ron"], "all": ALL}
     ap = argparse.ArgumentParser()

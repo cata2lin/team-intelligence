@@ -79,6 +79,8 @@ def main():
 
     print(f"\nAUDIT AGENȚIE (Meta+TikTok) — {cur_f}..{cur_t}" + (f"  vs {prev_f}..{prev_t}" if prev_f else ""))
     print(f"{'='*92}")
+    print("  ⚠ CM = ESTIMAT (daily_perf: venit BRUT cu TVA, TOATE comenzile) — supraestimeaza.")
+    print("    Profit REAL livrat-fara-TVA per brand (lunar): gigi:multi-brand-pnl.")
     print(f"  {'Brand':<16}{'Agency RON':>11}{'%spend':>7}{'Revenue':>11}{'CM real':>11}{'CM%':>7}{'MER':>6}  flags")
     tot_ag=tot_contrib=0.0
     for b,e in sorted(cur.items(), key=lambda x:-x[1]["agency"]):
