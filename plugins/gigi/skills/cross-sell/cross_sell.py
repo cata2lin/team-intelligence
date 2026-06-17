@@ -18,20 +18,24 @@ Usage:
     uv run cross_sell.py --brand gt --days 365 --min-co 10 --top 25
 """
 import argparse, os, sys
-from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
-import psycopg2
+from pathlib import Path
+
+# shared Postgres/secret helper — core/scripts/arona_pg.py (env-first, KB fallback, read-only)
+_here = Path(__file__).resolve()
+for _up in range(2, 8):
+    _cand = _here.parents[_up] / "core" / "scripts"
+    if (_cand / "arona_pg.py").exists():
+        sys.path.insert(0, str(_cand)); break
+import arona_pg
 
 BRANDS = {
     "esteban": "cmo5v89380001fzw2jii507fk", "grandia": "cmo5ulyl80003h1w2xlzfzhvh",
     "gt": "cmo8ocp3l000504l7ikr6s94q", "george-talent": "cmo8ocp3l000504l7ikr6s94q",
     "nubra": "cmo8odsm6000804l729wajk3p", "belasil": "cmo8kir3g000204jugknzr9zk",
 }
-_OK = {"sslmode", "sslrootcert", "sslcert", "sslkey", "connect_timeout", "application_name", "options"}
 
 def _conn():
-    d = os.environ.get("DATABASE_URL_METRICS") or sys.exit("Set DATABASE_URL_METRICS (kb.py secret-get).")
-    p = urlsplit(d); q = [(k, v) for k, v in parse_qsl(p.query) if k in _OK]
-    return psycopg2.connect(urlunsplit((p.scheme, p.netloc, p.path, urlencode(q), p.fragment)))
+    return arona_pg.connect("DATABASE_URL_METRICS")
 
 SQL = """
 WITH li AS (
