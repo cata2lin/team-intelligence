@@ -67,6 +67,7 @@ def clean_dsn(dsn):
 MAX_AGE = {
   "order_outcome": 24, "customer_agg": 24, "daily_ad_spend_ron": 24,
   "product_refusal_rate": 24, "order_enriched": 12, "product_basket_pairs": 48,
+  "product_ad_spend": 24,
 }
 # Per-table date span (min,max) so readers know WHICH PERIOD the cache covers.
 # None = table has no time dimension (e.g. all-time per-SKU aggregate).
@@ -77,6 +78,7 @@ SPAN_SQL = {
   "order_enriched":       "SELECT min(placed_at)::date, max(placed_at)::date FROM cache.order_enriched",
   "product_refusal_rate": None,
   "product_basket_pairs": None,
+  "product_ad_spend": "SELECT min(date), max(date) FROM cache.product_ad_spend",
 }
 
 CACHE_META_DDL = """
@@ -295,6 +297,75 @@ def run_daily_ad_spend(apply):
     log_refresh(mcur, "daily_ad_spend_ron", n)
     mconn.commit(); mconn.close()
     print(f"[daily_ad_spend_ron] APPLIED — cache.daily_ad_spend_ron now has {n} rows.")
+
+# Per-SKU ad spend (the SKU↔ad-spend "parity"). GOOGLE is native per-product
+# (google_ads_product_insights_daily.productItemId = shopify_zz_<prod>_<variant> → variants.sku);
+# FB/TikTok have NO product-level spend in the warehouse — only AWBprint.sku_ad_spend_daily
+# (currently HA-* SKUs, built from campaign-name parsing). General Meta/TikTok SKU mapping = TODO.
+PRODUCT_AD_SPEND_DDL = """
+CREATE SCHEMA IF NOT EXISTS cache;
+DROP TABLE IF EXISTS cache.product_ad_spend CASCADE;
+CREATE TABLE cache.product_ad_spend (
+  date          date,
+  brand_id      text,
+  sku           text,
+  product_title text,
+  platform      text,    -- google | meta | tiktok
+  spend_ron     numeric,
+  source        text,    -- google_product_insights | awbprint_sku
+  computed_at   timestamptz DEFAULT now(),
+  PRIMARY KEY (date, sku, platform)
+);
+CREATE INDEX IF NOT EXISTS product_ad_spend_brand_idx ON cache.product_ad_spend(brand_id, date);
+CREATE INDEX IF NOT EXISTS product_ad_spend_sku_idx   ON cache.product_ad_spend(sku);
+"""
+# Google per-SKU, in-DB (metrics): productItemId → variant → sku, aggregated.
+PRODUCT_AD_SPEND_GOOGLE = """
+INSERT INTO cache.product_ad_spend (date, brand_id, sku, product_title, platform, spend_ron, source)
+SELECT g.date, v."brandId", v.sku, MAX(g."productTitle"), 'google', ROUND(SUM(g."costRon"),2), 'google_product_insights'
+FROM google_ads_product_insights_daily g
+JOIN variants v ON v."shopifyNumericId" = (regexp_match(g."productItemId", '_(\\d+)$'))[1]::bigint
+WHERE g."productItemId" ~ '_\\d+$' AND v.sku IS NOT NULL AND v.sku<>'' AND g."costRon" IS NOT NULL
+GROUP BY g.date, v."brandId", v.sku
+"""
+
+def run_product_ad_spend(apply):
+    from psycopg2.extras import execute_values
+    mdsn = secret("DATABASE_URL_METRICS"); adsn = secret("DATABASE_URL_AWBPRINT")
+    mconn = psycopg2.connect(clean_dsn(mdsn)); mcur = mconn.cursor()
+    # sku -> brand_id map from metrics variants (for the AWBprint fb/tiktok rows)
+    mcur.execute("SELECT sku, MAX(\"brandId\") FROM variants WHERE sku IS NOT NULL AND sku<>'' GROUP BY sku")
+    skubrand = dict(mcur.fetchall())
+    fbtk, unmatched = [], set()
+    if adsn:
+        aconn = psycopg2.connect(clean_dsn(adsn)); acur = aconn.cursor()
+        acur.execute("SELECT date, sku, amount_fb_ron, amount_tk_ron FROM sku_ad_spend_daily")
+        for d, sku, fb, tk in acur.fetchall():
+            bid = skubrand.get(sku)
+            if bid is None: unmatched.add(sku)
+            if fb: fbtk.append((d, bid, sku, None, "meta", float(fb), "awbprint_sku"))
+            if tk: fbtk.append((d, bid, sku, None, "tiktok", float(tk), "awbprint_sku"))
+        aconn.close()
+    else:
+        print("[product_ad_spend] WARN: no DATABASE_URL_AWBPRINT — google only")
+    print(f"[product_ad_spend] google: in-DB; fb/tiktok(AWBprint): {len(fbtk)} rows; "
+          f"unmatched fb/tiktok skus: {len(unmatched)}")
+    if not apply:
+        mconn.rollback(); mconn.close(); print("DRY-RUN — nothing written."); return
+    mcur.execute(PRODUCT_AD_SPEND_DDL)
+    mcur.execute(PRODUCT_AD_SPEND_GOOGLE)
+    if fbtk:
+        execute_values(mcur,
+            "INSERT INTO cache.product_ad_spend (date,brand_id,sku,product_title,platform,spend_ron,source) "
+            "VALUES %s ON CONFLICT (date,sku,platform) DO UPDATE SET spend_ron=EXCLUDED.spend_ron, "
+            "brand_id=COALESCE(EXCLUDED.brand_id,cache.product_ad_spend.brand_id), source=EXCLUDED.source",
+            fbtk, page_size=2000)
+    mcur.execute("SELECT COUNT(*), platform FROM cache.product_ad_spend GROUP BY platform")
+    by = dict((p, c) for c, p in mcur.fetchall())
+    mcur.execute("SELECT COUNT(*) FROM cache.product_ad_spend"); n = mcur.fetchone()[0]
+    log_refresh(mcur, "product_ad_spend", n)
+    mconn.commit(); mconn.close()
+    print(f"[product_ad_spend] APPLIED — {n} rows ({by}).")
 
 PRODUCT_REFUSAL_DDL = """
 CREATE SCHEMA IF NOT EXISTS cache;
@@ -569,6 +640,8 @@ def run(table, apply):
         return run_order_outcome(apply)
     if table == "daily_ad_spend_ron":
         return run_daily_ad_spend(apply)
+    if table == "product_ad_spend":
+        return run_product_ad_spend(apply)
     spec = TABLES[table]
     dsn = secret("DATABASE_URL_METRICS")
     if not dsn:
@@ -598,7 +671,7 @@ def run(table, apply):
 
 if __name__ == "__main__":
     # dependency order: order_outcome first (the others LEFT JOIN it)
-    ALL = ["order_outcome", "daily_ad_spend_ron", "product_refusal_rate", "product_basket_pairs", "customer_agg", "order_enriched"]
+    ALL = ["order_outcome", "daily_ad_spend_ron", "product_ad_spend", "product_refusal_rate", "product_basket_pairs", "customer_agg", "order_enriched"]
     # named groups for cron cadences (see SKILL.md): cs = intraday CS-facing; ads = current-day spend
     GROUPS = {"cs": ["order_enriched", "customer_agg"], "ads": ["daily_ad_spend_ron"], "all": ALL}
     ap = argparse.ArgumentParser()
