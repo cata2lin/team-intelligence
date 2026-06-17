@@ -248,3 +248,32 @@ Reversible any time with `publishablePublish`.
 | Edit an order's lines | `orderEditBegin`→…→`orderEditCommit` (ignores publication/stock) |
 | Any other mutation (prices, stock, refunds, drafts, discounts, blog, webhooks, bulk) | `reference/mutations.md` — copy-paste cookbook |
 | 429s | slow to ~2–3 req/s, retry, read `throttleStatus` |
+| Read/search/**write** theme asset files | `scripts/shopify_theme.py` |
+| Import a `.docx` (+ photos) as a blog article | `scripts/publish_blog.py` |
+
+## Theme assets & blog import
+
+**`scripts/shopify_theme.py`** — read / search / **write** theme asset files (companion to `shopify_gql.py`, reuses its store/token resolution; adds the write verbs it lacks). All cmds need `--prefix <STORE>` + `--theme <ID>` except `themes`:
+```bash
+uv run scripts/shopify_theme.py themes --prefix GRAN                       # list themes → main/live id + copies
+uv run scripts/shopify_theme.py get snippets/meta-tags.liquid --prefix GRAN --theme <ID>
+uv run scripts/shopify_theme.py grep "BreadcrumbList" --prefix GRAN --theme <ID>
+uv run scripts/shopify_theme.py put sections/foo.liquid --file /tmp/foo.liquid --prefix GRAN --theme <ID>   # WRITES
+```
+**SAFETY:** editing the **main** theme edits the LIVE storefront. Duplicate the live theme (admin → Online Store → Themes → Duplicate), edit the COPY, preview with `?preview_theme_id=<ID>`, publish only on explicit confirmation (`PUT themes/<id>.json {"theme":{"id":<id>,"role":"main"}}`; revert by republishing the old one). **Curl on a storefront URL hits Shopify's bot/edge cache → unreliable for QA**; after a theme edit the public URL can serve stale HTML for minutes — verify in a real logged-out browser or via `?preview_theme_id` (preview bypasses the page cache).
+
+**`scripts/publish_blog.py`** — publish an **existing** `.docx` (+ photo `.zip`) as a blog article on any store: uploads images to the Shopify CDN, inlines them per H2, sets SEO meta + an ASCII handle. Defaults to **DRAFT**; `--publish` for live.
+```bash
+uv run scripts/publish_blog.py --prefix GRAN --blog news --docx a.docx --zip photos.zip --tags "a,b" [--publish]
+```
+> To *generate* brand-voice articles use `core:<store>-articles`. publish_blog.py *imports* externally-written deliverables (e.g. an SEO agency's .docx) verbatim — a different job.
+
+**Liquid / Shopify traps that cost real time:**
+- `{% stylesheet %}`/`{% javascript %}` work only in **sections**, not snippets → use a plain `<style>` in a snippet.
+- Can't filter inside a bracket lookup: `collections['brand-' | append: h]` errors → assign the handle to a var first, then `collections[var]`.
+- Metaobjects: type/handle via `metaobject.system.type` / `.system.handle` (**not** `metaobject.type`); fields by key `metaobject.<key>`; enumerate a type with `shop.metaobjects.<type>.values` (needs storefront access on the definition).
+- The theme's `.collection-wrapper` product grid is sized off `--page-width` (full page) → **0-height cards** inside a narrow column; for custom layouts render your **own** simple grid (`repeat(auto-fill,minmax(...))`).
+- Section `schema.name` ≤ **25 chars** (count bytes — avoid diacritics/`·`); range settings enforce `step` (e.g. an int-step scale rejects `1.25`).
+- New article/asset handles keep diacritics → handleize to ASCII (ă→a, ș→s, ț→t, î/â→i/a) for clean URLs.
+- Inline body images must live on the CDN: `stagedUploadsCreate` → multipart POST to the target → `fileCreate(contentType:IMAGE)` → poll `node…image.url`. Requesting `image_url: width: N` **can't upscale** past the source resolution (small source = blurry when displayed large).
+- Smart collections do **not** auto-reindex after a bulk `metafieldsSet` → re-apply the ruleSet (`collectionUpdate` same rule) to force re-evaluation.
