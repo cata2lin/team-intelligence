@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["psycopg2-binary"]
 # ///
 """
 multi_brand_pnl.py — P&L live "all-in" pentru ORICARE sau TOATE cele 16+ branduri Arona
@@ -8,12 +8,12 @@ multi_brand_pnl.py — P&L live "all-in" pentru ORICARE sau TOATE cele 16+ brand
 Magdeal, Belasil, Gento, Carpetto, Covoria, Nocturna, Rossi Nails, Apreciat...) pentru un
 interval de date.
 
-Sursa = data/daily_perf.db de pe VPS-ul Scripturi (alimentat din 'Raport Zilnic 2').
-Pentru fiecare brand agreghează: venit, cheltuiala FB/Google/TikTok, COGS, transport,
-profit de contributie (= venit - COGS - transport - total_spend), MER, ROAS, CPA, AOV.
+Sursa = cache.daily_brand_pnl din warehouse-ul metrics (oglinda daily_perf.db, reimprospatata
+de gigi:metrics-cache pe cron). Inainte foloseam SSH la daily_perf.db direct; acum citim din
+cache (aceleasi cifre, fara dependenta de SSH). Pentru fiecare brand agreghează: venit,
+cheltuiala FB/Google/TikTok, COGS, transport, profit de contributie, MER, ROAS, CPA, AOV.
 
-Citeste DOAR (SELECT). Nu scrie nimic. Ruleaza un heredoc Python pe VPS prin SSH
-(nu exista binar sqlite3 CLI acolo) si formateaza tabelul local.
+Citeste DOAR (SELECT). Verifica prospetimea cu: gigi:metrics-cache --status (cache.freshness).
 
 Folosire:
   uv run multi_brand_pnl.py --today
@@ -27,10 +27,42 @@ import json
 import argparse
 import datetime
 import subprocess
+from pathlib import Path
+import psycopg2
 
-VPS = "root@84.46.242.181"
-PY = "/root/Scripturi/.venv/bin/python3"
-DB = "/root/Scripturi/data/daily_perf.db"
+
+def _kb_path():
+    env = os.environ.get("KB_PATH")
+    if env and Path(env).exists():
+        return env
+    here = Path(__file__).resolve()
+    for up in range(2, 7):
+        c = here.parents[up] / "core" / "scripts" / "kb.py"
+        if c.exists():
+            return str(c)
+    return None
+
+
+def secret(key):
+    v = os.environ.get(key)
+    if v:
+        return v.strip()
+    kb = _kb_path()
+    if kb:
+        try:
+            return subprocess.run(["uv", "run", kb, "secret-get", key],
+                                  capture_output=True, text=True, timeout=60).stdout.strip()
+        except Exception:
+            return ""
+    return ""
+
+
+def _clean_dsn(dsn):
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+    u = urlsplit(dsn)
+    keep = {"sslmode", "sslrootcert", "sslcert", "sslkey", "connect_timeout", "application_name"}
+    q = [(k, v) for k, v in parse_qsl(u.query) if k in keep]
+    return urlunsplit((u.scheme, u.netloc, u.path, urlencode(q), u.fragment))
 
 # Alias prietenos -> fragment care apare in coloana brand din DB (lower, substring match).
 ALIASES = {
@@ -72,69 +104,46 @@ def resolve_brands(arg):
     return ("list", frags)
 
 
-# --- SQL pe VPS, intors ca JSON ---
-REMOTE = r'''
-import sqlite3, json, sys
-db = "%s"
-date_from, date_to, mode, frags = sys.argv[1], sys.argv[2], sys.argv[3], json.loads(sys.argv[4])
-c = sqlite3.connect(db); cur = c.cursor()
-where = ["date >= ?", "date <= ?"]
-params = [date_from, date_to]
-if mode == "list" and frags:
-    likes = []
-    for f in frags:
-        likes.append("LOWER(brand) LIKE ?")
-        params.append("%%" + f + "%%")
-    where.append("(" + " OR ".join(likes) + ")")
-sql = (
-    "SELECT brand, "
-    "SUM(orders) o, "
-    "SUM(revenue) rev, "
-    "SUM(fb_spend) fb, "
-    "SUM(tk_spend) tk, "
-    "SUM(google_spend) ggl, "
-    "SUM(total_spend) sp, "
-    "SUM(cogs) cogs, "
-    "SUM(transport) tr, "
-    "SUM(profit) profit, "
-    "COUNT(DISTINCT date) days "
-    "FROM daily_perf WHERE " + " AND ".join(where) + " "
-    "GROUP BY brand "
-    "HAVING SUM(revenue) > 0 OR SUM(total_spend) > 0 OR SUM(orders) > 0 "
-    "ORDER BY brand"
-)
-cur.execute(sql, params)
-cols = [d[0] for d in cur.description]
-rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-print(json.dumps(rows))
-'''
-
-
+# --- agregare per brand din cache.daily_brand_pnl (warehouse metrics) ---
 def run_remote(date_from, date_to, mode, frags):
-    code = REMOTE % DB
+    """Same shape as before (list of dicts: brand,o,rev,fb,tk,ggl,sp,cogs,tr,profit,days),
+    but now read from cache.daily_brand_pnl instead of SSH to daily_perf.db. ::float8 casts
+    keep the values as plain floats (identical downstream behaviour)."""
+    where = ["date >= %s", "date <= %s"]
+    params = [date_from, date_to]
+    if mode == "list" and frags:
+        where.append("(" + " OR ".join(["LOWER(brand_name) LIKE %s"] * len(frags)) + ")")
+        params += ["%" + f + "%" for f in frags]
+    sql = (
+        "SELECT brand_name AS brand, "
+        "SUM(orders)::int o, "
+        "SUM(revenue)::float8 rev, "
+        "SUM(fb_spend)::float8 fb, "
+        "SUM(tk_spend)::float8 tk, "
+        "SUM(google_spend)::float8 ggl, "
+        "SUM(total_spend)::float8 sp, "
+        "SUM(cogs)::float8 cogs, "
+        "SUM(transport)::float8 tr, "
+        "SUM(contribution_margin)::float8 profit, "
+        "COUNT(DISTINCT date)::int days "
+        "FROM cache.daily_brand_pnl WHERE " + " AND ".join(where) + " "
+        "GROUP BY brand_name "
+        "HAVING SUM(revenue) > 0 OR SUM(total_spend) > 0 OR SUM(orders) > 0 "
+        "ORDER BY brand_name"
+    )
+    dsn = secret("DATABASE_URL_METRICS")
+    if not dsn:
+        sys.exit("EROARE: DATABASE_URL_METRICS lipseste (env sau KB).")
     try:
-        out = subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", VPS,
-             PY + " - " + date_from + " " + date_to + " " + mode + " " + _shq(json.dumps(frags or []))],
-            input=code, capture_output=True, text=True, timeout=90,
-        )
-    except subprocess.TimeoutExpired:
-        sys.exit("EROARE: SSH catre VPS a expirat (timeout).")
-    if out.returncode != 0:
-        sys.exit("EROARE SSH/VPS:\n" + (out.stderr or out.stdout))
-    data = out.stdout.strip()
-    if not data:
-        return []
-    # ultima linie e JSON-ul (heredoc-ul poate produce zgomot inainte)
-    line = data.splitlines()[-1]
-    try:
-        return json.loads(line)
-    except json.JSONDecodeError:
-        sys.exit("EROARE: raspuns ne-JSON de la VPS:\n" + data)
-
-
-def _shq(s):
-    return "'" + s.replace("'", "'\\''") + "'"
+        conn = psycopg2.connect(_clean_dsn(dsn), connect_timeout=20)
+    except Exception as e:
+        sys.exit("EROARE conexiune metrics: " + str(e)[:200])
+    cur = conn.cursor()
+    cur.execute(sql, params)
+    cols = [d[0] for d in cur.description]
+    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    conn.close()
+    return rows
 
 
 # --- metrici derivate per brand ---
