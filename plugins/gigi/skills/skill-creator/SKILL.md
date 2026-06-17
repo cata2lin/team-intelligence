@@ -35,7 +35,11 @@ the 4 `*-articles` → one `articles --store`; `cro`+`landing-audit`; the CS pro
 - **SKILL.md frontmatter:** `name`, `description` (pack it with real trigger phrases — that's how it's matched), optional `argument-hint`.
 - **Scripts:** `uv run` self-contained (`# /// script` header with deps). No committed `.venv`.
 - **Reuse shared libs — never duplicate** (the audit found `_clean_dsn` copied in ~40 files):
-  `shopify_lib.Store`, `gads_client` (`gads.py`), `metrics_db`+BRANDS, `fx_ron` (or read `metrics.fx_rates`), `awb_lib` (awb-track), `richpanel_client`, `ro_text` (ai-scrub), `pg_dsn`.
+  **`core/scripts/arona_pg.py`** is the canonical Postgres/secret helper — `secret()` (env-first + KB),
+  `clean_dsn()`, `connect(key, readonly=True)`, `query()`. Import it instead of re-inlining DSN/secret code.
+  Also reuse: `shopify_lib.Store` (shopify-seo), `gads_client` (`gads.py`), `awb_lib` (awb-track),
+  `richpanel_client`, `ro_text` (ai-scrub), and read `cache.*` (gigi:metrics-cache) / `metrics.fx_rates`
+  instead of recomputing.
 - **Efficiency:** read precomputed `cache.*` tables (`gigi:metrics-cache`) instead of recomputing heavy aggregates live; if you need a new precompute, add a table there + cron, don't bake a slow query into every run.
 - **Safety:** Postgres read-only by default; any write is `--apply` after a dry-run that prints the SELECT + row counts + explicit confirmation; no destructive SQL without the matching SELECT shown.
 
