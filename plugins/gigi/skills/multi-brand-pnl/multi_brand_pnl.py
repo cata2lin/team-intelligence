@@ -28,41 +28,15 @@ import argparse
 import datetime
 import subprocess
 from pathlib import Path
-import psycopg2
 
-
-def _kb_path():
-    env = os.environ.get("KB_PATH")
-    if env and Path(env).exists():
-        return env
-    here = Path(__file__).resolve()
-    for up in range(2, 7):
-        c = here.parents[up] / "core" / "scripts" / "kb.py"
-        if c.exists():
-            return str(c)
-    return None
-
-
-def secret(key):
-    v = os.environ.get(key)
-    if v:
-        return v.strip()
-    kb = _kb_path()
-    if kb:
-        try:
-            return subprocess.run(["uv", "run", kb, "secret-get", key],
-                                  capture_output=True, text=True, timeout=60).stdout.strip()
-        except Exception:
-            return ""
-    return ""
-
-
-def _clean_dsn(dsn):
-    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
-    u = urlsplit(dsn)
-    keep = {"sslmode", "sslrootcert", "sslcert", "sslkey", "connect_timeout", "application_name"}
-    q = [(k, v) for k, v in parse_qsl(u.query) if k in keep]
-    return urlunsplit((u.scheme, u.netloc, u.path, urlencode(q), u.fragment))
+# shared Postgres/secret helper — core/scripts/arona_pg.py (env-first secret + clean_dsn + connect)
+_here = Path(__file__).resolve()
+for _up in range(2, 8):
+    _cand = _here.parents[_up] / "core" / "scripts"
+    if (_cand / "arona_pg.py").exists():
+        sys.path.insert(0, str(_cand)); break
+import arona_pg
+secret = arona_pg.secret
 
 # Alias prietenos -> fragment care apare in coloana brand din DB (lower, substring match).
 ALIASES = {
@@ -131,11 +105,8 @@ def run_remote(date_from, date_to, mode, frags):
         "HAVING SUM(revenue) > 0 OR SUM(total_spend) > 0 OR SUM(orders) > 0 "
         "ORDER BY brand_name"
     )
-    dsn = secret("DATABASE_URL_METRICS")
-    if not dsn:
-        sys.exit("EROARE: DATABASE_URL_METRICS lipseste (env sau KB).")
     try:
-        conn = psycopg2.connect(_clean_dsn(dsn), connect_timeout=20)
+        conn = arona_pg.connect("DATABASE_URL_METRICS")
     except Exception as e:
         sys.exit("EROARE conexiune metrics: " + str(e)[:200])
     cur = conn.cursor()

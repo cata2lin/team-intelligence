@@ -20,41 +20,15 @@ Usage:
 """
 import argparse, datetime as dt, json, os, subprocess, sys
 from pathlib import Path
-import psycopg2
 
-
-def _kb_path():
-    env = os.environ.get("KB_PATH")
-    if env and Path(env).exists():
-        return env
-    here = Path(__file__).resolve()
-    for up in range(2, 7):
-        c = here.parents[up] / "core" / "scripts" / "kb.py"
-        if c.exists():
-            return str(c)
-    return None
-
-
-def secret(key):
-    v = os.environ.get(key)
-    if v:
-        return v.strip()
-    kb = _kb_path()
-    if kb:
-        try:
-            return subprocess.run(["uv", "run", kb, "secret-get", key],
-                                  capture_output=True, text=True, timeout=60).stdout.strip()
-        except Exception:
-            return ""
-    return ""
-
-
-def _clean_dsn(dsn):
-    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
-    u = urlsplit(dsn)
-    keep = {"sslmode", "sslrootcert", "sslcert", "sslkey", "connect_timeout", "application_name"}
-    q = [(k, v) for k, v in parse_qsl(u.query) if k in keep]
-    return urlunsplit((u.scheme, u.netloc, u.path, urlencode(q), u.fragment))
+# shared Postgres/secret helper — core/scripts/arona_pg.py
+_here = Path(__file__).resolve()
+for _up in range(2, 8):
+    _cand = _here.parents[_up] / "core" / "scripts"
+    if (_cand / "arona_pg.py").exists():
+        sys.path.insert(0, str(_cand)); break
+import arona_pg
+secret = arona_pg.secret
 
 
 def run_remote(dfrom, dto):
@@ -65,11 +39,8 @@ def run_remote(dfrom, dto):
         "SUM(contribution_margin)::float8 profit, COUNT(DISTINCT date)::int days "
         "FROM cache.daily_brand_pnl WHERE date >= %s AND date <= %s GROUP BY brand_name "
         "HAVING (SUM(fb_spend)+SUM(tk_spend)) > 0 ORDER BY (SUM(fb_spend)+SUM(tk_spend)) DESC")
-    dsn = secret("DATABASE_URL_METRICS")
-    if not dsn:
-        sys.exit("EROARE: DATABASE_URL_METRICS lipseste (env sau KB).")
     try:
-        conn = psycopg2.connect(_clean_dsn(dsn), connect_timeout=20)
+        conn = arona_pg.connect("DATABASE_URL_METRICS")
     except Exception as e:
         sys.exit("EROARE conexiune metrics: " + str(e)[:200])
     cur = conn.cursor()
