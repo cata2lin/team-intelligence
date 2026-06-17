@@ -11,13 +11,14 @@ Read-only. Run daily.
     uv run anomaly_detector.py --customer 7566352958 --recent 1 --baseline 14
 """
 import os, sys, argparse, datetime, collections
-from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
-import psycopg2, psycopg2.extras, requests
-API=os.environ.get("GADS_API_VERSION","v21")
-_PG_OK={"host","port","dbname","user","password","sslmode","sslrootcert","sslcert","sslkey","connect_timeout","application_name","options","channel_binding"}
-def clean(d):
-    p=urlsplit(d)
-    return d if not p.query else urlunsplit((p.scheme,p.netloc,p.path,urlencode([(x,y) for x,y in parse_qsl(p.query,keep_blank_values=True) if x.lower() in _PG_OK]),p.fragment))
+from pathlib import Path
+# shared Google Ads MCC client (creds + OAuth + GAQL search) — google-ads-mcc/gads.py
+_here = Path(__file__).resolve()
+for _up in range(1, 6):
+    _cand = _here.parents[_up] / "google-ads-mcc"
+    if (_cand / "gads.py").exists():
+        sys.path.insert(0, str(_cand)); break
+import gads
 
 def daily(rows_by_date, dates):
     """average per-day metrics across the given dates."""
@@ -44,27 +45,20 @@ def main():
     ap.add_argument("--cpc-rise",type=float,default=0.35)
     ap.add_argument("--min-spend",type=float,default=20.0,help="ignore tiny campaigns (baseline daily spend below this)")
     a=ap.parse_args()
-    cx=psycopg2.connect(clean(os.environ["DATABASE_URL_METRICS"])); cx.set_session(readonly=True)
-    c=cx.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    c.execute('SELECT "developerToken" dev,"loginCustomerId" mcc,"oauthClientId" cid,"oauthClientSecret" csec,"refreshToken" rt FROM google_ads_connections WHERE "isActive"=true'); r=c.fetchone()
-    tok=requests.post("https://oauth2.googleapis.com/token",data={"grant_type":"refresh_token","client_id":r["cid"],"client_secret":r["csec"],"refresh_token":r["rt"]},timeout=20).json()["access_token"]
-    H={"Authorization":f"Bearer {tok}","developer-token":r["dev"],"login-customer-id":"".join(ch for ch in str(r["mcc"]) if ch.isdigit()),"Content-Type":"application/json"}
+    conn=gads.get_connection()
     win=a.recent+a.baseline+2
     end=datetime.date.today(); start=end-datetime.timedelta(days=win)
     q=(f"SELECT campaign.id, campaign.name, segments.date, metrics.cost_micros, metrics.conversions, "
        f"metrics.conversions_value, metrics.clicks, metrics.impressions FROM campaign "
        f"WHERE campaign.status='ENABLED' AND segments.date BETWEEN '{start}' AND '{end}'")
-    rr=requests.post(f"https://googleads.googleapis.com/{API}/customers/{a.customer}/googleAds:searchStream",headers=H,json={"query":q},timeout=120)
-    if rr.status_code!=200: sys.exit(f"Ads API {rr.status_code}: {rr.text[:300]}")
     camps=collections.defaultdict(lambda:{"name":"","byd":collections.defaultdict(lambda:{"spend":0.0,"conv":0.0,"val":0.0,"clicks":0,"impr":0})})
     alldates=set()
-    for b in rr.json():
-        for row in b.get("results",[]):
-            cid=row["campaign"]["id"]; dt=row["segments"]["date"]; m=row["metrics"]; alldates.add(dt)
-            camps[cid]["name"]=row["campaign"]["name"]
-            x=camps[cid]["byd"][dt]
-            x["spend"]+=float(m.get("costMicros",0))/1e6; x["conv"]+=float(m.get("conversions",0))
-            x["val"]+=float(m.get("conversionsValue",0)); x["clicks"]+=int(m.get("clicks",0)); x["impr"]+=int(m.get("impressions",0))
+    for row in gads.search(conn, a.customer, q):
+        cid=row["campaign"]["id"]; dt=row["segments"]["date"]; m=row["metrics"]; alldates.add(dt)
+        camps[cid]["name"]=row["campaign"]["name"]
+        x=camps[cid]["byd"][dt]
+        x["spend"]+=float(m.get("costMicros",0))/1e6; x["conv"]+=float(m.get("conversions",0))
+        x["val"]+=float(m.get("conversionsValue",0)); x["clicks"]+=int(m.get("clicks",0)); x["impr"]+=int(m.get("impressions",0))
     dates=sorted(alldates)
     today=str(datetime.date.today())
     if dates and dates[-1]==today: dates=dates[:-1]   # drop partial 'today'

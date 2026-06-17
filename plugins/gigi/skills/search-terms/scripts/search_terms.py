@@ -11,13 +11,14 @@ and split spend brand vs non-brand. Read-only; prints `gads.py add-negatives` co
     uv run search_terms.py --customer 7566352958 --brand-terms belasil --competitor-terms "dero,ariel,persil,chanteclair" --min-waste 5
 """
 import os, sys, argparse, re, collections
-from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
-import psycopg2, psycopg2.extras, requests
-API=os.environ.get("GADS_API_VERSION","v21")
-_PG_OK={"host","port","dbname","user","password","sslmode","sslrootcert","sslcert","sslkey","connect_timeout","application_name","options","channel_binding"}
-def clean(d):
-    p=urlsplit(d)
-    return d if not p.query else urlunsplit((p.scheme,p.netloc,p.path,urlencode([(x,y) for x,y in parse_qsl(p.query,keep_blank_values=True) if x.lower() in _PG_OK]),p.fragment))
+from pathlib import Path
+# shared Google Ads MCC client (creds + OAuth + GAQL search) — google-ads-mcc/gads.py
+_here = Path(__file__).resolve()
+for _up in range(1, 6):
+    _cand = _here.parents[_up] / "google-ads-mcc"
+    if (_cand / "gads.py").exists():
+        sys.path.insert(0, str(_cand)); break
+import gads
 
 def main():
     ap=argparse.ArgumentParser()
@@ -32,23 +33,16 @@ def main():
     brand=[t.strip().lower() for t in a.brand_terms.split(",") if t.strip()]
     comp=[t.strip().lower() for t in a.competitor_terms.split(",") if t.strip()]
     junk=[t.strip().lower() for t in a.junk_terms.split(",") if t.strip()]
-    cx=psycopg2.connect(clean(os.environ["DATABASE_URL_METRICS"])); cx.set_session(readonly=True)
-    c=cx.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    c.execute('SELECT "developerToken" dev,"loginCustomerId" mcc,"oauthClientId" cid,"oauthClientSecret" csec,"refreshToken" rt FROM google_ads_connections WHERE "isActive"=true'); r=c.fetchone()
-    tok=requests.post("https://oauth2.googleapis.com/token",data={"grant_type":"refresh_token","client_id":r["cid"],"client_secret":r["csec"],"refresh_token":r["rt"]},timeout=20).json()["access_token"]
-    H={"Authorization":f"Bearer {tok}","developer-token":r["dev"],"login-customer-id":"".join(ch for ch in str(r["mcc"]) if ch.isdigit()),"Content-Type":"application/json"}
+    conn=gads.get_connection()
     where="metrics.cost_micros > 0"+(f" AND campaign.name = '{a.campaign}'" if a.campaign else "")
     q=(f"SELECT search_term_view.search_term, campaign.name, metrics.cost_micros, metrics.conversions, "
        f"metrics.conversions_value, metrics.clicks FROM search_term_view "
        f"WHERE segments.date DURING LAST_{a.days}_DAYS AND {where}")
-    rr=requests.post(f"https://googleads.googleapis.com/{API}/customers/{a.customer}/googleAds:searchStream",headers=H,json={"query":q},timeout=120)
-    if rr.status_code!=200: sys.exit(f"Ads API {rr.status_code}: {rr.text[:300]}")
     T=[]
-    for b in rr.json():
-        for row in b.get("results",[]):
-            m=row["metrics"]; t=row["searchTermView"]["searchTerm"].lower()
-            T.append({"t":t,"cost":float(m.get("costMicros",0))/1e6,"conv":float(m.get("conversions",0)),
-                      "val":float(m.get("conversionsValue",0)),"clicks":int(m.get("clicks",0))})
+    for row in gads.search(conn, a.customer, q):
+        m=row["metrics"]; t=row["searchTermView"]["searchTerm"].lower()
+        T.append({"t":t,"cost":float(m.get("costMicros",0))/1e6,"conv":float(m.get("conversions",0)),
+                  "val":float(m.get("conversionsValue",0)),"clicks":int(m.get("clicks",0))})
     def has(t,lst): return any(w in t for w in lst)
     tot=sum(x["cost"] for x in T); brand_spend=sum(x["cost"] for x in T if has(x["t"],brand))
     waste=[x for x in T if x["conv"]==0 and x["cost"]>=a.min_waste and not has(x["t"],brand)]

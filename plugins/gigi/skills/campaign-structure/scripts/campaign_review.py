@@ -11,13 +11,14 @@ and bidding-strategy mismatches. Read-only; prints prioritised recommendations.
     uv run campaign_review.py --customer 5229815058 --brand-terms "esteban,maison" --margin 0.70
 """
 import os, sys, argparse, collections
-from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
-import psycopg2, psycopg2.extras, requests
-API=os.environ.get("GADS_API_VERSION","v21")
-_PG_OK={"host","port","dbname","user","password","sslmode","sslrootcert","sslcert","sslkey","connect_timeout","application_name","options","channel_binding"}
-def clean(d):
-    p=urlsplit(d)
-    return d if not p.query else urlunsplit((p.scheme,p.netloc,p.path,urlencode([(x,y) for x,y in parse_qsl(p.query,keep_blank_values=True) if x.lower() in _PG_OK]),p.fragment))
+from pathlib import Path
+# shared Google Ads MCC client (creds + OAuth + GAQL search) — google-ads-mcc/gads.py
+_here = Path(__file__).resolve()
+for _up in range(1, 6):
+    _cand = _here.parents[_up] / "google-ads-mcc"
+    if (_cand / "gads.py").exists():
+        sys.path.insert(0, str(_cand)); break
+import gads
 
 def main():
     ap=argparse.ArgumentParser()
@@ -27,15 +28,9 @@ def main():
     ap.add_argument("--delivery-rate",type=float,default=1.0)
     a=ap.parse_args()
     brand=[t.strip().lower() for t in a.brand_terms.split(",") if t.strip()]
-    cx=psycopg2.connect(clean(os.environ["DATABASE_URL_METRICS"])); cx.set_session(readonly=True)
-    c=cx.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    c.execute('SELECT "developerToken" dev,"loginCustomerId" mcc,"oauthClientId" cid,"oauthClientSecret" csec,"refreshToken" rt FROM google_ads_connections WHERE "isActive"=true'); r=c.fetchone()
-    tok=requests.post("https://oauth2.googleapis.com/token",data={"grant_type":"refresh_token","client_id":r["cid"],"client_secret":r["csec"],"refresh_token":r["rt"]},timeout=20).json()["access_token"]
-    H={"Authorization":f"Bearer {tok}","developer-token":r["dev"],"login-customer-id":"".join(ch for ch in str(r["mcc"]) if ch.isdigit()),"Content-Type":"application/json"}
+    conn=gads.get_connection()
     def gaql(q):
-        rr=requests.post(f"https://googleads.googleapis.com/{API}/customers/{a.customer}/googleAds:searchStream",headers=H,json={"query":q},timeout=120)
-        if rr.status_code!=200: sys.exit(f"Ads API {rr.status_code}: {rr.text[:300]}")
-        return [row for b in rr.json() for row in b.get("results",[])]
+        return gads.search(conn, a.customer, q)
     camps={}
     for row in gaql("SELECT campaign.name, campaign.advertising_channel_type, campaign.bidding_strategy_type, campaign_budget.amount_micros, metrics.cost_micros, metrics.conversions, metrics.conversions_value FROM campaign WHERE campaign.status='ENABLED' AND segments.date DURING LAST_30_DAYS"):
         cm=row["campaign"]; m=row["metrics"]; nm=cm["name"]
