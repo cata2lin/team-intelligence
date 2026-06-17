@@ -69,9 +69,13 @@ per-product (current, all Google-advertised SKUs) via `google_ads_product_insigh
 `AWBprint.sku_ad_spend_daily` (HA-* SKUs, built from campaign-name parsing) — general Meta/TikTok
 per-SKU mapping is a **TODO** (campaign/ad data isn't in the warehouse). Feeds product_economics/POAS.
 
+### `cache.daily_brand_pnl`  (mirror of the VPS `daily_perf.db`, per-brand daily P&L)
+`date × brand → orders, revenue, cogs, transport, fb/tk/google/total spend, contribution_margin, roas, cpa, aov`.
+**Replaces the SSH dependency**: multi-brand-pnl / agency-audit / daily-ops can read this from metrics
+instead of SSHing the SQLite. 9,392 rows, 29 brands, current. (Read locally on the VPS cron host.)
+
 ### Roadmap (from skills-audit.md), add as `--table`:
-`ticket_order_link` (mostly already in `richpanel_tickets` cols),
-`rma_signal_daily`, `daily_brand_pnl` (replaces SSH `daily_perf.db`),
+`ticket_order_link` (mostly already in `richpanel_tickets` cols), `rma_signal_daily`,
 `dataforseo_cache` (the only pay-per-call source).
 
 ## Freshness — ALWAYS know what you're reading (it's a snapshot, not live)
