@@ -167,5 +167,25 @@ uv run scripts/internal_links.py deorphan  --store esteban --map deorphan.json -
 
 Făcut pe Esteban (Jun 2026): cluster top-8 + de-orfanizate toate 15 articolele blog (bidirecțional colecție↔articol) + link de brand pe toate 133 produse. **`mutation` type-uri care înșeală:** `articleUpdate.body` = **HTML!**, `productUpdate.descriptionHtml` = **String!** (opuse — nu le confunda).
 
+## Baseline comun pe magazinele ARONA (ce găsești pe un store nou)
+
+Din rollout-ul **Esteban / GT / Nubra** (iun 2026, baseline din Admin API) — verifică ÎNTÂI astea cu `scripts/seo_audit.py`, sunt aproape garantate pe orice store ARONA nou:
+- **Duplicate/thin content la produse** — cel mai mare blocaj: Esteban 138/153, GT 161/163, Nubra 150/151 produse cu descriere IDENTICĂ (template ~27-43 cuvinte). Fix: descrieri unice (vezi `core:<store>-articles` / `product_fix.py`).
+- **Alt text 100% lipsă** — ~1.200 imagini fără alt (Esteban 483, GT 412, Nubra 305), inclusiv featured.
+- **Meta SEO lipsă** — GT & Nubra: 100% produse fără `seo_title`+`meta_description`; TOATE colecțiile (Esteban 24, GT 6, Nubra 5) fără meta. Setate ca metafields `global.title_tag`/`global.description_tag`. **Regula de aur:** `seo:{}` ÎNLOCUIEȘTE (nu merge) → trimite mereu title ȘI description.
+- **Mizerie colecții** (Esteban): nume duplicate („Cele mai vândute" ×4), colecții junk indexabile („Home page", „Ultimate Search - Do not delete").
+Aceleași clase de probleme + recomandările tehnice (brand pages, internal linking, schema) le-am rezolvat și pe **Grandia** (mai jos). Patternurile generalizează între magazine.
+
+## Pagini de brand + internal linking + schema (metaobject-driven — Grandia, iun 2026)
+
+Pattern-uri pt un magazin unde brandurile sunt **metaobjects** (`type: brand`, câmpuri name/logo/description) și produsele referă unul printr-un metafield `metaobject_reference` (`custom.brand`). Implementate live pe Grandia (recomandările agenției Limitless). Editarea temei: vezi `gigi:shopify-stores` (`scripts/shopify_theme.py`).
+- **Colecții de listare per brand:** o **smart collection** per brand cu regula `column: PRODUCT_METAFIELD_DEFINITION, relation: EQUALS, condition: <metaobject gid>, conditionObjectId: <metafield-definition gid>`, apoi `publishablePublish` pe Online Store. **CAPCANĂ:** smart collections NU se reindexează după un `metafieldsSet` în masă → reaplică ruleSet-ul (`collectionUpdate` cu aceeași regulă) ca să forțezi re-evaluarea.
+- **Pagina de brand** (template metaobject): H1=brand.name, H2/H3 în jurul listării, sidebar „BRANDURI" care enumeră `shop.metaobjects.brand.values` (filtrat la cele cu colecție `brand-<handle>` care are produse), brand activ evidențiat, breadcrumb + `BreadcrumbList` JSON-LD. Randează produsele cu grila TA (nu grila full-width a temei — colapsează în coloană îngustă).
+- **Agregator + strip de branduri pe homepage:** auto-enumeră `shop.metaobjects.brand.values` în loc de blocuri adăugate manual (ca brandurile noi să apară automat).
+- **Meta title per brand:** metaobjectele n-au câmp SEO implicit → adaugă `seo_title`/`seo_description` la definiție (`metaobjectDefinitionUpdate`), populează, și în `meta-tags.liquid` suprascrie `page_title`/description când `metaobject.seo_title != blank`.
+- **Mesh internal linking pe categorii:** colecțiile au `custom.parent_collection` (referință Collection) → pe pagina de categorie arată copiii (existenți) + un bloc „ALTE CATEGORII" cu **frați** (același parent) + **părinte**; pt o categorie top-level, frații = categoriile principale din main-menu.
+- **Pagina de produs:** secțiune de mesh internal-linking (link spre colecțiile principale) + `BreadcrumbList` JSON-LD care oglindește breadcrumb-ul vizibil. Judge.me injectează deja un al 2-lea nod Product cu `aggregateRating` pe același `@id` → stele în SERP (nu dubla).
+- **Colecții de filtrare/duplicat** (ex. `brand-*` folosite doar ca sursă de date): `noindex,follow` + canonical spre pagina reală în `meta-tags.liquid`, ca să eviți conținut duplicat. **Shopify auto-injectează** canonical pe URL-uri cu `?sort_by`/`?q=`/paginate via `content_for_header` — tema nu-l poate scoate (și nici nu trebuie; e consolidare corectă).
+
 ## Logging (team convention)
 After a run: `kb.py log --type skill --action used --name gigi:shopify-seo --summary "…"`.
