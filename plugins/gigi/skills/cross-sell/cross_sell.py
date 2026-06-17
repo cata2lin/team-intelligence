@@ -64,11 +64,24 @@ def main():
     ap.add_argument("--min-lift", type=float, default=1.5, dest="min_lift")
     ap.add_argument("--product", help="title substring → show complements for it")
     ap.add_argument("--top", type=int, default=20)
+    ap.add_argument("--cached", action="store_true",
+                    help="read precomputed cache.product_basket_pairs (instant; fixed 180d window, "
+                         "ignores --days/--min-prod). Refreshed nightly by gigi:metrics-cache.")
     a = ap.parse_args()
     bid = BRANDS.get(a.brand.lower(), a.brand)
     c = _conn(); cur = c.cursor()
-    cur.execute(SQL, {"bid": bid, "days": a.days, "min_prod": a.min_prod, "min_co": a.min_co})
-    rows = [r for r in cur.fetchall() if r[5] >= a.min_lift]
+    if a.cached:
+        # instant: read the precomputed market-basket (same data, no heavy live self-join)
+        cur.execute(
+            "SELECT title_a, title_b, co_count, NULL::int, NULL::int, lift, conf_a_to_b, conf_b_to_a "
+            "FROM cache.product_basket_pairs WHERE brand_id = %s AND co_count >= %s ORDER BY lift DESC",
+            (bid, a.min_co))
+        rows = [r for r in cur.fetchall() if (r[5] or 0) >= a.min_lift]
+        if a.days != 180:
+            print("(--cached: fereastră fixă 180z; --days ignorat)")
+    else:
+        cur.execute(SQL, {"bid": bid, "days": a.days, "min_prod": a.min_prod, "min_co": a.min_co})
+        rows = [r for r in cur.fetchall() if r[5] >= a.min_lift]
     if not rows:
         print(f"Niciun pattern de co-cumpărare peste praguri ({a.brand}, {a.days}z, min_co={a.min_co}). "
               f"Magazin cu coșuri mono-produs? Scade --min-co sau crește --days."); return
