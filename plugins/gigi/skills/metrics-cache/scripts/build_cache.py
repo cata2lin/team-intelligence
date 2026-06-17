@@ -67,7 +67,7 @@ def clean_dsn(dsn):
 MAX_AGE = {
   "order_outcome": 24, "customer_agg": 24, "daily_ad_spend_ron": 24,
   "product_refusal_rate": 24, "order_enriched": 12, "product_basket_pairs": 48,
-  "product_ad_spend": 24, "daily_brand_pnl": 24,
+  "product_ad_spend": 24, "daily_brand_pnl": 24, "ticket_order_link": 12,
 }
 # Per-table date span (min,max) so readers know WHICH PERIOD the cache covers.
 # None = table has no time dimension (e.g. all-time per-SKU aggregate).
@@ -80,6 +80,7 @@ SPAN_SQL = {
   "product_basket_pairs": None,
   "product_ad_spend": "SELECT min(date), max(date) FROM cache.product_ad_spend",
   "daily_brand_pnl": "SELECT min(date), max(date) FROM cache.daily_brand_pnl",
+  "ticket_order_link": None,
 }
 
 CACHE_META_DDL = """
@@ -484,7 +485,49 @@ LEFT JOIN titles ta ON ta.pid=p.pa
 LEFT JOIN titles tb ON tb.pid=p.pb;
 """
 
+# Ticket → order → delivery outcome, precomputed (CS triage/profiles/draft link a ticket to its
+# order's refusal/AWB status instantly instead of re-resolving live).
+TICKET_ORDER_LINK_DDL = """
+CREATE SCHEMA IF NOT EXISTS cache;
+DROP TABLE IF EXISTS cache.ticket_order_link CASCADE;
+CREATE TABLE cache.ticket_order_link (
+  ticket_id        text PRIMARY KEY,
+  conversation_no  bigint,
+  resolved_store   text,
+  order_name       text,
+  ticket_status    text,
+  category         text,
+  contact_phone    text,
+  contact_email    text,
+  status_category  text,     -- delivery outcome of the linked order (Livrata/Refuzata/…)
+  is_refusal       boolean,
+  delivery_status  text,
+  awb              text,
+  courier_status   text,
+  computed_at      timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ticket_order_link_order_idx ON cache.ticket_order_link(order_name);
+CREATE INDEX IF NOT EXISTS ticket_order_link_conv_idx  ON cache.ticket_order_link(conversation_no);
+CREATE INDEX IF NOT EXISTS ticket_order_link_refusal_idx ON cache.ticket_order_link(is_refusal) WHERE is_refusal;
+"""
+TICKET_ORDER_LINK_SELECT = """
+SELECT DISTINCT ON (t.id)
+  t.id, t.conversation_no, t.resolved_store, t.order_name, t.status, t.category,
+  t.contact_phone, t.contact_email,
+  oo.status_category, oo.is_refusal, oo.delivery_status, oo.awb, oo.courier_status
+FROM richpanel_tickets t
+LEFT JOIN cache.order_outcome oo ON oo.order_name = t.order_name
+WHERE t.order_name IS NOT NULL AND t.order_name <> ''
+ORDER BY t.id, oo.is_refusal DESC NULLS LAST;
+"""
+
 TABLES = {
+  "ticket_order_link": {
+    "ddl": TICKET_ORDER_LINK_DDL,
+    "cols": "(ticket_id,conversation_no,resolved_store,order_name,ticket_status,category,contact_phone,contact_email,status_category,is_refusal,delivery_status,awb,courier_status)",
+    "select": TICKET_ORDER_LINK_SELECT,
+    "count_sql": "SELECT COUNT(*) FROM (" + TICKET_ORDER_LINK_SELECT.rstrip().rstrip(';') + ") q",
+  },
   "product_basket_pairs": {
     "ddl": PRODUCT_BASKET_DDL,
     "cols": "(brand_id,product_a,product_b,title_a,title_b,co_count,conf_a_to_b,conf_b_to_a,lift,window_days)",
@@ -768,9 +811,9 @@ def run(table, apply):
 
 if __name__ == "__main__":
     # dependency order: order_outcome first (the others LEFT JOIN it)
-    ALL = ["order_outcome", "daily_brand_pnl", "daily_ad_spend_ron", "product_ad_spend", "product_refusal_rate", "product_basket_pairs", "customer_agg", "order_enriched"]
+    ALL = ["order_outcome", "daily_brand_pnl", "daily_ad_spend_ron", "product_ad_spend", "product_refusal_rate", "product_basket_pairs", "customer_agg", "order_enriched", "ticket_order_link"]
     # named groups for cron cadences (see SKILL.md): cs = intraday CS-facing; ads = current-day spend
-    GROUPS = {"cs": ["order_enriched", "customer_agg"], "ads": ["daily_ad_spend_ron"], "all": ALL}
+    GROUPS = {"cs": ["order_enriched", "customer_agg", "ticket_order_link"], "ads": ["daily_ad_spend_ron"], "all": ALL}
     ap = argparse.ArgumentParser()
     ap.add_argument("--table", choices=ALL)
     ap.add_argument("--all", action="store_true")
