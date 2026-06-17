@@ -46,34 +46,47 @@ def secret(k):
     return subprocess.run(["uv", "run", kb, "secret-get", k], capture_output=True, text=True).stdout.strip()
 
 
-PY = r"""
-import sqlite3,json,datetime
-today=datetime.date.today(); yd=(today-datetime.timedelta(days=1)).isoformat()
-ms=today.replace(day=1).isoformat()
-dp=sqlite3.connect('data/daily_perf.db')
-def agg(w,p):
-    r=dp.execute("SELECT COALESCE(SUM(revenue),0),COALESCE(SUM(total_spend),0),COALESCE(SUM(cogs),0),COALESCE(SUM(transport),0),COALESCE(SUM(orders),0) FROM daily_perf WHERE "+w,p).fetchone()
-    return list(r)
-y=agg("date=?",(yd,)); m=agg("date>=? AND date<=?",(ms,yd))
-tb=dp.execute("SELECT brand,SUM(revenue),SUM(total_spend) FROM daily_perf WHERE date=? GROUP BY brand ORDER BY 2 DESC LIMIT 6",(yd,)).fetchall()
-pf=sqlite3.connect('data/profitability.db')
-d7=(today-datetime.timedelta(days=7)).isoformat(); d5=(today-datetime.timedelta(days=5)).isoformat()
-s6=(today-datetime.timedelta(days=6)).isoformat(); s60=(today-datetime.timedelta(days=60)).isoformat()
-refz=pf.execute("SELECT COUNT(*),COALESCE(SUM(revenue),0) FROM profit_orders WHERE status_category='Refuzata' AND substr(created_at,1,10)>=?",(d7,)).fetchone()
-netr=pf.execute("SELECT COUNT(*) FROM profit_orders WHERE status_category='Netrimisa' AND substr(created_at,1,10)>=?",(d5,)).fetchone()[0]
-stuck=pf.execute("SELECT COUNT(*) FROM profit_orders WHERE status_category='In curs de livrare' AND substr(created_at,1,10) BETWEEN ? AND ?",(s60,s6)).fetchone()[0]
-print(json.dumps({'yd':yd,'ms':ms,'y':y,'m':m,'tb':tb,'refz':list(refz),'netr':netr,'stuck':stuck}))
-"""
+def _pg(url):
+    u = urllib.parse.urlparse(url)
+    return pg8000.dbapi.connect(ssl_context=True, user=urllib.parse.unquote(u.username or ""),
+                                password=urllib.parse.unquote(u.password or ""), host=u.hostname,
+                                port=u.port or 5432, database=(u.path or "/").lstrip("/"))
 
 
 def main():
-    out = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", VPS,
-                          "cd /root/Scripturi && .venv/bin/python3 -c " + shlex.quote(PY)],
-                         capture_output=True, text=True, timeout=90).stdout.strip()
+    import datetime
+    today = datetime.date.today()
+    yd = (today - datetime.timedelta(days=1)).isoformat()
+    ms = today.replace(day=1).isoformat()
+    d7 = (today - datetime.timedelta(days=7)).isoformat()
+    d5 = (today - datetime.timedelta(days=5)).isoformat()
+    s60 = (today - datetime.timedelta(days=60)).isoformat()
+    s6 = (today - datetime.timedelta(days=6)).isoformat()
+    # P&L from cache.daily_brand_pnl + outcome from cache.order_outcome (was SSH→daily_perf/profitability.db)
     try:
-        d = json.loads(out.splitlines()[-1])
-    except Exception:
-        print("Nu am putut citi datele:", out[:160]); return
+        mc = _pg(secret("DATABASE_URL_METRICS")).cursor()
+    except Exception as e:
+        print("Nu am putut conecta la metrics:", str(e)[:160]); return
+    def agg(wsql, params):
+        mc.execute("SELECT COALESCE(SUM(revenue),0)::float8, COALESCE(SUM(total_spend),0)::float8, "
+                   "COALESCE(SUM(cogs),0)::float8, COALESCE(SUM(transport),0)::float8, "
+                   "COALESCE(SUM(orders),0)::int FROM cache.daily_brand_pnl WHERE " + wsql, params)
+        return list(mc.fetchone())
+    y = agg("date=%s", (yd,))
+    m = agg("date>=%s AND date<=%s", (ms, yd))
+    mc.execute("SELECT brand_name, SUM(revenue)::float8, SUM(total_spend)::float8 FROM cache.daily_brand_pnl "
+               "WHERE date=%s GROUP BY brand_name ORDER BY 2 DESC LIMIT 6", (yd,))
+    tb = [list(r) for r in mc.fetchall()]
+    mc.execute("SELECT COUNT(*)::int, COALESCE(SUM(revenue),0)::float8 FROM cache.order_outcome "
+               "WHERE status_category='Refuzata' AND created_at::date >= %s", (d7,))
+    refz = list(mc.fetchone())
+    mc.execute("SELECT COUNT(*)::int FROM cache.order_outcome WHERE status_category='Netrimisa' "
+               "AND created_at::date >= %s", (d5,))
+    netr = mc.fetchone()[0]
+    mc.execute("SELECT COUNT(*)::int FROM cache.order_outcome WHERE status_category='In curs de livrare' "
+               "AND created_at::date BETWEEN %s AND %s", (s60, s6))
+    stuck = mc.fetchone()[0]
+    d = {"yd": yd, "ms": ms, "y": y, "m": m, "tb": tb, "refz": refz, "netr": netr, "stuck": stuck}
     # open RMAs (grandia)
     rma = "?"
     try:
