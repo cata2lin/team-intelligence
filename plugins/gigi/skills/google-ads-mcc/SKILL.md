@@ -72,6 +72,14 @@ uv run gads.py report --customer 7566352958 --query "SELECT campaign.name, campa
 `costMicros` is shown ÷1e6 (RON). Ranges: TODAY, YESTERDAY, LAST_7_DAYS, LAST_14_DAYS, LAST_30_DAYS, THIS_MONTH.
 Useful signals: `campaign.primary_status_reasons` = `BUDGET_CONSTRAINED` (→ scale), bidding strategy, asset group listing groups.
 
+## 1b. Keyword research — Keyword Planner (`kw_ideas.py`) — și pentru SEO
+Volume REALE de căutare lunară (RO) via `generateKeywordIdeas`. Read-only. **Util mai ales pt SEO** (gigi:shopify-seo): ce cuvinte au cerere → ce colecții/articole merită. Geo RO=2642, **limbă RO=1032** (Keyword Planner folosește 1032, NU 1038 care e pt targeting campanii).
+```bash
+DATABASE_URL_METRICS=... uv run kw_ideas.py --customer 9069610821 --seeds "mobilier,canapea,lustra led"
+uv run kw_ideas.py --customer 9069610821 --url https://grandia.ro/collections/mobilier --page   # idei din pagină
+```
+**Regulă SEO (vezi gigi:shopify-seo):** volumul = CEREREA, dar colecție creezi DOAR unde ai stoc real — termen cu volum mare fără marfă = pagină goală, nu task SEO.
+
 ## 2. Mutations — **dry-run by default, add `--apply` to execute**
 Treat a write to a live ad account like a destructive DB write: dry-run, confirm with the user, then `--apply`.
 ```bash
