@@ -16,8 +16,9 @@ AUTH (do this first — the SA key lives in the KB, never printed):
 
 Commands:
     uv run gas_deploy.py list
-    uv run gas_deploy.py get  --script-id <ID> [--out backup.json]
-    uv run gas_deploy.py push --script-id <ID> --as owner@domain --file Code=new.gs [--file appsscript=manifest.json] [--apply]
+    uv run gas_deploy.py get    --script-id <ID> [--out backup.json]
+    uv run gas_deploy.py push   --script-id <ID> --as owner@domain --file Code=new.gs [--file appsscript=manifest.json] [--apply]
+    uv run gas_deploy.py create --title "My Script" --as owner@domain [--parent <driveFileId>] [--file Code=code.gs] [--apply]
 
 Notes / gotchas (hard-won):
   * READ (`get`) works with the plain SA. WRITE (`push`) needs impersonation (`--as <owner>`)
@@ -126,6 +127,39 @@ def cmd_push(a):
     print(f"\nUPDATE: {'OK' if ok else 'ATENTIE — read-back nu coincide!'}  | fisiere in proiect: {[f['name'] for f in r.get('files',[])]}")
     if not ok: sys.exit("read-back mismatch — verifica manual (backup pastrat).")
 
+def cmd_create(a):
+    if not a.as_user:
+        sys.exit("create needs --as <owner-email> (write/create requires impersonation).")
+    files = {}
+    for spec in a.file:
+        if "=" not in spec: sys.exit(f"--file must be NAME=path, got: {spec}")
+        name, path = spec.split("=", 1)
+        files[name.strip()] = open(path, encoding="utf-8").read()
+    body = {"title": a.title}
+    if a.parent: body["parentId"] = a.parent     # bound script (Sheet/Doc/Form Drive id)
+    kind = "BOUND la " + a.parent if a.parent else "STANDALONE"
+    print(f"mod: {'APLIC (--apply)' if a.apply else 'DRY-RUN (nimic creat)'}")
+    print(f"  creez proiect {kind}: titlu={a.title!r} ca {a.as_user}")
+    for n in files: print(f"    + fisier initial: {n} ({len(files[n])} chars)")
+    if not a.apply:
+        print("\nDRY-RUN. Adauga --apply pentru a crea."); return
+    svc = _script(a.as_user)
+    proj = svc.projects().create(body=body).execute()
+    sid = proj["scriptId"]
+    print(f"\nCREAT scriptId: {sid}")
+    if files:
+        cur = svc.projects().getContent(scriptId=sid).execute()   # default Code + appsscript
+        out, names = [], set(files)
+        for f in cur["files"]:
+            out.append({"name": f["name"], "type": f["type"],
+                        "source": files.get(f["name"], f.get("source", ""))})
+            names.discard(f["name"])
+        for n in names:                                           # extra files not in default
+            out.append({"name": n, "type": _infer_type(n), "source": files[n]})
+        svc.projects().updateContent(scriptId=sid, body={"files": out}).execute()
+        print(f"  continut initial scris: {[f['name'] for f in out]}")
+    print(f"  editor: https://script.google.com/d/{sid}/edit")
+
 def main():
     ap = argparse.ArgumentParser(description="Deploy/patch Google Apps Script code (dry-run default).")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -138,8 +172,14 @@ def main():
     g.add_argument("--file", action="append", default=[], help="NAME=path (repeatable; NAME = file name in project, no extension)")
     g.add_argument("--backup", default=None)
     g.add_argument("--apply", action="store_true")
+    g = sub.add_parser("create")
+    g.add_argument("--title", required=True, help="title of the new script project")
+    g.add_argument("--as", dest="as_user", required=True, help="owner email to impersonate")
+    g.add_argument("--parent", default=None, help="Drive file id of a Sheet/Doc/Form -> bound script (else standalone)")
+    g.add_argument("--file", action="append", default=[], help="NAME=path initial content (repeatable)")
+    g.add_argument("--apply", action="store_true")
     a = ap.parse_args()
-    {"list": cmd_list, "get": cmd_get, "push": cmd_push}[a.cmd](a)
+    {"list": cmd_list, "get": cmd_get, "push": cmd_push, "create": cmd_create}[a.cmd](a)
 
 if __name__ == "__main__":
     main()
