@@ -1,7 +1,7 @@
 ---
 name: cross-sell
 description: Cross-sell / "frequently bought together" recommender from our own order data — market-basket analysis (support / confidence / lift) on metrics order line items, per store. Surfaces which products are actually bought together so we can add PDP "frequently bought together" blocks, power Klaviyo post-purchase flows, and pick the 2+1 surprise-perfume pairings. Use for "what's bought together", "cross-sell", "frequently bought together", "produse complementare", "ce se cumpără împreună", "upsell pairings". Read-only.
-argument-hint: "--brand <esteban|grandia|gt|nubra|belasil> [--product <title>] [--days 180]"
+argument-hint: "--brand <esteban|grandia|gt|nubra|belasil> [--product <title>] [--days 180] [--cached]"
 ---
 
 # cross-sell — frequently-bought-together (our data)
