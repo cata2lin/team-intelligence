@@ -208,6 +208,47 @@ that page renders through the theme like any storefront page.
 - Deindex is not instant — it drops on the next crawl (days–weeks). For speed, file a
   temporary removal in Google Search Console (team has GSC via `gigi:analytics`).
 
+### noindex the "ARONA SRL" legal pages across ALL stores — `scripts/noindex_legal_all.py`
+The recurring job: get the **legal entity name** (`ARONA SRL`, CUI/J-number, address) out of
+Google search results on every store, **without** removing the legally-required disclosure from
+the site. One tool does the whole sweep (recon + batched apply + verify):
+```bash
+uv run scripts/noindex_legal_all.py scan                 # read-only: where does the term appear, per store
+uv run scripts/noindex_legal_all.py apply                # DRY-RUN: planned <meta robots> insertions
+uv run scripts/noindex_legal_all.py apply --apply        # WRITE to live themes (one PUT + backup per store)
+uv run scripts/noindex_legal_all.py apply --apply --only EST,GT
+uv run scripts/noindex_legal_all.py verify               # Googlebot-UA, cache-busted re-check
+uv run scripts/noindex_legal_all.py scan  --term "arona" # term is configurable (default: "arona")
+```
+It auto-discovers, per store, the auto-generated `/policies/*` pages, the homepage footer, and
+every admin `/pages/*`, then noindexes only the **dedicated** legal/policy pages. Uses the SAME
+snippet as `noindex_page.py`, so each path stays reversible with `noindex_page.py --remove`.
+Hard-won lessons baked in (Jun 2026, swept all 21 ARONA stores):
+- **WHY noindex, not delete.** RO/EU law REQUIRES the company ID (name, CUI, J-no, address) on
+  the storefront (Termeni / Contact / footer). `noindex` keeps it on the site (crawlable) but
+  out of search results — the correct, legal fix. **Do NOT** remove the name or robots.txt-Disallow
+  these pages (Disallow *prevents* deindexing — Google can't crawl to see the noindex).
+- **FOOTER = site-wide ⇒ cannot be noindexed.** On stores that print the entity in the footer
+  (Jun 2026: **BELA, BON, GRAN**) the term is on *every* page; noindexing the whole shop is wrong
+  and the footer must stay for legal compliance. The tool **flags** these and noindexes only the
+  dedicated pages — surface the footer caveat to the requester, don't try to "fix" it.
+- **The same legal text lives in 2 places.** Shopify auto-generates `/policies/<handle>` (contact-
+  information, refund-policy, privacy-policy, terms-of-service, shipping-policy, legal-notice,
+  subscription-policy) **and** many stores have hand-built duplicates at `/pages/<handle>`
+  (termeni-si-conditii, politica-de-confidentialitate, …, plus localized BG/CZ handles). Noindex
+  BOTH. `/policies/contact-information` is the canonical "ARONA-SRL page".
+- **Diacritic handles.** Some handles contain `ț`/`ș` (e.g. BON `politica-de-confidențialitate`).
+  `request.path` may be percent-encoded → match on the **ASCII prefix** (`/pages/politica-de-confiden`);
+  the tool does this automatically (`contains` substring).
+- **OAuth-rotation stores (NUB/Nubra).** Static token is dead by design → admin calls 401 from a
+  laptop; `scan` flags it "run on VPS". Run the tool **on the VPS** (`ssh root@84.46.242.181`,
+  `/root/Scripturi`, `.venv/bin/python`) where `core.stores.get_store` returns the live token.
+  Nubra's *refresh* currently 401s but the **stored access token still works** for reads+writes (§3).
+- **Verify via API read-back, not the storefront.** Shopify's policy/page **edge cache is persistent**
+  and flaps for minutes after a theme edit (a page can show no-meta on one cache-buster and the meta
+  on the next). The authoritative check is reading `layout/theme.liquid` back and grepping for the
+  snippet; the cached storefront HTML is not.
+
 ## 6. Rate limits (don't get 429'd)
 
 - **GraphQL**: cost-based leaky bucket. Read `extensions.cost.throttleStatus`
