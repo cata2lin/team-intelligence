@@ -200,3 +200,54 @@ Playbook order that worked for a store (Esteban, Nubra): brand collections (+pub
 → menu → internal-link cluster → copy rewrite (6-agent fan-out, see §16) → brand link
 on PDPs → de-orphan blog articles (per-store `deorphan_<store>.json` map) → fill
 metafield/SEO gaps.
+
+## Meta-quality sweep & gotchas (Jun 2026 — Grandia / Belasil)
+**"100% SEO coverage" can be a lie on supplier-import stores.** Stores that import from
+CN suppliers (Grandia, Belasil) ship products with **empty `seo.title`** and **raw
+supplier-junk `seo.description`** (e.g. `Brand Name:MagiDeal / Origin:Mainland China /
+Material:...`). A prior "100%" claim missed **80/476** products on Grandia; **all 21**
+Belasil products had **zero** meta description. Run a recurring read-only sweep —
+paginate `status:active` products and flag:
+- empty/blank `seo.title`;
+- `seo.description` matching: `Brand Name:|Model Number:|Mainland China|High-concerned|Origin:|Item Type:|Package Included|Feature:Stocked|Material:[A-Z]|Color:[A-Z]|Size:[0-9].*inch`.
+Regenerate keyword-led RO title (≤60) + desc (120–155) **grounded ONLY in the product's
+real title** — validate: every number in the new meta must already appear in
+`title+handle`, else it's hallucinated. The product **`title` is ground truth, NOT the
+handle** (handles go stale: a balloon handle said `80-cm` but the real title was `90 cm`).
+
+**`seo.title == product.title` → Shopify stores `null`** (no userError); `<title>` falls
+back to the product title (fine if concise). Don't chase it as "empty/broken".
+
+**High rank + ~0 CTR → check for a CONTAMINATED `seo.title`.** Belasil ranked #1.2 on
+"lavete magice" (789 impr) with **0 clicks** because the same wrong title ("Belasil Ultra
+– Kit 10 lavete…") was copy-pasted across every lavete product → SERP title didn't match
+the query. Fix = give each product its own keyword-matching title.
+
+## Homepage title/meta — the `{% if page_description %}` trap
+Themes output `<title>{{ page_title }}…</title>` where on the homepage `page_title` falls
+back to `shop.name` (e.g. just "Belasil"), and the meta-description line is often wrapped in
+`{% if page_description %}…{% endif %}` — **false on the homepage** (blank) → homepage gets
+**no meta description at all**. Fix in `layout/theme.liquid`:
+- Title: `{%- if request.page_type == 'index' and page_title == shop.name -%}<keyword-rich homepage title>{%- else -%}…default…{%- endif -%}` (the `== shop.name` guard respects a Preferences title set later).
+- Desc: replace the block with `{%- if page_description != blank -%}<meta …page_description>{%- elsif request.page_type == 'index' -%}<meta …homepage fallback>{%- endif -%}`.
+Also set og:title/og:description homepage fallbacks in `snippets/meta-tags.liquid` (og_description defaults to `shop.name` otherwise).
+
+## og:image homepage gap
+Many themes emit og:image only inside `{%- if page_image -%}` → the homepage (no
+`page_image`) renders **no og:image / twitter:image**. Add a fallback in `meta-tags.liquid`:
+`{%- if page_image == blank and request.page_type == 'index' and settings.logo != blank -%}`
+→ og:image + og:image:secure_url + twitter:image = `https:{{ settings.logo | image_url: width: 1200 }}`.
+Also: og:image served on `http:` → switch primary to `https:` (keep `og:image:secure_url`),
+and add `twitter:image` (themes often omit it).
+
+## Cross-store access — the ARONA app is NOT on every store
+`shopify_lib.Store` / `seo_audit.py` use the ARONA custom-app `client_credentials` grant —
+installed on Esteban/GT/Nubra/Grandia but **NOT Belasil** (seo_audit.py errors there). For
+those stores use `../shopify-stores/scripts/shopify_gql.py --prefix <PREFIX>` (token from
+`SHOPIFY_STORES_CSV`) for Admin GraphQL, and storefront fetch for on-page checks.
+
+## Asset API read-after-write lag
+`PUT themes/{id}/assets.json` returns OK but an **immediate** GET can still show the OLD
+content (eventual consistency) — re-read after a few seconds before concluding the edit
+failed. Separately, the **storefront** is edge-cached (very persistent): verify the THEME
+SOURCE via `asset_get`, not just the live page (`?nc=` doesn't reliably bust the full-page cache).
