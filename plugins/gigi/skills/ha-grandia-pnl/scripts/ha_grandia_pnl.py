@@ -119,7 +119,27 @@ def main():
         print(f"  = NET {net:>12,.0f}   ({net/rev_n*100:.1f}% margin)")
     if not a.no_ha:
         print(f"\n(marketing HA alocat = {ha_mkt:,.0f} lei — cotă HA din override-ul {DEALS_PREFIXES})")
-    print("\nNotă: contribuție pre-overhead; HA marketing ALOCAT (per-SKU incomplet); capital de stoc neinclus (vezi sheet inventar).")
+
+    # --- Return on inventory (din profit_inventory_value, dacă există snapshot) ---
+    try:
+        snap = remote("SELECT snapshot FROM profit_inventory_value ORDER BY snapshot DESC LIMIT 1")
+        if snap:
+            sn = snap[0]["snapshot"]
+            inv = {r["line"]: r["stock_value"] for r in remote(
+                f"SELECT line, stock_value FROM profit_inventory_value WHERE snapshot='{sn}'")}
+            INV_MAP = {"HA": "HA", "GRAN": "Grandia"}
+            print(f"\n--- Return on inventory (stoc la {sn}) ---")
+            for lbl, *_, net in out:
+                key = INV_MAP.get(lbl, lbl)
+                sv = inv.get(key)
+                if sv:
+                    print(f"  {lbl:6} net {net:>10,.0f} / stoc {sv:>10,.0f} = {net/sv*100:>5.1f}% pe perioadă")
+    except Exception:
+        pass
+
+    print("\nNotă: contribuție pre-overhead; HA marketing ALOCAT (per-SKU incomplet). "
+          "Inventar din profit_inventory_value (snapshot din sheet-ul de inventar, un tab/lună). "
+          "Containere HA care vin: tabel profit_container_ha.")
 
 if __name__ == "__main__":
     main()
