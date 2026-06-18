@@ -11,12 +11,15 @@ Construit PE `gigi:ads-transparency` (RPC-ul Google Transparency Center, fără 
 
 ## Comenzi
 ```bash
-# cele mai bune creative ale unui competitor (rank pe longevitate)
+# GOOGLE — cele mai bune creative ale unui competitor (rank pe longevitate)
 uv run scripts/competitor_ads.py best rasheed.ro --top 10
 uv run scripts/competitor_ads.py best notino.ro evero.ro parfumat.ro   # batch
-
-# best + analiză vision (Gemini) + comparativ cu noi + recomandări
+# Google: best + analiză vision (Gemini) + comparativ cu noi + recomandări
 uv run scripts/competitor_ads.py analyze rasheed.ro --top 6 --vs esteban.ro
+
+# TIKTOK — reclamele unui advertiser din TikTok Ad Library UE (Playwright + Chrome)
+uv run --with playwright scripts/tiktok_ads.py best "answear" --top 10
+uv run --with playwright scripts/tiktok_ads.py best "Answear" --json
 ```
 
 ## Ideea de bază: longevitatea = proxy de câștigător
@@ -37,13 +40,21 @@ LLM-ul vine din KB: `GEMINI_API_KEY` / `GOOGLE_AI_API_KEY` (vezi [[image-gen-ski
 ## Surse & roadmap
 | Sursă | Stare |
 |---|---|
-| **Google** Ads Transparency Center | ✅ v1 (fără auth) |
+| **Google** Ads Transparency Center | ✅ (fără auth) — `competitor_ads.py` |
+| **TikTok** Ad Library UE | ✅ (`tiktok_ads.py`, Playwright + Chrome) |
 | **Meta** Ad Library API | ⏳ după confirmarea ID pe contul Meta (facebook.com/ads/library/api) — apoi `ads_archive` cu tokenul nostru |
-| **TikTok** Commercial Content Library (UE) | ⏳ recon endpoint (library.tiktok.com; API intern de descoperit cu chrome-devtools) |
 | **Comparativ cu PERFORMANȚA noastră reală** | ⏳ enhancement: ROAS/CTR/spend per ad din conturile noastre via `gigi:meta-ads`/`tiktok-ads`/`google-ads-mcc` (la noi avem date reale, nu doar longevitate) |
+
+## TikTok — detalii (tiktok_ads.py)
+TikTok caută pe **advertiser**, nu pe domeniu. API-ul intern (`library.tiktok.com/api/v1/{suggestion,search}`)
+e semnat (`x-ccl-str` din JS) → îl conducem prin **Playwright + Chrome de sistem** (`channel="chrome"`, fără
+download de chromium). Flux: nume → `biz_id` (suggestion) → reclame (search). **Capcană critică: `query_type=2`**
+— fără el, numele e tratat ca keyword și întoarce feed-ul generic RO (44M reclame), nu advertiserul. Răspunsul dă
+`first/last_shown_date` (longevitate), `title` (copy-ul), `estimated_audience`, `cover_img`/`video_url`.
 
 ## Capcane
 - Region code Google = `2642` (RO). Pt altă țară, deschide adstransparency.google.com pe regiunea aia și citește numărul din payload.
+- TikTok: cere Google Chrome instalat. Numele de advertiser ≠ domeniu (ex. „answear", nu „answear.ro"); dacă-s mai mulți omonimi, scriptul caută la fiecare până găsește reclame.
 - `best` e cap-at la `--limit` (100). „100 creative" poate însemna „100+".
 - Imaginile (`tpc.googlesyndication.com/archive/simgad/…`) se deschid direct ca imagini și se pot da la vision.
 - Longevitatea e proxy, nu performanță certă — un creativ vechi încă activ e foarte probabil câștigător, dar confirmă cu bunul-simț (poate fi un evergreen de brand).
