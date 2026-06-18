@@ -258,7 +258,8 @@ def probe_youtube(brand, conf, days):
     base = conf["terms"][0]
     ctx = (conf.get("context") or [None])[0]
     q = f"{base} {ctx}" if (conf.get("ambiguous") and ctx) else base
-    key = secret("YOUTUBE_API_KEY")
+    # cheia dedicată; rezervă: GADS_GOOGLE_API_KEY (merge dacă YouTube Data API v3 e activat pe proiectul ei)
+    key = secret("YOUTUBE_API_KEY") or secret("GADS_GOOGLE_API_KEY")
     tok = None if key else _yt_oauth_token()
     if not key and not tok:
         print("  n/a — lipsește YOUTUBE_API_KEY.")
