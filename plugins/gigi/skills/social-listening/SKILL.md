@@ -1,7 +1,7 @@
 ---
 name: social-listening
 description: Social listening RO — caută ACTIV mențiuni și buzz despre brandurile Arona (Nubra, Esteban, George Talent, Grandia, Belasil, Gento, Covoria) pe web și social, din surse pe care le avem deja, fără tool plătit de monitoring și fără cod extern neverificat. Combină: mențiuni/profile terțe în Google RO (DataForSEO SERP, localizat — scoate postările de Instagram/Facebook/forumuri care ne pomenesc, inclusiv influenceri/UGC), numărul global de mențiuni + sentiment (DataForSEO Content Analysis), branded search din Search Console (căutări pe numele brandului, săptămâna curentă vs precedentă = semnalul „se vorbește/caută despre noi", cu detecție de spike/uptick), Reddit (best-effort) și Instagram hashtag (best-effort, dacă există token IG). Folosește pentru „social listening", „caută mențiuni despre brandul nostru", „ce se vorbește despre Nubra/Esteban", „ne-a pomenit cineva pe social media", „vreo postare de influencer", „brand mentions", „buzz", „monitorizare social media", „cine ne pomenește", „ce zice lumea despre noi", „branded search a crescut?".
-argument-hint: scan <brand> [--days 7] [--only mentions,reddit,gsc,instagram]
+argument-hint: scan <brand> [--days 7] [--only mentions,news,reddit,gsc,instagram]
 ---
 
 # social-listening — caută mențiuni & buzz despre brandurile Arona
@@ -26,6 +26,7 @@ uv run scripts/social_listen.py brands          # brandurile configurate
 | sondă | sursă | ce dă | fiabilitate |
 |---|---|---|---|
 | **mentions** | DataForSEO **Google RO SERP** + Content Analysis | profile/postări TERȚE care ne pomenesc (IG/FB/forumuri/marketplace), marcate 📱 când-s social; + nr. global de mențiuni & sentiment | **bună** (SERP RO e localizat și curat); costă câțiva cenți/rulare |
+| **news** | DataForSEO **Google News** + organic „forumuri/discuții" RO | articole News terțe + fire pe forumuri/Reddit/Quora — și prinde **TikTok & YouTube** indexate de Google (mențiuni TT/YT fără API-ul lor!) | **bună**; News e adesea gol pt branduri mici (normal) |
 | **gsc** | Google Search Console | **branded search** (căutări pe nume) fereastra curentă vs precedentă, cu `flat / 🔼uptick(+15-30%) / 🔺spike(>+30%)` | **bună**, dacă SA `looker-sheets` e Full user pe proprietate; lag GSC ~3 zile |
 | **reddit** | reddit.com search (public) | fire recente care pomenesc brandul | best-effort (Reddit dă 403 de pe IP-uri server; volum RO mic) |
 | **instagram** | Graph API `ig_hashtag_search` | postări recente cu #brand | best-effort — cere `IG_GRAPH_TOKEN` + `IG_BUSINESS_ID` în KB (lipsesc acum) |
