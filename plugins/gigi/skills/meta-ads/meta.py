@@ -73,7 +73,8 @@ def graph(url, params):
                 break
             t = r.text.lower()
             transient = (r.status_code in (429, 500, 503) or '"is_transient":true' in t
-                         or 'request limit' in t or '"code":4' in t or '"code":17' in t or '"code":613' in t)
+                         or 'request limit' in t or 'temporarily unavailable' in t
+                         or '"code":2' in t or '"code":4' in t or '"code":17' in t or '"code":613' in t)
             if transient and attempt < 5:
                 time.sleep(min(90, 5 * (2 ** attempt)))  # exponential backoff on Meta rate limit
                 continue
