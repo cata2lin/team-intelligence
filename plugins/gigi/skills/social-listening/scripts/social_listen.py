@@ -258,9 +258,11 @@ def probe_youtube(brand, conf, days):
     base = conf["terms"][0]
     ctx = (conf.get("context") or [None])[0]
     q = f"{base} {ctx}" if (conf.get("ambiguous") and ctx) else base
-    # cheia dedicată; rezervă: GADS_GOOGLE_API_KEY (merge dacă YouTube Data API v3 e activat pe proiectul ei)
-    key = secret("YOUTUBE_API_KEY") or secret("GADS_GOOGLE_API_KEY")
+    # ordine: cheie dedicată → OAuth readonly (clientul yt_upload, proiect cu API activ) → rezervă GADS key
+    key = secret("YOUTUBE_API_KEY")
     tok = None if key else _yt_oauth_token()
+    if not key and not tok:
+        key = secret("GADS_GOOGLE_API_KEY")   # rezervă finală (merge doar dacă YT Data API e activ pe proiectul ei)
     if not key and not tok:
         print("  n/a — lipsește YOUTUBE_API_KEY.")
         print("       Activare (2 min, gratis): Google Cloud Console → activează «YouTube Data API v3»")
@@ -281,14 +283,22 @@ def probe_youtube(brand, conf, days):
             print(f"  n/a — {j['error'].get('message','')[:130]}")
             return None
         items = j.get("items") or []
-        rel = [i for i in items if base.lower() in
-               ((i.get("snippet", {}).get("title", "") + " " + i.get("snippet", {}).get("description", "")).lower())]
+        site = (conf.get("site") or "").lower()
+        terms = [t.lower() for t in conf["terms"]] + ([site] if site else [])
+        def _txt(i):
+            s = i.get("snippet", {})
+            return (s.get("title", "") + " " + s.get("description", "")).lower()
+        rel = [i for i in items if any(t in _txt(i) for t in terms)]
+        confd = [i for i in rel if site and site in _txt(i)]   # mențiune de domeniu = sigur despre noi
         show = rel or items
-        print(f"  video-uri pe „{q}\": {len(items)}  (relevante pe nume: {len(rel)})")
+        print(f"  video-uri pe „{q}\": {len(items)}  ·  relevante: {len(rel)}  ·  📍confirmate (domeniu): {len(confd)}")
+        if not rel:
+            print("  (toate par omonime — nume ambiguu pe YouTube; verifică manual)")
         for i in show[:12]:
             s = i.get("snippet", {})
-            print(f"   • [{s.get('publishedAt','')[:10]}] {s.get('channelTitle','')[:22]:22} {s.get('title','')[:52]}")
-        return {"videos": len(items), "relevant": len(rel)}
+            mark = "📍" if (site and site in _txt(i)) else "  "
+            print(f"  {mark} [{s.get('publishedAt','')[:10]}] {s.get('channelTitle','')[:20]:20} {s.get('title','')[:50]}")
+        return {"videos": len(items), "relevant": len(rel), "confirmed": len(confd)}
     except Exception as e:
         print(f"  n/a — {e}")
         return None
@@ -546,7 +556,8 @@ def cmd_scan(args):
         bits.append(f"{nw.get('news',0)} articole News + {nw.get('forums',0)} fire pe forumuri")
     yt = summary.get("youtube") or {}
     if yt.get("relevant"):
-        bits.append(f"{yt['relevant']} video-uri YouTube relevante")
+        cc = f", {yt['confirmed']} 📍confirmate" if yt.get("confirmed") else ""
+        bits.append(f"{yt['relevant']} video-uri YouTube relevante{cc}")
     if fresh_reddit:
         bits.append(f"{fresh_reddit} fire Reddit proaspete")
     print("  " + ("\n  ".join("• " + b for b in bits) if bits else "semnal insuficient din sursele disponibile."))
