@@ -174,6 +174,70 @@ def probe_mentions(brand, conf, days):
               f"Pentru curățenie filtrează pe context: {', '.join(conf.get('context') or []) or '—'} sau pe nubra.ro.")
     return out or None
 
+# ───────────────────────── PROBE 1b: Google News + forumuri (DataForSEO) ─────────────────────────
+FORUM_HINTS = ("reddit", "quora", "forum", "tpu.ro", "softpedia", "okazii", "trustpilot",
+               "reclamatii", "discuss", "comunitate", "grup", "tiktok", "instagram", "facebook", "youtube")
+
+def _norm_items(items):
+    """Aplatizează rezultatele SERP/News: top_stories & discussions_and_forums au sub-items în .items."""
+    out = []
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        raw = it.get("items")
+        subs = raw if (isinstance(raw, list) and raw and all(isinstance(x, dict) for x in raw)) else [it]
+        for s in subs:
+            if not isinstance(s, dict):
+                continue
+            out.append({"domain": (s.get("domain") or s.get("source") or ""),
+                        "title": (s.get("title") or s.get("snippet") or ""),
+                        "ts": (s.get("timestamp") or "")[:10],
+                        "type": s.get("type") or it.get("type")})
+    return out
+
+def probe_news(brand, conf, days):
+    _hr(f"GOOGLE NEWS + FORUMURI — „{conf['name']}\"  (DataForSEO, RO)")
+    base = conf["terms"][0]
+    ctx = (conf.get("context") or [None])[0]
+    nkw = f"{base} {ctx}" if (conf.get("ambiguous") and ctx) else base   # dezambiguizare pt nume generice
+    out = {}
+    # — Google News —
+    try:
+        res = _dfs_post("/v3/serp/google/news/live/advanced",
+                        [{"keyword": nkw, "location_name": "Romania", "language_name": "Romanian", "depth": 30}])
+        items = (res[0].get("items") or []) if res else []
+        news = [n for n in _norm_items(items) if n["domain"] and not _owned(n["domain"])]
+        print(f"\n  Google News pe „{nkw}\": {len(news)} articole terțe")
+        for n in news[:12]:
+            print(f"   • [{n['ts'] or '????'}] {n['domain'][:24]:24} {n['title'][:60]}")
+        out["news"] = len(news)
+    except Exception as e:
+        if "no search result" in str(e).lower():
+            print(f"\n  Google News pe „{nkw}\": 0 articole (fără știri)")
+            out["news"] = 0
+        else:
+            print(f"  news n/a — {e}")
+    # — Forumuri / discuții —
+    try:
+        fkw = f"{base} (forum OR pareri OR review OR experienta)"
+        res = _dfs_post("/v3/serp/google/organic/live/advanced",
+                        [{"keyword": fkw, "location_name": "Romania", "language_name": "Romanian", "depth": 30}])
+        items = (res[0].get("items") or []) if res else []
+        forums = []
+        for n in _norm_items(items):
+            dom = n["domain"]
+            if not dom or _owned(dom):
+                continue
+            if n["type"] == "discussions_and_forums" or any(h in dom for h in FORUM_HINTS):
+                forums.append(n)
+        print(f"\n  Forumuri / discuții pe „{base}\": {len(forums)}")
+        for n in forums[:12]:
+            print(f"   • {n['domain'][:24]:24} {n['title'][:62]}")
+        out["forums"] = len(forums)
+    except Exception as e:
+        print(f"  forumuri n/a — {e}")
+    return out or None
+
 # ───────────────────────── PROBE 2: Reddit (free) ─────────────────────────
 def probe_reddit(brand, conf, days):
     _hr(f"REDDIT — „{conf['name']}\"  (căutare publică, ultimele ~{days} zile)")
@@ -377,7 +441,7 @@ def cmd_ig_discover(args):
     print("\nPune id-urile relevante în IG_ACCOUNTS (în acest script).")
 
 # ───────────────────────── main ─────────────────────────
-PROBES = {"mentions": probe_mentions, "reddit": probe_reddit, "gsc": probe_gsc, "instagram": probe_instagram}
+PROBES = {"mentions": probe_mentions, "news": probe_news, "reddit": probe_reddit, "gsc": probe_gsc, "instagram": probe_instagram}
 
 def cmd_scan(args):
     key, conf = cfg(args.brand)
@@ -409,6 +473,9 @@ def cmd_scan(args):
     if serp_third is not None:
         extra = f" ({serp_social} pe social)" if serp_social else ""
         bits.append(f"{serp_third} domenii terțe ne pomenesc în Google RO{extra}")
+    nw = summary.get("news") or {}
+    if nw.get("news") is not None or nw.get("forums") is not None:
+        bits.append(f"{nw.get('news',0)} articole News + {nw.get('forums',0)} fire pe forumuri")
     if fresh_reddit:
         bits.append(f"{fresh_reddit} fire Reddit proaspete")
     print("  " + ("\n  ".join("• " + b for b in bits) if bits else "semnal insuficient din sursele disponibile."))
