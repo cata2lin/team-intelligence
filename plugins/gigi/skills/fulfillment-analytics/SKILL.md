@@ -1,6 +1,6 @@
 ---
 name: fulfillment-analytics
-description: Analitică RAPIDĂ de livrare / vânzări / transport din AWBprint (DB-ul AWB/Frisbo), pe TOATE cele 21 de magazine Arona — Postgres = instant, ~99% complet (mult peste metrics warehouse, care e incomplet). 4 rapoarte (--report) — refuse (rată de refuz/retur per brand|curier|produs, din line_items × aggregated_status), sales (venit + comenzi + bucăți per brand, sau --daily pe zi), transport (cost REAL de curier per brand×curier, avg/colet, % din venit), stuck (colete blocate in_transit/pending de > N zile + „ghost" = AWB emis dar nescanat). Opțional scrie un Google Sheet partajat. Folosește pentru „rată de refuz", „COD refusal", „ce brand/produs/curier se refuză cel mai mult", „cât pierdem din retururi", „venit pe brand azi/luna asta", „vânzări pe zi", „cost real de transport", „cât mănâncă transportul din marjă", „DPD vs Sameday cost", „colete blocate", „ghost shipments", „comenzi stuck in transit". Triggers: refuz, retur, COD refusal, deliverability, livrabilitate, refuse rate, transport cost, cost curier, vanzari pe brand, venit zilnic, daily sales, stuck shipments, colete blocate, ghost shipment, AWBprint, Frisbo.
+description: Analitică RAPIDĂ de livrare / vânzări / transport / retenție din AWBprint (DB-ul AWB/Frisbo), pe TOATE cele 21 de magazine Arona — Postgres = instant, ~99% complet (mult peste metrics warehouse, care e incomplet). 5 rapoarte (--report) — refuse (rată de refuz/retur per brand|curier|produs, din line_items × aggregated_status), sales (venit + comenzi + bucăți per brand, sau --daily pe zi), transport (cost REAL de curier per brand×curier, avg/colet, % din venit), stuck (colete blocate in_transit/pending de > N zile + „ghost" = AWB emis dar nescanat), repeat (retenție: clienți noi vs revenit, returning-rate, comenzi/client, cheia = telefonul). Opțional scrie un Google Sheet partajat. Folosește pentru „rată de refuz", „COD refusal", „ce brand/produs/curier se refuză cel mai mult", „cât pierdem din retururi", „venit pe brand azi/luna asta", „vânzări pe zi", „cost real de transport", „cât mănâncă transportul din marjă", „DPD vs Sameday cost", „colete blocate", „ghost shipments", „comenzi stuck in transit", „rată de revenire", „clienți care revin", „retenție", „repeat rate", „câți clienți noi". Triggers: refuz, retur, COD refusal, deliverability, livrabilitate, refuse rate, transport cost, cost curier, vanzari pe brand, venit zilnic, daily sales, stuck shipments, colete blocate, ghost shipment, repeat rate, returning customers, retentie, clienti noi, AWBprint, Frisbo.
 ---
 
 # Fulfillment analytics (AWBprint — rapid, toate magazinele)
@@ -30,6 +30,9 @@ uv run fulfillment_analytics.py --report transport --months 1
 # colete blocate de > 7 zile (in_transit/pending) + ghost (AWB emis, nescanat)
 uv run fulfillment_analytics.py --report stuck --days 7 --limit 50
 
+# retenție: clienți noi vs revenit + returning-rate per brand
+uv run fulfillment_analytics.py --report repeat --months 3
+
 # orice raport + un Google Sheet partajat:
 uv run fulfillment_analytics.py --report refuse --by brand --months 3 --sheet
 ```
@@ -37,7 +40,7 @@ uv run fulfillment_analytics.py --report refuse --by brand --months 3 --sheet
 ### Parametri
 | Flag | Default | Ce face |
 |---|---|---|
-| `--report` | `refuse` | `refuse` / `sales` / `transport` / `stuck` |
+| `--report` | `refuse` | `refuse` / `sales` / `transport` / `stuck` / `repeat` |
 | `--by` | `brand` | doar la `refuse`: `brand` / `courier` / `product` |
 | `--stores` | toate | prefixe (EST,GT) → mapate la magazine; obligatoriu la `refuse --by product` pt titluri |
 | `--months` / `--days` | 3 luni | fereastra; la `stuck`, `--days` = pragul de vechime |

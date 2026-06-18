@@ -327,6 +327,39 @@ def rep_transport(cur, frm, to, stores, limit):
     return ["Brand", "Curier", "Colete", "Cost/colet", "Cost total", "% din venit"], rows[:limit], "transport per brand×curier"
 
 
+def rep_repeat(cur, frm, to, stores, limit):
+    """Retenție: clienți noi vs revenit, returning-rate, comenzi/client. Cheia = telefonul
+    normalizat (ultimele 9 cifre; 100% populat, vs email ~66%). „first_o" = prima comandă
+    EVER a clientului pe ACEL magazin → returning = avea comandă înainte de fereastră."""
+    sf, sp = store_filter(stores)
+    cur.execute(f"""
+      WITH firsts AS (
+        SELECT store_uid, right(regexp_replace(coalesce(shipping_address->>'phone',''),'\\D','','g'),9) ph,
+               min(frisbo_created_at) first_o
+        FROM orders WHERE shipping_address->>'phone' IS NOT NULL GROUP BY store_uid, ph
+      ), w AS (
+        SELECT s.name brand, o.store_uid,
+               right(regexp_replace(coalesce(o.shipping_address->>'phone',''),'\\D','','g'),9) ph
+        FROM orders o JOIN stores s ON s.uid=o.store_uid
+        WHERE o.frisbo_created_at >= %s AND o.frisbo_created_at < %s {sf}
+      )
+      SELECT w.brand, count(*) orders, count(DISTINCT w.ph) customers,
+        count(DISTINCT w.ph) FILTER (WHERE f.first_o >= %s) new_customers,
+        count(*) FILTER (WHERE f.first_o < %s) returning_orders
+      FROM w JOIN firsts f ON f.store_uid=w.store_uid AND f.ph=w.ph
+      WHERE w.ph <> ''
+      GROUP BY w.brand
+    """, [frm, to] + sp + [frm, frm])
+    rows = []
+    for brand, orders, customers, new_cust, ret_orders in cur.fetchall():
+        rate = 100.0 * ret_orders / orders if orders else 0
+        opc = orders / customers if customers else 0
+        rows.append((brand, orders, customers, new_cust, ret_orders, round(rate, 1), round(opc, 2)))
+    rows.sort(key=lambda r: r[5], reverse=True)
+    header = ["Brand", "Comenzi", "Clienți", "Clienți noi", "Cmd. de la revenit", "Returning %", "Cmd/client"]
+    return header, rows[:limit], "repeat / retenție clienți (cheie: telefon)"
+
+
 def rep_stuck(cur, frm, to, stores, days, limit):
     sf, sp = store_filter(stores)
     cutoff = (datetime.now(TZ) - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -350,7 +383,7 @@ def rep_stuck(cur, frm, to, stores, days, limit):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--report", choices=["refuse", "sales", "transport", "stuck"], default="refuse")
+    ap.add_argument("--report", choices=["refuse", "sales", "transport", "stuck", "repeat"], default="refuse")
     ap.add_argument("--by", choices=["brand", "courier", "product"], default="brand", help="doar pt refuse")
     ap.add_argument("--stores", help="prefixe (EST,GT) sau implicit toate")
     ap.add_argument("--months", type=int)
@@ -382,6 +415,8 @@ def main():
         header, rows, label = rep_sales(cur, from_date, to_excl, stores, args.daily, args.limit)
     elif args.report == "transport":
         header, rows, label = rep_transport(cur, from_date, to_excl, stores, args.limit)
+    elif args.report == "repeat":
+        header, rows, label = rep_repeat(cur, from_date, to_excl, stores, args.limit)
     else:
         header, rows, label = rep_stuck(cur, from_date, to_excl, stores, stuck_days, args.limit)
     conn.close()
