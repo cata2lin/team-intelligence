@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.9"
-# dependencies = ["requests>=2.31", "google-auth>=2.0"]
+# dependencies = ["requests>=2.31", "google-auth>=2.0", "psycopg2-binary>=2.9"]
 # ///
 """
 social_listen.py — Social listening RO pentru brandurile Arona.
@@ -66,6 +66,19 @@ def cfg(brand):
         return b, BRANDS[b]
     # fallback: brand necunoscut → caută numele așa cum e dat
     return b, {"name": brand, "site": "", "terms": [brand], "context": [], "ambiguous": True}
+
+# Conturile IG Business pe care le DEȚINEM (descoperite via business_management; vezi `ig-discover`).
+# `ig` = id-ul contului brandului (pt mențiuni-tag „cine ne-a tăguit"). Pt hashtag-search e nevoie
+# doar de UN cont IG al nostru ca apelant (IG_CALLER) — nu trebuie să fie chiar al brandului.
+IG_ACCOUNTS = {
+    "belasil": "17841471596135156", "grandia": "17841474188574596",
+    "gt": "17841475742630890", "bonhaus": "17841455560909948",
+    "magdeal": "17841476114459735", "nocturna": "17841468835767811",
+    "rossi": "17841407896729965",
+    # nubra, esteban: conturile IG nu-s atașate la BM-ul accesibil → adaugă-le ca asset în Business
+    # Manager (sau dă handle-ul pt business_discovery). Hashtag-search merge oricum (folosește IG_CALLER).
+}
+IG_CALLER = "17841474188574596"  # @grandia.ro — apelantul implicit pt ig_hashtag_search
 
 # ───────────────────────── creds ─────────────────────────
 def secret(name):
@@ -271,35 +284,97 @@ def probe_gsc(brand, conf, days):
     print(f"  n/a — niciun property accesibil ({', '.join(site_variants)}); SA looker-sheets nu e Full user pe proprietate?")
     return None
 
-# ───────────────────────── PROBE 4: Instagram hashtag (best effort) ─────────────────────────
+# ───────────────────────── PROBE 4: Instagram (hashtag + cine ne taghează) ─────────────────────────
+IG_VER = "v21.0"
+IG_APP = "arona.ro (app_id 35528853310046610)"
+
+def _ig_get(path, params, tok):
+    p = dict(params); p["access_token"] = tok
+    return requests.get(f"https://graph.facebook.com/{IG_VER}/{path}", params=p, timeout=30).json()
+
 def probe_instagram(brand, conf, days):
-    _hr(f"INSTAGRAM HASHTAG — #{conf['terms'][0].replace(' ', '').replace('.', '')}  (best-effort, Graph API)")
+    _hr(f"INSTAGRAM — „{conf['name']}\"  (hashtag + cine ne-a tăguit, Graph API)")
     tok = secret("IG_GRAPH_TOKEN")
-    igid = secret("IG_BUSINESS_ID")
-    if not tok or not igid:
-        print("  n/a — lipsește IG_GRAPH_TOKEN / IG_BUSINESS_ID în KB.")
-        print("       (ca să-l activăm: token Graph cu instagram_basic+instagram_manage_insights pe un cont IG Business)")
+    key = brand.lower().strip()
+    own_ig = IG_ACCOUNTS.get(key) or secret("IG_BUSINESS_ID")
+    caller = own_ig or IG_CALLER
+    if not tok:
+        print("  n/a — lipsește IG_GRAPH_TOKEN (token cu scope instagram_basic).")
+        print(f"       Tokenurile actuale sunt ADS-ONLY (App „{IG_APP}\", scope ads_read/business_management).")
+        print("       Activare (fără App Review, ești admin pe conturi):")
+        print(f"         1. App «arona.ro» → adaugă produsul Instagram Graph API + conturile IG ca assets")
+        print("         2. generează token cu: instagram_basic, instagram_manage_insights, pages_show_list,")
+        print("            pages_read_engagement (+ instagram_manage_comments pt tag-uri)")
+        print("         3. kb.py secret-set IG_GRAPH_TOKEN <token>   (apoi acest probe pornește singur)")
+        if own_ig:
+            print(f"       Contul IG al brandului e deja știut: id {own_ig}.")
         return None
     tag = conf["terms"][0].replace(" ", "").replace(".", "").replace("'", "")
+    out = {}
+    # 1) hashtag — postări publice care folosesc #brand (apelant = un cont IG al nostru)
     try:
-        s = requests.get(f"https://graph.facebook.com/v21.0/ig_hashtag_search",
-                         params={"user_id": igid, "q": tag, "access_token": tok}, timeout=30).json()
+        s = _ig_get("ig_hashtag_search", {"user_id": caller, "q": tag}, tok)
+        if s.get("error"):
+            raise RuntimeError(s["error"].get("message", "")[:100])
         hid = ((s.get("data") or [{}])[0] or {}).get("id")
-        if not hid:
-            print(f"  hashtag #{tag} negăsit / fără date.")
-            return None
-        m = requests.get(f"https://graph.facebook.com/v21.0/{hid}/recent_media",
-                         params={"user_id": igid, "fields": "caption,permalink,timestamp,like_count,comments_count",
-                                 "access_token": tok, "limit": 30}, timeout=30).json()
-        items = m.get("data") or []
-        print(f"  postări recente cu #{tag}: {len(items)}")
-        for it in items[:10]:
-            cap = (it.get("caption") or "")[:80].replace("\n", " ")
-            print(f"   • [{(it.get('timestamp') or '')[:10]}] ❤{it.get('like_count',0):<4} 💬{it.get('comments_count',0):<3} {cap}")
-        return {"recent_media": len(items)}
+        if hid:
+            m = _ig_get(f"{hid}/recent_media",
+                        {"user_id": caller, "limit": 25,
+                         "fields": "caption,permalink,timestamp,like_count,comments_count"}, tok)
+            items = m.get("data") or []
+            print(f"\n  #{tag} · postări recente: {len(items)}")
+            for it in items[:12]:
+                cap = (it.get("caption") or "").replace("\n", " ")[:78]
+                print(f"   • [{(it.get('timestamp') or '')[:10]}] ❤{it.get('like_count',0):<4} 💬{it.get('comments_count',0):<3} {cap}")
+            out["hashtag_media"] = len(items)
+        else:
+            print(f"  #{tag}: fără date / hashtag negăsit.")
     except Exception as e:
-        print(f"  n/a — {e}")
-        return None
+        print(f"  hashtag n/a — {e}")
+    # 2) cine ne-a tăguit (@brand) — postări de influenceri/UGC care ne menționează direct
+    if own_ig:
+        try:
+            m = _ig_get(f"{own_ig}/tags",
+                        {"limit": 25, "fields": "username,caption,permalink,timestamp,like_count,comments_count"}, tok)
+            if m.get("error"):
+                raise RuntimeError(m["error"].get("message", "")[:100])
+            items = m.get("data") or []
+            print(f"\n  cine ne-a tăguit @{key}: {len(items)} postări")
+            for it in items[:12]:
+                cap = (it.get("caption") or "").replace("\n", " ")[:60]
+                print(f"   • @{(it.get('username') or '?')[:20]:20} ❤{it.get('like_count',0):<4} {cap}")
+            out["tags"] = len(items)
+        except Exception as e:
+            print(f"  tag-uri n/a — {e}")
+    else:
+        print(f"\n  (cont IG al brandului „{key}\" necunoscut → tag-urile @ nu se pot citi; "
+              f"adaugă-l în IG_ACCOUNTS sau ca asset în BM)")
+    return out or None
+
+def cmd_ig_discover(args):
+    """Inventariază conturile IG pe care le DEȚINEM, via tokenul de ads (business_management) din DB.
+    Rulează ACUM (nu cere instagram_basic) — îți dă id-urile pt IG_ACCOUNTS."""
+    dsn = secret("DATABASE_URL_METRICS")
+    if not dsn:
+        sys.exit("lipsește DATABASE_URL_METRICS (kb.py secret-get DATABASE_URL_METRICS)")
+    try:
+        import psycopg2
+    except ImportError:
+        sys.exit("psycopg2 indisponibil")
+    dsn = dsn.replace("postgresql+psycopg2", "postgresql").split("?")[0]
+    cur = psycopg2.connect(dsn).cursor()
+    cur.execute('SELECT "accessToken" FROM meta_access_tokens WHERE "isActive" IS NOT FALSE')
+    seen = {}
+    for (tok,) in cur.fetchall():
+        bj = _ig_get("me/businesses", {"fields": "name,id", "limit": 50}, tok)
+        for b in (bj.get("data") or []):
+            j = _ig_get(f"{b['id']}/owned_instagram_accounts", {"fields": "username,id,followers_count"}, tok)
+            for ig in (j.get("data") or []):
+                seen[ig["id"]] = (ig.get("username"), ig.get("followers_count"), b.get("name"))
+    print(f"Conturi IG deținute (via business_management): {len(seen)}")
+    for igid, (u, f, biz) in sorted(seen.items(), key=lambda kv: -(kv[1][1] or 0)):
+        print(f"  @{(u or '?'):24} id={igid}  {f or '?':>7}f   [BM: {biz}]")
+    print("\nPune id-urile relevante în IG_ACCOUNTS (în acest script).")
 
 # ───────────────────────── main ─────────────────────────
 PROBES = {"mentions": probe_mentions, "reddit": probe_reddit, "gsc": probe_gsc, "instagram": probe_instagram}
@@ -354,6 +429,7 @@ def main():
     sc.add_argument("--only", default="", help="subset de sonde: mentions,reddit,gsc,instagram")
     sc.set_defaults(fn=cmd_scan)
     sub.add_parser("brands", help="listează brandurile configurate").set_defaults(fn=cmd_brands)
+    sub.add_parser("ig-discover", help="inventariază conturile IG deținute (via token ads, fără instagram_basic)").set_defaults(fn=cmd_ig_discover)
     args = ap.parse_args()
     args.fn(args)
 
