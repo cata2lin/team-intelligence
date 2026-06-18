@@ -192,8 +192,21 @@ def live_rows(days=14, since=None, until=None):
                 key, lbl = ("TEST", "(produse de test)") if prodmap.is_test(camp) else classify("tiktok", r["_acct"], camp, adn)
                 agg[(d, bid, key, "tiktok")] += sp; title[key] = lbl
 
-    out = [(d, bid, key, title.get(key, key), plat, round(sp, 2), "meta_tiktok_campaign_map")
-           for (d, bid, key, plat), sp in agg.items() if d]
+    # dedup pe PK (date, sku, platform): un grup account-scoped (ex. "Covoare" pe 2 magazine) ar produce
+    # 2 rânduri cu același (date,key,platform) și brand_id diferit → coliziune ON CONFLICT. Sumăm + brand dominant.
+    final = {}  # (date, key, platform) -> [spend_total, brand_id_dominant, max_contrib]
+    for (d, bid, key, plat), sp in agg.items():
+        if not d:
+            continue
+        k = (d, key, plat); cur = final.get(k)
+        if cur is None:
+            final[k] = [sp, bid, sp]
+        else:
+            cur[0] += sp
+            if sp > cur[2]:
+                cur[1], cur[2] = bid, sp
+    out = [(d, brand, key, title.get(key, key), plat, round(tot, 2), "meta_tiktok_campaign_map")
+           for (d, key, plat), (tot, brand, _) in final.items()]
     return out
 
 
