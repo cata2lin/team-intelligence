@@ -84,6 +84,19 @@ def resolve_brand(acct, entries):
     return best
 
 
+def _month_chunks(start, end):
+    """Split [start,end] into per-month (since,until) ranges — Meta/TikTok reject ad-level daily over a long span
+    ('reduce the amount of data'). One request per month stays under the limit."""
+    import datetime
+    s = datetime.date.fromisoformat(start); e = datetime.date.fromisoformat(end)
+    out, cur = [], s
+    while cur <= e:
+        nxt = datetime.date(cur.year + 1, 1, 1) if cur.month == 12 else datetime.date(cur.year, cur.month + 1, 1)
+        out.append((cur.isoformat(), min(e, nxt - datetime.timedelta(days=1)).isoformat()))
+        cur = nxt
+    return out
+
+
 def single_sku_groups():
     """From WMS 'Product Group' (SKU->Group): groups that map to exactly one SKU -> resolve group to that SKU."""
     try:
@@ -145,37 +158,39 @@ def live_rows(days=14, since=None, until=None):
             continue  # non-ARONA account (BauBax, intl Rossi, etc.)
         # metrics has no 'Bonhaus RO/SK', 'Esteban Parfum' etc → fold into parent (first word)
         bid = name2id.get(brand.strip().lower()) or name2id.get(brand.strip().lower().split()[0])
-        for r in meta.graph(f"https://graph.facebook.com/{meta.VER}/{aid}/insights",
-                {"level": "ad", "fields": "campaign_name,ad_name,spend", "time_increment": "1",
-                 "time_range": json.dumps({"since": start, "until": end}), "limit": "800", "access_token": tok}):
-            d = r.get("date_start"); camp = r.get("campaign_name", ""); adn = r.get("ad_name", "")
-            sp = meta.conv(float(r.get("spend", 0)), cur, meta._pdate(d), idx_meta)  # per-day FX
-            if sp <= 0: continue
-            # TEST campaigns tracked SEPARATELY (bucket 'TEST'), excluded from real products (ca RZ2)
-            key, lbl = ("TEST", "(produse de test)") if prodmap.is_test(camp) else classify("facebook", nm, camp, adn)
-            agg[(d, bid, key, "meta")] += sp; title[key] = lbl
+        for cs, ce in _month_chunks(start, end):   # monthly chunks (Meta rejects long daily ad-level spans)
+            for r in meta.graph(f"https://graph.facebook.com/{meta.VER}/{aid}/insights",
+                    {"level": "ad", "fields": "campaign_name,ad_name,spend", "time_increment": "1",
+                     "time_range": json.dumps({"since": cs, "until": ce}), "limit": "500", "access_token": tok}):
+                d = r.get("date_start"); camp = r.get("campaign_name", ""); adn = r.get("ad_name", "")
+                sp = meta.conv(float(r.get("spend", 0)), cur, meta._pdate(d), idx_meta)  # per-day FX
+                if sp <= 0: continue
+                # TEST campaigns tracked SEPARATELY (bucket 'TEST'), excluded from real products (ca RZ2)
+                key, lbl = ("TEST", "(produse de test)") if prodmap.is_test(camp) else classify("facebook", nm, camp, adn)
+                agg[(d, bid, key, "meta")] += sp; title[key] = lbl
 
     # ---- TikTok ----
     idx_tt = tiktok.fx_index({"USD", "EUR", "PLN", "HUF", "CZK", "RON"}, start, end)  # per-day FX
     for brand in brands:
-        try: accts, rows = tiktok.report_rows(brand, "ad", *(start, end))
-        except SystemExit: continue
-        except Exception: continue
         bid = bid_for(brand)
-        for r in rows:
-            if not tiktok._passes(r, "ad"): continue
-            m = r.get("metrics", {}); dim = r.get("dimensions", {})
-            d = dim.get("stat_time_day", "")[:10]
-            camp = m.get("campaign_name", ""); adn = m.get("ad_name", "")
-            k = ("tiktok", r["_acct"], d, camp, adn)
-            if k in seen: continue
-            seen.add(k)
-            try: _day = datetime.date.fromisoformat(d)
-            except Exception: _day = None
-            sp = tiktok.conv(tiktok._f(m, "spend"), r["_cur"], _day, idx_tt)
-            if sp <= 0: continue
-            key, lbl = ("TEST", "(produse de test)") if prodmap.is_test(camp) else classify("tiktok", r["_acct"], camp, adn)
-            agg[(d, bid, key, "tiktok")] += sp; title[key] = lbl
+        for cs, ce in _month_chunks(start, end):   # monthly chunks
+            try: accts, rows = tiktok.report_rows(brand, "ad", cs, ce)
+            except SystemExit: break
+            except Exception: continue
+            for r in rows:
+                if not tiktok._passes(r, "ad"): continue
+                m = r.get("metrics", {}); dim = r.get("dimensions", {})
+                d = dim.get("stat_time_day", "")[:10]
+                camp = m.get("campaign_name", ""); adn = m.get("ad_name", "")
+                k = ("tiktok", r["_acct"], d, camp, adn)
+                if k in seen: continue
+                seen.add(k)
+                try: _day = datetime.date.fromisoformat(d)
+                except Exception: _day = None
+                sp = tiktok.conv(tiktok._f(m, "spend"), r["_cur"], _day, idx_tt)
+                if sp <= 0: continue
+                key, lbl = ("TEST", "(produse de test)") if prodmap.is_test(camp) else classify("tiktok", r["_acct"], camp, adn)
+                agg[(d, bid, key, "tiktok")] += sp; title[key] = lbl
 
     out = [(d, bid, key, title.get(key, key), plat, round(sp, 2), "meta_tiktok_campaign_map")
            for (d, bid, key, plat), sp in agg.items() if d]
