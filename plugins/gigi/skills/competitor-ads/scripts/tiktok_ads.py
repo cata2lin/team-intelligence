@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["playwright>=1.40"]
+# dependencies = ["playwright>=1.40", "requests>=2.31"]
 # ///
 """
 tiktok_ads.py — reclamele unui competitor din TikTok Ad Library (UE/RO).
@@ -113,6 +113,47 @@ def cmd_best(a):
         if c["cover"]:
             print(f"        {c['cover'][:100]}")
 
+def cmd_analyze(a):
+    """best + analiză vision (Gemini, pe thumbnail + copy) + comparativ + recomandări."""
+    import os, sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import competitor_ads as ca   # reutilizează helper-ele Gemini
+    advname, ads = fetch(a.advertiser, a.region, a.limit)
+    if advname is None or not ads:
+        print(f"\n● {a.advertiser} — niciun advertiser cu reclame în TikTok Ad Library"); return
+    crs = sorted(parse(ads), key=lambda c: (c["active"], c["days"]), reverse=True)[:a.top]
+    covers = [c["cover"] for c in crs if c["cover"]][:a.top]
+    titles = [f"- ({c['days']}z) {c['title']}" for c in crs if c["title"]]
+    print(f"\n══ ANALIZĂ TIKTOK · {advname} ══  ({len(crs)} top creative, {len(covers)} thumbnail-uri)")
+    analysis = ""
+    prompt = (f"Ești strateg de performance marketing pe TikTok. Analizează reclamele TikTok ale "
+              f"competitorului {advname} care rulează de cel mai mult timp (longevitatea = au performat). "
+              f"Ai thumbnail-urile video + copy-urile.\nCOPY-URI:\n" + "\n".join(titles) +
+              "\n\nPentru fiecare: unghi/mesaj, hook (primele secunde sugerate de thumbnail+copy), ofertă, "
+              "format (UGC/produs/demo). Apoi PATTERN-URILE comune (ce repetă = ce funcționează). Scurt, română, bullet-uri.")
+    try:
+        analysis = ca._gemini(ca.vision_parts(prompt, covers))
+        print("\n— Ce funcționează la ei pe TikTok —\n" + analysis)
+    except Exception as e:
+        print(f"  (analiză vision indisponibilă: {e})")
+    ours_ctx = ""
+    if a.vs:
+        oadv, oads = fetch(a.vs, a.region, a.limit)
+        if oads:
+            ocrs = sorted(parse(oads), key=lambda c: (c["active"], c["days"]), reverse=True)[:a.top]
+            print(f"\n— Noi ({oadv}) — top {len(ocrs)} pe longevitate:")
+            for c in ocrs[:8]:
+                print(f"   🟢 {c['days']:>3}z „{c['title'][:64]}\"")
+            ours_ctx = "\n".join(f"- ({c['days']}z) {c['title']}" for c in ocrs)
+    rec = (f"Pe baza analizei reclamelor TikTok câștigătoare ale {advname}:\n{analysis}\n\n"
+           + (f"Reclamele NOASTRE ({a.vs}):\n{ours_ctx}\n\n" if ours_ctx else "")
+           + "Dă 5 recomandări concrete de reclame TikTok de testat la noi (unghi + hook în primele 3s + format), "
+           + ("evidențiind gap-urile față de competitor. " if ours_ctx else "") + "Scurt, acționabil, română.")
+    try:
+        print("\n— Recomandări de creative TikTok —\n" + ca._gemini([{"text": rec}]))
+    except Exception as e:
+        print(f"  (recomandări indisponibile: {e})")
+
 def main():
     ap = argparse.ArgumentParser(description="TikTok Ad Library — reclamele unui competitor")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -121,6 +162,11 @@ def main():
     b.add_argument("--region", default="RO"); b.add_argument("--limit", type=int, default=50)
     b.add_argument("--top", type=int, default=10); b.add_argument("--json", action="store_true")
     b.set_defaults(fn=cmd_best)
+    an = sub.add_parser("analyze", help="best + vision + comparativ + recomandări")
+    an.add_argument("advertiser")
+    an.add_argument("--vs", default="", help="advertiserul nostru pt comparativ, ex: nubra")
+    an.add_argument("--region", default="RO"); an.add_argument("--limit", type=int, default=50)
+    an.add_argument("--top", type=int, default=6); an.set_defaults(fn=cmd_analyze)
     a = ap.parse_args(); a.fn(a)
 
 if __name__ == "__main__":
