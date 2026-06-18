@@ -238,30 +238,96 @@ def probe_news(brand, conf, days):
         print(f"  forumuri n/a — {e}")
     return out or None
 
-# ───────────────────────── PROBE 2: Reddit (free) ─────────────────────────
+# ───────────────────────── PROBE 1c: YouTube (video mentions) ─────────────────────────
+def _yt_oauth_token():
+    """Access token readonly via refresh (clientul YouTube existent), dacă există un refresh readonly."""
+    cid, csec = secret("YOUTUBE_OAUTH_CLIENT_ID"), secret("YOUTUBE_OAUTH_CLIENT_SECRET")
+    rt = secret("YOUTUBE_READONLY_REFRESH_TOKEN")
+    if not (cid and csec and rt):
+        return None
+    try:
+        r = requests.post("https://oauth2.googleapis.com/token",
+                          data={"client_id": cid, "client_secret": csec,
+                                "refresh_token": rt, "grant_type": "refresh_token"}, timeout=30)
+        return r.json().get("access_token")
+    except Exception:
+        return None
+
+def probe_youtube(brand, conf, days):
+    _hr(f"YOUTUBE — „{conf['name']}\"  (video-uri care ne pomenesc)")
+    base = conf["terms"][0]
+    ctx = (conf.get("context") or [None])[0]
+    q = f"{base} {ctx}" if (conf.get("ambiguous") and ctx) else base
+    key = secret("YOUTUBE_API_KEY")
+    tok = None if key else _yt_oauth_token()
+    if not key and not tok:
+        print("  n/a — lipsește YOUTUBE_API_KEY.")
+        print("       Activare (2 min, gratis): Google Cloud Console → activează «YouTube Data API v3»")
+        print("       → Create credentials → API key →  kb.py secret-set YOUTUBE_API_KEY <key>")
+        print("       (alt: re-auth OAuth `youtube.readonly` cu clientul existent → YOUTUBE_READONLY_REFRESH_TOKEN)")
+        return None
+    params = {"part": "snippet", "q": q, "type": "video", "order": "date", "maxResults": 20,
+              "regionCode": "RO", "relevanceLanguage": "ro",
+              "publishedAfter": (dt.datetime.utcnow() - dt.timedelta(days=max(days, 30))).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    headers = {}
+    if key:
+        params["key"] = key
+    else:
+        headers["Authorization"] = f"Bearer {tok}"
+    try:
+        j = requests.get("https://www.googleapis.com/youtube/v3/search", params=params, headers=headers, timeout=30).json()
+        if j.get("error"):
+            print(f"  n/a — {j['error'].get('message','')[:130]}")
+            return None
+        items = j.get("items") or []
+        rel = [i for i in items if base.lower() in
+               ((i.get("snippet", {}).get("title", "") + " " + i.get("snippet", {}).get("description", "")).lower())]
+        show = rel or items
+        print(f"  video-uri pe „{q}\": {len(items)}  (relevante pe nume: {len(rel)})")
+        for i in show[:12]:
+            s = i.get("snippet", {})
+            print(f"   • [{s.get('publishedAt','')[:10]}] {s.get('channelTitle','')[:22]:22} {s.get('title','')[:52]}")
+        return {"videos": len(items), "relevant": len(rel)}
+    except Exception as e:
+        print(f"  n/a — {e}")
+        return None
+
+# ───────────────────────── PROBE 2: Reddit (OAuth) ─────────────────────────
 def probe_reddit(brand, conf, days):
-    _hr(f"REDDIT — „{conf['name']}\"  (căutare publică, ultimele ~{days} zile)")
+    _hr(f"REDDIT — „{conf['name']}\"  (ultimele ~{days} zile)")
     term = conf["terms"][0]
     q = f'"{term}"'
     if conf.get("ambiguous") and conf.get("context"):
         q = f'"{term}" ({" OR ".join(conf["context"])})'
-    ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-          "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+    cid, csec = secret("REDDIT_CLIENT_ID"), secret("REDDIT_CLIENT_SECRET")
+    ua = "arona-social-listening/1.0 (by u/arona)"
     children = None
-    for host in ("https://www.reddit.com", "https://old.reddit.com"):
+    if cid and csec:
         try:
-            r = requests.get(f"{host}/search.json",
-                             params={"q": q, "sort": "new", "limit": 25, "t": "year"},
-                             headers={"User-Agent": ua, "Accept": "application/json"}, timeout=30)
-            if r.status_code == 200:
-                children = (r.json().get("data") or {}).get("children") or []
-                break
-        except Exception:
-            continue
+            tr = requests.post("https://www.reddit.com/api/v1/access_token",
+                               auth=(cid, csec), data={"grant_type": "client_credentials"},
+                               headers={"User-Agent": ua}, timeout=30)
+            tk = tr.json().get("access_token")
+            if tk:
+                r = requests.get("https://oauth.reddit.com/search",
+                                 params={"q": q, "sort": "new", "limit": 25, "t": "year"},
+                                 headers={"User-Agent": ua, "Authorization": f"bearer {tk}"}, timeout=30)
+                if r.status_code == 200:
+                    children = (r.json().get("data") or {}).get("children") or []
+                else:
+                    print(f"  (Reddit search HTTP {r.status_code})")
+            else:
+                print(f"  (token Reddit eșuat: {str(tr.json())[:80]})")
+        except Exception as e:
+            print(f"  (OAuth Reddit eșuat: {e})")
+    else:
+        print("  n/a — lipsesc REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET (JSON-ul public e blocat 403).")
+        print("       Activare (2 min, gratis): reddit.com/prefs/apps → Create app → tip «script» →")
+        print("       kb.py secret-set REDDIT_CLIENT_ID <id>  ;  kb.py secret-set REDDIT_CLIENT_SECRET <secret>")
+        return None
     try:
         if children is None:
-            print("  n/a — Reddit a blocat cererea (403/429 de pe IP server). "
-                  "Volumul RO pe Reddit e oricum mic; rulează din altă rețea dacă vrei să forțezi.")
+            print("  n/a — Reddit a respins cererea (verifică REDDIT_CLIENT_ID/SECRET).")
             return None
         cutoff = (dt.datetime.utcnow() - dt.timedelta(days=days)).timestamp()
         recent = []
@@ -441,7 +507,8 @@ def cmd_ig_discover(args):
     print("\nPune id-urile relevante în IG_ACCOUNTS (în acest script).")
 
 # ───────────────────────── main ─────────────────────────
-PROBES = {"mentions": probe_mentions, "news": probe_news, "reddit": probe_reddit, "gsc": probe_gsc, "instagram": probe_instagram}
+PROBES = {"mentions": probe_mentions, "news": probe_news, "youtube": probe_youtube,
+          "reddit": probe_reddit, "gsc": probe_gsc, "instagram": probe_instagram}
 
 def cmd_scan(args):
     key, conf = cfg(args.brand)
@@ -476,6 +543,9 @@ def cmd_scan(args):
     nw = summary.get("news") or {}
     if nw.get("news") is not None or nw.get("forums") is not None:
         bits.append(f"{nw.get('news',0)} articole News + {nw.get('forums',0)} fire pe forumuri")
+    yt = summary.get("youtube") or {}
+    if yt.get("relevant"):
+        bits.append(f"{yt['relevant']} video-uri YouTube relevante")
     if fresh_reddit:
         bits.append(f"{fresh_reddit} fire Reddit proaspete")
     print("  " + ("\n  ".join("• " + b for b in bits) if bits else "semnal insuficient din sursele disponibile."))
