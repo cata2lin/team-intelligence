@@ -1,6 +1,6 @@
 ---
 name: deliverability-monitor
-description: Diagnose the COD-refusal / failed-delivery money leak across every Arona brand. From the Scripturi profitability engine (profit_orders, status_category Livrata/Refuzata/Netrimisa/Anulata) it computes refusal rate and revenue-at-risk by brand, by courier (DPD/Packeta/Econt/Sameday) and — joined to metrics orders — by COUNTY (shippingProvince) and by product/SKU, plus the wasted transport (refused parcels × cost_per_parcel ×2). Surfaces the worst county×courier×brand pockets so ops can blacklist counties, tighten COD address validation, or switch courier per region. Use for "COD refusal analysis", "deliverability by county/courier", "refused/return rate per brand", "where do we lose money on shipping", "livrabilitate", "refuz ramburs", "rata de refuz".
+description: Diagnose the COD-refusal / failed-delivery money leak across every Arona brand. Default source AWBprint (--source awb, instant, ~99% complet, toate 21 magazinele, județ inclus direct din shipping_address, fără SSH); --source vps păstrează vechiul drum (profitability.db de pe VPS prin SSH + județ din metrics, incomplet). Computes refusal rate and revenue-at-risk by brand, by courier (DPD/Packeta/Econt/Sameday), by COUNTY and by product/SKU, plus wasted transport (refused parcels × real cost/parcel ×2). Surfaces the worst county×courier×brand pockets so ops can blacklist counties, tighten COD address validation, or switch courier per region. Use for "COD refusal analysis", "deliverability by county/courier", "refused/return rate per brand", "where do we lose money on shipping", "livrabilitate", "refuz ramburs", "rata de refuz". Vezi și `gigi:fulfillment-analytics` (refuse/geo/cod) pe aceeași sursă.
 ---
 
 # Deliverability monitor — refuzul COD (cel mai mare levier de bani)
@@ -11,7 +11,7 @@ Cca **9.000 colete refuzate/lună (~16%)** = **~272k RON/lună transport irosit*
 ```bash
 uv run deliverability_monitor.py --month 2026-05 --by brand     # rata refuz + venit la risc per brand
 uv run deliverability_monitor.py --month 2026-05 --by courier   # per curier (DPD/Packeta/Econt/Sameday)
-uv run deliverability_monitor.py --month 2026-05 --by county    # per județ (shippingProvince din metrics)
+uv run deliverability_monitor.py --month 2026-05 --by county    # per județ (direct din AWBprint shipping_address)
 uv run deliverability_monitor.py --month 2026-05 --by sku       # produsele cel mai des refuzate
 uv run deliverability_monitor.py --month 2026-05 --by pocket    # cele mai proaste combinatii brand×curier×judet
 uv run deliverability_monitor.py --month 2026-05 --brand Esteban --by county
