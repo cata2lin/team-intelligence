@@ -108,12 +108,19 @@ def accounts_for(brand):
     return [{"adv":r["adv"],"nm":r["nm"],"cur":r["cur"],"tok":r["tok"],"filter":byname.get(r["nm"].strip().lower())} for r in rows]
 
 def tk_get(path, token, params):
+    import time
     out=[]; page=1
     while True:
         p=dict(params); p["page"]=page; p.setdefault("page_size",1000)
-        j=requests.get(BASE+path, headers={"Access-Token":token}, params=p, timeout=90).json()
-        if j.get("code")!=0:
-            sys.stderr.write(f"[tt] {j.get('code')}: {j.get('message','')[:160]}\n"); break
+        j=None
+        for attempt in range(6):
+            j=requests.get(BASE+path, headers={"Access-Token":token}, params=p, timeout=90).json()
+            code=j.get("code")
+            if code==0: break
+            transient = code in (40100,40016,50000,40001) or "rate" in str(j.get("message","")).lower() or "too many" in str(j.get("message","")).lower()
+            if transient and attempt<5:
+                time.sleep(min(90,5*(2**attempt))); continue
+            sys.stderr.write(f"[tt] {code}: {j.get('message','')[:160]}\n"); return out
         d=j.get("data",{}); out+=d.get("list",[])
         if page>=d.get("page_info",{}).get("total_page",1): break
         page+=1

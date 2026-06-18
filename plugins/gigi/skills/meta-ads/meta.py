@@ -63,11 +63,22 @@ def accounts_for(brand):
         return [dict(r) for r in c.fetchall()]
 
 def graph(url, params):
+    import time
     out = []
     while True:
-        r = requests.get(url, params=params, timeout=90)
-        if r.status_code != 200:
-            sys.stderr.write(f"[meta] {r.status_code}: {r.text[:200]}\n"); return out
+        r = None
+        for attempt in range(6):
+            r = requests.get(url, params=params, timeout=90)
+            if r.status_code == 200:
+                break
+            t = r.text.lower()
+            transient = (r.status_code in (429, 500, 503) or '"is_transient":true' in t
+                         or 'request limit' in t or '"code":4' in t or '"code":17' in t or '"code":613' in t)
+            if transient and attempt < 5:
+                time.sleep(min(90, 5 * (2 ** attempt)))  # exponential backoff on Meta rate limit
+                continue
+            sys.stderr.write(f"[meta] {r.status_code}: {r.text[:200]}\n")
+            return out
         d = r.json(); out += d.get("data", [])
         nxt = d.get("paging", {}).get("next")
         if not nxt: break
