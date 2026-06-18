@@ -1,19 +1,21 @@
 ---
 name: cross-sell
-description: Cross-sell / "frequently bought together" recommender from our own order data — market-basket analysis (support / confidence / lift) on metrics order line items, per store. Surfaces which products are actually bought together so we can add PDP "frequently bought together" blocks, power Klaviyo post-purchase flows, and pick the 2+1 surprise-perfume pairings. Use for "what's bought together", "cross-sell", "frequently bought together", "produse complementare", "ce se cumpără împreună", "upsell pairings". Read-only.
-argument-hint: "--brand <esteban|grandia|gt|nubra|belasil> [--product <title>] [--days 180] [--cached]"
+description: Cross-sell / "frequently bought together" recommender from our own order data — market-basket analysis (support / confidence / lift) per store. Default source AWBprint (--source awb, instant, ~99% complet); warehouse (--source metrics) e fallback dar e incomplet pe unele branduri (GT ~15% comenzi lipsă). Surfaces which products are actually bought together so we can add PDP "frequently bought together" blocks, power Klaviyo post-purchase flows, and pick the 2+1 surprise-perfume pairings. Use for "what's bought together", "cross-sell", "frequently bought together", "produse complementare", "ce se cumpără împreună", "upsell pairings". Read-only.
+argument-hint: "--brand <esteban|grandia|gt|nubra|belasil> [--source awb|metrics] [--product <title>] [--days 180]"
 ---
 
 # cross-sell — frequently-bought-together (our data)
 > Author: Gigi.
 
-No new integration — pure market-basket on `metrics` order line items, weighted by **lift** (how much more often two products sell together than chance). Connects via `DATABASE_URL_METRICS` (KB), read-only.
+Pure market-basket weighted by **lift** (how much more often two products sell together than chance). Read-only.
+
+**Sursă (`--source`, default `awb`):** `awb` = AWBprint (DB AWB/Frisbo, `DATABASE_URL_AWBPRINT`) — instant, ~99% complet; coșul vine din `line_items.inventory_item.sku`, titlul produsului e rezolvat din warehouse (`order_line_items`, suficient pt produsele cu volum). `metrics` = warehouse direct (`DATABASE_URL_METRICS`) — poate fi INCOMPLET (GT ~15% comenzi lipsă), păstrat ca fallback + pt `--cached`. Vezi `gigi:product-sales` / `gigi:fulfillment-analytics` pt același pattern.
 
 ```bash
-export DATABASE_URL_METRICS="$(uv run "$KB" secret-get DATABASE_URL_METRICS)"
-uv run cross_sell.py --brand grandia                      # top pairs bought together (last 180d)
+uv run cross_sell.py --brand grandia                      # top pairs (AWBprint, last 180d)
 uv run cross_sell.py --brand esteban --product "scandal"  # complements for a product (title match)
 uv run cross_sell.py --brand gt --days 365 --min-co 10 --top 25
+uv run cross_sell.py --brand esteban --source metrics --cached   # warehouse precomputed (instant)
 ```
 
 ## Output & metrics
