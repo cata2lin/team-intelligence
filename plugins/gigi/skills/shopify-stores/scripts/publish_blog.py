@@ -17,10 +17,16 @@ Usage:
   uv run publish_blog.py --prefix GRAN --blog news --docx article.docx --zip photos.zip --tags "a,b" [--publish]
   (--zip optional → text-only; --publish → live, else DRAFT; --blog accepts a blog handle or numeric id)
 
+  # auto-generate a CONTEXTUAL hero (recommended — avoids same-looking articles); perfume: pass the bottle as --hero-ref
+  uv run publish_blog.py --prefix GT --blog blog --docx a.docx \
+      --hero-scene "masculine premium night out, city lights bokeh" \
+      --hero-ref https://cdn.shopify.com/.../bottle.jpg
+
 SAFETY: without --publish the article is created UNPUBLISHED for review. Use --publish only
 when the user explicitly wants it live.
 """
-import argparse, base64, io, mimetypes, os, re, sys, time, unicodedata, urllib.request, zipfile
+import argparse, base64, io, mimetypes, os, re, subprocess, sys, time, unicodedata, urllib.request, zipfile
+from pathlib import Path
 import docx
 from shopify_gql import resolve_store
 from shopify_theme import rest, API_VERSION
@@ -116,6 +122,30 @@ def upload_image(shop, token, img):
     return None
 
 
+def gen_hero(title, store, scene, refs):
+    """Generate a CONTEXTUAL blog hero via the image-gen skill (gigi:image-gen/hero.py)
+    instead of reusing a product photo (which makes every article look alike).
+    Returns an upload-ready img dict, or None on failure. PERFUME stores should pass the
+    main product image in `refs` so the REAL bottle appears in a fresh scene."""
+    hero = Path(__file__).resolve().parents[2] / "image-gen" / "scripts" / "hero.py"
+    if not hero.exists():
+        print("  ⚠ hero.py not found; falling back to zip/product image", file=sys.stderr)
+        return None
+    name = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:50] + "-hero"
+    cmd = ["uv", "run", str(hero), "--title", title, "--store", store or "",
+           "--scene", scene, "--out", "/tmp/blog-hero", "--name", name]
+    if refs:
+        cmd += ["--ref", *refs]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    m = re.findall(r"SAVED:\s*(\S+\.png)", r.stdout)
+    if not m:
+        print("  ⚠ hero generation failed:", (r.stderr or r.stdout)[-200:], file=sys.stderr)
+        return None
+    data = open(m[0], "rb").read()
+    print(f"  hero generated ({len(data)//1024} KB) ← {scene[:60]}")
+    return {"name": name + ".png", "num": 1, "mime": "image/png", "data": data, "alt": title}
+
+
 def resolve_blog_id(shop, token, blog):
     if str(blog).isdigit():
         return int(blog)
@@ -135,6 +165,9 @@ def main():
     ap.add_argument("--publish", action="store_true", help="publish live (default: DRAFT)")
     ap.add_argument("--author", default="", help="article author (default: store default)")
     ap.add_argument("--dry", action="store_true")
+    ap.add_argument("--hero-scene", default="", help="generate a CONTEXTUAL hero via gigi:image-gen instead of the zip/product photo (recommended — keeps articles from looking the same). Describe the article's topic/scene.")
+    ap.add_argument("--hero-ref", nargs="*", default=[], help="product image url(s) to keep the REAL product in the hero — perfume stores: pass the bottle image so it's authentic, not invented")
+    ap.add_argument("--hero-store", default="", help="brand/style key for the hero (GT/Belasil/Grandia/…); defaults to --prefix")
     a = ap.parse_args()
     shop, token = resolve_store(a.prefix)
     blog_id = resolve_blog_id(shop, token, a.blog)
@@ -142,7 +175,8 @@ def main():
     title, blocks = parse_docx(a.docx)
     h2s = [b[1] for b in blocks if b[0] == 'h2']
     imgs = load_images(a.zip) if a.zip else []
-    print(f"TITLE: {title}\n  blocks={len(blocks)} h2={len(h2s)} images={len(imgs)} -> blog {blog_id}")
+    hero_img = gen_hero(title, a.hero_store or a.prefix, a.hero_scene, a.hero_ref) if a.hero_scene else None
+    print(f"TITLE: {title}\n  blocks={len(blocks)} h2={len(h2s)} images={len(imgs)} hero={'gen' if hero_img else 'zip/none'} -> blog {blog_id}")
 
     h2_img, used = {}, set()
     for img in imgs:
@@ -157,7 +191,7 @@ def main():
                 sc, best = s, h
         if best and sc >= 1:
             h2_img[best] = img; used.add(best)
-    top_img = next((i for i in imgs if i["num"] == 1), imgs[0] if imgs else None)
+    top_img = hero_img or next((i for i in imgs if i["num"] == 1), imgs[0] if imgs else None)
     if a.dry:
         print("featured:", top_img and top_img["name"])
         for h in h2s:
