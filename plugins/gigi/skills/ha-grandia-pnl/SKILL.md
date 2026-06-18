@@ -38,7 +38,8 @@ uv run scripts/ha_grandia_pnl.py --months 2026-05 --prefixes GRAN,EST,GT
 - **profit_orders** (SQLite pe VPS 84.46.242.181, via SSH) — comenzi cu revenue/cogs/status/skus/prefix/tags.
 - **daily_perf.db** — marketing per brand (proaspăt). **product_analytics.db** — adspend per-SKU HA (FB/TK), dar INCOMPLET (FB din 22-apr, TK din 15-mai) → de aceea marketing HA se alocă, nu se ia de acolo.
 - **Containere care vin:** sheet „Tom - receptii containere" (id `1PjlFq31...`, tab „Master HA").
-- **Valori inventar lunar:** sheet id `1Pke-2fMv8...` — **un tab pe lună** (1 iunie, 1 noiembrie…), per-SKU `Cantitate × Cogs = Valoare stoc` + sumar per magazin. (Pentru capitalul blocat — neinclus încă în NET; pe roadmap.)
+- **Valori inventar lunar:** sheet id `1Pke-2fMv8...` — **un tab pe lună** (1 iunie, 1 noiembrie…), per-SKU `Cantitate × Cogs = Valoare stoc` + sumar per magazin. Ingerat în `profitability.db` → tabel **`profit_inventory_value`** (snapshot, line, stock_value; line='HA' = Σ SKU HA-*, plus per magazin + TOTAL). Skill-ul afișează **return on inventory** (net / stoc) când există snapshot.
+- **Containere HA care vin:** sheet „Master HA" → tabel **`profit_container_ha`** (sku, categorie, total_qty) în `profitability.db`.
 
 ## Avertismente
 - **Contribuție pre-overhead** (fără salarii/fixe).
