@@ -36,10 +36,27 @@ def _clean(dsn):
     return re.sub(r"[?&]+(&|$)", r"\1", dsn).rstrip("?&")
 
 
+def load_dpd_costs(path="data/dpd_nomenclator.json"):
+    """SKU(upper) -> avg_transport_cost real (din auditul DPD). Gol dacă fișierul lipsește."""
+    out = {}
+    try:
+        d = json.load(open(path, encoding="utf-8"))
+        items = d if isinstance(d, list) else [{**v, "sku": k} for k, v in d.items()]
+        for it in items:
+            s = str(it.get("sku") or "").strip().upper()
+            avg = float(it.get("avg_transport_cost") or 0)
+            if s and avg > 0:
+                out[s] = avg
+    except Exception:
+        pass
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("month"); ap.add_argument("--db", default="data/profitability.db")
     ap.add_argument("--top", type=int, default=25); a = ap.parse_args()
     s2g = sku_to_group()
+    dpd = load_dpd_costs()   # SKU-uri cu cost transport REAL în DB (audit DPD)
     cx = sqlite3.connect(a.db); cx.row_factory = sqlite3.Row
 
     tc = {r["prefix"]: r["cost_per_parcel"] for r in cx.execute(
@@ -47,28 +64,32 @@ def main():
 
     # delivered lines, joined to status
     rows = cx.execute("""
-        SELECT pol.prefix, pol.order_name, pol.sku, pol.qty, pol.line_revenue, pol.line_cogs
+        SELECT pol.prefix, pol.order_name, pol.sku, pol.qty, pol.line_revenue, pol.line_cogs,
+               po.revenue AS order_total
         FROM profit_order_lines pol
         JOIN profit_orders po ON po.month=pol.month AND po.prefix=pol.prefix AND po.order_name=pol.order_name
         WHERE pol.month=? AND po.status_category='Livrata'
     """, (a.month,)).fetchall()
     cx.close()
 
-    # order totals (for transport allocation)
-    otot = defaultdict(float)
+    # per-order: line-revenue total (for share) + order total (incl. transport ÎNCASAT de la client, ca engine-ul)
+    oline = defaultdict(float); ototal = {}
     for r in rows:
-        otot[(r["prefix"], r["order_name"])] += r["line_revenue"] or 0
+        k = (r["prefix"], r["order_name"]); oline[k] += r["line_revenue"] or 0; ototal[k] = r["order_total"] or 0
 
-    sku = defaultdict(lambda: [0, 0.0, 0.0, 0.0])  # qty, rev_exvat, cogs, transport
+    sku = defaultdict(lambda: [0, 0.0, 0.0, 0.0])  # qty, rev_exvat, cogs_exvat, transport_exvat
     for r in rows:
         if (r["sku"] or "").lower() in GIFT:
             continue
         country = PREFIX_COUNTRY.get(r["prefix"], "RO"); vat = DEFAULT_VAT.get(country, 0.21)
-        rev_ex = (r["line_revenue"] or 0) / (1 + vat)
-        ot = otot[(r["prefix"], r["order_name"])] or 1
-        tcost = tc.get(r["prefix"], 0) * ((r["line_revenue"] or 0) / ot)   # allocate parcel cost by revenue share
+        k = (r["prefix"], r["order_name"]); olt = oline[k] or 1
+        share = (r["line_revenue"] or 0) / olt
+        # venit alocat = cota din TOTALUL comenzii (incl. transport încasat) → reconciliază cu engine; ex-TVA pe tot
+        rev_ex = (ototal[k] * share) / (1 + vat)
+        cogs_ex = (r["line_cogs"] or 0) / (1 + vat)
+        tcost = tc.get(r["prefix"], 0) * share / (1 + vat)   # cost transport alocat, ex-TVA
         d = sku[r["sku"]]
-        d[0] += r["qty"] or 0; d[1] += rev_ex; d[2] += r["line_cogs"] or 0; d[3] += tcost
+        d[0] += r["qty"] or 0; d[1] += rev_ex; d[2] += cogs_ex; d[3] += tcost
 
     # marketing per sku (metrics)
     import psycopg2
@@ -98,9 +119,22 @@ def main():
     for g, (q, rev, cg, tr, m) in sorted(cat.items(), key=lambda x: -x[1][1]):
         print(f"{str(g)[:26]:26}{q:>7}{rev:>11.0f}{cg:>10.0f}{tr:>9.0f}{m:>9.0f}{rev-cg-tr-m:>11.0f}")
     print(f"\n=== TOP {a.top} SKU dupa venit ===")
-    print(f"{'sku':30}{'categorie':16}{'buc':>6}{'venit':>10}{'COGS':>9}{'transp':>8}{'mkt':>8}{'contrib':>10}")
+    print(f"{'sku':30}{'categorie':16}{'buc':>6}{'venit':>10}{'COGS':>9}{'transp':>8}{'mkt':>8}{'contrib':>10}{'  transp?'}")
     for s, g, q, rev, cg, tr, m, ct in out[:a.top]:
-        print(f"{str(s)[:30]:30}{str(g)[:16]:16}{q:>6}{rev:>10.0f}{cg:>9.0f}{tr:>8.0f}{m:>8.0f}{ct:>10.0f}")
+        flag = "REAL" if str(s).upper() in dpd else "ESTIMAT"
+        print(f"{str(s)[:30]:30}{str(g)[:16]:16}{q:>6}{rev:>10.0f}{cg:>9.0f}{tr:>8.0f}{m:>8.0f}{ct:>10.0f}  {flag}")
+
+    # ⚠️ NOTIFICARE: produse fără cost de transport REAL în DB (audit DPD) → profit estimat
+    tot_rev = sum(x[3] for x in out) or 1
+    no_real = [(s, rev) for s, g, q, rev, cg, tr, m, ct in out if str(s).upper() not in dpd]
+    nr_rev = sum(r for _, r in no_real)
+    if no_real:
+        print(f"\n⚠️  ATENȚIE: {len(no_real)} SKU-uri ({nr_rev/tot_rev*100:.0f}% din venit) NU au cost de transport REAL în DB (audit DPD).")
+        print(f"    Pentru acestea transportul e ESTIMAT (cost_per_parcel) → profitul lor e aproximativ. Rulează auditul DPD pe ele.")
+        for s, rev in sorted(no_real, key=lambda x: -x[1])[:10]:
+            print(f"      - {s}  (venit {rev:.0f})")
+    else:
+        print("\n✓ Toate SKU-urile au cost de transport real (audit DPD).")
 
 
 if __name__ == "__main__":
