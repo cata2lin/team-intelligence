@@ -151,6 +151,68 @@ def fetch_vps(month, brand):
     return json.loads(p.stdout.strip())
 
 
+# ---------------- AWBprint (rapid, ~99% complet, toate 21 magazinele, fara SSH) -----------------
+# aggregated_status (Frisbo) -> categoria de status din profitabilitate
+_AWB_CAT = {}
+for _s in ("delivered", "customer_pickup", "administrative_closure"): _AWB_CAT[_s] = "Livrata"
+for _s in ("back_to_sender", "returning_to_sender", "refused", "unsuccessful_delivery",
+           "incorrect_address", "lost", "received_by_sender"): _AWB_CAT[_s] = "Refuzata"
+for _s in ("in_transit", "fulfilled", "redirected", "deferred_delivery", "on_hold",
+           "out_for_delivery", "waiting_for_courier"): _AWB_CAT[_s] = "In curs de livrare"
+for _s in ("not_fulfilled", "new", "ready_for_pickup", "not_created", "created_awb"): _AWB_CAT[_s] = "Netrimisa"
+for _s in ("cancelled",): _AWB_CAT[_s] = "Anulata"
+_AWB_NORM = {"GRAND": "GRAN", "NUBRA": "NUB"}  # order-prefix -> prefix profitabilitate
+
+
+def _awb_courier(name):
+    n = (name or "").lower()
+    for k, key in (("dpd", "dpd-ro"), ("packeta", "packeta"), ("econt", "econt"), ("sameday", "sameday")):
+        if k in n:
+            return key
+    return "unknown"
+
+
+def fetch_awb(month, brand):
+    """Aceeasi forma ca fetch_vps {rows, transport, titles} dar din AWBprint (instant, complet).
+    transport = cost REAL mediu/colet per prefix (din transport_cost), nu un cost_per_parcel estimat."""
+    url = os.environ.get("DATABASE_URL_AWBPRINT")
+    if not url:
+        kb = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "core", "scripts", "kb.py")
+        url = subprocess.run(["uv", "run", kb, "secret-get", "DATABASE_URL_AWBPRINT"],
+                             capture_output=True, text=True).stdout.strip()
+    u = urllib.parse.urlparse(url)
+    conn = pg8000.dbapi.connect(ssl_context=True, user=urllib.parse.unquote(u.username or ""),
+                                password=urllib.parse.unquote(u.password or ""), host=u.hostname,
+                                port=u.port or 5432, database=(u.path or "/").lstrip("/"))
+    cur = conn.cursor()
+    lo = month + "-01"
+    cur.execute("""
+      SELECT substring(o.order_number from '^[A-Za-z]+') pfx, o.order_number,
+             coalesce(o.total_price,0), coalesce(o.currency,'RON'), o.aggregated_status,
+             o.courier_name, o.shipping_address->>'province', o.transport_cost,
+             (SELECT string_agg(lower(it->'inventory_item'->>'sku'), ';')
+              FROM jsonb_array_elements(o.line_items::jsonb) it
+              WHERE nullif(it->'inventory_item'->>'sku','') IS NOT NULL)
+      FROM orders o
+      WHERE o.frisbo_created_at >= %s::date AND o.frisbo_created_at < (%s::date + INTERVAL '1 month')
+        AND o.order_number ~ '^[A-Za-z]+'
+    """, (lo, lo))
+    rows, tcost = [], {}
+    for pfx, oname, rev, curr, agg, courier, prov, tc, skus in cur.fetchall():
+        pfx = _AWB_NORM.get((pfx or "").upper(), (pfx or "").upper())
+        if brand and pfx != brand:
+            continue
+        rows.append({"prefix": pfx, "order_name": oname, "revenue": float(rev or 0),
+                     "currency": curr or "RON", "status": _AWB_CAT.get((agg or "").lower(), ""),
+                     "courier": _awb_courier(courier), "courier_status": agg or "",
+                     "skus": skus or "", "province": (prov or "").strip() or "?"})
+        if tc and float(tc) > 0:
+            tcost.setdefault(pfx, []).append(float(tc))
+    conn.close()
+    transport = {p: (sum(v) / len(v)) for p, v in tcost.items()}  # cost real mediu/colet per brand
+    return {"rows": rows, "transport": transport, "titles": {}}
+
+
 # ---------------- aggregation -----------------
 def split_skus(s):
     out = []
@@ -208,24 +270,29 @@ def main():
     ap.add_argument("--limit", type=int, default=20)
     ap.add_argument("--min-sent", type=int, default=30,
                     help="ignora bucketele cu mai putine colete trimise (zgomot)")
+    ap.add_argument("--source", choices=["awb", "vps"], default="awb",
+                    help="awb = AWBprint (default, instant, ~99%%, toate 21 magazinele, judet inclus); "
+                         "vps = profitability.db de pe VPS prin SSH + judet din metrics (incomplet)")
     a = ap.parse_args()
     brand = a.brand.upper() if a.brand else None
 
-    data = fetch_vps(a.month, brand)
+    data = fetch_awb(a.month, brand) if a.source == "awb" else fetch_vps(a.month, brand)
     rows = data["rows"]
     transport = data["transport"]
     titles = data["titles"]
     if not rows:
-        print("Nicio comanda in profitabilitate pentru %s%s." %
-              (a.month, (" / " + brand) if brand else ""))
+        print("Nicio comanda pentru %s%s." % (a.month, (" / " + brand) if brand else ""))
         return
 
     prefixes = {r["prefix"] for r in rows}
 
-    # --------- judet din metrics (doar daca avem nevoie) ----------
+    # --------- judet (awb: direct din shipping_address; vps: join in metrics) ----------
     prov = {}
     if a.by in ("county", "pocket"):
-        prov = fetch_provinces(a.month, prefixes)
+        if a.source == "awb":
+            prov = {r["order_name"]: r.get("province", "?") for r in rows}
+        else:
+            prov = fetch_provinces(a.month, prefixes)
 
     # totaluri generale
     tot = Bucket()
