@@ -43,7 +43,7 @@ def _token():
 def _feed(tok, acct):
     H = {"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}
     q = "SELECT offer_id, id, title, aggregated_reporting_context_status, item_issues FROM product_view"
-    status = Counter(); disapproved = []; issues = Counter(); n = 0; page = None
+    status = Counter(); disapproved = []; issues = Counter(); limited = Counter(); n = 0; page = None
     for _ in range(20):
         body = {"query": q, "pageSize": 1000}
         if page: body["pageToken"] = page
@@ -61,17 +61,25 @@ def _feed(tok, acct):
                     issues[code] += 1
                     reasons.append(f"{code}({sev})")
                 disapproved.append((pv.get("offerId") or pv.get("offer_id"), (pv.get("title") or "")[:46], reasons))
+            elif st == "ELIGIBLE_LIMITED":   # eligible but reach-limited — surface WHY (e.g. pending review, missing GTIN)
+                for it in pv.get("itemIssues", []):
+                    code = (it.get("type") or {}).get("code") or "?"
+                    sev = (it.get("severity") or {}).get("aggregatedSeverity") or ""
+                    limited[f"{code}({sev})"] += 1
         page = d.get("nextPageToken")
         if not page: break
-    return n, status, disapproved, issues
+    return n, status, disapproved, issues, limited
 
 def run(store, tok):
     acct = ACCOUNTS.get(store.lower(), store)
-    n, status, disapproved, issues = _feed(tok, acct)
+    n, status, disapproved, issues, limited = _feed(tok, acct)
     bad = sum(v for k, v in status.items() if k not in ("ELIGIBLE", "ELIGIBLE_LIMITED"))
     print(f"\n{'='*70}\nMerchant Center feed — {store} ({acct}): {n} produse\n{'='*70}")
     print(f"  status: " + ", ".join(f"{k}={v}" for k, v in status.most_common()))
     print(f"  ⚠️ {bad} produse NU rulează în Shopping/PMax ({100*bad/max(n,1):.0f}%)")
+    if limited:
+        print(f"  🟡 ELIGIBLE_LIMITED (eligibile, reach redus) — motive: " + ", ".join(f"{c}×{v}" for c, v in limited.most_common(6)))
+        print(f"     (ex: pending_initial_policy_review_* = review nou de cont/feed, se rezolvă singur în ~3 zile; missing GTIN → identifier_exists=no)")
     if issues:
         print(f"  top motive: " + ", ".join(f"{c}×{n_}" for c, n_ in issues.most_common(6)))
     for off, title, reasons in disapproved[:25]:
