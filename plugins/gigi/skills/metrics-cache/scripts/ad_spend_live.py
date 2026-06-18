@@ -170,6 +170,32 @@ def live_rows(days=14, since=None, until=None):
                 agg[(d, bid, key, "meta")] += sp; title[key] = lbl
 
     # ---- TikTok ----
+    # Un advertiser poate rula MAI MULTE branduri (cont PARTAJAT). Atribuirea corectă, INDEPENDENTĂ de ordinea
+    # de iterare a brandurilor:
+    #   - cont PARTAJAT (împrumutat de cineva = are token-filter în Mapping) → brand după TOKEN GLOBAL din numele
+    #     campaniei (orice 'ESTEBAN/MAGDEAL/...' → brandul lui, oriunde rulează); fără token → OWNER-ul contului
+    #     (brandul pt care e dedicat, filter None); fără token ȘI fără owner → orfan (se raportează, nu se inventează).
+    #   - cont DEDICAT (nimeni nu-l împrumută) → brandul iterat.
+    # Token-ul cel mai lung câștigă (evită fals-pozitive la tokeni scurți ca 'GT'). seen-dedup → fiecare campanie 1×.
+    import brandmap
+    tt_token2brand = {}; tt_owner = {}; tt_shared = set()
+    for b in brands:
+        try: accs = brandmap.tiktok_accounts(b)
+        except Exception: continue
+        for e in accs:
+            nm = (e.get("name") or "").strip().lower(); f = (e.get("campaign_filter") or "").strip()
+            if not nm: continue
+            if f:                                   # b împrumută contul nm cu token f
+                tt_token2brand[f.lower()] = b; tt_shared.add(nm)
+            else:                                   # b deține contul nm (dedicat) → owner
+                tt_owner.setdefault(nm, b)
+    tt_tokens = sorted(tt_token2brand, key=len, reverse=True)   # cel mai specific (lung) întâi
+    # Reguli de brand SPECIFICE pe cont (au prioritate înaintea token-ului global + owner). Pe contul
+    # 'Belasil', Esteban rulează teste de creative numite 'NEW TIKTOK' fără token ESTEBAN → tot Esteban
+    # (regulă confirmată de user); restul fără token (și fără 'esteban') rămâne brandul owner = Belasil.
+    ACCT_BRAND_RULES = {"belasil": [("new tiktok", "Esteban")]}
+    tt_lost = defaultdict(float)   # (acct,campaign) -> spend orfan (cont partajat, fără token ȘI fără owner)
+
     idx_tt = tiktok.fx_index({"USD", "EUR", "PLN", "HUF", "CZK", "RON"}, start, end)  # per-day FX
     for brand in brands:
         bid = bid_for(brand)
@@ -178,19 +204,35 @@ def live_rows(days=14, since=None, until=None):
             except SystemExit: break
             except Exception: continue
             for r in rows:
-                if not tiktok._passes(r, "ad"): continue
                 m = r.get("metrics", {}); dim = r.get("dimensions", {})
                 d = dim.get("stat_time_day", "")[:10]
                 camp = m.get("campaign_name", ""); adn = m.get("ad_name", "")
+                acct_l = (r["_acct"] or "").strip().lower()
                 k = ("tiktok", r["_acct"], d, camp, adn)
                 if k in seen: continue
-                seen.add(k)
                 try: _day = datetime.date.fromisoformat(d)
                 except Exception: _day = None
                 sp = tiktok.conv(tiktok._f(m, "spend"), r["_cur"], _day, idx_tt)
+                if acct_l in tt_shared:    # cont PARTAJAT → regulă-cont, apoi token global, apoi owner
+                    cl = (camp or "").lower()
+                    brand_row = (next((br for kw, br in ACCT_BRAND_RULES.get(acct_l, []) if kw in cl), None)
+                                 or next((tt_token2brand[t] for t in tt_tokens if t in cl), None)
+                                 or tt_owner.get(acct_l))
+                    if not brand_row:
+                        if sp > 0: tt_lost[(r["_acct"], camp)] += sp
+                        continue
+                    row_bid = bid_for(brand_row)
+                else:                      # cont DEDICAT → brandul iterat
+                    row_bid = bid
+                seen.add(k)
                 if sp <= 0: continue
                 key, lbl = ("TEST", "(produse de test)") if prodmap.is_test(camp) else classify("tiktok", r["_acct"], camp, adn)
-                agg[(d, bid, key, "tiktok")] += sp; title[key] = lbl
+                agg[(d, row_bid, key, "tiktok")] += sp; title[key] = lbl
+    if tt_lost:
+        tot = sum(tt_lost.values())
+        sys.stderr.write(f"[ad_spend_live] ⚠ TikTok: {round(tot)} RON pe conturi partajate ORFANE (fără token ȘI fără owner) — {len(tt_lost)} campanii. Asignează owner contului în Mapping.\n")
+        for (ac, cp), v in sorted(tt_lost.items(), key=lambda x: -x[1])[:6]:
+            sys.stderr.write(f"    {ac} | {cp[:55]} | {round(v)} RON\n")
 
     # dedup pe PK (date, sku, platform): un grup account-scoped (ex. "Covoare" pe 2 magazine) ar produce
     # 2 rânduri cu același (date,key,platform) și brand_id diferit → coliziune ON CONFLICT. Sumăm + brand dominant.
