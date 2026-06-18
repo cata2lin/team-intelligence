@@ -62,12 +62,26 @@ Per `brand × product_a × product_b`: `co_count, conf_a_to_b, conf_b_to_a, lift
 "Frequently bought together" — powers PDP cross-sell, Klaviyo post-purchase flows, 2+1 pairings.
 Readers: gigi:cross-sell, PDP FBT blocks, klaviyo flows.
 
-### `cache.product_ad_spend`  (per-SKU ad spend "parity")
-`date × sku × platform → spend_ron` (+ brand_id, product_title, source). **Google** is native
-per-product (current, all Google-advertised SKUs) via `google_ads_product_insights_daily`
-(productItemId `shopify_zz_<prod>_<variant>` → `variants.sku`). **FB/TikTok** only from
-`AWBprint.sku_ad_spend_daily` (HA-* SKUs, built from campaign-name parsing) — general Meta/TikTok
-per-SKU mapping is a **TODO** (campaign/ad data isn't in the warehouse). Feeds product_economics/POAS.
+### `cache.product_ad_spend`  (per-SKU ad spend — Google native + Meta/TikTok via Nomenclator) ✅
+`date × sku × platform → spend_ron` (+ brand_id, product_title, source). **Google** native per-product via
+`google_ads_product_insights_daily`. **Meta+TikTok** now mapped per-SKU/group from **LIVE campaign/ad names**
+via the KB Nomenclator rules (`kb_meta['ad_campaign_rules']`: `HA-####`→SKU, else product_group; TEST bucketed
+separately), built by `scripts/ad_spend_live.py` — per-day FX, exact brand attribution from the Mapping sheet,
+monthly chunking. **Validated ±1% vs Raport Zilnic 2.** Source `meta_tiktok_campaign_map`. VPS cron 5:30
+(`/root/ad-spend/run_daily.sh`, incremental); year backfill `ad_spend_live.py --since 2025-01-01 --apply`.
+KB rules: `meta-ads/kb_rules.py seed`; coverage: `kb_rules.py coverage`. (build_cache product_ad_spend is now
+INCREMENTAL — never drops.) Feeds product_economics/POAS **and per-SKU profitability** (below).
+
+### Per-SKU / per-category PROFITABILITY (`scripts/profit_by_sku.py`, `profit_by_category.py`) ✅
+Real P&L per SKU and per product_group — **same formula as `api.profitability` / `grandia_pnl`**
+(Venit − COGS − Transport − Marketing, ex-VAT / TVA deductibil, gross+net), additive & read-only (does NOT
+touch the prod engine). Sources: `profit_order_lines` (per-line sku/qty/revenue/cogs captured by
+`profit_lines_sync.py` via extended Shopify GraphQL line price — handles 2+1 free via net discountedTotal)
+JOINed to `profit_orders` (delivered only); transport allocated, flagged **REAL** (DPD audit nomenclator)
+vs **ESTIMAT** with a ⚠️ notification of SKUs/%revenue lacking real transport; marketing = real per-SKU from
+`cache.product_ad_spend` (NOT a flat assumption). Run `uv run profit_by_sku.py 2026-05` / `profit_by_category.py 2026-05`.
+VPS cron 6:15 (`run_lines_daily.sh` refreshes `profit_order_lines`). Reconciles with the engine per-prefix.
+TODO: exact per-order transport from AWBprint `order_awbs.transport_cost_fara_tva` (order-level match).
 
 ### `cache.daily_brand_pnl`  (mirror of the VPS `daily_perf.db`, per-brand daily P&L — ESTIMATE)
 `date × brand → orders, revenue, cogs, transport, fb/tk/google/total spend, contribution_margin, roas, cpa, aov`.
