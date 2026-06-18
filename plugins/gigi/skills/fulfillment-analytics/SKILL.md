@@ -1,6 +1,6 @@
 ---
 name: fulfillment-analytics
-description: Analitică RAPIDĂ de livrare / vânzări / transport / retenție din AWBprint (DB-ul AWB/Frisbo), pe TOATE cele 21 de magazine Arona — Postgres = instant, ~99% complet (mult peste metrics warehouse, care e incomplet). 5 rapoarte (--report) — refuse (rată de refuz/retur per brand|curier|produs, din line_items × aggregated_status), sales (venit + comenzi + bucăți per brand, sau --daily pe zi), transport (cost REAL de curier per brand×curier, avg/colet, % din venit), stuck (colete blocate in_transit/pending de > N zile + „ghost" = AWB emis dar nescanat), repeat (retenție: clienți noi vs revenit, returning-rate, comenzi/client, cheia = telefonul). Opțional scrie un Google Sheet partajat. Folosește pentru „rată de refuz", „COD refusal", „ce brand/produs/curier se refuză cel mai mult", „cât pierdem din retururi", „venit pe brand azi/luna asta", „vânzări pe zi", „cost real de transport", „cât mănâncă transportul din marjă", „DPD vs Sameday cost", „colete blocate", „ghost shipments", „comenzi stuck in transit", „rată de revenire", „clienți care revin", „retenție", „repeat rate", „câți clienți noi". Triggers: refuz, retur, COD refusal, deliverability, livrabilitate, refuse rate, transport cost, cost curier, vanzari pe brand, venit zilnic, daily sales, stuck shipments, colete blocate, ghost shipment, repeat rate, returning customers, retentie, clienti noi, AWBprint, Frisbo.
+description: Analitică RAPIDĂ de livrare / vânzări / transport / retenție / COD-risk din AWBprint (DB-ul AWB/Frisbo), pe TOATE cele 21 de magazine Arona — Postgres = instant, ~99% complet (mult peste metrics warehouse, care e incomplet). 7 rapoarte (--report) — refuse (rată de refuz/retur per brand|curier|produs|payment|discount), sales (venit + comenzi + bucăți per brand, sau --daily pe zi), transport (cost REAL de curier per brand×curier, avg/colet, % din venit), stuck (colete blocate in_transit/pending de > N zile + „ghost"), repeat (retenție: clienți noi vs revenit, returning-rate), cod (COD value-at-risk: bani ramburs în zbor neîncasați, pe vârstă proaspăt vs stale 30z+, exclude comenzile test), geo (heatmap refuz pe județ/oraș RO). Folosește pentru „COD value-at-risk", „cât cash ramburs e în zbor", „rată de refuz pe județ/oraș", „COD vs prepaid refuz", „discount vs refuz". Opțional scrie un Google Sheet partajat. Folosește pentru „rată de refuz", „COD refusal", „ce brand/produs/curier se refuză cel mai mult", „cât pierdem din retururi", „venit pe brand azi/luna asta", „vânzări pe zi", „cost real de transport", „cât mănâncă transportul din marjă", „DPD vs Sameday cost", „colete blocate", „ghost shipments", „comenzi stuck in transit", „rată de revenire", „clienți care revin", „retenție", „repeat rate", „câți clienți noi". Triggers: refuz, retur, COD refusal, deliverability, livrabilitate, refuse rate, transport cost, cost curier, vanzari pe brand, venit zilnic, daily sales, stuck shipments, colete blocate, ghost shipment, repeat rate, returning customers, retentie, clienti noi, AWBprint, Frisbo.
 ---
 
 # Fulfillment analytics (AWBprint — rapid, toate magazinele)
@@ -33,6 +33,16 @@ uv run fulfillment_analytics.py --report stuck --days 7 --limit 50
 # retenție: clienți noi vs revenit + returning-rate per brand
 uv run fulfillment_analytics.py --report repeat --months 3
 
+# COD value-at-risk: bani ramburs ÎN ZBOR (neîncasați), pe vârstă (proaspăt vs stale 30z+)
+uv run fulfillment_analytics.py --report cod --months 3
+
+# heatmap refuz pe județ (RO) — și pe oraș cu --by city
+uv run fulfillment_analytics.py --report geo --by province
+
+# levere de refuz: COD vs prepaid, și adâncimea reducerii
+uv run fulfillment_analytics.py --report refuse --by payment
+uv run fulfillment_analytics.py --report refuse --by discount
+
 # orice raport + un Google Sheet partajat:
 uv run fulfillment_analytics.py --report refuse --by brand --months 3 --sheet
 ```
@@ -40,8 +50,8 @@ uv run fulfillment_analytics.py --report refuse --by brand --months 3 --sheet
 ### Parametri
 | Flag | Default | Ce face |
 |---|---|---|
-| `--report` | `refuse` | `refuse` / `sales` / `transport` / `stuck` / `repeat` |
-| `--by` | `brand` | doar la `refuse`: `brand` / `courier` / `product` |
+| `--report` | `refuse` | `refuse` / `sales` / `transport` / `stuck` / `repeat` / `cod` / `geo` |
+| `--by` | `brand` | `refuse`: brand/courier/product/**payment**/**discount** ; `geo`: province/city |
 | `--stores` | toate | prefixe (EST,GT) → mapate la magazine; obligatoriu la `refuse --by product` pt titluri |
 | `--months` / `--days` | 3 luni | fereastra; la `stuck`, `--days` = pragul de vechime |
 | `--from` / `--to` | — / azi | interval fix `YYYY-MM-DD` |
@@ -60,6 +70,16 @@ Bucket-uri din `aggregated_status`:
 `refuz % = (RETURNED + REFUSED) / (DELIVERED + RETURNED + REFUSED)` — DOAR pe comenzile
 **rezolvate** (livrate sau întoarse); cele în tranzit/pending NU intră în numitor (altfel
 rata iese fals mică). La produs, pragul minim e 5 comenzi rezolvate (anti-zgomot).
+
+## cod & geo
+- **cod** (COD value-at-risk): comenzi ramburs cu status IN_TRANSIT/PENDING (nici livrate, nici
+  eșuate) = cash încă neîncasat. Defalcat „proaspăt (<30z)" vs „stale 30z+" (cash blocat/abandonat
+  de urmărit separat). **Exclude comenzile de testare** (tag `test` în `tags`, mai ales Magdeal/Oferte).
+  COD = `payment_gateway` ILIKE ramburs/cod/numerar/cash/„plata la livrare". Linia TOTAL = peste toate brandurile.
+- **geo**: heatmap refuz pe `shipping_address->>'province'`/`'city'`, **DOAR RO** (brandurile străine
+  n-au province); prag 40 comenzi rezolvate/zonă; antetul arată și rata națională.
+- **refuse --by payment**: COD vs PREPAID (levierul mare). **--by discount**: 0%/1-15%/15-30%/30-40%/40%+
+  (cu cât reducerea e mai mare, cu atât refuzul scade — clientul e mai angajat).
 
 ## Capcane
 - `transport_cost` e populat ~81% (doar comenzile cu CSV de curier importat) — `cost/colet`

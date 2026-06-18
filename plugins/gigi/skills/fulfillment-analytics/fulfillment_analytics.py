@@ -62,6 +62,17 @@ S_RETURNED = {"back_to_sender", "returning_to_sender", "incorrect_address", "los
 S_REFUSED = {"refused", "unsuccessful_delivery"}
 S_TRANSIT = {"in_transit", "fulfilled", "redirected", "deferred_delivery", "on_hold", "out_for_delivery"}
 S_PENDING = {"waiting_for_courier", "not_fulfilled", "new", "ready_for_pickup", "not_created", "created_awb"}
+# COD = ramburs (plata la livrare); restul = prepaid. payment_gateway are 6+ variante → ILIKE.
+COD_SQL = ("(lower(coalesce(o.payment_gateway,'')) LIKE '%ramburs%' OR "
+           "lower(coalesce(o.payment_gateway,'')) LIKE '%cod%' OR "
+           "lower(coalesce(o.payment_gateway,'')) LIKE '%numerar%' OR "
+           "lower(coalesce(o.payment_gateway,'')) LIKE '%cash%' OR "
+           "lower(coalesce(o.payment_gateway,'')) LIKE '%plata la livrare%')")
+# „în zbor" = nici livrat, nici eșuat/anulat → bani COD încă neîncasați
+S_INFLIGHT = S_TRANSIT | S_PENDING
+# comenzi de TESTARE produs (mai ales Magdeal/Oferte) — tag-ul "test" în tags jsonb;
+# NU sunt cash real, le excludem din COD-at-risk
+NOT_TEST = "coalesce(o.tags::text,'') NOT ILIKE '%\"test\"%'"
 
 
 def bucket(status):
@@ -256,7 +267,18 @@ def rep_refuse(cur, frm, to, by, stores, limit):
         header = ["Produs", "SKU", "Rezolvate", "Livrate", "Returnate", "Refuzate", "În curs", "Refuz %"]
         return header, rows[:limit], "refuz per produs"
     else:
-        grp = "s.name" if by == "brand" else "o.courier_name"
+        GRP = {
+            "brand": "s.name",
+            "courier": "coalesce(nullif(o.courier_name,''),'(fără)')",
+            "payment": f"CASE WHEN {COD_SQL} THEN 'COD' ELSE 'PREPAID' END",
+            "discount": ("CASE WHEN coalesce(o.total_price,0)<=0 THEN 'n/a' "
+                         "WHEN coalesce(o.total_discounts,0)=0 THEN '0%' "
+                         "WHEN o.total_discounts/(o.total_price+o.total_discounts) < 0.15 THEN '1-15%' "
+                         "WHEN o.total_discounts/(o.total_price+o.total_discounts) < 0.30 THEN '15-30%' "
+                         "WHEN o.total_discounts/(o.total_price+o.total_discounts) < 0.40 THEN '30-40%' "
+                         "ELSE '40%+' END"),
+        }
+        grp = GRP.get(by, "s.name")
         cur.execute(f"""
           SELECT {grp} g, o.aggregated_status agg, count(*)
           FROM orders o JOIN stores s ON s.uid=o.store_uid
@@ -276,6 +298,68 @@ def rep_refuse(cur, frm, to, by, stores, limit):
         rows.sort(key=lambda r: r[-1], reverse=True)
         header = [by.capitalize(), "Total", "Rezolvate", "Livrate", "Returnate", "Refuzate", "În curs", "Refuz %"]
         return header, rows[:limit], f"refuz per {by}"
+
+
+def rep_cod(cur, frm, to, stores, limit):
+    """COD value-at-risk: bani ramburs ÎN ZBOR (nici livrat, nici eșuat) = cash neîncasat.
+    Pe vârstă, ca să separi cash-ul proaspăt (de urmărit) de „stale" 30z+ (blocat/abandonat)."""
+    sf, sp = store_filter(stores)
+    inflight = list(S_INFLIGHT)
+    cur.execute(f"""
+      SELECT s.name,
+        greatest(0, date_part('day', now() - o.frisbo_created_at))::int AS age,
+        o.total_price, o.aggregated_status
+      FROM orders o JOIN stores s ON s.uid=o.store_uid
+      WHERE o.aggregated_status = ANY(%s) AND {COD_SQL} AND {NOT_TEST}
+        AND o.frisbo_created_at >= %s AND o.frisbo_created_at < %s {sf}
+    """, [inflight, frm, to] + sp)
+    agg = defaultdict(lambda: {"orders": 0, "ron": 0.0, "fresh_ron": 0.0, "stale_ron": 0.0, "stale_orders": 0})
+    for nm, age, price, st in cur.fetchall():
+        a = agg[nm]; p = float(price or 0)
+        a["orders"] += 1; a["ron"] += p
+        if age is not None and age >= 30:
+            a["stale_ron"] += p; a["stale_orders"] += 1
+        else:
+            a["fresh_ron"] += p
+    rows = [(nm, v["orders"], round(v["ron"]), round(v["fresh_ron"]), v["stale_orders"], round(v["stale_ron"]))
+            for nm, v in agg.items()]
+    rows.sort(key=lambda r: r[2], reverse=True)
+    total = ("TOTAL (toate)", sum(r[1] for r in rows), round(sum(r[2] for r in rows)),
+             round(sum(r[3] for r in rows)), sum(r[4] for r in rows), round(sum(r[5] for r in rows)))
+    rows = rows[:limit] + [total]  # TOTAL e mereu peste TOATE brandurile, nu doar top-N
+    header = ["Brand", "Comenzi COD", "RON în zbor", "din care proaspăt (<30z)", "Comenzi stale 30z+", "RON stale 30z+"]
+    return header, rows, "COD value-at-risk (cash neîncasat în zbor)"
+
+
+def rep_geo(cur, frm, to, by, stores, limit):
+    """Heatmap refuz pe județ/oraș (DOAR RO — brandurile străine n-au province).
+    refuz % = (returnate+refuzate)/rezolvate. Prag minim de comenzi rezolvate = anti-zgomot."""
+    sf, sp = store_filter(stores)
+    col = "shipping_address->>'city'" if by == "city" else "shipping_address->>'province'"
+    cur.execute(f"""
+      SELECT {col} g, o.aggregated_status agg, count(*)
+      FROM orders o JOIN stores s ON s.uid=o.store_uid
+      WHERE o.frisbo_created_at >= %s AND o.frisbo_created_at < %s
+        AND upper(coalesce(o.shipping_address->>'country_code', o.shipping_address->>'country','RO')) IN ('RO','ROMANIA')
+        AND nullif({col},'') IS NOT NULL {sf}
+      GROUP BY g, agg
+    """, [frm, to] + sp)
+    agg = defaultdict(lambda: defaultdict(int))
+    for g, st, c in cur.fetchall():
+        agg[g][bucket(st)] += c
+    rows = []
+    natdeliv = natfail = 0
+    for g, b in agg.items():
+        resolved = b["delivered"] + b["returned"] + b["refused"]
+        fail = b["returned"] + b["refused"]
+        natdeliv += b["delivered"]; natfail += fail
+        if resolved < 40:  # prag anti-zgomot pe județ/oraș
+            continue
+        rows.append((g, resolved, b["delivered"], fail, round(100.0 * fail / resolved, 1)))
+    rows.sort(key=lambda r: r[-1], reverse=True)
+    nat = round(100.0 * natfail / (natdeliv + natfail), 1) if (natdeliv + natfail) else 0
+    header = [by.capitalize(), "Rezolvate", "Livrate", "Returnate+Refuzate", f"Refuz % (național {nat}%)"]
+    return header, rows[:limit], f"heatmap refuz pe {by} (RO)"
 
 
 def rep_sales(cur, frm, to, stores, daily, limit):
@@ -383,8 +467,9 @@ def rep_stuck(cur, frm, to, stores, days, limit):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--report", choices=["refuse", "sales", "transport", "stuck", "repeat"], default="refuse")
-    ap.add_argument("--by", choices=["brand", "courier", "product"], default="brand", help="doar pt refuse")
+    ap.add_argument("--report", choices=["refuse", "sales", "transport", "stuck", "repeat", "cod", "geo"], default="refuse")
+    ap.add_argument("--by", choices=["brand", "courier", "product", "payment", "discount", "province", "city"],
+                    default="brand", help="refuse: brand|courier|product|payment|discount ; geo: province|city")
     ap.add_argument("--stores", help="prefixe (EST,GT) sau implicit toate")
     ap.add_argument("--months", type=int)
     ap.add_argument("--days", type=int, help="fereastră în zile (sau pragul de vechime la stuck)")
@@ -417,6 +502,11 @@ def main():
         header, rows, label = rep_transport(cur, from_date, to_excl, stores, args.limit)
     elif args.report == "repeat":
         header, rows, label = rep_repeat(cur, from_date, to_excl, stores, args.limit)
+    elif args.report == "cod":
+        header, rows, label = rep_cod(cur, from_date, to_excl, stores, args.limit)
+    elif args.report == "geo":
+        by_geo = args.by if args.by in ("province", "city") else "province"
+        header, rows, label = rep_geo(cur, from_date, to_excl, by_geo, stores, args.limit)
     else:
         header, rows, label = rep_stuck(cur, from_date, to_excl, stores, stuck_days, args.limit)
     conn.close()
