@@ -47,7 +47,7 @@ Common flags: `--brand <name>` or `--property <id>`; `--all` (channels/economics
 ### Brand → GA4 property (`ga4.py` BRANDS map)
 `esteban` 510626424 · `grandia` 510760223 · `nubra` 541249929 · `george-talent`/`gt` 541255080 · `belasil` 487042770 · `gento` 486992931 · `covoria` 491785347 · `casa-ofertelor` 501613337 · `rossi` 402470642 · `nocturna` 460807314 (+ `nocturna-lux`/`-pl`/`-gr`/`-bg`).
 - ✅ Confirmed with data: Esteban, Grandia, Nubra, Belasil (and most others).
-- ⚠️ **George Talent: GA4 tag NOT firing** (0 sessions) → for GT use **Search Console** (works) or Shopify, not GA4.
+- ✅ **George Talent: GA4 FIXED 18 Jun 2026** — measurement ID `G-PDS3DVNQSZ` is live (Shopify web-pixel) and the SA has Viewer on property `541255080`. GA4 does **NOT backfill** → GT's organic trend starts 18 Jun; until history accrues, GSC stays the richer source for GT. (Was: tag not firing / 0 sessions.)
 
 Each store is a **separate GA4 account**, so granting the SA Viewer is per-account. To connect a new brand: add the SA as Viewer in that GA4 account, then `uv run ga4.py properties` to grab the new property ID and add it to `BRANDS` in `ga4.py`.
 
