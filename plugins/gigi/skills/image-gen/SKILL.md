@@ -82,6 +82,29 @@ uv run scripts/product_shots.py --title "Lampă LED birou" --ref ./lamp.jpg --pr
 Always pass **1–3 real `--ref` photos** for product mode — without them the product
 won't be faithful. Only the first 3 references are used (more add noise + cost).
 
+## 3) Blog hero images — `scripts/hero.py`
+
+A thin wrapper around `gen.py` for **article / blog hero images** (16:9): a per-brand
+visual style + a topic scene, so every article gets a UNIQUE, on-topic visual instead of
+reusing the same product photo (which makes a whole blog look identical).
+
+```bash
+# perfume store → pass the REAL bottle as --ref so it stays authentic; the scene gives context
+uv run scripts/hero.py --store GT --title "Cum alegi un parfum de barbati" \
+    --scene "masculine premium, dark slate, warm rim light, dried botanicals" \
+    --ref https://cdn.shopify.com/.../bottle.jpg --out /tmp/gen --name gt-pillar
+
+# non-product topic → no --ref, just a lifestyle scene
+uv run scripts/hero.py --store Belasil --title "Lavete magice" \
+    --scene "hand wiping a sparkling clean glass surface with a microfiber cloth, bright airy kitchen"
+```
+
+`--store` applies a per-brand look (GT/Esteban/Nubra/Grandia/Belasil presets, else neutral
+editorial). Always give a topic-specific `--scene` so the hero is IN CONTEXT. Prints
+`SAVED: <path>` on the last line. The blog publisher
+`gigi:shopify-stores/scripts/publish_blog.py` calls this automatically via its
+`--hero-scene` / `--hero-ref` flags — prefer a generated hero over a product photo.
+
 ## Notes & gotchas
 - **Reference fidelity:** `gemini` is the better choice when the output must match a
   real product/object closely. `openai` is great for free text‑to‑image and clean
