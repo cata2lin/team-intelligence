@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["psycopg2-binary", "paramiko>=3.0"]
+# dependencies = ["psycopg2-binary", "paramiko>=3.0", "requests>=2.31", "google-api-python-client>=2.0", "google-auth>=2.0"]
 # ///
 """
 build_cache.py — materialize shared CACHE tables in the metrics warehouse so CS
@@ -309,15 +309,15 @@ def run_daily_ad_spend(apply):
 # (currently HA-* SKUs, built from campaign-name parsing). General Meta/TikTok SKU mapping = TODO.
 PRODUCT_AD_SPEND_DDL = """
 CREATE SCHEMA IF NOT EXISTS cache;
-DROP TABLE IF EXISTS cache.product_ad_spend CASCADE;
-CREATE TABLE cache.product_ad_spend (
+-- INCREMENTAL: never DROP (cron upserts only a recent window; history is preserved for the year backfill)
+CREATE TABLE IF NOT EXISTS cache.product_ad_spend (
   date          date,
   brand_id      text,
   sku           text,
   product_title text,
   platform      text,    -- google | meta | tiktok
   spend_ron     numeric,
-  source        text,    -- google_product_insights | awbprint_sku
+  source        text,    -- google_product_insights | meta_tiktok_campaign_map
   computed_at   timestamptz DEFAULT now(),
   PRIMARY KEY (date, sku, platform)
 );
@@ -336,29 +336,31 @@ GROUP BY g.date, v."brandId", v.sku
 
 def run_product_ad_spend(apply):
     from psycopg2.extras import execute_values
-    mdsn = secret("DATABASE_URL_METRICS"); adsn = secret("DATABASE_URL_AWBPRINT")
+    mdsn = secret("DATABASE_URL_METRICS")
+    # meta/tiktok pull + FX need these in env; KB rules need KB_DATABASE_URL (already in env)
+    os.environ["DATABASE_URL_METRICS"] = mdsn
+    adsn = secret("DATABASE_URL_AWBPRINT")
+    if adsn: os.environ["DATABASE_URL_AWBPRINT"] = adsn
+    since = os.environ.get("AD_SPEND_SINCE", "2025-01-01")   # current + previous year
+    # LIVE Meta+TikTok per-SKU/group via the KB Nomenclator rules — replaces the stale AWBprint sku_ad_spend_daily.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    fbtk = []
+    try:
+        from ad_spend_live import live_rows
+        fbtk = live_rows(since=since)
+    except Exception as e:
+        print(f"[product_ad_spend] WARN live_rows a eșuat ({type(e).__name__}: {e}); doar google")
     mconn = psycopg2.connect(clean_dsn(mdsn)); mcur = mconn.cursor()
-    # sku -> brand_id map from metrics variants (for the AWBprint fb/tiktok rows)
-    mcur.execute("SELECT sku, MAX(\"brandId\") FROM variants WHERE sku IS NOT NULL AND sku<>'' GROUP BY sku")
-    skubrand = dict(mcur.fetchall())
-    fbtk, unmatched = [], set()
-    if adsn:
-        aconn = psycopg2.connect(clean_dsn(adsn)); acur = aconn.cursor()
-        acur.execute("SELECT date, sku, amount_fb_ron, amount_tk_ron FROM sku_ad_spend_daily")
-        for d, sku, fb, tk in acur.fetchall():
-            bid = skubrand.get(sku)
-            if bid is None: unmatched.add(sku)
-            if fb: fbtk.append((d, bid, sku, None, "meta", float(fb), "awbprint_sku"))
-            if tk: fbtk.append((d, bid, sku, None, "tiktok", float(tk), "awbprint_sku"))
-        aconn.close()
-    else:
-        print("[product_ad_spend] WARN: no DATABASE_URL_AWBPRINT — google only")
-    print(f"[product_ad_spend] google: in-DB; fb/tiktok(AWBprint): {len(fbtk)} rows; "
-          f"unmatched fb/tiktok skus: {len(unmatched)}")
+    print(f"[product_ad_spend] google: in-DB; meta/tiktok(live KB-map, since {since}): {len(fbtk)} rows")
     if not apply:
         mconn.rollback(); mconn.close(); print("DRY-RUN — nothing written."); return
-    mcur.execute(PRODUCT_AD_SPEND_DDL)
+    mcur.execute(PRODUCT_AD_SPEND_DDL)   # CREATE IF NOT EXISTS — never drops (incremental)
+    # Google: cheap in-DB → refresh fully
+    mcur.execute("DELETE FROM cache.product_ad_spend WHERE source='google_product_insights'")
     mcur.execute(PRODUCT_AD_SPEND_GOOGLE)
+    # Meta/TikTok live: clear only the pulled window then re-insert (so a cron with since=last-N-days
+    # refreshes recent data without re-pulling years and without leaving stale rows; history preserved).
+    mcur.execute("DELETE FROM cache.product_ad_spend WHERE source='meta_tiktok_campaign_map' AND date >= %s", (since,))
     if fbtk:
         execute_values(mcur,
             "INSERT INTO cache.product_ad_spend (date,brand_id,sku,product_title,platform,spend_ron,source) "

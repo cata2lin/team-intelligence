@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["google-api-python-client>=2.0", "google-auth>=2.0"]
+# dependencies = ["google-api-python-client>=2.0", "google-auth>=2.0", "psycopg2-binary>=2.9"]
 # ///
 """Map an ad campaign → product group, and flag TEST vs SALES — for multi-product "deals" accounts
 (e.g. Reflexino = Magdeal's FB account, where each campaign sells a different product and TEST campaigns
@@ -53,22 +53,47 @@ def sync():
     print(f"synced fb={len(out['facebook'])} tt={len(out['tiktok'])} reguli -> {CACHE}")
     return out
 
+_RULES = None
+def _kb_rules():
+    """Read campaign→group rules from the KB (kb_meta['ad_campaign_rules']) — the team-shared source.
+    Returns None if the KB is unreachable so callers fall back to the local prod_rules.json cache."""
+    url = os.environ.get("KB_DATABASE_URL")
+    if not url: return None
+    try:
+        import psycopg2
+        cx = psycopg2.connect(url, connect_timeout=10)
+        with cx.cursor() as c:
+            c.execute("SELECT value FROM kb_meta WHERE key='ad_campaign_rules'")
+            r = c.fetchone()
+        cx.close()
+        d = json.loads(r[0]) if r and r[0] else None
+        return d if d and (d.get("facebook") or d.get("tiktok")) else None
+    except Exception as e:
+        sys.stderr.write(f"[prodmap] reguli KB indisponibile ({type(e).__name__}); folosesc cache local\n")
+        return None
+
 def load():
-    return json.loads(CACHE.read_text()) if CACHE.exists() else {"facebook": [], "tiktok": []}
+    """Rules from KB first (live, team-shared), else the local prod_rules.json cache. Memoised."""
+    global _RULES
+    if _RULES is None:
+        _RULES = _kb_rules() or (json.loads(CACHE.read_text()) if CACHE.exists()
+                                 else {"facebook": [], "tiktok": []})
+    return _RULES
 
 def product_of(platform, account, campaign, ad=""):
-    """Campaign → product group: AUTO HA-<digits>, else first matching Nomenclator rule, else 'Unmapped'."""
-    m = re.search(r"(HA-\d+)", str(campaign or ""), re.IGNORECASE)
+    """Campaign/ad → product group: AUTO HA-<digits> (in campaign OR ad), else first matching rule, else 'Unmapped'."""
+    m = re.search(r"(?<![A-Za-z0-9])(HA-\d+)", f"{campaign or ''} {ad or ''}", re.IGNORECASE)
     if m: return m.group(1).upper()
     for r in load().get(platform, []):
         pat = _norm(r["pattern"])
         if not pat: continue
-        target = {"ACCOUNT": account, "CAMPAIGN_KEYWORD": campaign, "AD_KEYWORD": ad}.get(r["map_type"], "")
+        target = {"ACCOUNT": account, "CAMPAIGN_KEYWORD": campaign, "AD_KEYWORD": ad,
+                  "CAMPAIGN_AND_AD": f"{campaign} && {ad}"}.get(r["map_type"], "")
         if pat in _norm(target): return r["product_group"]
     return "Unmapped"
 
 def is_test(campaign):
-    return "test" in _norm(campaign)
+    return bool(re.search(r"\btest\b", _norm(campaign)))
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "sync"
