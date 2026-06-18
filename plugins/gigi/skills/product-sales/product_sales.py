@@ -2,6 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #   "httpx>=0.27",
+#   "pg8000>=1.30",
 #   "google-api-python-client>=2.0",
 #   "google-auth>=2.0",
 # ]
@@ -46,6 +47,19 @@ except Exception:
 API_VERSION = "2024-10"
 # titluri care NU sunt parfumuri (cutii cadou, mostre, testere, carduri) — excluse implicit
 NON_PERFUME_RE = r"cutie|cadou|ambalaj|mostr|sample|esantion|eșantion|tester|card|voucher|gift\s*card|pung[ăa]"
+
+# prefix stores.csv → AWBprint stores.name (DB_Reference §3). Pt sursa --source awb.
+PREFIX_TO_STORE = {
+    "EST": "esteban.ro", "GT": "georgetalent.ro", "OFER": "ofertelezilei.ro",
+    "BON": "casaofertelor.ro", "BELA": "belasil.ro", "LUX": "nocturnalux.ro",
+    "NOC": "nocturna.ro", "GEN": "gento.ro", "ROSSI": "rossinails.ro",
+    "APR": "apreciat.ro", "RED": "reduceribune.ro", "CARP": "carpetto.ro",
+    "PAT": "cepatai.ro", "GRAN": "grandia.ro", "MAG": "magdeal.ro",
+    "COV": "covoria.ro", "NUB": "nubra", "CZ": "bonhaus.cz", "PL": "bonhaus.pl",
+    "BG": "bonhaus.bg",
+}
+# stări care anulează vânzarea (pt "net" în sursa awb): comandă anulată / refuzată / întoarsă
+AWB_CANCEL_STATES = ("cancelled", "refused", "back_to_sender", "returning_to_sender")
 
 # ── line items first:20 acoperă ~tot (comenzi de parfumuri au 1-6 linii); fără refunds (net=currentQuantity) ──
 ORDERS_GQL = """
@@ -190,6 +204,98 @@ def fetch_store(prefix, from_date, to_date):
     return prod, n_orders
 
 
+# ════════════════════════ sursa AWBprint (Postgres, instant, ~99% complet) ════════════════════════
+def _awb_conn():
+    import pg8000.dbapi, urllib.parse as up
+    url = os.getenv("DATABASE_URL_AWBPRINT") or _kb_secret("DATABASE_URL_AWBPRINT")
+    if not url:
+        raise SystemExit("Lipsește DATABASE_URL_AWBPRINT (env sau KB).")
+    u = up.urlparse(url)
+    return pg8000.dbapi.connect(user=up.unquote(u.username or ""), password=up.unquote(u.password or ""),
+                                host=u.hostname, port=u.port or 5432,
+                                database=(u.path or "/").lstrip("/"), ssl_context=True)
+
+
+PRODUCTS_GQL = """
+query($cursor: String) {
+  products(first: 250, after: $cursor) {
+    pageInfo { hasNextPage endCursor }
+    edges { node { title variants(first: 50) { edges { node { sku } } } } }
+  }
+}
+"""
+
+
+def fetch_titles(prefix):
+    """sku(lower) → titlu produs, dintr-un singur pull de catalog Shopify (rapid: ~1 pagină)."""
+    shop, token = resolve_store(prefix)
+    if not token:
+        return {}
+    url = f"https://{shop}/admin/api/{API_VERSION}/graphql.json"
+    headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
+    titles, cursor = {}, None
+    client = httpx.Client()
+    while True:
+        j = _shopify_post(client, url, headers, {"query": PRODUCTS_GQL, "variables": {"cursor": cursor}})
+        data = (j.get("data") or {}).get("products") or {}
+        for ed in data.get("edges") or []:
+            node = (ed or {}).get("node") or {}
+            t = (node.get("title") or "").strip()
+            for ve in (node.get("variants") or {}).get("edges") or []:
+                sku = str(((ve or {}).get("node") or {}).get("sku") or "").strip().lower()
+                if sku and t:
+                    titles.setdefault(sku, t)
+        pi = data.get("pageInfo") or {}
+        if not pi.get("hasNextPage"):
+            break
+        cursor = pi.get("endCursor")
+    client.close()
+    return titles
+
+
+def fetch_store_awb(prefix, from_date, to_date):
+    """Bucăți per produs din AWBprint (instant). SKU din inventory_item.sku; titlul îl
+    rezolvăm din catalogul Shopify. net = exclude comenzile anulate/refuzate/întoarse."""
+    store_name = PREFIX_TO_STORE.get(prefix.upper())
+    if not store_name:
+        raise SystemExit(f"Nu știu numele AWBprint pt {prefix} — adaugă-l în PREFIX_TO_STORE.")
+    conn = _awb_conn()
+    cur = conn.cursor()
+    cur.execute("""
+      WITH li AS (
+        SELECT lower(item->'inventory_item'->>'sku') AS sku,
+               (item->>'quantity')::numeric AS qty,
+               COALESCE((item->>'price')::numeric, 0) AS price,
+               COALESCE((item->>'total_discount')::numeric, 0) AS disc,
+               o.order_number AS oname,
+               (o.aggregated_status = ANY(%s)) AS is_cancel
+        FROM orders o JOIN stores s ON s.uid = o.store_uid
+        CROSS JOIN LATERAL jsonb_array_elements(o.line_items::jsonb) AS item
+        WHERE s.name = %s
+          AND o.frisbo_created_at >= %s AND o.frisbo_created_at < %s
+      )
+      SELECT sku,
+             sum(qty)::int AS gross,
+             sum(qty) FILTER (WHERE NOT is_cancel)::int AS net,
+             sum(price*qty - disc) AS revenue,
+             count(DISTINCT oname) AS orders
+      FROM li WHERE sku IS NOT NULL AND sku <> '' GROUP BY sku
+    """, (list(AWB_CANCEL_STATES), store_name, from_date, to_date))
+    rows = cur.fetchall()
+    conn.close()
+    # numărul de comenzi din fereastră (pt log), comparabil cu sursa shopify
+    titles = fetch_titles(prefix)
+    prod = {}
+    n_units = 0
+    for sku, gross, net, revenue, orders in rows:
+        title = titles.get(sku, sku)
+        prod[(prefix, sku)] = {"store": prefix, "title": title, "skus": {sku},
+                               "gross": int(gross or 0), "net": int(net or 0),
+                               "revenue": float(revenue or 0), "orders": int(orders or 0), "currency": "RON"}
+        n_units += int(gross or 0)
+    return prod, n_units
+
+
 def months_ago(d, n):
     y, m = d.year, d.month - n
     while m <= 0:
@@ -263,6 +369,8 @@ def main():
     ap.add_argument("--sheet-title", help="titlul Sheet-ului nou")
     ap.add_argument("--no-sheet", action="store_true", help="doar print, fără Google Sheet")
     ap.add_argument("--json", help="scrie clasamentul complet ca JSON la calea dată")
+    ap.add_argument("--source", choices=["awb", "shopify"], default="awb",
+                    help="awb = AWBprint (instant, ~99%%, default); shopify = live (100%%, lent)")
     args = ap.parse_args()
 
     to_date = args.to_date or datetime.now(TZ).strftime("%Y-%m-%d")
@@ -272,8 +380,10 @@ def main():
 
     all_prod = {}
     excluded = []
+    print(f"sursă date: {args.source} ({'AWBprint — instant' if args.source=='awb' else 'Shopify live — lent'})", file=sys.stderr)
     for pfx in stores:
-        prod, n_orders = fetch_store(pfx, from_date, to_date)
+        prod, total = (fetch_store_awb(pfx, from_date, to_date) if args.source == "awb"
+                       else fetch_store(pfx, from_date, to_date))
         kept = 0
         for k, p in prod.items():
             if exclude_re and exclude_re.search(p["title"]):
@@ -281,15 +391,18 @@ def main():
                 continue
             all_prod[k] = p
             kept += 1
-        print(f"[{pfx}] {n_orders} comenzi, {len(prod)} produse ({kept} parfumuri păstrate, "
-              f"{len(prod)-kept} excluse), {sum(p['gross'] for p in prod.values())} buc gross", file=sys.stderr)
+        unit = "buc gross (total)" if args.source == "awb" else "comenzi"
+        print(f"[{pfx}] {total} {unit}, {len(prod)} produse ({kept} parfumuri păstrate, "
+              f"{len(prod)-kept} excluse)", file=sys.stderr)
     if excluded:
         print("  excluse (non-parfum): " + "; ".join(f"{s}:{t[:30]}({g})" for s, t, g in excluded[:12]), file=sys.stderr)
 
+    def _norders(p):
+        return p["orders"] if isinstance(p["orders"], int) else len(p["orders"])
     rows_data = [{
         "store": p["store"], "product": p["title"],
         "sku": ",".join(sorted(p["skus"]))[:50],
-        "gross": p["gross"], "net": p["net"], "orders": len(p["orders"]),
+        "gross": p["gross"], "net": p["net"], "orders": _norders(p),
         "revenue": round(p["revenue"], 2), "currency": p["currency"],
     } for p in all_prod.values()]
 
