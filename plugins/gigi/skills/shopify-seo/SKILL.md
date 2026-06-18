@@ -12,6 +12,11 @@ A repeatable playbook + tooling to take a Shopify store from "audited" to
 hard-won gotcha** from the ARONA stores rollout, so the next site goes fast and
 avoids the same traps.
 
+> **Brand NOU de la zero?** Citește `reference/brand-launch-playbook.md` — planul complet pe faze
+> (fundație tehnică → keyword research → acoperire on-page → structură/linking → conținut → off-page →
+> monitorizare), distilat dintr-o campanie SEO de agenție de 5 luni (Limitless / Grandia) + maparea
+> „ce livra agenția → cu ce skill al nostru îl facem singuri".
+
 ## Golden rules (read first — these cost real time to learn)
 
 1. **`seo:{}` REPLACES, it does not merge.** On `productUpdate`/`collectionUpdate`,
