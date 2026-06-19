@@ -56,6 +56,18 @@ def brand_name_to_id(cur):
 
 RZ2_SID = "1IVg0fI-_Rm7IptmOl3BmGrqtyyzn3auf0ZPuftr9vQo"
 
+def _sheet_exec(req, what="sheets"):
+    """Execută un request Google Sheets cu retry pe timeout/erori de rețea (rețea flaky → altfel aruncă
+    TimeoutError și crapă tot pull-ul). Aruncă doar după ce epuizează retry-urile."""
+    import time
+    for attempt in range(6):
+        try:
+            return req.execute()
+        except (TimeoutError, OSError, ConnectionError) as e:   # socket timeout/reset = tranzitoriu
+            if attempt < 5:
+                time.sleep(min(60, 4 * (2 ** attempt))); continue
+            sys.stderr.write(f"[ad_spend_live] {what} a eșuat după retry: {type(e).__name__}\n"); raise
+
 def load_fb_mapping():
     """Exact account->brand from the Raport Zilnic 2 'Mapping' tab (Conturi Facebook col).
     Returns [(account_name_lower, brand)] for best-match resolution."""
@@ -64,7 +76,7 @@ def load_fb_mapping():
     sa = json.loads(kb_secret("GA4_SA_JSON"))
     cr = Credentials.from_service_account_info(sa, scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"])
     svc = build("sheets", "v4", credentials=cr).spreadsheets()
-    v = svc.values().get(spreadsheetId=RZ2_SID, range="'Mapping'!A2:B").execute().get("values", [])
+    v = _sheet_exec(svc.values().get(spreadsheetId=RZ2_SID, range="'Mapping'!A2:B"), "load_fb_mapping").get("values", [])
     out = []
     for r in v:
         if len(r) >= 2 and r[0].strip() and r[1].strip():
@@ -106,7 +118,7 @@ def single_sku_groups():
         cr = Credentials.from_service_account_info(sa, scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"])
         svc = build("sheets", "v4", credentials=cr).spreadsheets()
         sid = kb_secret("NOMENCLATOR_SHEET_ID")
-        pg = svc.values().get(spreadsheetId=sid, range="'Product Group'!A2:B").execute().get("values", [])
+        pg = _sheet_exec(svc.values().get(spreadsheetId=sid, range="'Product Group'!A2:B"), "single_sku_groups").get("values", [])
         g2 = defaultdict(set)
         for r in pg:
             if len(r) >= 2 and r[0].strip() and r[1].strip():
