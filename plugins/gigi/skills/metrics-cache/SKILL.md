@@ -88,7 +88,9 @@ touch the prod engine). Sources: `profit_order_lines` (per-line sku/qty/revenue/
 `profit_lines_sync.py` via extended Shopify GraphQL line price — handles 2+1 free via net discountedTotal)
 JOINed to `profit_orders` (delivered only); transport allocated, flagged **REAL** (DPD audit nomenclator)
 vs **ESTIMAT** with a ⚠️ notification of SKUs/%revenue lacking real transport; marketing = real per-SKU from
-`cache.product_ad_spend` (NOT a flat assumption). Run `uv run profit_by_sku.py 2026-05` / `profit_by_category.py 2026-05`.
+`cache.product_ad_spend` (NOT a flat assumption). **Marketing-ul de brand/categorie** (campaniile fără SKU în
+nume — Esteban/GT/etc., ~80% din spend) se **alochează pe SKU proporțional cu NR. COMENZI** (CPA uniform pe
+categorie/brand; direct per-SKU HA-####/Google PMax rămâne exact). Prefix magazin→brand via `PREFIX_BRAND`. Run `uv run profit_by_sku.py 2026-05` / `profit_by_category.py 2026-05`.
 VPS cron 6:15 (`run_lines_daily.sh` refreshes `profit_order_lines`). Reconciles with the engine per-prefix.
 TODO: exact per-order transport from AWBprint `order_awbs.transport_cost_fara_tva` (order-level match).
 
