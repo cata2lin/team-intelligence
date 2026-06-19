@@ -75,7 +75,7 @@ INCREMENTAL — never drops.) Feeds product_economics/POAS **and per-SKU profita
 campaniei (orice `ESTEBAN/MAGDEAL/…` → brandul lui, oriunde rulează; token-ul cel mai lung câștigă),
 fallback pe **owner**-ul contului (brandul dedicat, filter None din Mapping — ex. `Belasil`); pt conturile
 partajate de MAI MULTE branduri cu token (unde owner-din-Mapping nu merge) → **`ACCT_DEFAULT_OWNER`**
-(ROSSI Nails Romania→Apreciat genți, Carpetto→Rossi Nails unghii, Nocturna.ro→Nocturna, Nocturna Europa→Ofertele Zilei);
+(ROSSI Nails Romania→Rossi Nails, Carpetto→Rossi Nails unghii, Nocturna.ro→Nocturna, Nocturna Europa→Ofertele Zilei);
 fără nimic din astea = orfan (raportat pe stderr, nu inventat). Reguli pe keyword în `ACCT_BRAND_RULES` (ex.
 `Belasil` `NEW TIKTOK`→Esteban). Owner-ii identificați din creative/produsul ad-urilor (ad_name). Re-backfill **doar o platformă** fără să atingi
 cealaltă: `ad_spend_live.py --platform tiktok --since 2025-01-01 --apply` (pur upsert → Facebook neatins;

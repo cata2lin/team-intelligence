@@ -200,9 +200,10 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
     # OWNER explicit pt conturile partajate de MAI MULTE branduri cu token (nu se poate exprima prin
     # Mapping ca la Belasil, fiindcă brandurile astea AU token). Campaniile fără token de pe contul ăsta
     # = brandul de mai jos (identificat din creative/produs de user 2026-06-19):
-    #   ROSSI Nails Romania → Apreciat (teste genți 'New Win Product'); Carpetto → Rossi Nails (creative KIT Polish/unghii);
-    #   Nocturna.ro → Nocturna (creative NOCTURNA/Pijamale); Nocturna Europa → Ofertele Zilei (oferte gospodărie).
-    ACCT_DEFAULT_OWNER = {"rossi nails romania": "Apreciat", "carpetto": "Rossi Nails",
+    #   ROSSI Nails Romania → Rossi Nails (untokened-ul, inclusiv 'New Win Product', e al brandului contului);
+    #   Carpetto → Rossi Nails (creative KIT Polish/unghii); Nocturna.ro → Nocturna (creative NOCTURNA/Pijamale);
+    #   Nocturna Europa → Ofertele Zilei (oferte gospodărie).
+    ACCT_DEFAULT_OWNER = {"rossi nails romania": "Rossi Nails", "carpetto": "Rossi Nails",
                           "nocturna.ro": "Nocturna", "nocturna europa": "Ofertele Zilei"}
     tt_lost = defaultdict(float)   # (acct,campaign) -> spend orfan (cont partajat, fără token ȘI fără owner)
 
