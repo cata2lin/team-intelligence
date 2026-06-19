@@ -52,6 +52,27 @@ def load_dpd_costs(path="data/dpd_nomenclator.json"):
     return out
 
 
+# prefix magazin -> nume brand (metrics). Prefixele de magazin sunt stabile; brand_map['shopify'] e gol,
+# deci mapăm explicit. Folosit pt alocarea marketingului de brand/UNMAPPED pe SKU-urile magazinului corect.
+PREFIX_BRAND = {
+    "EST": "Esteban", "GT": "George Talent", "NUB": "Nubra", "GRAN": "Grandia", "BELA": "Belasil",
+    "CARP": "Carpetto", "COV": "Covoria", "OFER": "Ofertele Zilei", "MAG": "Magdeal", "NOC": "Nocturna",
+    "APR": "Apreciat", "RED": "Reduceri bune", "GEN": "Gento", "PAT": "Ce Pat Ai", "ROSSI": "Rossi Nails",
+    "BON": "Bonhaus", "CZ": "Bonhaus CZ", "PL": "Bonhaus PL", "BG": "Bonhaus BG", "BONBG": "Bonhaus BG",
+    "LUX": "Nocturna Lux",
+}
+
+def _prefix_brandid(name2id):
+    """prefix magazin -> brand_id (metrics), via PREFIX_BRAND + brands(name->id), cu fallback pe primul cuvânt
+    (ex. 'Bonhaus CZ' -> 'Bonhaus' dacă sub-brandul nu e separat în metrics)."""
+    out = {}
+    for pfx, name in PREFIX_BRAND.items():
+        bid = name2id.get(name.strip().lower()) or name2id.get(name.split()[0].lower())
+        if bid:
+            out[pfx] = bid
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("month"); ap.add_argument("--db", default="data/profitability.db")
     ap.add_argument("--top", type=int, default=25); a = ap.parse_args()
@@ -77,7 +98,19 @@ def main():
     for r in rows:
         k = (r["prefix"], r["order_name"]); oline[k] += r["line_revenue"] or 0; ototal[k] = r["order_total"] or 0
 
-    sku = defaultdict(lambda: [0, 0.0, 0.0, 0.0])  # qty, rev_exvat, cogs_exvat, transport_exvat
+    # name2id + prefix->brand_id (pt alocarea marketingului de brand pe SKU-urile brandului corect)
+    import psycopg2
+    name2id = {}; pref2bid = {}; pc = None; cur = None
+    try:
+        pc = psycopg2.connect(_clean(os.environ["DATABASE_URL_METRICS"])); cur = pc.cursor()
+        cur.execute("SELECT id, name FROM brands"); name2id = {n.strip().lower(): i for i, n in cur.fetchall()}
+        pref2bid = _prefix_brandid(name2id)
+    except Exception as e:
+        sys.stderr.write(f"[brand-map] {type(e).__name__}: {e}\n")
+
+    sku = defaultdict(lambda: [0, 0.0, 0.0, 0.0])            # qty, rev_exvat, cogs_exvat, transport_exvat
+    sku_orders = defaultdict(set)                            # sku -> {(prefix,order)} = nr comenzi
+    brand_sku_orders = defaultdict(lambda: defaultdict(set)) # brand_id -> sku -> {(prefix,order)}
     for r in rows:
         if (r["sku"] or "").lower() in GIFT:
             continue
@@ -88,19 +121,49 @@ def main():
         rev_ex = (ototal[k] * share) / (1 + vat)
         cogs_ex = (r["line_cogs"] or 0) / (1 + vat)
         tcost = tc.get(r["prefix"], 0) * share / (1 + vat)   # cost transport alocat, ex-TVA
-        d = sku[r["sku"]]
+        s = r["sku"]; d = sku[s]
         d[0] += r["qty"] or 0; d[1] += rev_ex; d[2] += cogs_ex; d[3] += tcost
+        sku_orders[s].add(k)
+        bid = pref2bid.get(r["prefix"])
+        if bid: brand_sku_orders[bid][s].add(k)
+    orders_count = {s: len(v) for s, v in sku_orders.items()}
+    brand_oc = {b: {s: len(v) for s, v in d.items()} for b, d in brand_sku_orders.items()}
 
-    # marketing per sku (metrics)
-    import psycopg2
-    mk = defaultdict(float)
+    # --- MARKETING alocat pe COMENZI (CPA uniform): direct (HA-####/Google PMax) rămâne EXACT; brand/grup/unmapped
+    # se distribuie pe SKU-urile țintă proporțional cu NR. COMENZI → fiecare produs poartă CPA-ul categoriei/brandului.
+    mk = defaultdict(float); leftover = 0.0
     try:
-        pc = psycopg2.connect(_clean(os.environ["DATABASE_URL_METRICS"])); cur = pc.cursor()
-        cur.execute("SELECT sku, SUM(spend_ron) FROM cache.product_ad_spend WHERE to_char(date,'YYYY-MM')=%s GROUP BY sku", (a.month,))
-        for s, sp in cur.fetchall(): mk[s] += float(sp or 0)
-        pc.close()
+        y, mm = a.month.split("-"); mm = int(mm)
+        nxt = "%d-%02d-01" % (int(y) + (1 if mm == 12 else 0), 1 if mm == 12 else mm + 1)
+        if cur is None:
+            pc = psycopg2.connect(_clean(os.environ["DATABASE_URL_METRICS"])); cur = pc.cursor()
+        cur.execute("SELECT sku, brand_id, SUM(spend_ron) FROM cache.product_ad_spend WHERE date>=%s AND date<%s GROUP BY sku, brand_id",
+                    (a.month + "-01", nxt))
+        cache_rows = cur.fetchall()
+        if pc: pc.close()
+        sold = set(sku.keys())
+        grp_members = defaultdict(list)
+        for s in sold: grp_members[s2g.get(s)].append(s)
+        for key, bid_mkt, sp in cache_rows:
+            sp = float(sp or 0)
+            if not sp or key == "TEST": continue
+            if key in sold:                                                       # DIRECT (per-SKU exact)
+                mk[key] += sp; continue
+            members = [s for s in grp_members.get(key, []) if orders_count.get(s, 0) > 0]   # GRUP (categorie)
+            if members:
+                tot = sum(orders_count[s] for s in members)
+                for s in members: mk[s] += sp * orders_count[s] / tot
+                continue
+            bo = brand_oc.get(bid_mkt) if bid_mkt else None                       # BRAND-LEVEL / UNMAPPED
+            if bo and sum(bo.values()) > 0:
+                tot = sum(bo.values())
+                for s, oc in bo.items(): mk[s] += sp * oc / tot
+            else:
+                leftover += sp
     except Exception as e:
-        sys.stderr.write(f"[mkt] {type(e).__name__}; marketing=0\n")
+        sys.stderr.write(f"[mkt] {type(e).__name__}: {e}; marketing=0\n")
+    if leftover > 100:
+        sys.stderr.write(f"[mkt] ⚠ {round(leftover)} RON marketing NEALOCAT (brand fără SKU vândut în lună sau brand_id lipsă)\n")
 
     # per-SKU rows
     out = []
@@ -114,7 +177,7 @@ def main():
     for s, g, q, rev, cg, tr, m, ct in out:
         d = cat[g]; d[0] += q; d[1] += rev; d[2] += cg; d[3] += tr; d[4] += m
 
-    print(f"=== PROFIT PER CATEGORIE — {a.month} (venit exTVA, transport alocat, marketing din spend) ===")
+    print(f"=== PROFIT PER CATEGORIE — {a.month} (venit exTVA, transport alocat, marketing alocat pe COMENZI) ===")
     print(f"{'categorie':26}{'buc':>7}{'venit':>11}{'COGS':>10}{'transp':>9}{'mkt':>9}{'contrib':>11}")
     for g, (q, rev, cg, tr, m) in sorted(cat.items(), key=lambda x: -x[1][1]):
         print(f"{str(g)[:26]:26}{q:>7}{rev:>11.0f}{cg:>10.0f}{tr:>9.0f}{m:>9.0f}{rev-cg-tr-m:>11.0f}")
