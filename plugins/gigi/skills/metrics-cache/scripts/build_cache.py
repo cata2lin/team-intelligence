@@ -358,15 +358,18 @@ def run_product_ad_spend(apply):
     # Google: cheap in-DB → refresh fully
     mcur.execute("DELETE FROM cache.product_ad_spend WHERE source='google_product_insights'")
     mcur.execute(PRODUCT_AD_SPEND_GOOGLE)
-    # Meta/TikTok live: clear only the pulled window then re-insert (so a cron with since=last-N-days
-    # refreshes recent data without re-pulling years and without leaving stale rows; history preserved).
-    mcur.execute("DELETE FROM cache.product_ad_spend WHERE source='meta_tiktok_campaign_map' AND date >= %s", (since,))
+    # Meta/TikTok live: PUR UPSERT (FĂRĂ DELETE). Un pull parțial/eșuat (rețea flaky) actualizează doar ce a
+    # adus și PĂSTREAZĂ restul (last-known-good); cheile noi ⊇ cele vechi (același mapping de produs) → fără
+    # rânduri orfane. ⚠ NU reintroduce DELETE-since aici: dacă live_rows pică, DELETE-ul ștergea TOT istoricul
+    # și reinsera puțin/nimic (a trunchiat odată Facebook la 35 zile — vezi memoria). Gol → nu atinge nimic.
     if fbtk:
         execute_values(mcur,
             "INSERT INTO cache.product_ad_spend (date,brand_id,sku,product_title,platform,spend_ron,source) "
             "VALUES %s ON CONFLICT (date,sku,platform) DO UPDATE SET spend_ron=EXCLUDED.spend_ron, "
             "brand_id=COALESCE(EXCLUDED.brand_id,cache.product_ad_spend.brand_id), source=EXCLUDED.source",
             fbtk, page_size=2000)
+    else:
+        print("[product_ad_spend] ⚠ live_rows gol (API picat?) — PĂSTREZ meta/tiktok existent (nu șterg, nu scriu).")
     mcur.execute("SELECT COUNT(*), platform FROM cache.product_ad_spend GROUP BY platform")
     by = dict((p, c) for c, p in mcur.fetchall())
     mcur.execute("SELECT COUNT(*) FROM cache.product_ad_spend"); n = mcur.fetchone()[0]

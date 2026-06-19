@@ -68,7 +68,13 @@ def graph(url, params):
     while True:
         r = None
         for attempt in range(6):
-            r = requests.get(url, params=params, timeout=90)
+            try:
+                r = requests.get(url, params=params, timeout=90)
+            except requests.exceptions.RequestException as e:   # timeout/connection reset = tranzitoriu (rețea flaky)
+                if attempt < 5:
+                    time.sleep(min(90, 5 * (2 ** attempt))); continue
+                sys.stderr.write(f"[meta] request eșuat după retry: {type(e).__name__} — întorc parțial\n")
+                return out
             if r.status_code == 200:
                 break
             t = r.text.lower()

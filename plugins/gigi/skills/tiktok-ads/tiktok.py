@@ -114,7 +114,11 @@ def tk_get(path, token, params):
         p=dict(params); p["page"]=page; p.setdefault("page_size",1000)
         j=None
         for attempt in range(6):
-            j=requests.get(BASE+path, headers={"Access-Token":token}, params=p, timeout=90).json()
+            try:
+                j=requests.get(BASE+path, headers={"Access-Token":token}, params=p, timeout=90).json()
+            except requests.exceptions.RequestException as e:   # timeout/connection = tranzitoriu (rețea flaky)
+                if attempt<5: time.sleep(min(90,5*(2**attempt))); continue
+                sys.stderr.write(f"[tt] request eșuat după retry: {type(e).__name__} — întorc parțial\n"); return out
             code=j.get("code")
             if code==0: break
             transient = code in (40100,40016,50000,40001) or "rate" in str(j.get("message","")).lower() or "too many" in str(j.get("message","")).lower()

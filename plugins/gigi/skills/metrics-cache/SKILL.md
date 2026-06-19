@@ -71,6 +71,15 @@ monthly chunking. **Validated ±1% vs Raport Zilnic 2.** Source `meta_tiktok_cam
 (`/root/ad-spend/run_daily.sh`, incremental); year backfill `ad_spend_live.py --since 2025-01-01 --apply`.
 KB rules: `meta-ads/kb_rules.py seed`; coverage: `kb_rules.py coverage`. (build_cache product_ad_spend is now
 INCREMENTAL — never drops.) Feeds product_economics/POAS **and per-SKU profitability** (below).
+**Conturi TikTok partajate** (un advertiser, mai multe branduri): atribuire pe **token global** din numele
+campaniei (orice `ESTEBAN/MAGDEAL/…` → brandul lui, oriunde rulează; token-ul cel mai lung câștigă),
+fallback pe **owner**-ul contului (brandul dedicat, filter None din Mapping — ex. `Belasil`); pt conturile
+partajate de MAI MULTE branduri cu token (unde owner-din-Mapping nu merge) → **`ACCT_DEFAULT_OWNER`**
+(ROSSI Nails Romania→Rossi Nails, Carpetto→Rossi Nails unghii, Nocturna.ro→Nocturna, Nocturna Europa→Ofertele Zilei);
+fără nimic din astea = orfan (raportat pe stderr, nu inventat). Reguli pe keyword în `ACCT_BRAND_RULES` (ex.
+`Belasil` `NEW TIKTOK`→Esteban). Owner-ii identificați din creative/produsul ad-urilor (ad_name). Re-backfill **doar o platformă** fără să atingi
+cealaltă: `ad_spend_live.py --platform tiktok --since 2025-01-01 --apply` (pur upsert → Facebook neatins;
+0 rânduri = nu scrie, ca să nu strice datele la rețea flaky).
 
 ### Per-SKU / per-category PROFITABILITY (`scripts/profit_by_sku.py`, `profit_by_category.py`) ✅
 Real P&L per SKU and per product_group — **same formula as `api.profitability` / `grandia_pnl`**

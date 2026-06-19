@@ -117,9 +117,11 @@ def single_sku_groups():
         return {}
 
 
-def live_rows(days=14, since=None, until=None):
+def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
     """[(date, brand_id, sku_or_group, product_title, platform, spend_ron, source)] aggregated.
-    since='YYYY-MM-DD' overrides days; until='YYYY-MM-DD' caps the end (default today)."""
+    since='YYYY-MM-DD' overrides days; until='YYYY-MM-DD' caps the end (default today).
+    platforms = subset of ('meta','tiktok') — trage/scrie doar platformele cerute (ex. doar TikTok,
+    fără să atingă Facebook + fără apeluri Meta/Google Sheets)."""
     import meta, tiktok, prodmap, datetime
     end = until or datetime.date.today().isoformat()
     start = since or (datetime.date.today() - datetime.timedelta(days)).isoformat()
@@ -145,52 +147,106 @@ def live_rows(days=14, since=None, until=None):
         return name2id.get(brand.strip().lower()) or name2id.get(brand.replace(" RO", "").strip().lower())
 
     # ---- Meta (Facebook/Instagram): pull each ad account ONCE, attribute via exact Mapping ----
-    fb_entries = load_fb_mapping()
-    mc2 = metrics_conn(); c2 = mc2.cursor()
-    c2.execute('SELECT a.name, a."metaAccountId", a.currency, t."accessToken" '
-               'FROM meta_ad_accounts a JOIN meta_access_tokens t ON t.id=a."tokenId" '
-               'WHERE a."isActive" AND t."isActive"')
-    fb_accts = c2.fetchall(); mc2.close()
-    idx_meta = meta.fx_index({c for _, _, c, _ in fb_accts}, start, end)  # per-day USD/EUR→RON (like RZ2)
-    for nm, aid, cur, tok in fb_accts:
-        brand = resolve_brand(nm, fb_entries)
-        if not brand:
-            continue  # non-ARONA account (BauBax, intl Rossi, etc.)
-        # metrics has no 'Bonhaus RO/SK', 'Esteban Parfum' etc → fold into parent (first word)
-        bid = name2id.get(brand.strip().lower()) or name2id.get(brand.strip().lower().split()[0])
-        for cs, ce in _month_chunks(start, end):   # monthly chunks (Meta rejects long daily ad-level spans)
-            for r in meta.graph(f"https://graph.facebook.com/{meta.VER}/{aid}/insights",
-                    {"level": "ad", "fields": "campaign_name,ad_name,spend", "time_increment": "1",
-                     "time_range": json.dumps({"since": cs, "until": ce}), "limit": "500", "access_token": tok}):
-                d = r.get("date_start"); camp = r.get("campaign_name", ""); adn = r.get("ad_name", "")
-                sp = meta.conv(float(r.get("spend", 0)), cur, meta._pdate(d), idx_meta)  # per-day FX
-                if sp <= 0: continue
-                # TEST campaigns tracked SEPARATELY (bucket 'TEST'), excluded from real products (ca RZ2)
-                key, lbl = ("TEST", "(produse de test)") if prodmap.is_test(camp) else classify("facebook", nm, camp, adn)
-                agg[(d, bid, key, "meta")] += sp; title[key] = lbl
+    if "meta" in platforms:
+        fb_entries = load_fb_mapping()
+        mc2 = metrics_conn(); c2 = mc2.cursor()
+        c2.execute('SELECT a.name, a."metaAccountId", a.currency, t."accessToken" '
+                   'FROM meta_ad_accounts a JOIN meta_access_tokens t ON t.id=a."tokenId" '
+                   'WHERE a."isActive" AND t."isActive"')
+        fb_accts = c2.fetchall(); mc2.close()
+        idx_meta = meta.fx_index({c for _, _, c, _ in fb_accts}, start, end)  # per-day USD/EUR→RON (like RZ2)
+        for nm, aid, cur, tok in fb_accts:
+            brand = resolve_brand(nm, fb_entries)
+            if not brand:
+                continue  # non-ARONA account (BauBax, intl Rossi, etc.)
+            # metrics has no 'Bonhaus RO/SK', 'Esteban Parfum' etc → fold into parent (first word)
+            bid = name2id.get(brand.strip().lower()) or name2id.get(brand.strip().lower().split()[0])
+            for cs, ce in _month_chunks(start, end):   # monthly chunks (Meta rejects long daily ad-level spans)
+                for r in meta.graph(f"https://graph.facebook.com/{meta.VER}/{aid}/insights",
+                        {"level": "ad", "fields": "campaign_name,ad_name,spend", "time_increment": "1",
+                         "time_range": json.dumps({"since": cs, "until": ce}), "limit": "500", "access_token": tok}):
+                    d = r.get("date_start"); camp = r.get("campaign_name", ""); adn = r.get("ad_name", "")
+                    sp = meta.conv(float(r.get("spend", 0)), cur, meta._pdate(d), idx_meta)  # per-day FX
+                    if sp <= 0: continue
+                    # TEST campaigns tracked SEPARATELY (bucket 'TEST'), excluded from real products (ca RZ2)
+                    key, lbl = ("TEST", "(produse de test)") if prodmap.is_test(camp) else classify("facebook", nm, camp, adn)
+                    agg[(d, bid, key, "meta")] += sp; title[key] = lbl
 
     # ---- TikTok ----
-    idx_tt = tiktok.fx_index({"USD", "EUR", "PLN", "HUF", "CZK", "RON"}, start, end)  # per-day FX
-    for brand in brands:
-        bid = bid_for(brand)
-        for cs, ce in _month_chunks(start, end):   # monthly chunks
-            try: accts, rows = tiktok.report_rows(brand, "ad", cs, ce)
-            except SystemExit: break
-            except Exception: continue
-            for r in rows:
-                if not tiktok._passes(r, "ad"): continue
-                m = r.get("metrics", {}); dim = r.get("dimensions", {})
-                d = dim.get("stat_time_day", "")[:10]
-                camp = m.get("campaign_name", ""); adn = m.get("ad_name", "")
-                k = ("tiktok", r["_acct"], d, camp, adn)
-                if k in seen: continue
-                seen.add(k)
-                try: _day = datetime.date.fromisoformat(d)
-                except Exception: _day = None
-                sp = tiktok.conv(tiktok._f(m, "spend"), r["_cur"], _day, idx_tt)
-                if sp <= 0: continue
-                key, lbl = ("TEST", "(produse de test)") if prodmap.is_test(camp) else classify("tiktok", r["_acct"], camp, adn)
-                agg[(d, bid, key, "tiktok")] += sp; title[key] = lbl
+    # Un advertiser poate rula MAI MULTE branduri (cont PARTAJAT). Atribuirea corectă, INDEPENDENTĂ de ordinea
+    # de iterare a brandurilor:
+    #   - cont PARTAJAT (împrumutat de cineva = are token-filter în Mapping) → brand după TOKEN GLOBAL din numele
+    #     campaniei (orice 'ESTEBAN/MAGDEAL/...' → brandul lui, oriunde rulează); fără token → OWNER-ul contului
+    #     (brandul pt care e dedicat, filter None); fără token ȘI fără owner → orfan (se raportează, nu se inventează).
+    #   - cont DEDICAT (nimeni nu-l împrumută) → brandul iterat.
+    # Token-ul cel mai lung câștigă (evită fals-pozitive la tokeni scurți ca 'GT'). seen-dedup → fiecare campanie 1×.
+    import brandmap
+    tt_token2brand = {}; tt_owner = {}; tt_shared = set()
+    for b in brands:
+        try: accs = brandmap.tiktok_accounts(b)
+        except Exception: continue
+        for e in accs:
+            nm = (e.get("name") or "").strip().lower(); f = (e.get("campaign_filter") or "").strip()
+            if not nm: continue
+            if f:                                   # b împrumută contul nm cu token f
+                tt_token2brand[f.lower()] = b; tt_shared.add(nm)
+            else:                                   # b deține contul nm (dedicat) → owner
+                tt_owner.setdefault(nm, b)
+    tt_tokens = sorted(tt_token2brand, key=len, reverse=True)   # cel mai specific (lung) întâi
+    # Reguli de brand SPECIFICE pe cont (au prioritate înaintea token-ului global + owner). Pe contul
+    # 'Belasil', Esteban rulează teste de creative numite 'NEW TIKTOK' fără token ESTEBAN → tot Esteban
+    # (regulă confirmată de user); restul fără token (și fără 'esteban') rămâne brandul owner = Belasil.
+    ACCT_BRAND_RULES = {"belasil": [("new tiktok", "Esteban")]}
+    # OWNER explicit pt conturile partajate de MAI MULTE branduri cu token (nu se poate exprima prin
+    # Mapping ca la Belasil, fiindcă brandurile astea AU token). Campaniile fără token de pe contul ăsta
+    # = brandul de mai jos (identificat din creative/produs de user 2026-06-19):
+    #   ROSSI Nails Romania → Rossi Nails (untokened-ul, inclusiv 'New Win Product', e al brandului contului);
+    #   Carpetto → Rossi Nails (creative KIT Polish/unghii); Nocturna.ro → Nocturna (creative NOCTURNA/Pijamale);
+    #   Nocturna Europa → Ofertele Zilei (oferte gospodărie).
+    ACCT_DEFAULT_OWNER = {"rossi nails romania": "Rossi Nails", "carpetto": "Rossi Nails",
+                          "nocturna.ro": "Nocturna", "nocturna europa": "Ofertele Zilei"}
+    tt_lost = defaultdict(float)   # (acct,campaign) -> spend orfan (cont partajat, fără token ȘI fără owner)
+
+    if "tiktok" in platforms:
+        idx_tt = tiktok.fx_index({"USD", "EUR", "PLN", "HUF", "CZK", "RON"}, start, end)  # per-day FX
+        for brand in brands:
+            bid = bid_for(brand)
+            for cs, ce in _month_chunks(start, end):   # monthly chunks
+                try: accts, rows = tiktok.report_rows(brand, "ad", cs, ce)
+                except SystemExit: break
+                except Exception: continue
+                for r in rows:
+                    m = r.get("metrics", {}); dim = r.get("dimensions", {})
+                    d = dim.get("stat_time_day", "")[:10]
+                    camp = m.get("campaign_name", ""); adn = m.get("ad_name", "")
+                    acct_l = (r["_acct"] or "").strip().lower()
+                    k = ("tiktok", r["_acct"], d, camp, adn)
+                    if k in seen: continue
+                    try: _day = datetime.date.fromisoformat(d)
+                    except Exception: _day = None
+                    sp = tiktok.conv(tiktok._f(m, "spend"), r["_cur"], _day, idx_tt)
+                    if acct_l in tt_shared:    # cont PARTAJAT → regulă-cont, token global, owner Mapping, owner explicit
+                        cl = (camp or "").lower()
+                        brand_row = (next((br for kw, br in ACCT_BRAND_RULES.get(acct_l, []) if kw in cl), None)
+                                     or next((tt_token2brand[t] for t in tt_tokens if t in cl), None)
+                                     or tt_owner.get(acct_l)
+                                     or ACCT_DEFAULT_OWNER.get(acct_l))
+                        if not brand_row:
+                            if sp > 0: tt_lost[(r["_acct"], camp)] += sp
+                            seen.add(k)   # orfan numărat O DATĂ (contul partajat e iterat de mai multe branduri)
+                            continue
+                        row_bid = bid_for(brand_row)
+                    else:                      # cont DEDICAT → brandul iterat
+                        row_bid = bid
+                    seen.add(k)
+                    if sp <= 0: continue
+                    key, lbl = ("TEST", "(produse de test)") if prodmap.is_test(camp) else classify("tiktok", r["_acct"], camp, adn)
+                    agg[(d, row_bid, key, "tiktok")] += sp; title[key] = lbl
+        if tt_lost:
+            tot = sum(tt_lost.values())
+            sys.stderr.write(f"[ad_spend_live] ⚠ TikTok: {round(tot)} RON pe conturi partajate ORFANE (fără token ȘI fără owner) — {len(tt_lost)} campanii. Asignează owner contului în Mapping.\n")
+            for (ac, cp), v in sorted(tt_lost.items(), key=lambda x: -x[1])[:6]:
+                sys.stderr.write(f"    {ac} | {cp[:55]} | {round(v)} RON\n")
 
     # dedup pe PK (date, sku, platform): un grup account-scoped (ex. "Covoare" pe 2 magazine) ar produce
     # 2 rânduri cu același (date,key,platform) și brand_id diferit → coliziune ON CONFLICT. Sumăm + brand dominant.
@@ -211,12 +267,17 @@ def live_rows(days=14, since=None, until=None):
 
 
 def main():
+    import datetime
     ap = argparse.ArgumentParser(); ap.add_argument("--days", type=int, default=14)
     ap.add_argument("--since", default=None, help="YYYY-MM-DD (overrides --days), ex. 2026-01-01")
     ap.add_argument("--until", default=None, help="YYYY-MM-DD end cap (default today)")
+    ap.add_argument("--platform", choices=["meta", "tiktok", "both"], default="both",
+                    help="trage/scrie doar Meta sau doar TikTok (ex. re-backfill doar TikTok fără să atingă Facebook)")
     ap.add_argument("--apply", action="store_true")
     a = ap.parse_args()
-    rows = live_rows(a.days, a.since, a.until)
+    platforms = ("meta", "tiktok") if a.platform == "both" else (a.platform,)
+    start = a.since or (datetime.date.today() - datetime.timedelta(a.days)).isoformat()
+    rows = live_rows(a.days, a.since, a.until, platforms)
     byplat = defaultdict(float); skus = set(); groups = set(); unmapped = 0.0
     for d, bid, key, lbl, plat, sp, src in rows:
         byplat[plat] += sp
@@ -232,14 +293,21 @@ def main():
     if not a.apply:
         print("\nDRY-RUN — nimic scris. (--apply pentru upsert în cache.product_ad_spend)")
         return
+    if not rows:
+        print("\n⚠ 0 rânduri produse (posibil API picat) — NU scriu nimic, ca să nu stric datele. Reia."); return
     from psycopg2.extras import execute_values
     mconn = metrics_conn(); mcur = mconn.cursor()
+    # PUR UPSERT (fără DELETE): la --platform tiktok, rândurile au toate platform='tiktok' → ON CONFLICT
+    # atinge DOAR PK-urile (date,sku,'tiktok'); Facebook (platform='meta') rămâne intact. Cheile noi ⊇ cele
+    # vechi (același mapping de produs, doar atribuirea de brand + acoperirea diferă) → fără rânduri orfane.
+    # Sigur la rulări parțiale (rețea flaky): nu pierde date existente, doar le actualizează/adaugă.
     execute_values(mcur,
         "INSERT INTO cache.product_ad_spend (date,brand_id,sku,product_title,platform,spend_ron,source) VALUES %s "
         "ON CONFLICT (date,sku,platform) DO UPDATE SET spend_ron=EXCLUDED.spend_ron, brand_id=COALESCE(EXCLUDED.brand_id,cache.product_ad_spend.brand_id), source=EXCLUDED.source",
         rows, page_size=2000)
-    mconn.commit(); n = mcur.rowcount; mconn.close()
-    print(f"\nAPPLIED — {len(rows)} rânduri upsert în cache.product_ad_spend (source=meta_tiktok_campaign_map).")
+    mconn.commit(); mconn.close()
+    plat_lbls = sorted({r[4] for r in rows})
+    print(f"\nAPPLIED — platforme={','.join(plat_lbls)}; {len(rows)} rânduri upsert (source=meta_tiktok_campaign_map). Facebook neatins la --platform tiktok.")
 
 
 if __name__ == "__main__":
