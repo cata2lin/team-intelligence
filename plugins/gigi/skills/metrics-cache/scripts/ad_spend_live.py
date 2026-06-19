@@ -197,6 +197,13 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
     # 'Belasil', Esteban rulează teste de creative numite 'NEW TIKTOK' fără token ESTEBAN → tot Esteban
     # (regulă confirmată de user); restul fără token (și fără 'esteban') rămâne brandul owner = Belasil.
     ACCT_BRAND_RULES = {"belasil": [("new tiktok", "Esteban")]}
+    # OWNER explicit pt conturile partajate de MAI MULTE branduri cu token (nu se poate exprima prin
+    # Mapping ca la Belasil, fiindcă brandurile astea AU token). Campaniile fără token de pe contul ăsta
+    # = brandul de mai jos (identificat din creative/produs de user 2026-06-19):
+    #   ROSSI Nails Romania → Apreciat (teste genți 'New Win Product'); Carpetto → Rossi Nails (creative KIT Polish/unghii);
+    #   Nocturna.ro → Nocturna (creative NOCTURNA/Pijamale); Nocturna Europa → Ofertele Zilei (oferte gospodărie).
+    ACCT_DEFAULT_OWNER = {"rossi nails romania": "Apreciat", "carpetto": "Rossi Nails",
+                          "nocturna.ro": "Nocturna", "nocturna europa": "Ofertele Zilei"}
     tt_lost = defaultdict(float)   # (acct,campaign) -> spend orfan (cont partajat, fără token ȘI fără owner)
 
     if "tiktok" in platforms:
@@ -217,13 +224,15 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
                     try: _day = datetime.date.fromisoformat(d)
                     except Exception: _day = None
                     sp = tiktok.conv(tiktok._f(m, "spend"), r["_cur"], _day, idx_tt)
-                    if acct_l in tt_shared:    # cont PARTAJAT → regulă-cont, apoi token global, apoi owner
+                    if acct_l in tt_shared:    # cont PARTAJAT → regulă-cont, token global, owner Mapping, owner explicit
                         cl = (camp or "").lower()
                         brand_row = (next((br for kw, br in ACCT_BRAND_RULES.get(acct_l, []) if kw in cl), None)
                                      or next((tt_token2brand[t] for t in tt_tokens if t in cl), None)
-                                     or tt_owner.get(acct_l))
+                                     or tt_owner.get(acct_l)
+                                     or ACCT_DEFAULT_OWNER.get(acct_l))
                         if not brand_row:
                             if sp > 0: tt_lost[(r["_acct"], camp)] += sp
+                            seen.add(k)   # orfan numărat O DATĂ (contul partajat e iterat de mai multe branduri)
                             continue
                         row_bid = bid_for(brand_row)
                     else:                      # cont DEDICAT → brandul iterat
