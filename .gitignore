@@ -25,3 +25,6 @@ node_modules/
 dist/
 build/
 .cache/
+
+# apps-script-deploy runtime backups (junk)
+plugins/gigi/skills/apps-script-deploy/scripts/gas_backup_*.json
