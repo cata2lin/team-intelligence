@@ -48,7 +48,8 @@
 > 📦 **Tot codul de profit + tool-urile VPS pe care le folosim sunt acum în git** (mirror, editezi în git → deployezi pe VPS):
 > - **engine P&L** (`api/profitability.py`) + calculatoare (Trendyol, simulator pre-lansare) → `gigi/skills/metrics-cache/engine/` (vezi `engine/README.md`).
 > - **tool-uri operaționale** (sync_raport_zilnic, sync_barcodes, sheets_labels, shopify_image_manager, shopify_tag_orders_parallel, sku_to_url, upload_shopify_img) → `shared/scripturi-tools/` (vezi README-ul de acolo).
-> - Aplicația web (routes/models/dashboard) + modulele importate (serial_refuser, shipment, validation_service) **rămân pe VPS** — nu se urcă.
+> - **subsistemul e-Transport ANAF / SmartBill** (CLI `python -m etransport.main`, 47 module: parsers/services/exporters/catalogs) → `shared/etransport/`. Credențiale din env (`SMARTBILL_EMAIL/TOKEN/CIF`, OpenAI key ca param), DB = SQLite local. Deploy: `scp -r shared/etransport $VPS:/root/Scripturi/`.
+> - Aplicația web (routes/models/dashboard) + modulele importate (serial_refuser, shipment, validation_service) + `data/` (utilitare one-off) **rămân pe VPS** — nu se urcă.
 
 ## Lecții/capcane salvate (în KB: `kb.py resource-list`)
 - **Cache/backfill FAIL-SAFE**: nu face DELETE pe istoric apoi reinsert condiționat — un pull eșuat șterge tot. Pur upsert. Învelește apelurile externe în retry-on-timeout (googleapiclient aruncă TimeoutError brut, nu RequestException).
