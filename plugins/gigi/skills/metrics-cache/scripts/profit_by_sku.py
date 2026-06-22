@@ -49,6 +49,40 @@ def load_dpd_costs(path="data/dpd_nomenclator.json"):
     return out
 
 
+def load_real_transport(order_keys):
+    """{(prefix, order_name): transport_cost_fara_tva REAL} din AWBprint (per comandă, EXCLUS return labels).
+    prefix→store_uid via profit_core.PREFIX_AWB_DOMAIN ↔ AWBprint stores.name. Gol dacă AWBprint indisponibil
+    → cade pe media DPD. Acoperă ~69% din AWB-uri cu cost real; restul rămâne pe media nomenclator."""
+    out = {}
+    dsn = os.environ.get("DATABASE_URL_AWBPRINT")
+    if not dsn:
+        return out
+    try:
+        import psycopg2, psycopg2.extras
+        conn = psycopg2.connect(_clean(dsn)); cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT uid, name FROM stores")
+        dom2uid = {(r["name"] or "").strip().lower(): r["uid"] for r in cur.fetchall()}
+        pref2uid = {p: dom2uid[d] for p, d in pc.PREFIX_AWB_DOMAIN.items() if d in dom2uid}
+        by_pref = defaultdict(list)
+        for prefix, name in order_keys:
+            by_pref[prefix].append(name)
+        for prefix, names in by_pref.items():
+            uid = pref2uid.get(prefix)
+            if not uid:
+                continue
+            cur.execute("""SELECT o.order_number, SUM(a.transport_cost_fara_tva) t
+                FROM orders o JOIN order_awbs a ON a.order_id = o.id
+                WHERE o.store_uid = %s AND o.order_number = ANY(%s) AND COALESCE(a.is_return_label, false) = false
+                GROUP BY o.order_number""", (uid, names))
+            for r in cur.fetchall():
+                if (r["t"] or 0) > 0:
+                    out[(prefix, r["order_number"])] = float(r["t"])
+        conn.close()
+    except Exception as e:
+        sys.stderr.write(f"[transport-real] AWBprint indisponibil ({type(e).__name__}: {str(e)[:80]}); fallback media DPD\n")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("month"); ap.add_argument("--db", default="data/profitability.db")
     ap.add_argument("--top", type=int, default=25); a = ap.parse_args()
@@ -82,9 +116,10 @@ def main():
         ocurr[k] = r["curr"] or "RON"; order_skus[k].add(r["sku"])
     # transport REAL pe COLET: media costului real DPD (dpd_nomenclator) pe SKU-urile coletului, per comandă;
     # fallback cost_per_parcel/magazin. Un colet = un cost, alocat pe linii după venit (suma cotelor = 1).
-    parcel_cost = {}; parcel_real = {}
+    real_transport = load_real_transport(set(order_skus.keys()))   # transport REAL per comandă din AWBprint
+    parcel_cost = {}; tsrc = {}
     for k, sks in order_skus.items():
-        parcel_cost[k], parcel_real[k] = pc.parcel_transport(sks, dpd, tc.get(k[0], 0))
+        parcel_cost[k], tsrc[k] = pc.parcel_transport(sks, dpd, tc.get(k[0], 0), real_cost=real_transport.get(k))
 
     # name2id + prefix->brand_id (pt alocarea marketingului de brand pe SKU-urile brandului corect)
     import psycopg2
@@ -156,7 +191,12 @@ def main():
     T = [sum(x) for x in zip(*[(q, rev, cg, tr, m) for q, rev, cg, tr, m in cat.values()])] or [0, 0, 0, 0, 0]
     print(f"{'─'*74}")
     print(f"{'TOTAL (RON ex-TVA)':26}{T[0]:>7}{T[1]:>11.0f}{T[2]:>10.0f}{T[3]:>9.0f}{T[4]:>9.0f}{T[1]-T[2]-T[3]-T[4]:>11.0f}")
-    print(f"  (venit reconciliază cu engine-ul RON ex-TVA pe livrate; marketing alocat pe comenzi; transport real DPD)")
+    print(f"  (venit reconciliază cu engine-ul RON ex-TVA pe livrate; marketing alocat pe comenzi)")
+    from collections import Counter as _Counter
+    _sc = _Counter(tsrc.values())
+    _tot_ord = sum(_sc.values()) or 1
+    print(f"  transport: {_sc.get('awb',0)} com. cost REAL AWBprint ({_sc.get('awb',0)/_tot_ord*100:.0f}%) · "
+          f"{_sc.get('dpd',0)} media DPD · {_sc.get('estimat',0)} estimat flat")
     print(f"\n=== TOP {a.top} SKU dupa venit ===")
     print(f"{'sku':30}{'categorie':16}{'buc':>6}{'venit':>10}{'COGS':>9}{'transp':>8}{'mkt':>8}{'contrib':>10}{'  transp?'}")
     for s, g, q, rev, cg, tr, m, ct in out[:a.top]:
