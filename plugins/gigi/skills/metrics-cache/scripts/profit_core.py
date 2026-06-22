@@ -12,7 +12,7 @@ Din auditul celor 5 scripturi (2026-06-20): înainte fiecare trata TVA/COGS/tran
 from collections import defaultdict
 
 # ---- TVA per ȚARĂ (nu per prefix arbitrar) ----
-VAT_BY_COUNTRY = {"RO": 0.21, "BG": 0.20, "CZ": 0.21, "PL": 0.23, "HU": 0.27, "SK": 0.20, "HR": 0.25}
+VAT_BY_COUNTRY = {"RO": 0.21, "BG": 0.20, "CZ": 0.21, "PL": 0.23, "HU": 0.27, "SK": 0.23, "HR": 0.25}  # SK 23% din 2025
 PREFIX_COUNTRY = {"BG": "BG", "BONBG": "BG", "CZ": "CZ", "PL": "PL", "LUX": "RO", "NOC": "RO"}  # restul = RO
 
 def vat_for_country(country: str) -> float:
