@@ -112,7 +112,7 @@ upload in the Ads UI Asset library (Google auto-hosts), **or** upload via API (b
 
 ### 4a. One-time GCP / YouTube setup (per channel)
 1. **GCP project** → APIs & Services → **enable "YouTube Data API v3"**.
-2. **OAuth consent screen**: set **User type = External** (Internal blocks accounts outside the org → "can only be used within its organization"); add the `…/auth/youtube.upload` scope; add the **channel's Google account as a Test user**.
+2. **OAuth consent screen**: set **User type = External** (Internal blocks accounts outside the org → "can only be used within its organization"); add the `…/auth/youtube.upload` **and** `…/auth/youtube.readonly` scopes (readonly = ca să poți confirma pe ce canal a aterizat consimțământul cu `channels.list mine=true`; upload-only dă 403 la listare); add the **channel's Google account as a Test user**.
 3. **Credentials → Create credentials → OAuth client ID → Application type: Desktop app** → download JSON (client_id + secret).
 4. Store: `kb.py secret-set YOUTUBE_OAUTH_CLIENT_ID …` / `YOUTUBE_OAUTH_CLIENT_SECRET …`.
 5. **Consent once** (browser, logged in as the channel account):
@@ -122,22 +122,30 @@ upload in the Ads UI Asset library (Google auto-hosts), **or** upload via API (b
      python3 yt_oauth.py        # prints a consent URL, catches the loopback, writes the refresh token
    ```
    On "Google hasn't verified this app" → Advanced → proceed (it's your project, Testing mode).
-   Then store the printed token: `kb.py secret-set YOUTUBE_<BRAND>_REFRESH_TOKEN "$(cat /tmp/yt_refresh_belasil.txt)"`.
+   Then store the printed token: `kb.py secret-set YOUTUBE_<BRAND>_REFRESH_TOKEN "$(cat /tmp/yt_refresh_<brand>.txt)"` (`YT_OUT=/tmp/yt_refresh_<brand>.txt`).
    (Testing-mode refresh tokens for a sensitive scope expire in ~7 days — fine for a batch; re-consent if needed.)
+
+   **Modelul „un canal per brand" (Brand Accounts):** de regulă TOATE canalele de brand sunt **Brand Accounts sub UN singur cont Google** (mailul operatorului). Un singur app OAuth (`YOUTUBE_OAUTH_CLIENT_ID/_SECRET`) acoperă toate. Fiecare canal cere **un consimțământ separat** unde, la ecranul **„Choose a channel" / „Continuă ca…"**, alegi canalul acelui brand → iese un refresh token dedicat (`YOUTUBE_GT_REFRESH_TOKEN`, `YOUTUBE_NUBRA_REFRESH_TOKEN`, …). Un token e legat de canalul ales la consimțământ; NU poți urca pe alt canal cu același token. Confirmă canalul după consimțământ: `channels.list(mine=true)` cu tokenul nou. Canale verificate: Belasil `UCtlE0Kfi…`, GT by George Talent `UCYOqiJSNLhqAmW_ERwRQMSw`, Nubra `UCYm-4E8NmoTqT157UkpaDwQ`.
 
 ### 4b. Upload (quota: ~6 videos/day — `videos.insert` = 1600 units, daily cap 10,000)
 ```bash
 export YOUTUBE_OAUTH_CLIENT_ID=… YOUTUBE_OAUTH_CLIENT_SECRET=… YOUTUBE_<BRAND>_REFRESH_TOKEN=…
-uv run yt_upload.py --check                              # verify auth
-uv run yt_upload.py --dir "/path/Creative Belasil 2"     # batch (unlisted) → prints youtu.be/<id>
+uv run yt_upload.py --brand GT --check                          # verify auth (alege brandul = canalul)
+uv run yt_upload.py --brand GT --dir /tmp/gt_videos --url https://george-talent.ro   # batch (unlisted) → youtu.be/<id>
 ```
-Don't bulk-upload everything — pick the **proven winners** (see §5). PMax wants a handful, not dozens.
+`--brand` alege `YOUTUBE_<BRAND>_REFRESH_TOKEN` + descrierea/URL-ul default (BELASIL/GT/NUBRA/ESTEBAN în map). Don't bulk-upload everything — pick the **proven winners** (see §5). PMax wants a handful, not dozens.
 
-### 4c. Attach the YouTube videos to a PMax asset group — template `fix_attach.py`
+### 4d. De unde iei videourile (surse) — **shared drive „ARONA:NAS"**
+Creative-urile reale stau pe **Google Shared Drive „ARONA:NAS"** (driveId `0AKkB0AV7_E-bUk9PVA`) → folder **`Projects/<Brand>/Ads`** (ex. `_George Talent/Ads`, `Nubra/Ads`; root-ul brandului are și hero-uri 16:9). Acolo ajungi și când NAS-ul local nu e montat (alt network). Citește/descarcă cu SA `looker-sheets` (DWD, scope `drive.readonly`, `corpora=drive`, `supportsAllDrives=True`, `includeItemsFromAllDrives=True`). Curatează: **≥11s** (sub 10s → `YOUTUBE_VIDEO_TOO_SHORT` la atașare), mix **vertical 9:16 + orizontal 16:9**, un pumn (5–9), nu zeci.
+
+### 4c. Attach the YouTube videos to a PMax asset group — `attach_videos.py` (generic) / template `fix_attach.py`
+Script gata: `uv run attach_videos.py --cid <CID> --ag customers/<CID>/assetGroups/<AGID> --videos vids.json --apply` (JSON = `[["videoId","nume"], …]`, sau `--video ID:Nume` repetabil; dry-run fără `--apply`).
 **Gotchas (all real, all cost time):**
 - The asset group **must have a Final URL** or you get `assetGroupError: FINAL_URL_REQUIRED`. Set it first: `assetGroups:mutate` update `{finalUrls:["https://brand.ro/"]}`, `updateMask:"final_urls"`.
-- Link field type is **`YOUTUBE_VIDEO`**, NOT `VIDEO` (→ `assetLinkError: UNSUPPORTED_FIELD_TYPE`).
+- Link field type is **`YOUTUBE_VIDEO`**, NOT `VIDEO` (→ `assetLinkError: FIELD_TYPE_INCOMPATIBLE_WITH_ASSET_TYPE` / `UNSUPPORTED_FIELD_TYPE`).
 - Do it in **two steps**: `assets:mutate` (create `youtubeVideoAsset{youtubeVideoId}`) → `assetGroupAssets:mutate` (link, fieldType `YOUTUBE_VIDEO`).
+- **`CONCURRENT_MODIFICATION`** pe asset group nou (review în curs) la link în batch → leagă **unul câte unul cu retry/backoff** (attach_videos.py face deja asta).
+- **`YOUTUBE_VIDEO_TOO_SHORT`** = videoul are <10s → exclude-l (curatează ≥11s la sursă, §4d). Asset-ul rămâne creat dar nelegat (orphan inofensiv).
 - Only send `partialFailure` when you actually want partial (bulk creates); omit it on single updates (some endpoints reject it).
 - Verify: `SELECT asset.name FROM asset_group_asset WHERE asset_group.id=… AND asset_group_asset.field_type='YOUTUBE_VIDEO'`.
 - **Images** (unlike video) CAN be uploaded raw via API (`imageAsset.data` = base64 bytes) and linked with field types `MARKETING_IMAGE` (1.91:1) / `SQUARE_MARKETING_IMAGE` (1:1) / `PORTRAIT_MARKETING_IMAGE` (4:5).
