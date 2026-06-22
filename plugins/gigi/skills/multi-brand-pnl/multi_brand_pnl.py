@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["psycopg2-binary"]
+# dependencies = ["psycopg2-binary", "paramiko"]
 # ///
 """
 multi_brand_pnl.py — P&L live "all-in" pentru ORICARE sau TOATE cele 16+ branduri Arona
@@ -302,6 +302,114 @@ def run_canonical(months, mode, frags):
     return rows
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# --range : profit REAL pe o FEREASTRĂ EXACTĂ de zile (ex. 1–15 iunie), nu lună întreagă.
+# Rulează engine-ul canonic (api/profitability.get_report) DIRECT pe VPS cu from_date/to_date —
+# venit/COGS/transport filtrate pe created_at, marketing însumat DOAR pe fereastră (fix 2026-06).
+# Granularitate = zi. Atenție: fereastră RECENTĂ = livrare încă neașezată (comenzi „în curs"),
+# deci profitul livrat e încă incomplet → raportăm și gradul de așezare (livrate/plecate).
+# ═══════════════════════════════════════════════════════════════════════
+PREFIX_NAME = {
+    "EST": "esteban", "GT": "george talent", "NUB": "nubra", "GRAN": "grandia", "BELA": "belasil",
+    "CARP": "carpetto", "COV": "covoria", "OFER": "ofertele zilei", "MAG": "magdeal", "NOC": "nocturna",
+    "APR": "apreciat", "RED": "reduceri bune", "GEN": "gento", "PAT": "ce pat ai", "ROSSI": "rossi nails",
+    "BON": "bonhaus", "CZ": "bonhaus cz", "PL": "bonhaus pl", "BG": "bonhaus bg", "BONBG": "bonhaus bg",
+    "LUX": "nocturna lux",
+}
+
+RANGE_REMOTE = r'''
+import sys, os, asyncio, json
+sys.path.insert(0, "/root/Scripturi"); os.chdir("/root/Scripturi")
+from api.profitability import get_report
+async def main():
+    r = await get_report(month=os.environ["WM"], from_date=os.environ["WF"], to_date=os.environ["WT"])
+    deliv = {d["prefix"]: d for d in (r.get("deliverability") or [])}
+    out = []
+    for p in (r.get("profitability") or []):
+        pfx = p.get("prefix", ""); d = deliv.get(pfx, {})
+        inc = p.get("incasari_fara_tva") or 0; cg = p.get("cogs_fara_tva") or 0
+        tr = p.get("transport_fara_tva") or 0; mk = p.get("marketing_fara_tva") or 0
+        out.append({"prefix": pfx, "livrata": d.get("livrata", 0), "in_curs": d.get("in_curs", 0),
+                    "refuzata": d.get("refuzata", 0), "total": d.get("total", 0),
+                    "plecate": p.get("plecate", 0), "rev": inc, "cogs": cg, "tr": tr, "mk": mk,
+                    "net": inc - cg - tr - mk})
+    print(json.dumps(out))
+asyncio.run(main())
+'''
+
+
+def run_canonical_range(dfrom, dto, frags):
+    """Profit REAL pe fereastra exactă [dfrom, dto] via engine-ul de pe VPS. Listă dict/prefix."""
+    env = {"WM": ",".join(months_in_range(dfrom, dto)), "WF": dfrom, "WT": dto}
+    base = os.environ.get("SCRIPTURI_DIR") or "/root/Scripturi"
+    pybin = os.path.join(base, ".venv", "bin", "python")
+    if os.path.exists(os.path.join(base, "api", "profitability.py")) and os.path.exists(pybin):
+        # pe VPS: rulează engine-ul în venv-ul lui
+        with open("/tmp/_range_pnl.py", "w") as f:
+            f.write(RANGE_REMOTE)
+        r = subprocess.run([pybin, "/tmp/_range_pnl.py"], capture_output=True, text=True,
+                           timeout=900, cwd=base, env={**os.environ, **env})
+        if r.returncode != 0:
+            sys.exit("EROARE engine pe VPS: " + (r.stderr or "")[:400])
+        data = r.stdout
+    else:
+        # off-VPS: SSH la VPS (paramiko + secrete PROFIT_SSH_*)
+        import paramiko
+        pwd = secret("PROFIT_SSH_PASS")
+        if not pwd:
+            sys.exit("Lipsește PROFIT_SSH_PASS în KB — nu pot rula engine-ul canonic pe VPS.")
+        cli = paramiko.SSHClient(); cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        cli.connect(secret("PROFIT_SSH_HOST") or "84.46.242.181",
+                    username=secret("PROFIT_SSH_USER") or "root", password=pwd, timeout=30)
+        sftp = cli.open_sftp()
+        with sftp.open("/tmp/_range_pnl.py", "w") as f:
+            f.write(RANGE_REMOTE)
+        sftp.close()
+        envstr = " ".join("%s=%s" % (k, v) for k, v in env.items())
+        _, o, e = cli.exec_command(
+            "cd /root/Scripturi && %s /root/Scripturi/.venv/bin/python /tmp/_range_pnl.py" % envstr, timeout=900)
+        data = o.read().decode("utf-8", "replace"); err = e.read().decode().strip(); cli.close()
+        if err and not data.strip():
+            sys.exit("EROARE engine (VPS): " + err[:400])
+    rows = json.loads(data) if data.strip() else []
+    if frags:
+        def match(r):
+            nm = PREFIX_NAME.get(r["prefix"], r["prefix"]).lower()
+            return any(fr in nm or fr in r["prefix"].lower() for fr in frags)
+        rows = [r for r in rows if match(r)]
+    return rows
+
+
+def print_table_range(rows, dfrom, dto):
+    rows = sorted(rows, key=lambda r: r["net"], reverse=True)
+    print("=== P&L REAL pe FEREASTRĂ  %s → %s  (profit livrat fără TVA − COGS − transport − marketing) ===" % (dfrom, dto))
+    hdr = "%-14s%7s%7s%7s%11s%10s%9s%9s%12s%7s%9s" % (
+        "brand", "livr", "curs", "refuz", "venit(fT)", "mkt", "COGS", "transp", "PROFIT NET", "marja%", "asezat%")
+    print(hdr); print("-" * len(hdr))
+    tot = {"rev": 0.0, "cogs": 0.0, "tr": 0.0, "mk": 0.0, "net": 0.0, "livrata": 0, "in_curs": 0, "refuzata": 0, "plecate": 0}
+    for r in rows:
+        plecate = r.get("plecate") or 0
+        asez = (r["livrata"] / plecate * 100) if plecate else 0.0
+        marja = (r["net"] / r["rev"] * 100) if r["rev"] else 0.0
+        nm = PREFIX_NAME.get(r["prefix"], r["prefix"])
+        print("%-14s%7d%7d%7d%11s%10s%9s%9s%12s%7s%9s" % (
+            nm[:14], r["livrata"], r["in_curs"], r["refuzata"], fmt(r["rev"]), fmt(r["mk"]),
+            fmt(r["cogs"]), fmt(r["tr"]), fmt(r["net"]), f1(marja), f1(asez)))
+        for k in tot:
+            tot[k] += r.get(k, 0)
+    print("-" * len(hdr))
+    marja_t = (tot["net"] / tot["rev"] * 100) if tot["rev"] else 0.0
+    asez_t = (tot["livrata"] / tot["plecate"] * 100) if tot["plecate"] else 0.0
+    print("%-14s%7d%7d%7d%11s%10s%9s%9s%12s%7s%9s" % (
+        "TOTAL", tot["livrata"], tot["in_curs"], tot["refuzata"], fmt(tot["rev"]), fmt(tot["mk"]),
+        fmt(tot["cogs"]), fmt(tot["tr"]), fmt(tot["net"]), f1(marja_t), f1(asez_t)))
+    if tot["in_curs"] > 0:
+        print("\n⚠ %d comenzi încă in curs de livrare in fereastra — venitul LIVRAT e inca incomplet, deci"
+              % tot["in_curs"])
+        print("  PROFITUL NET real va CRESTE pe masura ce se aseaza livrarea (asezat% = livrate/plecate).")
+        print("  Cu cat fereastra e mai recenta, cu atat numarul de acum e mai sub-evaluat.")
+
+
 def enrich_canonical(r):
     rev = r.get("rev") or 0.0
     sp = r.get("sp") or 0.0
@@ -382,6 +490,9 @@ def main():
     ap.add_argument("--estimat", action="store_true",
                     help="sursa VECHE daily_perf (zilnic, BRUT cu TVA, toate comenzile, split FB/Google/TikTok) "
                          "in loc de profitul REAL lunar. Supraestimeaza — foloseste pt tendinta zilnica, nu pt profit.")
+    ap.add_argument("--range", dest="rng", action="store_true",
+                    help="profit REAL pe FEREASTRA EXACTA de zile (--from/--to), nu lună întreagă — rulează "
+                         "engine-ul canonic pe VPS cu from_date/to_date. Arată și gradul de așezare a livrării.")
     a = ap.parse_args()
 
     today = datetime.date.today()
@@ -409,6 +520,19 @@ def main():
         else:
             scope = "TOATE brandurile" if mode == "all" else ", ".join(frags)
             print_table(rows, "P&L Arona (estimat)  %s -> %s  (%s)" % (dfrom, dto, scope))
+        return
+
+    # ---- --range: profit REAL pe FEREASTRA EXACTA de zile (engine pe VPS, granularitate ZI) ----
+    if a.rng:
+        dfrom = a.dfrom or today.replace(day=1).isoformat()
+        dto = a.dto or today.isoformat()
+        mode, frags = resolve_brands(a.brands)
+        rows = run_canonical_range(dfrom, dto, frags if mode == "list" else None)
+        if not rows:
+            print("Nicio comandă în fereastra %s → %s (branduri=%s)." % (dfrom, dto, a.brands)); return
+        print_table_range(rows, dfrom, dto)
+        print("\n(profit REAL livrat-fără-TVA pe fereastra de zile; marketing = spend DOAR pe fereastră. "
+              "Pt P&L lunar canonic rulează fără --range.)")
         return
 
     # ---- DEFAULT: profit REAL canonic (cache.brand_pnl_monthly), granularitate lunara ----
