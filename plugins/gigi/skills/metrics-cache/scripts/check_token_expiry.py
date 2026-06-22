@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["psycopg2-binary>=2.9"]
+# dependencies = ["psycopg2-binary>=2.9", "google-api-python-client>=2.0", "google-auth>=2.0"]
 # ///
 """
 check_token_expiry.py — alertă PROACTIVĂ pe expirarea token-urilor de ad-spend din metrics.
@@ -21,8 +21,27 @@ READ-ONLY. Nu printează niciodată valoarea token-ului. Conexiune din ENV DATAB
 RULARE:
   export DATABASE_URL_METRICS="$(grep -m1 ^DATABASE_URL_METRICS= /root/Scripturi/.env | cut -d= -f2-)"
   /root/Scripturi/.venv/bin/python check_token_expiry.py --days 7
+  # cron cu email (trimite DOAR când e ceva de raportat), via SA looker-sheets (gmail.modify):
+  /root/Scripturi/.venv/bin/python check_token_expiry.py --days 7 \
+      --email gheorghe.beschea@overheat.agency --key /root/Scripturi/google_credentials.json
 """
 import os, sys, re, argparse, datetime
+
+
+def _send_email(to, subject, body, key, sender):
+    """Trimite alertul prin SA looker-sheets (impersonare Workspace, scope gmail.modify).
+    Lazy-import ca scriptul să ruleze pur (fără google libs) când NU se cere --email."""
+    import base64
+    from email.mime.text import MIMEText
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    creds = service_account.Credentials.from_service_account_file(
+        key, scopes=["https://www.googleapis.com/auth/gmail.modify"]).with_subject(sender)
+    svc = build("gmail", "v1", credentials=creds, cache_discovery=False)
+    msg = MIMEText(body, _charset="utf-8")
+    msg["to"] = to; msg["from"] = sender; msg["subject"] = subject
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+    svc.users().messages().send(userId="me", body={"raw": raw}).execute()
 
 def _dsn():
     dsn = os.environ.get("DATABASE_URL_METRICS")
@@ -48,6 +67,10 @@ def _table_exists(cur, name):
 def main():
     ap = argparse.ArgumentParser(description="Alertă proactivă pe expirarea token-urilor de ads (metrics).")
     ap.add_argument("--days", type=int, default=7, help="prag de avertizare înainte de expirare (zile)")
+    ap.add_argument("--email", help="adresă unde trimite alertul (DOAR dacă există ceva de raportat)")
+    ap.add_argument("--from", dest="sender", default="gheorghe.beschea@overheat.agency",
+                    help="expeditor impersonat de SA (default gheorghe.beschea@overheat.agency)")
+    ap.add_argument("--key", default="google_credentials.json", help="cheia SA pt trimiterea email-ului")
     a = ap.parse_args()
 
     import psycopg2
@@ -100,13 +123,24 @@ def main():
         return 0
 
     worst = 0
-    print(f"[token-expiry] ⚠ {len(alerts)} token(uri) de atenționat (prag {a.days} zile):")
+    lines = [f"[token-expiry] ⚠ {len(alerts)} token(uri) de atenționat (prag {a.days} zile):"]
     for sev, platform, label, exp, accts in sorted(alerts, key=lambda x: x[3]):
         days = (exp - now).days
         when = "expirat de %d zile" % (-days) if days < 0 else "expiră în %d zile" % days
-        print(f"  [{sev}] {platform}: «{label}» — {when} (expiresAt {exp:%Y-%m-%d %H:%M} UTC) → {accts} conturi afectate")
+        lines.append(f"  [{sev}] {platform}: «{label}» — {when} (expiresAt {exp:%Y-%m-%d %H:%M} UTC) → {accts} conturi afectate")
         worst = max(worst, 2 if sev == "EXPIRAT" else 1)
-    print("  Fix: re-autorizare OAuth (re-login) pe contul de mai sus, apoi backfill de la data blocării → azi.")
+    lines.append("  Fix: re-autorizare OAuth (re-login) pe contul de mai sus, apoi backfill de la data blocării → azi.")
+    report = "\n".join(lines)
+    print(report)
+
+    if a.email:
+        try:
+            sev_tag = "EXPIRAT" if worst >= 2 else "expiră curând"
+            _send_email(a.email, f"[ALERTĂ] Token ads {sev_tag} — sync Meta în pericol", report, a.key, a.sender)
+            print(f"[token-expiry] email trimis către {a.email}")
+        except Exception as e:
+            print(f"[token-expiry] EROARE trimitere email: {type(e).__name__}: {e}", file=sys.stderr)
+            return 3
     return worst
 
 
