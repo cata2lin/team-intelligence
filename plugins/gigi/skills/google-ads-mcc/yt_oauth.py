@@ -3,7 +3,8 @@
 exchanges for a refresh token, writes it to OUT_FILE. Secrets via env."""
 import os, sys, json, urllib.parse, urllib.request, http.server, socketserver
 
-CID = os.environ["YT_CLIENT_ID"]; CSEC = os.environ["YT_CLIENT_SECRET"]
+CID = os.environ.get("YT_CLIENT_ID") or os.environ["YOUTUBE_OAUTH_CLIENT_ID"]
+CSEC = os.environ.get("YT_CLIENT_SECRET") or os.environ["YOUTUBE_OAUTH_CLIENT_SECRET"]
 PORT = int(os.environ.get("YT_PORT", "8765"))
 REDIR = f"http://localhost:{PORT}"
 SCOPE = "https://www.googleapis.com/auth/youtube.upload"

@@ -16,10 +16,10 @@ touching git or `gh`.
 
 ```bash
 # auto-merge to main (team gets it on next plugin update):
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/publish_skill.py" --path plugins/<you>/skills/<name>
+uv run "${CLAUDE_PLUGIN_ROOT}/skills/publish-skill/scripts/publish_skill.py" --path plugins/<you>/skills/<name>
 
 # open the PR but leave it for review:
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/publish_skill.py" --path plugins/<you>/skills/<name> --no-merge
+uv run "${CLAUDE_PLUGIN_ROOT}/skills/publish-skill/scripts/publish_skill.py" --path plugins/<you>/skills/<name> --no-merge
 ```
 
 That's it. It prints the PR URL and confirms the merge.

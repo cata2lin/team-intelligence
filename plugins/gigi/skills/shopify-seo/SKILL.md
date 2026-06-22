@@ -65,7 +65,7 @@ fetch_live(f"https://{s.public}/products/x")   # storefront HTML, cache-busted
 
 ### 1. Audit (read-only, no writes)
 ```bash
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/seo_audit.py" --store <key-or-myshopify-domain>
+uv run "${CLAUDE_PLUGIN_ROOT}/skills/shopify-seo/scripts/seo_audit.py" --store <key-or-myshopify-domain>
 ```
 Prints a pass/fail matrix: meta coverage (products/collections), structured-data
 presence & validity, og:image https + twitter:image, canonical, single H1,
