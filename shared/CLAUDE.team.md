@@ -77,8 +77,11 @@ auto-connects each session using your NAS login stored in the database;
 reconnect or inspect with the **`core:nas`** skill. Record files you create:
 `kb.py file-add --location nas --path "$NAS_ROOT/..."`. No secrets on the NAS.
 
-## Python
-- Use **`uv`** (`uv run <script.py>`). Never assume a committed `.venv`.
+## Runtime (the onboarding installer sets all of this up — never configure it by hand)
+- **Python → `uv`.** Run every script with `uv run <script.py>`; deps are declared inline (PEP 723), so never assume a committed `.venv`.
+- **Node.js / `npx`.** Powers the read-only Postgres MCP servers, the `chrome-devtools` MCP, and the node-based skills (`library:brand`, `library:clickup-task-creator`, `library:ui-styling`, `gigi:shopify-knowledge-base`).
+- **GitHub CLI (`gh`).** Used by `gigi:publish-skill` to ship a skill end-to-end in one command.
+- `install.ps1` / `install.sh` auto-install all three. If an MCP server or a node/gh skill ever seems missing, open a fresh terminal and re-run the installer — don't hand-install.
 
 ## Adding or changing a capability
 See `CONTRIBUTING.md`: add a skill under `plugins/<you>/skills/`, declare any MCP

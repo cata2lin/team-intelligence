@@ -58,7 +58,10 @@ The walkthrough then:
 1. asks only for the DB **host / user / password** (db name defaults to `SharedClaude`);
 2. **identifies you automatically** from your DB login (the role = your handle) — no picking;
 3. pulls **your NAS login from the DB** and connects it (no NAS prompt);
-4. installs `uv`, enables every team plugin at **user scope**, writes the global
+4. auto-installs the runtime prerequisites — **`uv`** (Python), **Node.js/`npx`**
+   (the Postgres + chrome-devtools MCP servers and node skills) and the **GitHub
+   CLI `gh`** (`gigi:publish-skill`) — via winget on Windows / brew on macOS;
+5. enables every team plugin at **user scope**, writes the global
    `~/.claude/settings.json` env (`KB_DATABASE_URL`, `EMPLOYEE_HANDLE`,
    `NAS_ROOT`, `TEAM_REPO`) + the `CLAUDE.md` `@import`, and registers your machine.
 
