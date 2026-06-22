@@ -36,3 +36,12 @@ Logica reutilizabilă (vat/cogs/transport/marketing) e în `../scripts/profit_co
   `MAX(transport_cost_fara_tva)` (principalul deduplicat) → `cost_per_parcel` flat.
 - **COGS** ex-TVA (override + conversie RON), **marketing** din `cache.product_ad_spend` window-aware,
   venit **doar LIVRATE** ex-TVA. Toate VAT-urile per țară din `profit_core.vat_for_*`.
+
+## Alte scripturi de profit VPS (mirror, RUNNABLE pe VPS)
+Spre deosebire de `profitability.py` (modul al aplicației), astea sunt scripturi standalone care
+rulează din `/root/Scripturi`. Aici sunt ca **mirror byte-identic** (version-controlled, fără secrete):
+- **`trendyol_profitability.py`** — P&L pt marketplace-ul **Trendyol** (return-uri scăzute, `net_units`).
+- **`trendyol_split.py`** / **`trendyol_get_token.py`** — toolchain Trendyol (split comenzi / token via playwright).
+- **`product_profit_calculator.py`** — simulator prag/CPA **pre-lansare** (`--vat-rate` default 21) — NU e profit realizat.
+
+Deploy/drift = la fel ca engine-ul: `scp` din folderul ăsta în `/root/Scripturi/<fișier>.py`; diff cu VPS = gol.
