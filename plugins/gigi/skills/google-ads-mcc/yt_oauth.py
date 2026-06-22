@@ -7,7 +7,9 @@ CID = os.environ.get("YT_CLIENT_ID") or os.environ["YOUTUBE_OAUTH_CLIENT_ID"]
 CSEC = os.environ.get("YT_CLIENT_SECRET") or os.environ["YOUTUBE_OAUTH_CLIENT_SECRET"]
 PORT = int(os.environ.get("YT_PORT", "8765"))
 REDIR = f"http://localhost:{PORT}"
-SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+# upload (pt videos.insert) + readonly (ca să pot confirma pe ce canal a aterizat consimțământul).
+# Suprascrie cu YT_SCOPE (space-separated) dacă vrei doar upload.
+SCOPE = os.environ.get("YT_SCOPE", "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly")
 OUT = os.environ.get("YT_OUT", "/tmp/yt_refresh_belasil.txt")
 
 auth = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
