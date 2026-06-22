@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["google-genai", "pillow"]
+# ///
 """
 CIP Design Generator - Generate corporate identity mockups using Gemini Nano Banana
 

@@ -38,7 +38,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 from kb_env import load_secrets_into_env  # noqa: E402
 load_secrets_into_env()
 
-BASE = Path("/Users/gheorghebeschea/Downloads/Scripturi/blog-rollout")
+# Publish-time data (articles/<store>.json + index/index_<store>.json) is bundled
+# alongside this script in blog_data/ so the skill runs on any teammate's machine.
+# Set BLOG_DATA_DIR to point at a working blog-rollout dir when regenerating content.
+BASE = Path(os.environ.get("BLOG_DATA_DIR") or (Path(__file__).parent / "blog_data"))
 
 STORES = {
     "gt": {

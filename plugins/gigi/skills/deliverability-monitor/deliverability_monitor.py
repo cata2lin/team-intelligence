@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["pg8000>=1.30"]
+# dependencies = ["pg8000>=1.30", "paramiko>=3.0"]
 # ///
 """
 deliverability_monitor.py — Diagnoza scurgerii de bani din REFUZ ramburs / colete
@@ -41,6 +41,37 @@ import sys, os, json, subprocess, argparse, urllib.parse
 import pg8000.dbapi
 
 VPS_HOST = "root@84.46.242.181"
+
+def _vps_run(remote_cmd):
+    """Run a command on the profit VPS over SSH (paramiko, password from KB/env).
+    Zero-touch: PROFIT_SSH_HOST/USER/PASS are read from env, else the team KB.
+    Returns a CompletedProcess-like object (.stdout/.stderr/.returncode)."""
+    import os as _os, sys as _sys, types as _types, subprocess as _sp
+    def _sec(k):
+        v = _os.environ.get(k)
+        if v:
+            return v
+        kb = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                           "..", "..", "..", "core", "scripts", "kb.py")
+        try:
+            return _sp.run(["uv", "run", kb, "secret-get", k],
+                           capture_output=True, text=True, timeout=30).stdout.strip()
+        except Exception:
+            return ""
+    host = _sec("PROFIT_SSH_HOST") or "84.46.242.181"
+    user = _sec("PROFIT_SSH_USER") or "root"
+    pwd = _sec("PROFIT_SSH_PASS")
+    if not pwd:
+        _sys.exit("Lipsa PROFIT_SSH_PASS (KB/env). Ruleaza: kb.py secret-set PROFIT_SSH_PASS ...")
+    import paramiko
+    cl = paramiko.SSHClient()
+    cl.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    cl.connect(host, username=user, password=pwd, timeout=30)
+    _i, _o, _e = cl.exec_command(remote_cmd, timeout=180)
+    out = _o.read().decode(); err = _e.read().decode()
+    rc = _o.channel.recv_exit_status()
+    cl.close()
+    return _types.SimpleNamespace(stdout=out, stderr=err, returncode=rc)
 VPS_PY = "/root/Scripturi/.venv/bin/python3"
 VPS_DB = "/root/Scripturi/data/profitability.db"
 
@@ -142,9 +173,11 @@ print(json.dumps({"rows": rows, "transport": tc, "titles": titles}))
 
 
 def fetch_vps(month, brand):
-    cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", VPS_HOST,
-           VPS_PY + " - " + month + " " + (brand or '""')]
-    p = subprocess.run(cmd, input=VPS_SCRIPT, capture_output=True, text=True)
+    import shlex
+    # VPS_SCRIPT reads sys.argv[1]=month, sys.argv[2]=brand; pass it via -c instead of stdin
+    remote = (VPS_PY + " -c " + shlex.quote(VPS_SCRIPT)
+              + " " + shlex.quote(month) + " " + shlex.quote(brand or ""))
+    p = _vps_run(remote)
     if p.returncode != 0:
         sys.stderr.write(p.stderr)
         raise SystemExit("Eroare la citirea profitability.db de pe VPS.")

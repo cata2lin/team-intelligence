@@ -1,0 +1,3011 @@
+{
+  "store": "gt",
+  "shop": "GT Parfumuri by George Talent",
+  "domain": "ix5bxc-hr.myshopify.com",
+  "blogs": [
+    {
+      "id": "gid://shopify/Blog/116880474435",
+      "handle": "news",
+      "title": "News",
+      "articles": {
+        "edges": []
+      }
+    }
+  ],
+  "products": [
+    {
+      "handle": "gt-49",
+      "url": "/products/gt-49",
+      "title": "N°49 | Miss",
+      "name": "Miss",
+      "inspiration": null,
+      "inspiration_brand": "Dior",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "Dior",
+        "floral",
+        "Miss"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-77",
+      "url": "/products/gt-77",
+      "title": "N°77 | Good Fortune",
+      "name": "Good Fortune",
+      "inspiration": null,
+      "inspiration_brand": "Viktor & Rolf",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "Good Fortune",
+        "Viktor & Rolf"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "parfum-surpriza",
+      "url": "/products/parfum-surpriza",
+      "title": "Parfum surpriză",
+      "name": "Parfum surpriză",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [
+        "hidden"
+      ],
+      "stock": -34,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_dde0ec1b-58d4-430b-9932-49dca3e26d17.jpg?v=1765178126"
+    },
+    {
+      "handle": "gt-47",
+      "url": "/products/gt-47",
+      "title": "N°47 | Way",
+      "name": "Way",
+      "inspiration": null,
+      "inspiration_brand": "Armani",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "Armani",
+        "floral",
+        "My way"
+      ],
+      "stock": 1627,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-35",
+      "url": "/products/gt-35",
+      "title": "N°35 | Scandallo pour Homme",
+      "name": "Scandallo pour Homme",
+      "inspiration": null,
+      "inspiration_brand": "Jean Paul Gaultier",
+      "gender": "barbati",
+      "family": "lemnos",
+      "tags": [
+        "Jean Paul Gaultier",
+        "lemnos",
+        "oriental",
+        "Scandal Pour Homme"
+      ],
+      "stock": 416,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_f4ac876d-e559-4399-b6f2-ba8c65405b17.jpg?v=1765178395"
+    },
+    {
+      "handle": "gt-10",
+      "url": "/products/gt-10",
+      "title": "N°10 | Kirkeh",
+      "name": "Kirkeh",
+      "inspiration": null,
+      "inspiration_brand": "Tiziana Terenzi",
+      "gender": "unisex",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "fructat",
+        "kirke",
+        "Tiziana Terenzi"
+      ],
+      "stock": 231,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_c0fd12fa-4e9c-46d3-ad88-ac06a6077935.jpg?v=1765178197"
+    },
+    {
+      "handle": "gt-11",
+      "url": "/products/gt-11",
+      "title": "N°11 | Wood",
+      "name": "Wood",
+      "inspiration": null,
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": "lemnos",
+      "tags": [
+        "lemnos",
+        "lichidare",
+        "oriental",
+        "Oud wood",
+        "Tom Ford"
+      ],
+      "stock": 461,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_7061341a-d97b-4dd1-bd9c-974c8ff3dabb.jpg?v=1765178215"
+    },
+    {
+      "handle": "gt-12",
+      "url": "/products/gt-12",
+      "title": "N°12 | Gentle Man",
+      "name": "Gentle Man",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "barbati",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "Gentleman",
+        "Ghivency",
+        "lemnos",
+        "lichidare"
+      ],
+      "stock": 217,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_1af9ba63-cbe4-416e-836d-ab0e97333129.jpg?v=1765178394"
+    },
+    {
+      "handle": "gt-15",
+      "url": "/products/gt-15",
+      "title": "N°15 | Bleu",
+      "name": "Bleu",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "aromatic",
+        "Bleu de Chanel",
+        "Coco Chanel",
+        "fresh",
+        "lemnos"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_986d5c7b-2323-4bb2-940c-535728676102.jpg?v=1765178394"
+    },
+    {
+      "handle": "gt-16",
+      "url": "/products/gt-16",
+      "title": "N°16 | Phantom",
+      "name": "Phantom",
+      "inspiration": null,
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "aromatic",
+        "fresh",
+        "Paco Rabanne",
+        "Phantom"
+      ],
+      "stock": 157,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_706d203d-548e-461e-9644-a02f7dd488fb.jpg?v=1765178393"
+    },
+    {
+      "handle": "gt-2",
+      "url": "/products/gt-2",
+      "title": "N°2 | Tobacco & Vanile",
+      "name": "Tobacco & Vanile",
+      "inspiration": null,
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": "dulce",
+      "tags": [
+        "condimentat",
+        "dulce",
+        "oriental",
+        "Tobacco Vanille",
+        "Tom Ford"
+      ],
+      "stock": 420,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_2e1e5db3-40c7-4e53-a0df-2729439198e3.jpg?v=1765178298"
+    },
+    {
+      "handle": "gt-21",
+      "url": "/products/gt-21",
+      "title": "N°21 | The Code",
+      "name": "The Code",
+      "inspiration": null,
+      "inspiration_brand": "Armani",
+      "gender": "barbati",
+      "family": "fresh",
+      "tags": [
+        "Armani",
+        "Code",
+        "fresh",
+        "oriental"
+      ],
+      "stock": 759,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_6d6ad170-9a62-42ed-bd24-c096d16c5e31.jpg?v=1765178392"
+    },
+    {
+      "handle": "gt-23",
+      "url": "/products/gt-23",
+      "title": "N°23 | Absolute Man",
+      "name": "Absolute Man",
+      "inspiration": null,
+      "inspiration_brand": "Creed",
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "Aventus Man",
+        "Creed",
+        "fresh",
+        "fructat",
+        "lemnos",
+        "lichidare"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_49e11d66-14dd-4da1-b3b2-689e725f3f82.jpg?v=1765178393"
+    },
+    {
+      "handle": "gt-27",
+      "url": "/products/gt-27",
+      "title": "N°27 | Le Male",
+      "name": "Le Male",
+      "inspiration": null,
+      "inspiration_brand": "Jean Paul Gaultier",
+      "gender": "barbati",
+      "family": "fresh",
+      "tags": [
+        "fresh",
+        "Jean Paul Gaultier",
+        "Le Male",
+        "oriental"
+      ],
+      "stock": 165,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_3e686adc-6169-45d9-8dbe-a55199f80eb1.jpg?v=1765178392"
+    },
+    {
+      "handle": "gt-28",
+      "url": "/products/gt-28",
+      "title": "N°28 | Erotique",
+      "name": "Erotique",
+      "inspiration": null,
+      "inspiration_brand": "Versace",
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "aromatic",
+        "Eros",
+        "fresh",
+        "Versace"
+      ],
+      "stock": 461,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_41054a60-9486-44e0-8ff7-d759561031d9.jpg?v=1765178553"
+    },
+    {
+      "handle": "gt-30",
+      "url": "/products/gt-30",
+      "title": "N°30 | Sauvage",
+      "name": "Sauvage",
+      "inspiration": null,
+      "inspiration_brand": "Dior",
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "aromatic",
+        "Dior",
+        "fresh",
+        "Sauvage"
+      ],
+      "stock": 1133,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_71a2f782-c7df-497c-8e2b-8ac8e436a58e.jpg?v=1765178553"
+    },
+    {
+      "handle": "gt-31",
+      "url": "/products/gt-31",
+      "title": "N°31 | Sauvage Power",
+      "name": "Sauvage Power",
+      "inspiration": null,
+      "inspiration_brand": "Dior",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "Dior",
+        "fresh",
+        "lemnos",
+        "Sauvage Elixir"
+      ],
+      "stock": 1012,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_3b0ce4bc-e4d4-4471-8541-0e7189f88e66.jpg?v=1765178553"
+    },
+    {
+      "handle": "gt-32",
+      "url": "/products/gt-32",
+      "title": "N°32 | Man",
+      "name": "Man",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "barbati",
+      "family": "oriental",
+      "tags": [
+        "Bvlgari",
+        "condimentat",
+        "Man in Black",
+        "oriental"
+      ],
+      "stock": 354,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_49dc07f3-ddd4-444e-89cf-34a3dbfb5538.jpg?v=1765178551"
+    },
+    {
+      "handle": "gt-33",
+      "url": "/products/gt-33",
+      "title": "N°33 | Millionaire's row",
+      "name": "Millionaire's row",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "barbati",
+      "family": "lemnos",
+      "tags": [
+        "1 Million",
+        "condimentat",
+        "lemnos",
+        "Rabanne"
+      ],
+      "stock": 2104,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_9a15e11f-dfff-47a5-91db-70514efa50d0.jpg?v=1765178552"
+    },
+    {
+      "handle": "gt-36",
+      "url": "/products/gt-36",
+      "title": "N°36 | Gentle Man Society",
+      "name": "Gentle Man Society",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "Gentleman Society",
+        "Ghivency",
+        "lemnos"
+      ],
+      "stock": 425,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_a655d82e-dc54-41d7-8b5b-4e65861b75b8.jpg?v=1765178552"
+    },
+    {
+      "handle": "gt-39",
+      "url": "/products/gt-39",
+      "title": "N°39 | Absolute",
+      "name": "Absolute",
+      "inspiration": null,
+      "inspiration_brand": "Creed",
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "Absolu Aventus",
+        "acvatic",
+        "Creed",
+        "fructat",
+        "lemnos",
+        "lichidare"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_128b97b0-e08d-4f2f-8851-d563a1e71d82.jpg?v=1765178552"
+    },
+    {
+      "handle": "gt-4",
+      "url": "/products/gt-4",
+      "title": "N°4 | Erba",
+      "name": "Erba",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "unisex",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "Erba Pura",
+        "floral",
+        "fructat",
+        "Sospiro"
+      ],
+      "stock": 1128,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_fa5c7046-c75e-4307-aacd-8205cd20df5c.jpg?v=1765178086"
+    },
+    {
+      "handle": "gt-44",
+      "url": "/products/gt-44",
+      "title": "N°44 | Famous",
+      "name": "Famous",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "Fame",
+        "floral",
+        "fructat",
+        "Paco Rabane"
+      ],
+      "stock": 414,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-46",
+      "url": "/products/gt-46",
+      "title": "N°46 | Hypnotique",
+      "name": "Hypnotique",
+      "inspiration": null,
+      "inspiration_brand": "Dior",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "Dior",
+        "dulce",
+        "Hypnotic Poison",
+        "oriental",
+        "vanilat"
+      ],
+      "stock": 526,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-48",
+      "url": "/products/gt-48",
+      "title": "N°48 | Angel & Demon",
+      "name": "Angel & Demon",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "Ange ou Demon",
+        "floral",
+        "Ghivency",
+        "lichidare",
+        "oriental"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-5",
+      "url": "/products/gt-5",
+      "title": "N°5 | L'opera",
+      "name": "L'opera",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "unisex",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "Opera",
+        "oriental",
+        "Sospiro"
+      ],
+      "stock": 128,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_6e953e50-7efe-48be-b4f2-df95d06046b1.jpg?v=1765178059"
+    },
+    {
+      "handle": "gt-51",
+      "url": "/products/gt-51",
+      "title": "N°51 | Madmoiselle",
+      "name": "Madmoiselle",
+      "inspiration": null,
+      "inspiration_brand": "Chanel",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "Chanel",
+        "cypre",
+        "floral",
+        "Madmoiselle"
+      ],
+      "stock": 742,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-55",
+      "url": "/products/gt-55",
+      "title": "N°55 | Allen",
+      "name": "Allen",
+      "inspiration": null,
+      "inspiration_brand": "Thierry Mugler",
+      "gender": "femei",
+      "family": "lemnos",
+      "tags": [
+        "Alien",
+        "lemnos",
+        "oriental",
+        "Thierry Mugler"
+      ],
+      "stock": 1107,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-56",
+      "url": "/products/gt-56",
+      "title": "N°56 | Addicted",
+      "name": "Addicted",
+      "inspiration": null,
+      "inspiration_brand": "Dior",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "Addict",
+        "Dior",
+        "floral",
+        "lichidare",
+        "oriental"
+      ],
+      "stock": 93,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-57",
+      "url": "/products/gt-57",
+      "title": "N°57 | Si",
+      "name": "Si",
+      "inspiration": null,
+      "inspiration_brand": "Armani",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "Armani",
+        "cypre",
+        "floral",
+        "fructat",
+        "Si"
+      ],
+      "stock": 910,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-6",
+      "url": "/products/gt-6",
+      "title": "N°6 | Alexandria",
+      "name": "Alexandria",
+      "inspiration": null,
+      "inspiration_brand": "Xerjoff",
+      "gender": "unisex",
+      "family": "lemnos",
+      "tags": [
+        "Alexandria II",
+        "lemnos",
+        "oriental",
+        "Xerjoff"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_99b40ad4-d089-46fd-9296-233ae5eb8884.jpg?v=1765178033"
+    },
+    {
+      "handle": "gt-60",
+      "url": "/products/gt-60",
+      "title": "N°60 | Aventum",
+      "name": "Aventum",
+      "inspiration": null,
+      "inspiration_brand": "CREED",
+      "gender": "femei",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "Aventus for her",
+        "CREED",
+        "fresh",
+        "fructat",
+        "lemnos",
+        "lichidare"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-67",
+      "url": "/products/gt-67",
+      "title": "N°67 | So Blue",
+      "name": "So Blue",
+      "inspiration": null,
+      "inspiration_brand": "D&G",
+      "gender": "femei",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "D&G",
+        "fresh",
+        "fructat",
+        "lemnos",
+        "Light Blue"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-68",
+      "url": "/products/gt-68",
+      "title": "Zeylin N°68 | Orchid",
+      "name": "Orchid",
+      "inspiration": null,
+      "inspiration_brand": "Tom Ford",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "Black Orchid",
+        "floral",
+        "lichidare",
+        "oriental",
+        "Tom Ford"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-69",
+      "url": "/products/gt-69",
+      "title": "N°69 | Idol",
+      "name": "Idol",
+      "inspiration": null,
+      "inspiration_brand": "Armani",
+      "gender": "femei",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "Armani",
+        "floral",
+        "Idole",
+        "lichidare"
+      ],
+      "stock": 296,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-7",
+      "url": "/products/gt-7",
+      "title": "N°7 | Sex Vanille",
+      "name": "Sex Vanille",
+      "inspiration": null,
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "oriental",
+        "Tom Ford",
+        "vanilat",
+        "Vanilla Sex"
+      ],
+      "stock": 52,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_9ed63437-3b0e-464f-b27c-f5891b8568cb.jpg?v=1765178011"
+    },
+    {
+      "handle": "gt-70",
+      "url": "/products/gt-70",
+      "title": "N°70 | Dark Opium",
+      "name": "Dark Opium",
+      "inspiration": null,
+      "inspiration_brand": "YSL",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "Black Opium",
+        "dulce",
+        "oriental",
+        "YSL"
+      ],
+      "stock": 1054,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-71",
+      "url": "/products/gt-71",
+      "title": "Zeylin N°71 | Scandallo",
+      "name": "Scandallo",
+      "inspiration": null,
+      "inspiration_brand": "Jean Paul Gaultier",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "cypre",
+        "floral",
+        "Jean Paul Gaultier",
+        "Scandal"
+      ],
+      "stock": 1764,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-73",
+      "url": "/products/gt-73",
+      "title": "N°73 | Good Girl",
+      "name": "Good Girl",
+      "inspiration": null,
+      "inspiration_brand": "Carolina Herrera",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "Carolina Herrera",
+        "dulce",
+        "floral",
+        "Good Girl",
+        "oriental"
+      ],
+      "stock": 55,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-74",
+      "url": "/products/gt-74",
+      "title": "N°74 | Angelique",
+      "name": "Angelique",
+      "inspiration": null,
+      "inspiration_brand": "Thierry Mugler",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "Angel",
+        "dulce",
+        "gurmand",
+        "oriental",
+        "Thierry Mugler"
+      ],
+      "stock": 218,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-75",
+      "url": "/products/gt-75",
+      "title": "N°75 | Bon Vie",
+      "name": "Bon Vie",
+      "inspiration": null,
+      "inspiration_brand": "Lancome",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "fructat",
+        "La vie Est Belle",
+        "Lancome"
+      ],
+      "stock": 1010,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-76",
+      "url": "/products/gt-76",
+      "title": "N°76 | Cinque",
+      "name": "Cinque",
+      "inspiration": null,
+      "inspiration_brand": "Chanel",
+      "gender": "femei",
+      "family": "aldehidic",
+      "tags": [
+        "aldehidic",
+        "Chanel",
+        "floral",
+        "lichidare",
+        "No 5"
+      ],
+      "stock": 465,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-79",
+      "url": "/products/gt-79",
+      "title": "Zeylin N°79 | Carmine",
+      "name": "Carmine",
+      "inspiration": null,
+      "inspiration_brand": "CREED",
+      "gender": "femei",
+      "family": "lemnos",
+      "tags": [
+        "Carmina",
+        "CREED",
+        "lemnos",
+        "oriental",
+        "Out of stock"
+      ],
+      "stock": -34,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-8",
+      "url": "/products/gt-8",
+      "title": "N°8 | Noir",
+      "name": "Noir",
+      "inspiration": null,
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "Noir de Noir",
+        "oriental",
+        "Tom Ford"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_b0b5c692-a5b5-4126-a0c7-d2a2abac545e.jpg?v=1765177990"
+    },
+    {
+      "handle": "gt-82",
+      "url": "/products/gt-82",
+      "title": "N°82 | Interdit Rouge",
+      "name": "Interdit Rouge",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "Ghivency",
+        "L'interdit Rouge Ultime",
+        "lemnos",
+        "lichidare"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-87",
+      "url": "/products/gt-87",
+      "title": "N°87 | Millionaire Royale",
+      "name": "Millionaire Royale",
+      "inspiration": null,
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "Lady Million Royal",
+        "Paco Rabanne"
+      ],
+      "stock": 160,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-9",
+      "url": "/products/gt-9",
+      "title": "N°9 | Fkin Fabulous",
+      "name": "Fkin Fabulous",
+      "inspiration": null,
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "Fucking Fabulous",
+        "lemnos",
+        "migdale",
+        "Tom Ford"
+      ],
+      "stock": 214,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_f002f7ac-67c8-47f6-91d7-2189f90f1fb2.jpg?v=1765177968"
+    },
+    {
+      "handle": "gt-88",
+      "url": "/products/gt-88",
+      "title": "Zeylin N°88 | Q",
+      "name": "Q",
+      "inspiration": null,
+      "inspiration_brand": "D&G",
+      "gender": "femei",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "D&G",
+        "fresh",
+        "fructat",
+        "lemnos",
+        "lichidare",
+        "Q"
+      ],
+      "stock": 610,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-3",
+      "url": "/products/gt-3",
+      "title": "N°3 | Angel Noir",
+      "name": "Angel Noir",
+      "inspiration": null,
+      "inspiration_brand": "Kilian",
+      "gender": "unisex",
+      "family": "dulce",
+      "tags": [
+        "Angel's Share",
+        "condimentat",
+        "dulce",
+        "Kilian",
+        "oriental",
+        "second"
+      ],
+      "stock": 155,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_ca6a010c-f08f-4227-8846-359efd8f7173.jpg?v=1765177950"
+    },
+    {
+      "handle": "gt-13",
+      "url": "/products/gt-13",
+      "title": "N°13 | Invictum Profondo",
+      "name": "Invictum Profondo",
+      "inspiration": null,
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "barbati",
+      "family": "lemnos",
+      "tags": [
+        "Invictus Victory",
+        "lemnos",
+        "oriental",
+        "Paco Rabanne",
+        "second",
+        "vanilat"
+      ],
+      "stock": 298,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_8020bb4e-02c5-4982-8d2c-a2f439b7e392.jpg?v=1765178099"
+    },
+    {
+      "handle": "gt-14",
+      "url": "/products/gt-14",
+      "title": "N°14 | Uommo",
+      "name": "Uommo",
+      "inspiration": null,
+      "inspiration_brand": "Valentino",
+      "gender": "barbati",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "gourmand",
+        "lemnos",
+        "second",
+        "Uomo",
+        "Valentino"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_2326d76c-644e-4349-964d-074131a9e388.jpg?v=1765178099"
+    },
+    {
+      "handle": "gt-17",
+      "url": "/products/gt-17",
+      "title": "N°17 | Terre",
+      "name": "Terre",
+      "inspiration": null,
+      "inspiration_brand": "Hermes",
+      "gender": "barbati",
+      "family": "lemnos",
+      "tags": [
+        "citrus",
+        "Hermes",
+        "lemnos",
+        "second",
+        "terestru",
+        "Terre D'Hermes"
+      ],
+      "stock": 144,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_024ac6cf-c238-411b-b20d-7f42a7769d24.jpg?v=1765178099"
+    },
+    {
+      "handle": "gt-18",
+      "url": "/products/gt-18",
+      "title": "N°18 | Invictum",
+      "name": "Invictum",
+      "inspiration": null,
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "fresh",
+        "Invictus",
+        "lemnos",
+        "Paco Rabanne",
+        "second"
+      ],
+      "stock": 960,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_0750247b-8af9-4773-8674-368d21179c1d.jpg?v=1765178098"
+    },
+    {
+      "handle": "gt-19",
+      "url": "/products/gt-19",
+      "title": "N°19 | Le Mer Tourquise",
+      "name": "Le Mer Tourquise",
+      "inspiration": null,
+      "inspiration_brand": "D&G",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "citrus",
+        "D&G",
+        "fresh",
+        "lichidare",
+        "Light Blue Pour Homme",
+        "second"
+      ],
+      "stock": 211,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_ddd6281e-3ce3-41f3-889e-2247ddd28b30.jpg?v=1765178098"
+    },
+    {
+      "handle": "gt-20",
+      "url": "/products/gt-20",
+      "title": "N°20 | L'allure",
+      "name": "L'allure",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "Allure Home Sport",
+        "aromatic",
+        "Coco Chanel",
+        "fresh",
+        "lichidare",
+        "second",
+        "sportiv"
+      ],
+      "stock": 658,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_a05aa1af-96a3-437f-9ee9-d91e8805a832.jpg?v=1765178098"
+    },
+    {
+      "handle": "gt-22",
+      "url": "/products/gt-22",
+      "title": "N°22 | Le Mer Profondo",
+      "name": "Le Mer Profondo",
+      "inspiration": null,
+      "inspiration_brand": "Armani",
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "Acqua di Gio Profondo",
+        "acvatic",
+        "Armani",
+        "aromatic",
+        "lemnos",
+        "second"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_1940f529-239a-4c03-a3f5-842e4eacfece.jpg?v=1765178098"
+    },
+    {
+      "handle": "gt-24",
+      "url": "/products/gt-24",
+      "title": "N°24 | Bad Boy",
+      "name": "Bad Boy",
+      "inspiration": null,
+      "inspiration_brand": "Carolina Herrera",
+      "gender": "barbati",
+      "family": "lemnos",
+      "tags": [
+        "Bad Boy Le Parfum",
+        "Carolina Herrera",
+        "condimentat",
+        "lemnos",
+        "oriental",
+        "second"
+      ],
+      "stock": 99,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_34b92df0-159f-4ade-8118-11df90669132.jpg?v=1765178097"
+    },
+    {
+      "handle": "gt-25",
+      "url": "/products/gt-25",
+      "title": "N°25 | Le VIP",
+      "name": "Le VIP",
+      "inspiration": null,
+      "inspiration_brand": "Carolina Herrera",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "Carolina Herrera",
+        "condimentat",
+        "lemnos",
+        "second",
+        "VIP Black"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_3e4867ff-66bc-4b5f-ab19-99712aa93a32.jpg?v=1765178096"
+    },
+    {
+      "handle": "gt-26",
+      "url": "/products/gt-26",
+      "title": "N°26 | Le Noir",
+      "name": "Le Noir",
+      "inspiration": null,
+      "inspiration_brand": "Tom Ford",
+      "gender": "barbati",
+      "family": "oriental",
+      "tags": [
+        "condimentat",
+        "Noir Extreme",
+        "oriental",
+        "second",
+        "Tom Ford",
+        "vanilat"
+      ],
+      "stock": 155,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_99003563-a874-400d-92fb-06b86c5d23a5.jpg?v=1765178096"
+    },
+    {
+      "handle": "gt-29",
+      "url": "/products/gt-29",
+      "title": "N°29 |  Black Power",
+      "name": "Black Power",
+      "inspiration": null,
+      "inspiration_brand": "Boss",
+      "gender": "barbati",
+      "family": "lemnos",
+      "tags": [
+        "Boss",
+        "Bottled Elixir",
+        "condimentat",
+        "lemnos",
+        "rășinos",
+        "second"
+      ],
+      "stock": 718,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_108bf13a-7640-4180-bb38-c2bca5262b54.jpg?v=1765178097"
+    },
+    {
+      "handle": "gt-34",
+      "url": "/products/gt-34",
+      "title": "N°34 | Fahrenheit",
+      "name": "Fahrenheit",
+      "inspiration": null,
+      "inspiration_brand": "Dior",
+      "gender": "barbati",
+      "family": "floral",
+      "tags": [
+        "Dior",
+        "Fahrenheit",
+        "floral",
+        "lemnos",
+        "pielărie",
+        "second"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_d668874c-7d14-42ce-99f7-8f3402fedc58.jpg?v=1765177685"
+    },
+    {
+      "handle": "gt-37",
+      "url": "/products/gt-37",
+      "title": "N°37 | Why",
+      "name": "Why",
+      "inspiration": null,
+      "inspiration_brand": "Yves Saint Laurent",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "condimentat",
+        "lemnos",
+        "second",
+        "Y Intense",
+        "Yves Saint Laurent"
+      ],
+      "stock": 294,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_888438a9-8a7e-401f-a93c-766e35c2e096.jpg?v=1765177685"
+    },
+    {
+      "handle": "gt-38",
+      "url": "/products/gt-38",
+      "title": "N°38 | Stronger",
+      "name": "Stronger",
+      "inspiration": null,
+      "inspiration_brand": "Armani",
+      "gender": "barbati",
+      "family": "dulce",
+      "tags": [
+        "Armani",
+        "dulce",
+        "gourmand",
+        "oriental",
+        "second",
+        "Stronger with you"
+      ],
+      "stock": 1489,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_16fd5c0f-c33d-45de-93ca-eaa7a27f9275.jpg?v=1765177685"
+    },
+    {
+      "handle": "gt-40",
+      "url": "/products/gt-40",
+      "title": "N°40 | Key",
+      "name": "Key",
+      "inspiration": null,
+      "inspiration_brand": "D&G",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "D&G",
+        "K",
+        "lemnos",
+        "second",
+        "verde"
+      ],
+      "stock": 229,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_b9d8ae9b-850f-468e-a116-d7e2de03fd76.jpg?v=1765177562"
+    },
+    {
+      "handle": "gt-41",
+      "url": "/products/gt-41",
+      "title": "N°41 | So wanted",
+      "name": "So wanted",
+      "inspiration": null,
+      "inspiration_brand": "Azzaro",
+      "gender": "barbati",
+      "family": "dulce",
+      "tags": [
+        "Azzaro",
+        "condimentat",
+        "dulce",
+        "lemnos",
+        "second",
+        "Wanted"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_2b617379-d745-459b-821c-30655bd057fd.jpg?v=1765177514"
+    },
+    {
+      "handle": "gt-42",
+      "url": "/products/gt-42",
+      "title": "N°42 | Le Mer",
+      "name": "Le Mer",
+      "inspiration": null,
+      "inspiration_brand": "Armani",
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "Acqua di Gio",
+        "acvatic",
+        "Armani",
+        "aromatic",
+        "fresh",
+        "second"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_45a84648-c947-4729-ab10-9df90e44e193.jpg?v=1765177515"
+    },
+    {
+      "handle": "gt-43",
+      "url": "/products/gt-43",
+      "title": "Zeylin N°43  | Bianca",
+      "name": "Bianca",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "Casamorati",
+        "Dama Bianca",
+        "dulce",
+        "floral",
+        "pudrat",
+        "second"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-45",
+      "url": "/products/gt-45",
+      "title": "Zeylin N°45 | Blue Lady",
+      "name": "Blue Lady",
+      "inspiration": null,
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "fructat",
+        "Lady Million",
+        "Paco Rabanne",
+        "second"
+      ],
+      "stock": 968,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-50",
+      "url": "/products/gt-50",
+      "title": "Zeylin N°50 | So Guilty",
+      "name": "So Guilty",
+      "inspiration": null,
+      "inspiration_brand": "GUCCI",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "fructat",
+        "GUCCI",
+        "Guilty",
+        "oriental",
+        "second"
+      ],
+      "stock": 227,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-52",
+      "url": "/products/gt-52",
+      "title": "Zeylin N°52 | Le Nuit",
+      "name": "Le Nuit",
+      "inspiration": null,
+      "inspiration_brand": "Lancome",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "gourmand",
+        "La Nuit Tresor",
+        "Lancome",
+        "second"
+      ],
+      "stock": 200,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-53",
+      "url": "/products/gt-53",
+      "title": "Zeylin N°53 | Interdit",
+      "name": "Interdit",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "alb",
+        "condimentat",
+        "floral",
+        "Ghivency",
+        "L'interdit",
+        "second"
+      ],
+      "stock": 115,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-54",
+      "url": "/products/gt-54",
+      "title": "Zeylin N°54 | Tandre",
+      "name": "Tandre",
+      "inspiration": null,
+      "inspiration_brand": "Chanel",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "Chanel",
+        "floral",
+        "lemnos",
+        "pudrat",
+        "second",
+        "Tendre"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-58",
+      "url": "/products/gt-58",
+      "title": "Zeylin N°58 | It's U",
+      "name": "It's U",
+      "inspiration": null,
+      "inspiration_brand": "Armani",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "Armani",
+        "Because it's you",
+        "dulce",
+        "floral",
+        "fructat",
+        "lichidare",
+        "second"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-59",
+      "url": "/products/gt-59",
+      "title": "Zeylin N°59 | The one",
+      "name": "The one",
+      "inspiration": null,
+      "inspiration_brand": "D&G",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "D&G",
+        "dulce",
+        "gourmand",
+        "lichidare",
+        "oriental",
+        "second",
+        "The only one"
+      ],
+      "stock": 226,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-61",
+      "url": "/products/gt-61",
+      "title": "Zeylin N°61 | Olympique",
+      "name": "Olympique",
+      "inspiration": null,
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "fructat",
+        "lichidare",
+        "Olympea Flora",
+        "Paco Rabanne",
+        "second",
+        "vanilat"
+      ],
+      "stock": 39,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-62",
+      "url": "/products/gt-62",
+      "title": "Zeylin N°62 | Bloom",
+      "name": "Bloom",
+      "inspiration": null,
+      "inspiration_brand": "GUCCI",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "Bloom Intense",
+        "floral",
+        "GUCCI",
+        "lemnos",
+        "lichidare",
+        "second",
+        "verde"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-63",
+      "url": "/products/gt-63",
+      "title": "Zeylin N°63 | J'Adore",
+      "name": "J'Adore",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "alb",
+        "floral",
+        "Infinissime",
+        "J'Adore",
+        "lichidare",
+        "pudrat",
+        "second"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-64",
+      "url": "/products/gt-64",
+      "title": "Zeylin N°64 | So Good Girl",
+      "name": "So Good Girl",
+      "inspiration": null,
+      "inspiration_brand": "Carolina Herrera",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "Carolina Herrera",
+        "floral",
+        "fructat",
+        "second",
+        "vanilat",
+        "Very Good Girl"
+      ],
+      "stock": 23,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-65",
+      "url": "/products/gt-65",
+      "title": "Zeylin N°65 | L'idole",
+      "name": "L'idole",
+      "inspiration": null,
+      "inspiration_brand": "Lancome",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "curat",
+        "floral",
+        "fructat",
+        "Idole",
+        "Lancome",
+        "second"
+      ],
+      "stock": -92,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-66",
+      "url": "/products/gt-66",
+      "title": "Zeylin N°66 | Piu Belle",
+      "name": "Piu Belle",
+      "inspiration": null,
+      "inspiration_brand": "Jean Paul Gaultier",
+      "gender": "femei",
+      "family": "fructat",
+      "tags": [
+        "fructat",
+        "Jean Paul Gaultier",
+        "La Belle",
+        "lemnos",
+        "lichidare",
+        "second",
+        "vanilat"
+      ],
+      "stock": 40,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-72",
+      "url": "/products/gt-72",
+      "title": "Zeylin N°72 | So Scandallo",
+      "name": "So Scandallo",
+      "inspiration": null,
+      "inspiration_brand": "Jean Paul Gaultier",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "Jean Paul Gaultier",
+        "lăptos",
+        "second",
+        "So Scandal"
+      ],
+      "stock": 1342,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-78",
+      "url": "/products/gt-78",
+      "title": "Zeylin N°78 | Her",
+      "name": "Her",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": "gourmand",
+      "tags": [
+        "citrus",
+        "condimentat",
+        "gourmand",
+        "lemnos",
+        "lichidare",
+        "second",
+        "This is Her",
+        "Zadig & Voltaire"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-80",
+      "url": "/products/gt-80",
+      "title": "Zeylin N°80 | Gorgeous",
+      "name": "Gorgeous",
+      "inspiration": null,
+      "inspiration_brand": "GUCCI",
+      "gender": "femei",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "Flora Gorgeous Magnolia",
+        "floral",
+        "GUCCI",
+        "lemnos",
+        "lichidare",
+        "second"
+      ],
+      "stock": 81,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-83",
+      "url": "/products/gt-83",
+      "title": "Zeylin N°83 | Goddess",
+      "name": "Goddess",
+      "inspiration": null,
+      "inspiration_brand": "Burberry",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "Burberry",
+        "Burberry Goddess",
+        "citrus",
+        "dulce",
+        "gourmand",
+        "lichidare",
+        "second",
+        "vanilat"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-84",
+      "url": "/products/gt-84",
+      "title": "Zeylin N°84 | My Berry",
+      "name": "My Berry",
+      "inspiration": null,
+      "inspiration_brand": "Burberry",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "Burberry",
+        "floral",
+        "My Burberry",
+        "proaspăt",
+        "pudrat",
+        "second"
+      ],
+      "stock": 166,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-85",
+      "url": "/products/gt-85",
+      "title": "Zeylin N°85 | Vie Belle",
+      "name": "Vie Belle",
+      "inspiration": null,
+      "inspiration_brand": "Lancome",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "La vie Est Belle Soleil Cristal",
+        "Lancome",
+        "second",
+        "solar"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-86",
+      "url": "/products/gt-86",
+      "title": "Zeylin N°86 | Millionaire",
+      "name": "Millionaire",
+      "inspiration": null,
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "exotic",
+        "floral",
+        "Lady Million Fabulous",
+        "Paco Rabanne",
+        "second",
+        "vanilat"
+      ],
+      "stock": 385,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-89",
+      "url": "/products/gt-89",
+      "title": "Zeylin N°89 | Devotion",
+      "name": "Devotion",
+      "inspiration": null,
+      "inspiration_brand": "D&G",
+      "gender": "femei",
+      "family": "gourmand",
+      "tags": [
+        "citrus",
+        "D&G",
+        "Devotion",
+        "gourmand",
+        "lichidare",
+        "second",
+        "vanilat"
+      ],
+      "stock": 466,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-90",
+      "url": "/products/gt-90",
+      "title": "Zeylin N°90 | Q Absolu",
+      "name": "Q Absolu",
+      "inspiration": null,
+      "inspiration_brand": "D&G",
+      "gender": "femei",
+      "family": "fructat",
+      "tags": [
+        "citrus",
+        "D&G",
+        "fructat",
+        "lichidare",
+        "Q (intense)",
+        "second",
+        "vanilat"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green.jpg?v=1752499607"
+    },
+    {
+      "handle": "gt-91",
+      "url": "/products/gt-91",
+      "title": "N°91 | Lost",
+      "name": "Lost",
+      "inspiration": null,
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": "fructat",
+      "tags": [
+        "condimentat",
+        "fructat",
+        "gourmand",
+        "Lost Cherry",
+        "second",
+        "Tom Ford"
+      ],
+      "stock": 1889,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_b1700cf7-e494-4138-80a0-c5f8859f7f58.jpg?v=1765177515"
+    },
+    {
+      "handle": "gt-92",
+      "url": "/products/gt-92",
+      "title": "N°92 | Blue Bottled",
+      "name": "Blue Bottled",
+      "inspiration": null,
+      "inspiration_brand": "Hugo Boss",
+      "gender": "barbati",
+      "family": "dulce",
+      "tags": [
+        "Boss Bottled",
+        "condimentat",
+        "dulce",
+        "Hugo Boss",
+        "lemnos",
+        "lichidare",
+        "second"
+      ],
+      "stock": 812,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_b6de5497-9832-4416-98d0-dcfb2d6e5260.jpg?v=1765177389"
+    },
+    {
+      "handle": "gt-93",
+      "url": "/products/gt-93",
+      "title": "Zeylin N°93 | Paradoxe",
+      "name": "Paradoxe",
+      "inspiration": null,
+      "inspiration_brand": "Prada",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "citrus",
+        "floral",
+        "Paradoxe",
+        "Prada",
+        "second",
+        "vanilat"
+      ],
+      "stock": 2054,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6043714-2912-4ae2-8850-90f82c040aa6.jpg?v=1752499940"
+    },
+    {
+      "handle": "gt-94",
+      "url": "/products/gt-94",
+      "title": "N°94 | Homme",
+      "name": "Homme",
+      "inspiration": null,
+      "inspiration_brand": "Dior",
+      "gender": "barbati",
+      "family": "floral",
+      "tags": [
+        "Dior",
+        "Dior Homme (Intense)",
+        "floral",
+        "lemnos",
+        "pudrat",
+        "second"
+      ],
+      "stock": 208,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_07b860c5-3a2d-4836-ad83-24cf84841a11.jpg?v=1765177370"
+    },
+    {
+      "handle": "gt-95",
+      "url": "/products/gt-95",
+      "title": "N°95 | Imagination",
+      "name": "Imagination",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "citrus",
+        "Imagination",
+        "lichidare",
+        "Louis Vuitton",
+        "misterios"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_8e6441b4-d0c9-4b04-aeca-32934a4cc914.jpg?v=1765177358"
+    },
+    {
+      "handle": "gt-96",
+      "url": "/products/gt-96",
+      "title": "Zeylin N°96 | Libre Absolu",
+      "name": "Libre Absolu",
+      "inspiration": null,
+      "inspiration_brand": "YSL",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "condimentat",
+        "dulce",
+        "floral",
+        "Libre Intense",
+        "second",
+        "YSL"
+      ],
+      "stock": 535,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green.jpg?v=1752499607"
+    },
+    {
+      "handle": "gt-97",
+      "url": "/products/gt-97",
+      "title": "N°97 | Donna",
+      "name": "Donna",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "unisex",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "fructat",
+        "Prima Donna",
+        "second",
+        "Sospiro"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_1d9cf196-a7ea-4ebe-ba02-7f0434826375.jpg?v=1765177397"
+    },
+    {
+      "handle": "gt-98",
+      "url": "/products/gt-98",
+      "title": "N°98 | Tuscan",
+      "name": "Tuscan",
+      "inspiration": null,
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": "fructat",
+      "tags": [
+        "condimentat",
+        "fructat",
+        "lemnos",
+        "lichidare",
+        "second",
+        "Tom Ford",
+        "Tuscan Leather"
+      ],
+      "stock": 475,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_b7ff7ccf-0ee9-4336-8078-68a148394a80.jpg?v=1765177319"
+    },
+    {
+      "handle": "gt-99",
+      "url": "/products/gt-99",
+      "title": "N°99 | Baccarat",
+      "name": "Baccarat",
+      "inspiration": null,
+      "inspiration_brand": "Maison Francis Kurkdjian",
+      "gender": "unisex",
+      "family": "floral",
+      "tags": [
+        "Baccarat Rouge 540",
+        "floral",
+        "lemnos",
+        "Maison Francis Kurkdjian",
+        "second"
+      ],
+      "stock": 1494,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_58771aed-e84b-42aa-b959-03283d32a109.jpg?v=1765177308"
+    },
+    {
+      "handle": "gt-100",
+      "url": "/products/gt-100",
+      "title": "N°100 | Afgano",
+      "name": "Afgano",
+      "inspiration": null,
+      "inspiration_brand": "Nasomatto",
+      "gender": "unisex",
+      "family": "lemnos",
+      "tags": [
+        "black afgano",
+        "condimentat",
+        "lemnos",
+        "lichidare",
+        "Nasomatto",
+        "oriental",
+        "second"
+      ],
+      "stock": -1,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_f93d5994-fc63-4277-ad1d-4389d45dfa04.jpg?v=1765177295"
+    },
+    {
+      "handle": "gt-101",
+      "url": "/products/gt-101",
+      "title": "N°101 | Leather Ombre",
+      "name": "Leather Ombre",
+      "inspiration": null,
+      "inspiration_brand": "Tom Ford",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "ombre leather",
+        "Tom Ford"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_65d3837b-538a-4afd-bb59-a82da01b3f74.jpg?v=1765177280"
+    },
+    {
+      "handle": "gt-102",
+      "url": "/products/gt-102",
+      "title": "Zeylin N°102 | VIP 212",
+      "name": "VIP 212",
+      "inspiration": null,
+      "inspiration_brand": "Carolina Herrera",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "212 vip",
+        "Carolina Herrera"
+      ],
+      "stock": 489,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_868a93bc-2470-4d43-badc-cf2792a5cb8b.jpg?v=1758301398"
+    },
+    {
+      "handle": "gt-103",
+      "url": "/products/gt-103",
+      "title": "N°103 | Amber Stronger",
+      "name": "Amber Stronger",
+      "inspiration": null,
+      "inspiration_brand": "Armani",
+      "gender": "unisex",
+      "family": null,
+      "tags": [
+        "Armani",
+        "Stronger with you amber"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_223afa0e-79ef-4471-a595-7f460f201a70.jpg?v=1765177266"
+    },
+    {
+      "handle": "gt-104",
+      "url": "/products/gt-104",
+      "title": "N°104 | Ultra Male",
+      "name": "Ultra Male",
+      "inspiration": null,
+      "inspiration_brand": "Jean Paul Gaultier",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "Jean Paul Gaultier",
+        "Ultra Male"
+      ],
+      "stock": 209,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_647693aa-e18f-47cf-8dfa-9d8566b996be.jpg?v=1765177254"
+    },
+    {
+      "handle": "gt-105",
+      "url": "/products/gt-105",
+      "title": "N°105 | Chic Men",
+      "name": "Chic Men",
+      "inspiration": null,
+      "inspiration_brand": "Carolina Herrera",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "Carolina Herrera",
+        "Chic For Men"
+      ],
+      "stock": 107,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_9c846d7d-07e1-4be6-a273-687dca8f762b.jpg?v=1765177229"
+    },
+    {
+      "handle": "gt-106",
+      "url": "/products/gt-106",
+      "title": "N°106 | Silver Chrome",
+      "name": "Silver Chrome",
+      "inspiration": null,
+      "inspiration_brand": "Azzaro",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "Azzaro",
+        "Chrome"
+      ],
+      "stock": 35,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_5efb899c-2dfc-4021-99b2-7169c817f772.jpg?v=1765177215"
+    },
+    {
+      "handle": "gt-107",
+      "url": "/products/gt-107",
+      "title": "N°107 | Men Obsession",
+      "name": "Men Obsession",
+      "inspiration": null,
+      "inspiration_brand": "Calvin Klein",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "Calvin Klein",
+        "lichidare",
+        "Obssesion for men"
+      ],
+      "stock": 248,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_27649dfa-cc57-4cb0-984c-519013e937d6.jpg?v=1765177202"
+    },
+    {
+      "handle": "gt-108",
+      "url": "/products/gt-108",
+      "title": "N°108 | Gold Euphoria",
+      "name": "Gold Euphoria",
+      "inspiration": null,
+      "inspiration_brand": "calvin klein",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "calvin klein",
+        "Euphoria liquid gold for men",
+        "lichidare"
+      ],
+      "stock": 163,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_f012e27c-a561-45ec-b2cc-c53c29b16035.jpg?v=1765177188"
+    },
+    {
+      "handle": "gt-109",
+      "url": "/products/gt-109",
+      "title": "N°109 | Myself",
+      "name": "Myself",
+      "inspiration": null,
+      "inspiration_brand": "Yves Saint Laurent",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "lichidare",
+        "MYSLF",
+        "Yves Saint Laurent"
+      ],
+      "stock": 113,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_865221ed-48c5-472d-a431-dca5d8728abb.jpg?v=1765177174"
+    },
+    {
+      "handle": "gt-110",
+      "url": "/products/gt-110",
+      "title": "N°110 | Power Y",
+      "name": "Power Y",
+      "inspiration": null,
+      "inspiration_brand": "Yves Saint Laurent",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "lichidare",
+        "Y elixir for men",
+        "Yves Saint Laurent"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_b58c257f-b7b1-4cc7-ae3c-477ed8fcec81.jpg?v=1765177160"
+    },
+    {
+      "handle": "gt-111",
+      "url": "/products/gt-111",
+      "title": "N°111 | Dark Leather",
+      "name": "Dark Leather",
+      "inspiration": null,
+      "inspiration_brand": "Yves Saint Laurent",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "lichidare",
+        "Y elixir for men",
+        "Yves Saint Laurent"
+      ],
+      "stock": 235,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_a11de13a-3e07-4ae5-8838-5dc66d37fdd4.jpg?v=1765177145"
+    },
+    {
+      "handle": "gt-112",
+      "url": "/products/gt-112",
+      "title": "Zeylin N°112 | Desire One",
+      "name": "Desire One",
+      "inspiration": null,
+      "inspiration_brand": "Dolce & Gabbana",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Dolce & Gabbana",
+        "The One Desire"
+      ],
+      "stock": 26,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_a15e4f36-01f2-43cb-ae4b-898dd16968cb.jpg?v=1758301414"
+    },
+    {
+      "handle": "gt-113",
+      "url": "/products/gt-113",
+      "title": "Zeylin N°113 | Irresistible Touch",
+      "name": "Irresistible Touch",
+      "inspiration": null,
+      "inspiration_brand": "Givenchy",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Givenchy",
+        "Irresistible"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_de8ec8ad-cb3f-47f9-b0e5-017e17851449.jpg?v=1758301415"
+    },
+    {
+      "handle": "gt-114",
+      "url": "/products/gt-114",
+      "title": "Zeylin N°114 | Rush Absolu",
+      "name": "Rush Absolu",
+      "inspiration": null,
+      "inspiration_brand": "Gucci",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Gucci",
+        "Rush"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_383232d8-1586-4df3-9ea6-8f595675e0a4.jpg?v=1758301417"
+    },
+    {
+      "handle": "gt-115",
+      "url": "/products/gt-115",
+      "title": "Zeylin N°115 | Alive Spirit",
+      "name": "Alive Spirit",
+      "inspiration": null,
+      "inspiration_brand": "Hugo Boss",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Boss Alive",
+        "Hugo Boss"
+      ],
+      "stock": 237,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_0437ff18-10f0-4270-8983-d37e88a46da3.jpg?v=1758301418"
+    },
+    {
+      "handle": "gt-116",
+      "url": "/products/gt-116",
+      "title": "Zeylin N°116 | Platine Libre",
+      "name": "Platine Libre",
+      "inspiration": null,
+      "inspiration_brand": "Yves Saint Laurent",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Libre L’Absolu Platine",
+        "Yves Saint Laurent"
+      ],
+      "stock": 213,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_3cdcb210-ca33-4671-acb1-fea22e308ef0.jpg?v=1758301420"
+    },
+    {
+      "handle": "gt-117",
+      "url": "/products/gt-117",
+      "title": "N°117 | Peach Bitter",
+      "name": "Peach Bitter",
+      "inspiration": null,
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": null,
+      "tags": [
+        "Bitter Peach",
+        "Tom Ford"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_855f32bd-475e-45c1-ae72-47ac187c8216.jpg?v=1765177132"
+    },
+    {
+      "handle": "gt-118",
+      "url": "/products/gt-118",
+      "title": "Zeylin N°118 | Crystal Bright",
+      "name": "Crystal Bright",
+      "inspiration": null,
+      "inspiration_brand": "Versace",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Bright Crystal",
+        "Versace"
+      ],
+      "stock": 302,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_f77d5460-1e00-48e8-bbdc-1968a5bed33a.jpg?v=1758301424"
+    },
+    {
+      "handle": "gt-119",
+      "url": "/products/gt-119",
+      "title": "Zeylin N°119 | Noir Essence",
+      "name": "Noir Essence",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Coco Chanel",
+        "Coco Noir"
+      ],
+      "stock": 143,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_3dab3d6f-851b-4b7d-8221-7815892a2937.jpg?v=1758301425"
+    },
+    {
+      "handle": "gt-120",
+      "url": "/products/gt-120",
+      "title": "Zeylin N°120 | Pure Obsession",
+      "name": "Pure Obsession",
+      "inspiration": null,
+      "inspiration_brand": "Calvin Klein",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Calvin Klein",
+        "lichidare",
+        "Obsession"
+      ],
+      "stock": 339,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_a00cccfd-6d21-471d-aff4-0836a6e47729.jpg?v=1758301426"
+    },
+    {
+      "handle": "gt-121",
+      "url": "/products/gt-121",
+      "title": "Zeylin N°121 | Amor Passion",
+      "name": "Amor Passion",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Amor Amor",
+        "Cacharel"
+      ],
+      "stock": 28,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_945eb867-abcb-4483-8d94-24254b2cb16e.jpg?v=1758301429"
+    },
+    {
+      "handle": "gt-122",
+      "url": "/products/gt-122",
+      "title": "Zeylin N°122 | Divine Aura",
+      "name": "Divine Aura",
+      "inspiration": null,
+      "inspiration_brand": "Jean Paul Gaultier",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Gaultier Divine",
+        "Jean Paul Gaultier"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_2d0bdb33-6b72-40f0-9cc5-7617518d317b.jpg?v=1758301430"
+    },
+    {
+      "handle": "gt-123",
+      "url": "/products/gt-123",
+      "title": "Zeylin N°123 | Absolu Paradoxe",
+      "name": "Absolu Paradoxe",
+      "inspiration": null,
+      "inspiration_brand": "Prada",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Paradoxe Intense",
+        "Prada"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_2727af21-7dd4-4ee4-b0f9-899d9e8c742b.jpg?v=1758301432"
+    },
+    {
+      "handle": "gt-124",
+      "url": "/products/gt-124",
+      "title": "Zeylin N°124 | Venus Glow",
+      "name": "Venus Glow",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Nina Ricci",
+        "Venus"
+      ],
+      "stock": 32,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_4a4d5f7d-ed91-4311-8ef2-7b3966dc1d94.jpg?v=1758301433"
+    },
+    {
+      "handle": "gt-125",
+      "url": "/products/gt-125",
+      "title": "Zeylin N°125 | Barenia Essence",
+      "name": "Barenia Essence",
+      "inspiration": null,
+      "inspiration_brand": "Hermes",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Barenia",
+        "Hermes",
+        "lichidare"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_430e8f5a-fd80-494d-8bf3-624ac7c7e9d4.jpg?v=1758301434"
+    },
+    {
+      "handle": "gt-126",
+      "url": "/products/gt-126",
+      "title": "Zeylin N°126 | Marshmallow Boujee",
+      "name": "Marshmallow Boujee",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "81 Kayali",
+        "lichidare",
+        "Yum Boujee Marshmallow"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_89b77fdd-fd71-4675-a839-0bf41f28c510.jpg?v=1758301436"
+    },
+    {
+      "handle": "gt-127",
+      "url": "/products/gt-127",
+      "title": "Zeylin N°127 | Silk Queen",
+      "name": "Silk Queen",
+      "inspiration": null,
+      "inspiration_brand": "Creed",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Creed",
+        "lichidare",
+        "Queen of Silk"
+      ],
+      "stock": 277,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c6d887c2-643a-46b3-a09e-abf42205e547.jpg?v=1758301438"
+    },
+    {
+      "handle": "gt-128",
+      "url": "/products/gt-128",
+      "title": "N°128 | Centaurus Star",
+      "name": "Centaurus Star",
+      "inspiration": null,
+      "inspiration_brand": "Creed",
+      "gender": "unisex",
+      "family": null,
+      "tags": [
+        "Centaurus",
+        "Creed",
+        "lichidare"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_52f35678-55f3-4f78-ac29-164de75caa0a.jpg?v=1765177113"
+    },
+    {
+      "handle": "gt-129",
+      "url": "/products/gt-129",
+      "title": "N°129 | Hot Smoke",
+      "name": "Hot Smoke",
+      "inspiration": null,
+      "inspiration_brand": "Kilian",
+      "gender": "unisex",
+      "family": null,
+      "tags": [
+        "Kilian",
+        "Smoking Hot"
+      ],
+      "stock": 54,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_61d1ec91-22de-408e-8fa8-9e46fac8abe2.jpg?v=1765177100"
+    },
+    {
+      "handle": "gt-130",
+      "url": "/products/gt-130",
+      "title": "N°130 | Dolce Harmonia",
+      "name": "Dolce Harmonia",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "unisex",
+      "family": null,
+      "tags": [
+        "Dolce Melodia",
+        "Sospiro"
+      ],
+      "stock": 210,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_e31ad7c4-0e80-4172-8d31-5ef8851837bd.jpg?v=1765177077"
+    },
+    {
+      "handle": "gt-131",
+      "url": "/products/gt-131",
+      "title": "N°131 | Reflection One",
+      "name": "Reflection One",
+      "inspiration": null,
+      "inspiration_brand": "Calvin Klein",
+      "gender": "unisex",
+      "family": null,
+      "tags": [
+        "Calvin Klein",
+        "One Reflection"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_85054a88-9032-4ead-a617-63dc151becb4.jpg?v=1765177063"
+    },
+    {
+      "handle": "gt-132",
+      "url": "/products/gt-132",
+      "title": "N°132 | Old Fashioned",
+      "name": "Old Fashioned",
+      "inspiration": null,
+      "inspiration_brand": "Kilian",
+      "gender": "unisex",
+      "family": null,
+      "tags": [
+        "Kilian",
+        "Old Fashion"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_0ae47a49-f86c-4ec6-adcc-826b6471272a.jpg?v=1765177052"
+    },
+    {
+      "handle": "gt-133",
+      "url": "/products/gt-133",
+      "title": "N°133 | Apom Essence",
+      "name": "Apom Essence",
+      "inspiration": null,
+      "inspiration_brand": "Maison Francis Kurkdjian",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "Apom",
+        "lichidare",
+        "Maison Francis Kurkdjian"
+      ],
+      "stock": 237,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_799625a2-ec4a-4911-b791-a96be1400f52.jpg?v=1765177039"
+    },
+    {
+      "handle": "gt-134",
+      "url": "/products/gt-134",
+      "title": "N°134 | Fleur Majesty",
+      "name": "Fleur Majesty",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Fleur Majesty Royale",
+        "Kayali",
+        "lichidare"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_ca881d1e-db0c-4f9c-840d-686f7c6e5a53.jpg?v=1758301452"
+    },
+    {
+      "handle": "gt-135",
+      "url": "/products/gt-135",
+      "title": "N°135 | Sandal Stronger",
+      "name": "Sandal Stronger",
+      "inspiration": null,
+      "inspiration_brand": "Armani",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "Armani",
+        "lichidare",
+        "Stronger with you Sandalwood"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_e49bf142-a141-44c2-ac4c-f29400b0ab89.jpg?v=1765177027"
+    },
+    {
+      "handle": "gt-136",
+      "url": "/products/gt-136",
+      "title": "N°136 | Homme Devotion",
+      "name": "Homme Devotion",
+      "inspiration": null,
+      "inspiration_brand": "D&G",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "D&G",
+        "Devotion pour homme"
+      ],
+      "stock": 18,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_f9ca41d9-4357-484a-bc20-f21ae4df9d56.jpg?v=1765177013"
+    },
+    {
+      "handle": "gt-137",
+      "url": "/products/gt-137",
+      "title": "N°137 | Extreme Gentle Man",
+      "name": "Extreme Gentle Man",
+      "inspiration": null,
+      "inspiration_brand": "Givenchy",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "Gentleman Society Extreme",
+        "Givenchy",
+        "lichidare"
+      ],
+      "stock": 68,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_b38cf42b-aac0-4fe8-8a92-82e704ad63a0.jpg?v=1765176954"
+    },
+    {
+      "handle": "gt-138",
+      "url": "/products/gt-138",
+      "title": "N°138 | Power Y",
+      "name": "Power Y",
+      "inspiration": null,
+      "inspiration_brand": "YSL",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "lichidare",
+        "Y L'Elixir for men",
+        "YSL"
+      ],
+      "stock": 175,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_cf9d2a45-c1df-4d36-bd6b-aafe66aed641.jpg?v=1765176939"
+    },
+    {
+      "handle": "gt-139",
+      "url": "/products/gt-139",
+      "title": "N°139 | Amber Society",
+      "name": "Amber Society",
+      "inspiration": null,
+      "inspiration_brand": "Givenchy",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "Gentleman Society Ambree",
+        "Givenchy",
+        "lichidare"
+      ],
+      "stock": 340,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_2006decd-1a78-49c2-a89e-72e36647dd58.jpg?v=1765176923"
+    },
+    {
+      "handle": "gt-140",
+      "url": "/products/gt-140",
+      "title": "N°140 | Parfum Stronger",
+      "name": "Parfum Stronger",
+      "inspiration": null,
+      "inspiration_brand": "Armani",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "Armani",
+        "lichidare",
+        "Stronger with you parfum"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_20f6cf03-dd7d-4ce5-b0c6-4a0f866b8919.jpg?v=1765176910"
+    },
+    {
+      "handle": "gt-141",
+      "url": "/products/gt-141",
+      "title": "N°141 | Phantom Power",
+      "name": "Phantom Power",
+      "inspiration": null,
+      "inspiration_brand": "Armani",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "Armani",
+        "lichidare",
+        "Phantom Elixir"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_1f87028f-9e2d-4fdb-abd7-89e6b4d8c5ea.jpg?v=1765176894"
+    },
+    {
+      "handle": "gt-142",
+      "url": "/products/gt-142",
+      "title": "Zeylin N°142 | Velvet Nude",
+      "name": "Velvet Nude",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Ghivency",
+        "Irresistible Nude Velvet",
+        "lichidare"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_cad93063-f503-430b-872d-87748b87e820.jpg?v=1758301464"
+    },
+    {
+      "handle": "gt-143",
+      "url": "/products/gt-143",
+      "title": "Zeylin N°143 | Ella Notes",
+      "name": "Ella Notes",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Cacharel",
+        "Ella Ella",
+        "lichidare"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_c91c9897-9214-4851-9996-c4493897145d.jpg?v=1758301467"
+    },
+    {
+      "handle": "gt-144",
+      "url": "/products/gt-144",
+      "title": "Zeylin N°144 | Fragaria Bloom",
+      "name": "Fragaria Bloom",
+      "inspiration": null,
+      "inspiration_brand": "Creed",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Creed",
+        "Fragaria",
+        "lichidare"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_d607d4d2-ae4f-43a1-a7a7-fd35ba829d50.jpg?v=1758301469"
+    },
+    {
+      "handle": "gt-145",
+      "url": "/products/gt-145",
+      "title": "Zeylin N°145 | Glitter Dark Opium",
+      "name": "Glitter Dark Opium",
+      "inspiration": null,
+      "inspiration_brand": "YSL",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Black Opium Glitter",
+        "lichidare",
+        "YSL"
+      ],
+      "stock": 1,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_9bb7f325-d7fc-48b5-bacd-0a12f6791622.jpg?v=1758301469"
+    },
+    {
+      "handle": "gt-146",
+      "url": "/products/gt-146",
+      "title": "Zeylin N°146 | Born In Rome",
+      "name": "Born In Rome",
+      "inspiration": null,
+      "inspiration_brand": "Valentino",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Donna Born in Roma Extradose",
+        "lichidare",
+        "Valentino"
+      ],
+      "stock": -6,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_61fd4db6-b653-4104-9646-b70f6b018c2b.jpg?v=1758301470"
+    },
+    {
+      "handle": "gt-147",
+      "url": "/products/gt-147",
+      "title": "Zeylin N°147 | Her Essence",
+      "name": "Her Essence",
+      "inspiration": null,
+      "inspiration_brand": "Burberry",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Burberry",
+        "Burberry her intense",
+        "lichidare"
+      ],
+      "stock": 91,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_2afdd175-1fc1-41c8-a357-e28e4e7107a7.jpg?v=1758301473"
+    },
+    {
+      "handle": "gt-148",
+      "url": "/products/gt-148",
+      "title": "Zeylin N°148 | Ylang Journey",
+      "name": "Ylang Journey",
+      "inspiration": null,
+      "inspiration_brand": "Armani",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Armani",
+        "lichidare",
+        "My way Ylang Ylang"
+      ],
+      "stock": 115,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_e38cea0e-7e52-4807-a50d-3f7d51dfe399.jpg?v=1758301476"
+    },
+    {
+      "handle": "gt-149",
+      "url": "/products/gt-149",
+      "title": "Zeylin N°149 | Fame Couture",
+      "name": "Fame Couture",
+      "inspiration": null,
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Fame The Couture",
+        "lichidare",
+        "Paco Rabanne"
+      ],
+      "stock": 162,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_f3ab2732-8377-4729-9788-404d3bb09249.jpg?v=1758301476"
+    },
+    {
+      "handle": "lessence-no-150-inspirat-din-love-dont-be-shy-by-killian",
+      "url": "/products/lessence-no-150-inspirat-din-love-dont-be-shy-by-killian",
+      "title": "Zeylin N°150 | Lovish",
+      "name": "Lovish",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Killian",
+        "Love Don't Be Shy",
+        "new"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_fecdf173-06b4-42a2-a5ce-c3a86ede59d7.jpg?v=1765015473"
+    },
+    {
+      "handle": "lessence-no-152-inspirat-din-olympea-by-paco-rabanne",
+      "url": "/products/lessence-no-152-inspirat-din-olympea-by-paco-rabanne",
+      "title": "Zeylin N°152 | Olym Auré",
+      "name": "Olym Auré",
+      "inspiration": null,
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "new",
+        "Olympea",
+        "Paco Rabanne"
+      ],
+      "stock": 1164,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_10e947c9-e97a-464d-b546-7ef67183228c.jpg?v=1765015247"
+    },
+    {
+      "handle": "lessence-no-153-inspirat-din-grand-soir-by-maison-francis-kurkdjian",
+      "url": "/products/lessence-no-153-inspirat-din-grand-soir-by-maison-francis-kurkdjian",
+      "title": "N°153 | Soir Noble",
+      "name": "Soir Noble",
+      "inspiration": null,
+      "inspiration_brand": "Maison Francis Kurkdjian",
+      "gender": "unisex",
+      "family": null,
+      "tags": [
+        "Grand Soir",
+        "Maison Francis Kurkdjian",
+        "new"
+      ],
+      "stock": 105,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_3aad9f6d-45d7-4fb3-b1de-510f2f5847df.jpg?v=1765176873"
+    },
+    {
+      "handle": "lessence-no-154-inspirat-din-armani-prive-rose-d-arabie-by-armani",
+      "url": "/products/lessence-no-154-inspirat-din-armani-prive-rose-d-arabie-by-armani",
+      "title": "N°154 | Velours d’Arabie",
+      "name": "Velours d’Arabie",
+      "inspiration": null,
+      "inspiration_brand": "Armani",
+      "gender": "unisex",
+      "family": null,
+      "tags": [
+        "Armani",
+        "Armani Privé Rose d’Arabie",
+        "new"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_4fbc7038-d8fb-4b9d-b569-e2d3ce7b0c60.jpg?v=1765176856"
+    },
+    {
+      "handle": "lessence-no-155-inspirat-din-si-passione-intense-by-armani",
+      "url": "/products/lessence-no-155-inspirat-din-si-passione-intense-by-armani",
+      "title": "Zeylin N°155 | Si Passione Absolu",
+      "name": "Si Passione Absolu",
+      "inspiration": null,
+      "inspiration_brand": "Armani",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Armani",
+        "new",
+        "Si passione intense"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_6e4ce547-539a-4427-922b-6114c832d210.jpg?v=1765015425"
+    },
+    {
+      "handle": "lessence-no-156-inspirat-din-toy-boy-by-moschino",
+      "url": "/products/lessence-no-156-inspirat-din-toy-boy-by-moschino",
+      "title": "N°156 | Toy Man",
+      "name": "Toy Man",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "Moschino",
+        "new",
+        "Toy boy"
+      ],
+      "stock": 166,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_75b64b83-1c6c-4e07-942c-9ed868ef16f2.jpg?v=1765176840"
+    },
+    {
+      "handle": "lessence-no-157-vintage-edition-inspirat-din-miss-dior-originale-1947-by-christian-dior",
+      "url": "/products/lessence-no-157-vintage-edition-inspirat-din-miss-dior-originale-1947-by-christian-dior",
+      "title": "Zeylin N°157 | Miss Originale (1947), Vintage Edition",
+      "name": "Miss Originale (1947), Vintage Edition",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Christian Dior",
+        "Miss Dior Originale (1947)",
+        "new"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_f93eda94-8af8-4687-8dfb-134ef832f0f9.jpg?v=1765015257"
+    },
+    {
+      "handle": "lessence-no-151-inspirat-din-soleil-blanc-by-tom-ford-1",
+      "url": "/products/lessence-no-151-inspirat-din-soleil-blanc-by-tom-ford-1",
+      "title": "N°151 | Soleil Privé",
+      "name": "Soleil Privé",
+      "inspiration": null,
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": null,
+      "tags": [
+        "new",
+        "Soleil Blanc",
+        "Tom Ford"
+      ],
+      "stock": 220,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_378f6d87-1bc5-4d5e-bb16-40b75388504b.jpg?v=1765176801"
+    },
+    {
+      "handle": "cutie-de-cadou",
+      "url": "/products/cutie-de-cadou",
+      "title": "Cutie Cadou Premium pentru 3 Parfumuri (doar ambalajul, fără parfumuri)",
+      "name": "Cutie Cadou Premium pentru 3 Parfumuri (doar ambalajul, fără parfumuri)",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [],
+      "stock": 8137,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/cutie-cadou_f9b6257d-17d7-4687-9fa2-1f5db164f3a7.jpg?v=1765453881"
+    },
+    {
+      "handle": "n-158-miss-intense",
+      "url": "/products/n-158-miss-intense",
+      "title": "Zeylin N°158 | Miss Absolu",
+      "name": "Miss Absolu",
+      "inspiration": null,
+      "inspiration_brand": "Dior",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Dior",
+        "Miss Dior Intense",
+        "new"
+      ],
+      "stock": 742,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_a0f893ef-0eca-4c1b-82ae-7c1dfa883db6.jpg?v=1769530965"
+    },
+    {
+      "handle": "n-159-le-beau",
+      "url": "/products/n-159-le-beau",
+      "title": "N°159 | Le Beau",
+      "name": "Le Beau",
+      "inspiration": null,
+      "inspiration_brand": "Jean Paul Gaultier",
+      "gender": "barbati",
+      "family": null,
+      "tags": [
+        "Jean Paul Gaultier",
+        "Le beau",
+        "new"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_378f6d87-1bc5-4d5e-bb16-40b75388504b.jpg?v=1765176801"
+    },
+    {
+      "handle": "n-160-omnia-crystal",
+      "url": "/products/n-160-omnia-crystal",
+      "title": "Zeylin N°160 | Omnia Crystal",
+      "name": "Omnia Crystal",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Bvlgari",
+        "new",
+        "Omnia Crystalline"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_11da656a-bcd7-4ac3-8ab5-8dcc0b21ac0d.jpg?v=1769530953"
+    },
+    {
+      "handle": "n-161-not-enough",
+      "url": "/products/n-161-not-enough",
+      "title": "N°161 | Not Enough",
+      "name": "Not Enough",
+      "inspiration": null,
+      "inspiration_brand": "Initio",
+      "gender": "unisex",
+      "family": null,
+      "tags": [
+        "Can't get Enough",
+        "Initio",
+        "new"
+      ],
+      "stock": 306,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_378f6d87-1bc5-4d5e-bb16-40b75388504b.jpg?v=1765176801"
+    },
+    {
+      "handle": "n-162-gentleman-1972",
+      "url": "/products/n-162-gentleman-1972",
+      "title": "N°162 | Gentle Man 1972",
+      "name": "Gentle Man 1972",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "unisex",
+      "family": null,
+      "tags": [
+        "Gentleman 1972",
+        "Ghivency",
+        "new"
+      ],
+      "stock": 468,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_black_378f6d87-1bc5-4d5e-bb16-40b75388504b.jpg?v=1765176801"
+    },
+    {
+      "handle": "n-163-bomba",
+      "url": "/products/n-163-bomba",
+      "title": "Zeylin N°163 | Bomba",
+      "name": "Bomba",
+      "inspiration": null,
+      "inspiration_brand": "Carolina Herrera",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "Carolina Herrera",
+        "La Bomba",
+        "new"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0939/7370/9123/files/gt_green_7207eedd-caa5-485c-8ddc-e54c4718f693.jpg?v=1769530937"
+    }
+  ],
+  "instock_count": 102
+}

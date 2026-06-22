@@ -37,6 +37,10 @@ grounded in `esteban.md` + `catalog/esteban.md`), then **always**
 image) → `blog-rollout/articles/esteban.json`. Never publish raw workflow output.
 
 ## Publish
+> Publish/SEO **run out of the box on any machine**: the article + index + SEO JSON
+> are bundled in the plugin at `scripts/blog_data/`. The `blog-rollout/` pipeline above
+> is only for authoring NEW content (maintainer's machine) — point the scripts at a fresh
+> working dir with `BLOG_DATA_DIR=/path/to/blog-rollout`.
 ```bash
 # dry-run = validate (handles real+in-stock, banned words); --draft = staged; no flag = LIVE
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/blog_publish_articles.py" --store esteban --dry-run
