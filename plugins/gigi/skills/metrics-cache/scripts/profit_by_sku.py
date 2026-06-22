@@ -14,11 +14,8 @@ Read-only pe profit_orders/engine. Secrete din ENV (run.env).
 """
 import os, sys, re, json, sqlite3, argparse
 from collections import defaultdict
-
-DEFAULT_VAT = {"RO": 0.21, "BG": 0.20, "CZ": 0.21, "PL": 0.23, "HU": 0.27, "SK": 0.20, "HR": 0.25}
-# prefix → country (pt VAT). Restul = RO.
-PREFIX_COUNTRY = {"BG": "BG", "BONBG": "BG", "CZ": "CZ", "PL": "PL", "LUX": "RO", "NOC": "RO"}
-GIFT = {"surpriza", "cutie-cadou", "cad", "cadou", "gift", "surprise"}
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import profit_core as pc   # funcții CANONICE (vat/cogs/transport/marketing) — single source, vezi profit_core.py
 
 
 def sku_to_group():
@@ -49,27 +46,6 @@ def load_dpd_costs(path="data/dpd_nomenclator.json"):
                 out[s] = avg
     except Exception:
         pass
-    return out
-
-
-# prefix magazin -> nume brand (metrics). Prefixele de magazin sunt stabile; brand_map['shopify'] e gol,
-# deci mapăm explicit. Folosit pt alocarea marketingului de brand/UNMAPPED pe SKU-urile magazinului corect.
-PREFIX_BRAND = {
-    "EST": "Esteban", "GT": "George Talent", "NUB": "Nubra", "GRAN": "Grandia", "BELA": "Belasil",
-    "CARP": "Carpetto", "COV": "Covoria", "OFER": "Ofertele Zilei", "MAG": "Magdeal", "NOC": "Nocturna",
-    "APR": "Apreciat", "RED": "Reduceri bune", "GEN": "Gento", "PAT": "Ce Pat Ai", "ROSSI": "Rossi Nails",
-    "BON": "Bonhaus", "CZ": "Bonhaus CZ", "PL": "Bonhaus PL", "BG": "Bonhaus BG", "BONBG": "Bonhaus BG",
-    "LUX": "Nocturna Lux",
-}
-
-def _prefix_brandid(name2id):
-    """prefix magazin -> brand_id (metrics), via PREFIX_BRAND + brands(name->id), cu fallback pe primul cuvânt
-    (ex. 'Bonhaus CZ' -> 'Bonhaus' dacă sub-brandul nu e separat în metrics)."""
-    out = {}
-    for pfx, name in PREFIX_BRAND.items():
-        bid = name2id.get(name.strip().lower()) or name2id.get(name.split()[0].lower())
-        if bid:
-            out[pfx] = bid
     return out
 
 
@@ -108,19 +84,15 @@ def main():
     # fallback cost_per_parcel/magazin. Un colet = un cost, alocat pe linii după venit (suma cotelor = 1).
     parcel_cost = {}; parcel_real = {}
     for k, sks in order_skus.items():
-        reals = [dpd[s.upper()] for s in sks if s and s.upper() in dpd]
-        if reals:
-            parcel_cost[k] = sum(reals) / len(reals); parcel_real[k] = True
-        else:
-            parcel_cost[k] = tc.get(k[0], 0); parcel_real[k] = False
+        parcel_cost[k], parcel_real[k] = pc.parcel_transport(sks, dpd, tc.get(k[0], 0))
 
     # name2id + prefix->brand_id (pt alocarea marketingului de brand pe SKU-urile brandului corect)
     import psycopg2
-    name2id = {}; pref2bid = {}; pc = None; cur = None
+    name2id = {}; pref2bid = {}; mconn = None; cur = None
     try:
-        pc = psycopg2.connect(_clean(os.environ["DATABASE_URL_METRICS"])); cur = pc.cursor()
+        mconn = psycopg2.connect(_clean(os.environ["DATABASE_URL_METRICS"])); cur = mconn.cursor()
         cur.execute("SELECT id, name FROM brands"); name2id = {n.strip().lower(): i for i, n in cur.fetchall()}
-        pref2bid = _prefix_brandid(name2id)
+        pref2bid = pc.prefix_brandid(name2id)
     except Exception as e:
         sys.stderr.write(f"[brand-map] {type(e).__name__}: {e}\n")
 
@@ -130,17 +102,13 @@ def main():
     for r in rows:
         # (A) NU mai sărim liniile cadou — cadoul are venit 0 dar COGS+bucăți reale (cost real, ca engine-ul).
         s = r["sku"]
-        country = PREFIX_COUNTRY.get(r["prefix"], "RO"); vat = DEFAULT_VAT.get(country, 0.21)
+        vat = pc.vat_for_prefix(r["prefix"])                 # TVA per țară (canonic)
         k = (r["prefix"], r["order_name"]); olt = oline[k] or 1
         rate = fx.get(ocurr[k], 1.0)                          # (G) monedă magazin → RON
         share = (r["line_revenue"] or 0) / olt               # cotă pe venit (rație, moneda se simplifică)
         rev_ex = (ototal[k] * rate * share) / (1 + vat)      # venit = cotă din total comandă, în RON, ex-TVA
-        if s in cogs_ov:                                      # (H) override COGS ca engine-ul (în moneda lui)
-            ov_cost, ov_curr = cogs_ov[s]
-            cogs_ron = (ov_cost or 0) * fx.get(ov_curr, 1.0) * (r["qty"] or 0)
-        else:
-            cogs_ron = (r["line_cogs"] or 0) * rate
-        cogs_ex = cogs_ron / (1 + vat)
+        cogs = pc.cogs_ron(r["qty"], line_cogs_store=r["line_cogs"], rate_store=rate, override=cogs_ov.get(s), fx=fx)
+        cogs_ex = cogs / (1 + vat)                            # (H) override + (G) RON, ca engine-ul
         tcost = parcel_cost[k] * share / (1 + vat)           # transport REAL pe colet (DPD), alocat pe venit, ex-TVA
         d = sku[s]
         d[0] += r["qty"] or 0; d[1] += rev_ex; d[2] += cogs_ex; d[3] += tcost
@@ -152,35 +120,18 @@ def main():
 
     # --- MARKETING alocat pe COMENZI (CPA uniform): direct (HA-####/Google PMax) rămâne EXACT; brand/grup/unmapped
     # se distribuie pe SKU-urile țintă proporțional cu NR. COMENZI → fiecare produs poartă CPA-ul categoriei/brandului.
-    mk = defaultdict(float); leftover = 0.0
+    mk = {}; leftover = 0.0
     try:
         y, mm = a.month.split("-"); mm = int(mm)
         nxt = "%d-%02d-01" % (int(y) + (1 if mm == 12 else 0), 1 if mm == 12 else mm + 1)
-        if cur is None:
-            pc = psycopg2.connect(_clean(os.environ["DATABASE_URL_METRICS"])); cur = pc.cursor()
+        if mconn is None:
+            mconn = psycopg2.connect(_clean(os.environ["DATABASE_URL_METRICS"])); cur = mconn.cursor()
         cur.execute("SELECT sku, brand_id, SUM(spend_ron) FROM cache.product_ad_spend WHERE date>=%s AND date<%s GROUP BY sku, brand_id",
                     (a.month + "-01", nxt))
         cache_rows = cur.fetchall()
-        if pc: pc.close()
-        sold = set(sku.keys())
-        grp_members = defaultdict(list)
-        for s in sold: grp_members[s2g.get(s)].append(s)
-        for key, bid_mkt, sp in cache_rows:
-            sp = float(sp or 0)
-            if not sp or key == "TEST": continue
-            if key in sold:                                                       # DIRECT (per-SKU exact)
-                mk[key] += sp; continue
-            members = [s for s in grp_members.get(key, []) if orders_count.get(s, 0) > 0]   # GRUP (categorie)
-            if members:
-                tot = sum(orders_count[s] for s in members)
-                for s in members: mk[s] += sp * orders_count[s] / tot
-                continue
-            bo = brand_oc.get(bid_mkt) if bid_mkt else None                       # BRAND-LEVEL / UNMAPPED
-            if bo and sum(bo.values()) > 0:
-                tot = sum(bo.values())
-                for s, oc in bo.items(): mk[s] += sp * oc / tot
-            else:
-                leftover += sp
+        if mconn: mconn.close()
+        # alocare CANONICĂ pe comenzi (profit_core) — direct/grup/brand, CPA uniform
+        mk, leftover = pc.allocate_marketing_by_orders(cache_rows, set(sku.keys()), s2g, orders_count, brand_oc)
     except Exception as e:
         sys.stderr.write(f"[mkt] {type(e).__name__}: {e}; marketing=0\n")
     if leftover > 100:
