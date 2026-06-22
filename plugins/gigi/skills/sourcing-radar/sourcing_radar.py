@@ -141,6 +141,8 @@ def main():
                     help="potrivește fiecare produs cu catalogul nostru Grandia → coloane match%% + Avem?")
     ap.add_argument("--gap-only", action="store_true", help="(cu --vs-grandia) doar ce NU avem = oportunități de lansat")
     ap.add_argument("--match-threshold", type=int, default=72, help="prag scor peste care consideram ca avem deja produsul")
+    ap.add_argument("--stockout", action="store_true",
+                    help="DOAR produse la care competiția a rămas fără stoc (latest_stock=0) dar încă au viteză = cerere neacoperită")
     ap.add_argument("--sheet", action="store_true")
     args = ap.parse_args()
     if args.gap_only:
@@ -161,6 +163,8 @@ def main():
         params.append(args.placeholder_stock)
     if not args.include_vivre:
         where.append("lower(m.parser_name) <> 'vivre'")
+    if args.stockout:  # competiția e ruptă de stoc dar produsul încă se vindea = cerere neacoperită
+        where.append("m.latest_stock = 0")
     if args.search:
         where.append("m.name ~* %s"); params.append(args.search)
     if args.parser:
@@ -198,6 +202,7 @@ def main():
     if args.min_vel: flt.append(f"vel≥{args.min_vel}")
     if args.min_price or args.max_price: flt.append(f"preț {args.min_price or 0}-{args.max_price or '∞'}")
     if args.vs_grandia: flt.append("vs Grandia" + (" (gap-only)" if args.gap_only else ""))
+    if args.stockout: flt.append("STOCKOUT (rupt la competiție)")
     print(f"Radar sourcing · arona-bi (date la zi {fresh[:10]}) · {', '.join(flt) or 'fără filtre'} · "
           f"placeholder excluși: {not args.include_placeholder}", file=sys.stderr)
 
