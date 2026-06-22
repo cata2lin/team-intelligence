@@ -45,6 +45,11 @@
 | `ad_spend_live.py` (metrics-cache) | Spend Meta+TikTok per-SKU → cache.product_ad_spend (`--platform meta|tiktok|both`) | `ad_spend_live.py --platform tiktok --since 2025-01-01 --apply` |
 | `grandia_pnl.py` (core) | P&L Grandia (transport real AWBprint) | vezi `core:grandia-pnl` |
 
+> 📦 **Tot codul de profit + tool-urile VPS pe care le folosim sunt acum în git** (mirror, editezi în git → deployezi pe VPS):
+> - **engine P&L** (`api/profitability.py`) + calculatoare (Trendyol, simulator pre-lansare) → `gigi/skills/metrics-cache/engine/` (vezi `engine/README.md`).
+> - **tool-uri operaționale** (sync_raport_zilnic, sync_barcodes, sheets_labels, shopify_image_manager, shopify_tag_orders_parallel, sku_to_url, upload_shopify_img) → `shared/scripturi-tools/` (vezi README-ul de acolo).
+> - Aplicația web (routes/models/dashboard) + modulele importate (serial_refuser, shipment, validation_service) **rămân pe VPS** — nu se urcă.
+
 ## Lecții/capcane salvate (în KB: `kb.py resource-list`)
 - **Cache/backfill FAIL-SAFE**: nu face DELETE pe istoric apoi reinsert condiționat — un pull eșuat șterge tot. Pur upsert. Învelește apelurile externe în retry-on-timeout (googleapiclient aruncă TimeoutError brut, nu RequestException).
 - **Shopify token permanent (`shpat_`)**: nu-l trece prin OAuth refresh; setează expires_at în viitor.
