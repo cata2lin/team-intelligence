@@ -200,6 +200,22 @@ uv run change_history.py --customer 9069610821 --by matei@skilledppc.com
 - **Google only keeps 30 days** of change history. To track longer, run this on a cron and snapshot to a table/file (e.g. the metrics DB or NAS) — otherwise older agency moves are lost.
 - Reads only; safe on any account, including ones we don't manage.
 
+## Launch playbook — cont nou (testat: Gento, Carpetto, GT, Nubra)
+Pașii repetabili pentru a lansa un brand pe Google Ads de la zero. Template scripturi: `gt-creatives/` și `nubra-creatives/` (`build_all.py` = PMax+Brand+Non-Brand atomic, citește `spec.json` + `out/`).
+
+1. **Link MCC** — `customerClientLinks:mutate` (**operation SINGULAR**, `status:"PENDING"`) de la MCC-ul nostru `746-711-0480` → contul client. Proprietarul **acceptă** în Admin→Access&security→Managers. Verifică ACTIV cu `customer_client_link`. (Script: `esteban-creatives/_link_mcc.py`.)
+2. **Readiness** — verifică: campanii existente, `conversion_action` (există PURCHASE?), `billing_setup.status=APPROVED`, `product_link.merchant_center` (Merchant Center linkat = obligatoriu pt PMax Shopping).
+3. **Economia** — `gigi:fulfillment-analytics/breakeven.py --store X` (AOV/COGS/**breakeven CPA+ROAS**). Top produse: AWBprint `line_items` (SKU-uri hero) → le împingi în asset group.
+4. **Conversion goals** — `fix_conversion_goals.py --customer X --apply` → **doar PURCHASE biddable** (PAGE_VIEW/ADD_TO_CART/BEGIN_CHECKOUT biddable = bug care umflă conversiile, optimizează aiurea).
+5. **Feed** — `gigi:merchant-center-feed --store <merchantId>` (ai nevoie de produse ELIGIBLE pt Shopping).
+6. **Copy** — generat (workflow cu verificare adversarială, sau direct) + **self-verificat**: ⚠️ **ZERO mărci înregistrate** (nume de parfum/brand premium → dezaprobare!), limite char (HL≤30, desc≤90, long≤90, business name≤25, **min 1 desc ≤60**), diacritice RO corecte, **fără superlative** neverificabile ("îmbatabil/de top" → "excelent").
+7. **Imagini** — poze hero → crop la **1:1 / 1.91:1 / 4:5** + logo. Sursă: Shopify (`shopify_gql`) SAU **warehouse `products.featuredImageUrl`** (token-free — folosește când tokenul magazinului e mort/rotativ, ex. **Nubra**).
+8. **Build** (`build_all.py`): PMax skelet atomic (budget + campanie `maximizeConversions{targetCpaMicros}` + `shoppingSetting.merchantId` + geo RO `2642` + lang RO `1038` + asset group + listing group `UNIT_INCLUDED/SHOPPING`) → assets (text + imagini; **BN+LOGO la nivel CAMPANIE** fiindcă Brand Guidelines ON, restul la asset group) → Brand Search → Non-Brand Search → enable PMax.
+9. **Bidding cont NOU = cold-start**: PMax pe **`maximizeConversions` + tCPA ≈ breakeven**, NU value-bidding (value cold-startează la 0 impresii — lecția Carpetto). După ~15-30 conv → tROAS ~2,5.
+10. **UTM** — `customer.final_url_suffix = utm_source=google&utm_medium=cpc&utm_campaign={campaignid}&utm_content={creative}&utm_term={keyword}` (gclid acoperă GA4 nativ; UTM acoperă warehouse/Shopify). Setat pe toate conturile.
+11. **Gotchas**: PMax auto-creează un „Asset Group 1" gol + uneori „Performance Max-1" (inofensive, lasă-le paused); asset group nou = **PENDING review ~ore** apoi servește.
+12. **Ora ideală** = dimineața (~07:30 RO) zi lucrătoare. Dar **review-ul PMax întârzie servirea spre dimineață oricum**, deci lansarea de seara nu strică PMax-ul; Search-urile pornesc imediat. Scheduling = vezi memoria [[gads-skill-suite]] (rutine cloud, capcană: NU văd tooling-ul local).
+
 ## Guardrails / hard rules
 - **Never print** the developer token, OAuth secret, or refresh tokens. Read from DB/secret store, use in-process.
 - **Reports are read-only.** Mutations are **dry-run by default**; require `--apply` AND user confirmation before touching a live account.

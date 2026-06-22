@@ -49,6 +49,7 @@
 - **Cache/backfill FAIL-SAFE**: nu face DELETE pe istoric apoi reinsert condiționat — un pull eșuat șterge tot. Pur upsert. Învelește apelurile externe în retry-on-timeout (googleapiclient aruncă TimeoutError brut, nu RequestException).
 - **Shopify token permanent (`shpat_`)**: nu-l trece prin OAuth refresh; setează expires_at în viitor.
 - **TikTok conturi partajate**: split pe token de brand din numele campaniei + owner; vezi memoria.
+- **Meta = single point of failure pe UN token OAuth**: tot spend-ul Meta (toate brandurile — 122 conturi în `meta_ad_accounts`, 25 active) trece printr-un singur token „OAuth — Sabina Radu" din `meta_access_tokens`, long-lived ~60 zile. Când expiră, **TOT** Meta se oprește tăcut: toate `lastSyncAt` blocate în aceeași zi, `cache.product_ad_spend` platform=meta nu mai înaintează, `sync_runs` = FAILED cu „Token for <Account> has expired" (numește un cont la întâmplare, dar pică toate). Incident 2026-06-19 → tot Meta stale. Fix = re-autorizare OAuth (Sabina Radu re-login) + backfill. **Alert proactiv pe cron**: `metrics-cache/scripts/check_token_expiry.py` (prag implicit 7 zile). Capcană înrudită: `campaignFilter` gol pe un cont = tot contul intră pe un singur brand (ex. Reflexino→Magdeal).
 
 ## Cum descoperi mai mult
 - Skill-uri: catalogul auto din CLAUDE.team.md (sau descrie task-ul). Activitate/resurse: `kb.py recent` / `kb.py resource-list`.
