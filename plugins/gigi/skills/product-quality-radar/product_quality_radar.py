@@ -13,7 +13,8 @@ Semnal de CALITATE per produs, din DOUĂ circuite independente:
                             (de ce se returnează: poor_quality / defective / damaged /
                              not_as_described / wrong_product / missing_parts / other)
                             + RATA DE DEFECT per SKU (retururi / comenzi vândute, numitor
-                            din metrics.order_line_items pe același brand).
+                            din AWBprint — istoric complet, NU metrics care e truncat la 19-apr
+                            și supraestima defect-rate ~38%).
   Cross-validare: SKU-uri care apar în AMBELE circuite = problemă confirmată.
 
 Output: top produse-problemă cu motiv + cifre + recomandare CS/calitate
@@ -112,24 +113,29 @@ def shopify_refunds(store, limit):
     return rows
 
 
-# numitor pt rata de defect: câte comenzi a vândut fiecare SKU (pe același brand)
+# numitor pt rata de defect: câte comenzi a vândut fiecare SKU (Grandia).
+# SURSĂ = AWBprint (DB AWB/Frisbo), NU metrics: metrics.orders pt Grandia e TRUNCAT (începe ~19-apr-2026),
+# pe când AWBprint are istoricul complet (din nov-2025) → metrics sub-numără vânzările vechi și
+# SUPRAESTIMEAZĂ defect-rate ~38% (poate flipa decizia „scot de pe COD"). SKU la inventory_item.sku.
 def sold_denominator(brand, skus):
     if not skus:
         return {}
-    conn = connect("DATABASE_URL_METRICS")
+    conn = connect("DATABASE_URL_AWBPRINT")
     cur = conn.cursor()
-    out = {}
     ph = ",".join(["%s"] * len(skus))
     cur.execute(
-        'SELECT oli.sku, COUNT(DISTINCT o.id), COALESCE(SUM(oli.quantity),0) '
-        'FROM orders o JOIN order_line_items oli ON oli."orderId"=o.id '
-        'JOIN brands b ON b.id=o."brandId" '
-        'WHERE b.name ILIKE %s AND oli.sku IN (' + ph + ') '
-        'GROUP BY oli.sku', ["%" + brand + "%"] + list(skus))
+        "SELECT lower(it->'inventory_item'->>'sku') AS sku, COUNT(DISTINCT o.id), "
+        "       COALESCE(SUM((it->>'quantity')::numeric),0) "
+        "FROM orders o JOIN stores s ON s.uid = o.store_uid "
+        "CROSS JOIN LATERAL jsonb_array_elements(o.line_items::jsonb) AS it "
+        "WHERE s.name = 'grandia.ro' AND lower(it->'inventory_item'->>'sku') IN (" + ph + ") "
+        "GROUP BY 1", [str(s).lower() for s in skus])
+    by_lower = {}
     for sku, orders, qty in cur.fetchall():
-        out[sku] = {"sold_orders": int(orders), "sold_qty": int(qty)}
+        by_lower[sku] = {"sold_orders": int(orders), "sold_qty": int(qty or 0)}
     conn.close()
-    return out
+    # cheile = SKU-ul original (case-ul din RMA); potrivire case-insensitive cu AWBprint
+    return {s: by_lower.get(str(s).lower(), {"sold_orders": 0, "sold_qty": 0}) for s in skus}
 
 
 # ---------------------------------------------------------------------------
