@@ -383,10 +383,11 @@ def _fetch_awb_rows(awb_conn, included_order_names: list[str]):
     if not included_order_names:
         return [], set(), [], []
     matched_orders = fetchall(awb_conn,
-        """SELECT id, order_number FROM orders
+        """SELECT id, order_number, transport_cost FROM orders
             WHERE store_uid = %s AND order_number = ANY(%s)""",
         (GRANDIA_STORE_UID, included_order_names))
     id_to_name = {r["id"]: r["order_number"] for r in matched_orders}
+    id_to_tc = {r["id"]: r["transport_cost"] for r in matched_orders}
     matched_names = set(id_to_name.values())
     if not matched_orders:
         return [], set(), [], list(included_order_names)
@@ -394,11 +395,26 @@ def _fetch_awb_rows(awb_conn, included_order_names: list[str]):
         """SELECT order_id, courier_name, tracking_number, transport_cost, transport_cost_fara_tva
              FROM order_awbs WHERE order_id = ANY(%s)""",
         (list(id_to_name.keys()),))
+    # UN AWB principal per comandă: păstrăm UN rând/comandă (cel cu net maxim — rândurile multiple sunt în mare
+    # DUPLICATE, cu același net; la un split real luăm principalul) și suprascriem costul cu `orders.transport_cost`
+    # (autoritativ, exact cum e urcat în AWB Arona; gross, TVA transport = RO 21% → /1.21 = net) când există.
+    # Așa NU mai sumăm rânduri duplicate (bug vechi: net_total = Σ peste toate rândurile → comenzile multi-rând dublate).
+    best_by_order: dict[int, dict] = {}
+    for r in awb_rows:
+        oid = r["order_id"]
+        cur = best_by_order.get(oid)
+        if cur is None or (r["transport_cost_fara_tva"] or 0) > (cur["transport_cost_fara_tva"] or 0):
+            best_by_order[oid] = r
     enriched = []
     orders_with_awb: set[int] = set()
-    for r in awb_rows:
-        orders_with_awb.add(r["order_id"])
-        enriched.append({**r, "order_number": id_to_name.get(r["order_id"])})
+    for oid, r in best_by_order.items():
+        orders_with_awb.add(oid)
+        row = dict(r)
+        tc = id_to_tc.get(oid)
+        if tc and tc > 0:                       # orders.transport_cost = gross autoritativ la nivel de comandă
+            row["transport_cost"] = float(tc)
+            row["transport_cost_fara_tva"] = float(tc) / 1.21
+        enriched.append({**row, "order_number": id_to_name.get(oid)})
     orders_missing_awb = sorted(id_to_name[oid] for oid in id_to_name if oid not in orders_with_awb)
     return list(id_to_name.keys()), matched_names, enriched, orders_missing_awb
 
