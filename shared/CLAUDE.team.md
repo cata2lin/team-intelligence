@@ -14,6 +14,9 @@ one capability pool and one memory with the whole team.
 
 You are **{$EMPLOYEE_HANDLE}** on this machine.
 
+> 🗺️ **Unde găsesc ce** (date, scripturi, profitabilitate, „Vreau X → unde mă duc") → vezi **`shared/HARTA.md`** (index hand-maintained). Pipeline-ul canonic de profitabilitate, harta bazelor de date și scripturile cheie sunt acolo.
+@HARTA.md
+
 ## What you have
 - **Every teammate's skills**, namespaced by author: `core:*`, `iulian:*`,
   `catalin:*`, … . Invoke by describing the task or with `/<author>:<skill>`.
