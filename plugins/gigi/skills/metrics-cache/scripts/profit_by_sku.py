@@ -82,21 +82,37 @@ def main():
 
     tc = {r["prefix"]: r["cost_per_parcel"] for r in cx.execute(
         "SELECT prefix, cost_per_parcel FROM profit_transport_costs WHERE month=?", (a.month,)).fetchall()}
+    fx = {r["currency"]: r["rate_to_ron"] for r in cx.execute(
+        "SELECT currency, rate_to_ron FROM profit_exchange_rates WHERE month=?", (a.month,)).fetchall()}
+    fx["RON"] = 1.0   # monedă magazin → RON (CZK/EUR/PLN/BGN). Lipsă → 1.0 (tratat ca RON).
+    cogs_ov = {r["sku"]: (r["unit_cost"], r["currency"]) for r in cx.execute(
+        "SELECT sku, unit_cost, currency FROM profit_cogs_override").fetchall()}   # override COGS (H), ca engine-ul
 
-    # delivered lines, joined to status
+    # delivered lines, joined to status + monedă comandă
     rows = cx.execute("""
         SELECT pol.prefix, pol.order_name, pol.sku, pol.qty, pol.line_revenue, pol.line_cogs,
-               po.revenue AS order_total
+               po.revenue AS order_total, po.currency AS curr
         FROM profit_order_lines pol
         JOIN profit_orders po ON po.month=pol.month AND po.prefix=pol.prefix AND po.order_name=pol.order_name
         WHERE pol.month=? AND po.status_category='Livrata'
     """, (a.month,)).fetchall()
     cx.close()
 
-    # per-order: line-revenue total (for share) + order total (incl. transport ÎNCASAT de la client, ca engine-ul)
-    oline = defaultdict(float); ototal = {}
+    # per-order: line-revenue total (share) + order total (incl. transport ÎNCASAT) + monedă + SKU-urile coletului
+    oline = defaultdict(float); ototal = {}; ocurr = {}; order_skus = defaultdict(set)
     for r in rows:
-        k = (r["prefix"], r["order_name"]); oline[k] += r["line_revenue"] or 0; ototal[k] = r["order_total"] or 0
+        k = (r["prefix"], r["order_name"])
+        oline[k] += r["line_revenue"] or 0; ototal[k] = r["order_total"] or 0
+        ocurr[k] = r["curr"] or "RON"; order_skus[k].add(r["sku"])
+    # transport REAL pe COLET: media costului real DPD (dpd_nomenclator) pe SKU-urile coletului, per comandă;
+    # fallback cost_per_parcel/magazin. Un colet = un cost, alocat pe linii după venit (suma cotelor = 1).
+    parcel_cost = {}; parcel_real = {}
+    for k, sks in order_skus.items():
+        reals = [dpd[s.upper()] for s in sks if s and s.upper() in dpd]
+        if reals:
+            parcel_cost[k] = sum(reals) / len(reals); parcel_real[k] = True
+        else:
+            parcel_cost[k] = tc.get(k[0], 0); parcel_real[k] = False
 
     # name2id + prefix->brand_id (pt alocarea marketingului de brand pe SKU-urile brandului corect)
     import psycopg2
@@ -112,16 +128,21 @@ def main():
     sku_orders = defaultdict(set)                            # sku -> {(prefix,order)} = nr comenzi
     brand_sku_orders = defaultdict(lambda: defaultdict(set)) # brand_id -> sku -> {(prefix,order)}
     for r in rows:
-        if (r["sku"] or "").lower() in GIFT:
-            continue
+        # (A) NU mai sărim liniile cadou — cadoul are venit 0 dar COGS+bucăți reale (cost real, ca engine-ul).
+        s = r["sku"]
         country = PREFIX_COUNTRY.get(r["prefix"], "RO"); vat = DEFAULT_VAT.get(country, 0.21)
         k = (r["prefix"], r["order_name"]); olt = oline[k] or 1
-        share = (r["line_revenue"] or 0) / olt
-        # venit alocat = cota din TOTALUL comenzii (incl. transport încasat) → reconciliază cu engine; ex-TVA pe tot
-        rev_ex = (ototal[k] * share) / (1 + vat)
-        cogs_ex = (r["line_cogs"] or 0) / (1 + vat)
-        tcost = tc.get(r["prefix"], 0) * share / (1 + vat)   # cost transport alocat, ex-TVA
-        s = r["sku"]; d = sku[s]
+        rate = fx.get(ocurr[k], 1.0)                          # (G) monedă magazin → RON
+        share = (r["line_revenue"] or 0) / olt               # cotă pe venit (rație, moneda se simplifică)
+        rev_ex = (ototal[k] * rate * share) / (1 + vat)      # venit = cotă din total comandă, în RON, ex-TVA
+        if s in cogs_ov:                                      # (H) override COGS ca engine-ul (în moneda lui)
+            ov_cost, ov_curr = cogs_ov[s]
+            cogs_ron = (ov_cost or 0) * fx.get(ov_curr, 1.0) * (r["qty"] or 0)
+        else:
+            cogs_ron = (r["line_cogs"] or 0) * rate
+        cogs_ex = cogs_ron / (1 + vat)
+        tcost = parcel_cost[k] * share / (1 + vat)           # transport REAL pe colet (DPD), alocat pe venit, ex-TVA
+        d = sku[s]
         d[0] += r["qty"] or 0; d[1] += rev_ex; d[2] += cogs_ex; d[3] += tcost
         sku_orders[s].add(k)
         bid = pref2bid.get(r["prefix"])
@@ -181,6 +202,10 @@ def main():
     print(f"{'categorie':26}{'buc':>7}{'venit':>11}{'COGS':>10}{'transp':>9}{'mkt':>9}{'contrib':>11}")
     for g, (q, rev, cg, tr, m) in sorted(cat.items(), key=lambda x: -x[1][1]):
         print(f"{str(g)[:26]:26}{q:>7}{rev:>11.0f}{cg:>10.0f}{tr:>9.0f}{m:>9.0f}{rev-cg-tr-m:>11.0f}")
+    T = [sum(x) for x in zip(*[(q, rev, cg, tr, m) for q, rev, cg, tr, m in cat.values()])] or [0, 0, 0, 0, 0]
+    print(f"{'─'*74}")
+    print(f"{'TOTAL (RON ex-TVA)':26}{T[0]:>7}{T[1]:>11.0f}{T[2]:>10.0f}{T[3]:>9.0f}{T[4]:>9.0f}{T[1]-T[2]-T[3]-T[4]:>11.0f}")
+    print(f"  (venit reconciliază cu engine-ul RON ex-TVA pe livrate; marketing alocat pe comenzi; transport real DPD)")
     print(f"\n=== TOP {a.top} SKU dupa venit ===")
     print(f"{'sku':30}{'categorie':16}{'buc':>6}{'venit':>10}{'COGS':>9}{'transp':>8}{'mkt':>8}{'contrib':>10}{'  transp?'}")
     for s, g, q, rev, cg, tr, m, ct in out[:a.top]:

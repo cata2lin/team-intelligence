@@ -11,6 +11,7 @@ profit_orders la raportare (nu recalculăm logica de status). ADITIV: tabel nou,
   cd /root/Scripturi && .venv/bin/python profit_lines_sync.py 2026-05 [PREFIX|all]
 """
 import sys, os, asyncio, sqlite3
+from collections import defaultdict
 sys.path.insert(0, "/root/Scripturi"); os.chdir("/root/Scripturi")
 from datetime import datetime, timezone, timedelta
 import httpx
@@ -46,16 +47,21 @@ async def sync_store(cl, st, ym, start, end):
     shop, token, prefix = st["shop"], st["token"], st["prefix"]
     url = f"https://{shop}/admin/api/{DEFAULT_API_VERSION}/graphql.json"
     H = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
-    rows = []; cursor = None; vids = set(); raw = []
+    cursor = None; vids = set(); raw = []; ok = True
     while True:
+        r = None
         for _ in range(5):
             try:
                 r = await cl.post(url, headers=H, json={"query": EXT_GQL, "variables": {"q": q, "cursor": cursor}}, timeout=60)
                 if r.status_code == 429: await asyncio.sleep(2); continue
                 break
             except Exception: await asyncio.sleep(1)
-        else: break
-        d = (r.json().get("data") or {}).get("orders") or {}
+        else:
+            ok = False; break        # toate retry-urile au eșuat → fetch INCOMPLET
+        try:
+            d = (r.json().get("data") or {}).get("orders") or {}
+        except Exception:
+            ok = False; break
         for ed in d.get("edges") or []:
             n = ed.get("node") or {}
             if (n.get("createdAt", "")[:7]) != ym: continue
@@ -72,14 +78,17 @@ async def sync_store(cl, st, ym, start, end):
         pi = d.get("pageInfo") or {}
         if not pi.get("hasNextPage"): break
         cursor = pi.get("endCursor")
+    if not ok:
+        return None                  # NU scrie luna parțial (evită pierderea silențioasă — ca build_cache)
     vcost = await _fetch_variant_costs(cl, shop, token, list(vids)) if vids else {}
+    # G1: agregă pe (comandă, SKU) — același SKU pe 2 variante NU mai face coliziune PK; linii fără SKU → UNKNOWN_SKU.
+    perkey = defaultdict(lambda: [0, 0.0, 0.0])   # (name,key) -> qty, line_revenue, line_cogs
     for name, agg in raw:
         for (sku, vid), (qty, lr) in agg.items():
-            key = sku or (vcost.get(vid, {}).get("sku") or "")
-            if not key: continue
+            key = sku or (vcost.get(vid, {}).get("sku") or "") or "UNKNOWN_SKU"
             uc = vcost.get(vid, {}).get("unit_cost")
-            rows.append((ym, prefix, name, key, qty, round(lr, 2), round((uc or 0) * qty, 2)))
-    return rows
+            d = perkey[(name, key)]; d[0] += qty; d[1] += lr; d[2] += (uc or 0) * qty
+    return [(ym, prefix, name, key, q, round(lr, 2), round(cg, 2)) for (name, key), (q, lr, cg) in perkey.items()]
 
 
 async def main(ym, which):
@@ -96,6 +105,8 @@ async def main(ym, which):
                 rows = await sync_store(cl, st, ym, start, end)
             except Exception as e:
                 print(f"  {st['prefix']}: ERR {type(e).__name__} {str(e)[:80]}"); continue
+            if rows is None:
+                print(f"  {st['prefix']}: ⚠ fetch INCOMPLET — păstrez datele existente (NU șterg/scriu)"); continue
             c = sqlite3.connect(DB)
             c.execute("DELETE FROM profit_order_lines WHERE month=? AND prefix=?", (ym, st["prefix"]))
             c.executemany("INSERT OR REPLACE INTO profit_order_lines VALUES (?,?,?,?,?,?,?)", rows)
