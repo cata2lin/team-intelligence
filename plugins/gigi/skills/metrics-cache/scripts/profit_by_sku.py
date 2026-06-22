@@ -148,7 +148,9 @@ def main():
         rev_ex = (ototal[k] * rate * share) / (1 + vat)      # venit = cotă din total comandă, în RON, ex-TVA
         cogs = pc.cogs_ron(r["qty"], line_cogs_store=r["line_cogs"], rate_store=rate, override=cogs_ov.get(s), fx=fx)
         cogs_ex = cogs / (1 + vat)                            # (H) override + (G) RON, ca engine-ul
-        tcost = parcel_cost[k] * share / (1 + vat)           # transport REAL pe colet (DPD), alocat pe venit, ex-TVA
+        # transport: 'awb'/'dpd' = cost real DEJA ex-TVA (transport_cost_fara_tva) → direct; 'estimat' =
+        # cost_per_parcel GROSS (TVA transport = RO 21%) → /1.21. (NU /(1+vat): scotea TVA de două ori pe awb/dpd.)
+        tcost = (parcel_cost[k] * share / 1.21) if tsrc[k] == "estimat" else (parcel_cost[k] * share)
         d = sku[s]
         d[0] += r["qty"] or 0; d[1] += rev_ex; d[2] += cogs_ex; d[3] += tcost
         sku_orders[s].add(k)
