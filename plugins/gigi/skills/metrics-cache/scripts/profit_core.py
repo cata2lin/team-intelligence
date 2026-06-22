@@ -34,13 +34,28 @@ def cogs_ron(qty=0, line_cogs_store=None, unit_cost_store=None, rate_store=1.0, 
         return (line_cogs_store or 0) * (rate_store or 1.0)
     return (unit_cost_store or 0) * (rate_store or 1.0) * (qty or 0)
 
-# ---- Transport REAL pe COLET (un colet = un cost; media DPD pe SKU-urile coletului) ----
-def parcel_transport(order_skus, dpd, fallback) -> tuple:
-    """(cost, is_real). dpd = {SKU_UPPER: avg_transport_cost real}; fallback = cost_per_parcel/magazin."""
+# ---- Transport pe COLET — cascadă: REAL per-AWB (AWBprint) → media DPD pe SKU-urile coletului → flat ----
+def parcel_transport(order_skus, dpd, fallback, real_cost=None) -> tuple:
+    """(cost, source). Prioritate:
+    1. real_cost = transport_cost_fara_tva REAL per comandă din AWBprint (cel mai precis) → 'awb';
+    2. media dpd_nomenclator pe SKU-urile coletului → 'dpd';
+    3. fallback = cost_per_parcel/magazin → 'estimat'.
+    dpd = {SKU_UPPER: avg_transport_cost real}."""
+    if real_cost is not None and real_cost > 0:
+        return float(real_cost), "awb"
     reals = [dpd[s.upper()] for s in order_skus if s and s.upper() in dpd]
     if reals:
-        return sum(reals) / len(reals), True
-    return (fallback or 0), False
+        return sum(reals) / len(reals), "dpd"
+    return (fallback or 0), "estimat"
+
+# ---- prefix magazin → domeniul AWBprint (stores.name); pt transport REAL per-AWB. Sursă: fulfillment STORES ----
+PREFIX_AWB_DOMAIN = {
+    "EST": "esteban.ro", "BELA": "belasil.ro", "CARP": "carpetto.ro", "GEN": "gento.ro", "GT": "georgetalent.ro",
+    "GRAN": "grandia.ro", "OFER": "ofertelezilei.ro", "MAG": "magdeal.ro", "RED": "reduceribune.ro",
+    "BON": "casaofertelor.ro", "COV": "covoria.ro", "APR": "apreciat.ro", "LUX": "nocturnalux.ro",
+    "ROSSI": "rossinails.ro", "NUB": "nubra", "CZ": "bonhaus.cz", "PL": "bonhaus.pl", "BONBG": "bonhaus.bg",
+    "NOC": "nocturna.ro", "PAT": "cepatai.ro", "BG": "nocturna.bg",
+}
 
 def refusal_transport_multiplier(status_category: str) -> float:
     """Multiplicator transport pe statusul comenzii: livrare ×1; refuz ×2 (tur+retur); restul 0 (deferred)."""
