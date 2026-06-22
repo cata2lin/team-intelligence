@@ -184,16 +184,14 @@ def fetch_store(prefix, from_date, to_date):
                 pid = p.get("id") or (f"sku:{sku}" if sku else ln.get("name") or "?")
                 title = (p.get("title") or ln.get("name") or sku or "(necunoscut)").strip()
                 money = (ln.get("discountedTotalSet") or {}).get("shopMoney") or {}
-                rev = float(money.get("amount") or 0)
-                disc = sum(float((da.get("allocatedAmountSet") or {}).get("shopMoney", {}).get("amount") or 0)
-                           for da in (ln.get("discountAllocations") or []))
+                rev = float(money.get("amount") or 0)  # discountedTotalSet = DEJA net de reduceri (incl. 2+1)
                 a = prod[(prefix, pid)]
                 a["title"] = title
                 if sku:
                     a["skus"].add(sku)
                 a["gross"] += qty
                 a["net"] += qty_net
-                a["revenue"] += rev - disc
+                a["revenue"] += rev  # NU rev - discountAllocations (era dublă-scădere → venit sub-raportat ~36%)
                 a["orders"].add(oname)
                 a["currency"] = str(money.get("currencyCode") or a["currency"])
         pi = data.get("pageInfo") or {}
