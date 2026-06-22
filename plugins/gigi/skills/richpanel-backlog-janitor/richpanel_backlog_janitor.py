@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["pg8000>=1.30"]
 # ///
 """
 richpanel_backlog_janitor.py — CURĂȚĂ backlog-ul Richpanel în siguranță.
