@@ -43,8 +43,10 @@ uv run product_quality_radar.py --json               # pt automatizare / export
   `"createdAt"`). `rma_request_items` e un tabel **real per-linie** (nu aproximăm prin toate
   liniile comenzii ca în `returns-rma-report`), deci motivul e atribuit exact SKU-ului
   returnat.
-- **Numitorul** ratei de defect = comenzi vândute pentru SKU (din `metrics.order_line_items`,
-  scopat pe **același brand**, Grandia, ca să nu se ciocnească SKU-uri numerice între branduri).
+- **Numitorul** ratei de defect = comenzi vândute pentru SKU, **din AWBprint** (store `grandia.ro`,
+  `line_items.inventory_item.sku`). NU din metrics: metrics.orders pt Grandia e truncat (din ~19-apr-2026),
+  pe când AWBprint are istoricul complet (din nov-2025) — altfel numitorul iese mic și defect-rate
+  supraestimat ~38% (poate flipa fals pragul de „scoate de pe COD").
 - Conexiuni `pg8000` cu SSL; URL-urile vin din env, altfel din KB (`kb.py secret-get`).
   Doar `SELECT`, nu scrie nimic.
 
@@ -59,9 +61,9 @@ uv run product_quality_radar.py --json               # pt automatizare / export
 ## Limitări
 - Motivele de retur (RMA) există **doar pentru Grandia** (singurul magazin cu modulul RMA).
   Pentru celelalte branduri ai doar circuitul de refund Shopify (fără „de ce").
-- Rata de defect e calculată doar pentru SKU-urile Grandia (acolo unde avem numitorul pe
-  același brand). Ferestrele de timp diferă ușor între surse (RMA din martie, refund-urile
-  metrics din aprilie), deci rata e un **indicator de tendință**, nu un decont exact.
+- Rata de defect e calculată doar pentru SKU-urile Grandia (singurul brand cu RMA). Numitorul
+  vine acum din AWBprint (istoric complet), deci e mult mai aproape de realitate decât înainte
+  (când metrics-ul truncat la apr supraestima rata ~38%).
 - Sume brute în RON (cum sunt în DB), fără TVA-adjust sau transport.
 - `--reason X` restrânge setul de SKU-uri și cifrele de headline la acel motiv; linia
   „motive:" arată în continuare **mixul complet** al SKU-ului, pentru context.
