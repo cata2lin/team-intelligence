@@ -33,8 +33,12 @@ def _clean(dsn):
     return re.sub(r"[?&]+(&|$)", r"\1", dsn).rstrip("?&")
 
 
-def load_dpd_costs(path="data/dpd_nomenclator.json"):
+def load_dpd_costs(path=None):
     """SKU(upper) -> avg_transport_cost real (din auditul DPD). Gol dacă fișierul lipsește."""
+    if path is None:
+        # bundled lângă acest script (merge pe orice mașină, orice CWD), altfel relativ la CWD (VPS: /root/Scripturi/data/)
+        bundled = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "dpd_nomenclator.json")
+        path = bundled if os.path.exists(bundled) else "data/dpd_nomenclator.json"
     out = {}
     try:
         d = json.load(open(path, encoding="utf-8"))
