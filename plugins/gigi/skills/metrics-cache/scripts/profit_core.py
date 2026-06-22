@@ -57,12 +57,17 @@ PREFIX_AWB_DOMAIN = {
     "NOC": "nocturna.ro", "PAT": "cepatai.ro", "BG": "nocturna.bg",
 }
 
-def refusal_transport_multiplier(status_category: str) -> float:
-    """Multiplicator transport pe statusul comenzii: livrare ×1; refuz ×2 (tur+retur); restul 0 (deferred)."""
-    if status_category == "Livrata":
+def refusal_transport_multiplier(status_category: str, is_intl: bool = False) -> float:
+    """Multiplicator pe cost_per_parcel (FALLBACK când nu există cost real AWBprint). Documentat:
+    - Livrare / În curs de livrare → ×1 (dus-ul e plătit);
+    - Refuz: **×2 doar pe INTERNAȚIONAL** (dus + retur); **×1 pe RO** (NU avem cost de retur pe RO);
+    - altele (anulat etc.) → 0.
+    Notă: dacă ai costul REAL per comandă din AWBprint (suma tuturor AWB-urilor, inclusiv retur), folosește-l
+    direct — el conține deja retur-ul pe intl; multiplicatorul ăsta e doar pentru fallback."""
+    if status_category in ("Livrata", "In curs de livrare"):
         return 1.0
     if status_category == "Refuzata":
-        return 2.0
+        return 2.0 if is_intl else 1.0
     return 0.0
 
 # ---- Status: venit + COGS doar pe LIVRATE ----
