@@ -18,6 +18,10 @@ uv run sourcing_radar.py --search "covor|presul"       # ce covoare se vând (sp
 uv run sourcing_radar.py --search "raft|depozit|gradina" --min-price 30 --max-price 200
 uv run sourcing_radar.py --parser vevor --min-vel 20   # doar de pe un site, viteză mare
 uv run sourcing_radar.py --days 7 --sheet              # ce s-a vândut în ultimele 7z → Google Sheet
+
+# v2 — matching cu catalogul nostru Grandia:
+uv run sourcing_radar.py --search covor --vs-grandia              # + coloane Match% / Avem?
+uv run sourcing_radar.py --search "raft|organizator" --gap-only --sheet  # DOAR ce NU avem = de lansat
 ```
 
 | Flag | Default | Ce face |
@@ -31,6 +35,9 @@ uv run sourcing_radar.py --days 7 --sheet              # ce s-a vândut în ulti
 | `--placeholder-stock` | 500 | parserii cu median latest_stock peste asta = placeholder, excluși |
 | `--include-placeholder` | — | NU exclude site-urile placeholder |
 | `--include-vivre` | — | include Vivre (stoc netrack-uit; default exclus) |
+| `--vs-grandia` | — | potrivește fiecare produs cu catalogul Grandia → coloane Match% / Avem? / cel mai apropiat |
+| `--gap-only` | — | (implică --vs-grandia) DOAR ce NU avem = oportunități de lansat |
+| `--match-threshold` | 72 | scor peste care zicem „avem deja" (rapidfuzz token_set_ratio) |
 | `--limit` | 40 / `--sheet` | câte rânduri / scrie un Google Sheet partajat |
 
 ## ANTI-ZGOMOT (de ce e cheia)
@@ -42,7 +49,11 @@ souqshop **10906** (max 1,2 mld!) vs site-uri reale (Bonami median 3, aosom 43, 
 
 ## Capcane / v2
 - `ads30_cal` e o ESTIMARE din stoc, nu vânzări reale — bună pt ranking relativ, nu cifre absolute.
-- **v2 (neimplementat):** matching fuzzy cu catalogul nostru (AWBprint/Shopify) ca să separe „avem deja"
-  de „de lansat", + alerte de stockout/price-cut la competiție (din stock_history/price_history).
-  arona-bi NU are copie a catalogului nostru → matching-ul cere join cross-DB.
-- Conexiune: secret KB `DATABASE_URL_ARONA_BI`. Google Sheet: `GOOGLE_OAUTH_TOKEN_JSON`.
+- **`--vs-grandia` (implementat):** trage catalogul ACTIV Grandia (`grandia.Product`, ~479 produse) și
+  potrivește fuzzy (rapidfuzz `token_set_ratio`) numele competitorului → `Match%` + `Avem?`. Matching-ul e
+  pe NUME DE PRODUS (specific), nu pe categorie — deci „—" la un covor rugvista înseamnă „n-avem ACEST covor",
+  nu „n-avem covoare". Reglează cu `--match-threshold`. Doar catalogul **Grandia** (brandul de commodity);
+  numele EN (vevor) nu se potrivesc cu catalogul RO → apar ca gap.
+- **v2 rămas:** alerte de stockout-steal / price-cut la competiție (din `stock_history`/`price_history`,
+  127M rânduri); matching și cu alte branduri (nu doar Grandia).
+- Conexiune: secrete KB `DATABASE_URL_ARONA_BI` + `DATABASE_URL_GRANDIA` (pt --vs-grandia). Sheet: `GOOGLE_OAUTH_TOKEN_JSON`.
