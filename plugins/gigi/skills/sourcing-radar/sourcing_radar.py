@@ -2,6 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #   "pg8000>=1.30",
+#   "rapidfuzz>=3.0",
 #   "google-api-python-client>=2.0",
 #   "google-auth>=2.0",
 # ]
@@ -61,6 +62,32 @@ def bi_conn():
                                 database=(u.path or "/").lstrip("/"), ssl_context=True)
 
 
+def grandia_titles():
+    """Titlurile produselor ACTIVE din catalogul Grandia (pt matching „avem deja vs de lansat")."""
+    import pg8000.dbapi, urllib.parse as up
+    url = os.getenv("DATABASE_URL_GRANDIA") or _kb_secret("DATABASE_URL_GRANDIA")
+    if not url:
+        raise SystemExit("Lipsește DATABASE_URL_GRANDIA (pt --vs-grandia).")
+    u = up.urlparse(url)
+    c = pg8000.dbapi.connect(user=up.unquote(u.username or ""), password=up.unquote(u.password or ""),
+                             host=u.hostname, port=u.port or 5432,
+                             database=(u.path or "/").lstrip("/"), ssl_context=True)
+    cur = c.cursor()
+    cur.execute("SELECT title FROM \"Product\" WHERE status='ACTIVE' AND title IS NOT NULL")
+    titles = [r[0] for r in cur.fetchall()]
+    c.close()
+    return titles
+
+
+def best_match(name, catalog, scorer):
+    """Cel mai bun scor de potrivire (0-100) al numelui competitorului în catalogul nostru."""
+    from rapidfuzz import process
+    if not name:
+        return 0, ""
+    m = process.extractOne(name, catalog, scorer=scorer, score_cutoff=0)
+    return (round(m[1]), m[0]) if m else (0, "")
+
+
 def write_sheet(header, rows, title):
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
@@ -110,8 +137,14 @@ def main():
     ap.add_argument("--days", type=int, default=14, help="doar produse vândute în ultimele N zile")
     ap.add_argument("--include-placeholder", action="store_true", help="NU exclude site-urile cu stoc placeholder")
     ap.add_argument("--include-vivre", action="store_true", help="include Vivre (stoc netrack-uit, doar viteză)")
+    ap.add_argument("--vs-grandia", action="store_true",
+                    help="potrivește fiecare produs cu catalogul nostru Grandia → coloane match%% + Avem?")
+    ap.add_argument("--gap-only", action="store_true", help="(cu --vs-grandia) doar ce NU avem = oportunități de lansat")
+    ap.add_argument("--match-threshold", type=int, default=72, help="prag scor peste care consideram ca avem deja produsul")
     ap.add_argument("--sheet", action="store_true")
     args = ap.parse_args()
+    if args.gap_only:
+        args.vs_grandia = True
 
     conn = bi_conn(); cur = conn.cursor()
     cur.execute("SELECT max(last_sold_day) FROM public.mv_best_sellers_ranked")
@@ -145,32 +178,64 @@ def main():
       FROM public.mv_best_sellers_ranked m
       WHERE {' AND '.join(where)}
       ORDER BY m.ads30_cal DESC LIMIT %s"""
-    params.append(args.limit)
+    # cu --gap-only multe rânduri pică (le avem deja) → tragem un pool mai mare
+    fetch_n = min(args.limit * 6, 800) if args.gap_only else args.limit
+    params.append(fetch_n)
 
     cur.execute(sql, params)
     rows = cur.fetchall()
     conn.close()
+
+    catalog = scorer = None
+    if args.vs_grandia:
+        from rapidfuzz import fuzz
+        catalog = grandia_titles()
+        scorer = fuzz.token_set_ratio
 
     flt = []
     if args.search: flt.append(f"search='{args.search}'")
     if args.parser: flt.append(f"parser={args.parser}")
     if args.min_vel: flt.append(f"vel≥{args.min_vel}")
     if args.min_price or args.max_price: flt.append(f"preț {args.min_price or 0}-{args.max_price or '∞'}")
+    if args.vs_grandia: flt.append("vs Grandia" + (" (gap-only)" if args.gap_only else ""))
     print(f"Radar sourcing · arona-bi (date la zi {fresh[:10]}) · {', '.join(flt) or 'fără filtre'} · "
           f"placeholder excluși: {not args.include_placeholder}", file=sys.stderr)
 
-    header = ["#", "Site", "Vendor", "Produs", "Preț", "Stoc", "Viteză 30z", "Ultima vânz.", "URL"]
+    vs = args.vs_grandia
+    header = ["#", "Site", "Vendor", "Produs", "Preț", "Stoc", "Viteză 30z", "Ultima vânz."]
+    if vs:
+        header += ["Match %", "Avem? (Grandia)", "Cel mai apropiat la noi"]
+    header += ["URL"]
+
     out = []
-    for i, (pn, vn, nm, pr, st, vel, lsd, url) in enumerate(rows, 1):
-        out.append([i, pn, (vn or "")[:22], (nm or "")[:60], round(float(pr or 0), 2),
-                    st, vel, (lsd or "")[:10], url or ""])
-    print(f"\n=== Top {len(out)} produse care se vând cel mai repede la competiție ===")
-    print("  " + " | ".join(["#", "Site", "Produs", "Preț", "Stoc", "Vel30"]))
+    for (pn, vn, nm, pr, st, vel, lsd, url) in rows:
+        extra = []
+        if vs:
+            score, who = best_match(nm, catalog, scorer)
+            carry = score >= args.match_threshold
+            if args.gap_only and carry:
+                continue
+            extra = [score, "DA" if carry else "—", (who or "")[:40]]
+        row = [len(out) + 1, pn, (vn or "")[:22], (nm or "")[:60], round(float(pr or 0), 2),
+               st, vel, (lsd or "")[:10]] + extra + [url or ""]
+        out.append(row)
+        if len(out) >= args.limit:
+            break
+
+    label = "produse care se vând la competiție și NU le avem (de lansat)" if (vs and args.gap_only) \
+        else "produse care se vând cel mai repede la competiție"
+    print(f"\n=== Top {len(out)} {label} ===")
+    cols = ["#", "Site", "Produs", "Preț", "Vel30"] + (["Match%", "Avem?"] if vs else [])
+    print("  " + " | ".join(cols))
     for r in out:
-        print(f"  {r[0]:>3} | {r[1][:12]:12} | {r[3][:46]:46} | {r[4]:>7} | {r[5]:>6} | {r[6]}")
+        line = f"  {r[0]:>3} | {r[1][:12]:12} | {r[3][:44]:44} | {r[4]:>7} | {r[6]:>6}"
+        if vs:
+            line += f" | {r[8]:>5} | {r[9]}"
+        print(line)
 
     if args.sheet:
-        title = "Sourcing radar competiție" + (f" — {args.search}" if args.search else "") + f" — {fresh[:10]}"
+        title = ("Sourcing GAP Grandia" if (vs and args.gap_only) else "Sourcing radar competiție") \
+            + (f" — {args.search}" if args.search else "") + f" — {fresh[:10]}"
         print(f"\n✅ Google Sheet: {write_sheet(header, [list(map(str, r)) for r in out], title)}")
 
 
