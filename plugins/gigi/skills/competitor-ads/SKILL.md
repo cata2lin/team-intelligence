@@ -20,6 +20,10 @@ uv run scripts/competitor_ads.py analyze rasheed.ro --top 6 --vs esteban.ro
 # TIKTOK — reclamele unui advertiser din TikTok Ad Library UE (Playwright + Chrome)
 uv run --with playwright scripts/tiktok_ads.py best "answear" --top 10
 uv run --with playwright scripts/tiktok_ads.py best "Answear" --json
+
+# META (FB/IG) — Ad Library API oficial (cere META_ADLIB_TOKEN = USER token cont confirmat)
+uv run scripts/meta_ads.py best "answear" --country RO --top 10
+uv run scripts/meta_ads.py analyze "answear" --vs "nubra"
 ```
 
 ## Ideea de bază: longevitatea = proxy de câștigător
@@ -42,7 +46,7 @@ LLM-ul vine din KB: `GEMINI_API_KEY` / `GOOGLE_AI_API_KEY` (vezi [[image-gen-ski
 |---|---|
 | **Google** Ads Transparency Center | ✅ (fără auth) — `competitor_ads.py` |
 | **TikTok** Ad Library UE | ✅ (`tiktok_ads.py`, Playwright + Chrome) |
-| **Meta** Ad Library API | ⏳ după confirmarea ID pe contul Meta (facebook.com/ads/library/api) — apoi `ads_archive` cu tokenul nostru |
+| **Meta** (FB/IG) Ad Library API | ✅ (`meta_ads.py`, oficial) — cere `META_ADLIB_TOKEN` = **USER token de cont confirmat** (facebook.com/ID). App/system tokens dau 2332002. Tokenul Graph API Explorer e short-lived (~2h) → exchange long-lived cu app_id+secret (60 zile). |
 | **Comparativ cu PERFORMANȚA noastră reală** | ⏳ enhancement: ROAS/CTR/spend per ad din conturile noastre via `gigi:meta-ads`/`tiktok-ads`/`google-ads-mcc` (la noi avem date reale, nu doar longevitate) |
 
 ## TikTok — detalii (tiktok_ads.py)
