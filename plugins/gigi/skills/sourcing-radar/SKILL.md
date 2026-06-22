@@ -22,6 +22,10 @@ uv run sourcing_radar.py --days 7 --sheet              # ce s-a vândut în ulti
 # v2 — matching cu catalogul nostru Grandia:
 uv run sourcing_radar.py --search covor --vs-grandia              # + coloane Match% / Avem?
 uv run sourcing_radar.py --search "raft|organizator" --gap-only --sheet  # DOAR ce NU avem = de lansat
+
+# stockout: competiția e ruptă de stoc dar produsul încă se vindea = cerere neacoperită
+uv run sourcing_radar.py --stockout --min-vel 5                   # produse „hot" pe care se rup de stoc
+uv run sourcing_radar.py --stockout --gap-only --sheet           # cel mai tare semnal: nu avem ȘI se rup la ei
 ```
 
 | Flag | Default | Ce face |
@@ -38,6 +42,7 @@ uv run sourcing_radar.py --search "raft|organizator" --gap-only --sheet  # DOAR 
 | `--vs-grandia` | — | potrivește fiecare produs cu catalogul Grandia → coloane Match% / Avem? / cel mai apropiat |
 | `--gap-only` | — | (implică --vs-grandia) DOAR ce NU avem = oportunități de lansat |
 | `--match-threshold` | 72 | scor peste care zicem „avem deja" (rapidfuzz token_set_ratio) |
+| `--stockout` | — | DOAR produse cu latest_stock=0 dar viteză > 0 = competiția e ruptă de stoc (cerere neacoperită) |
 | `--limit` | 40 / `--sheet` | câte rânduri / scrie un Google Sheet partajat |
 
 ## ANTI-ZGOMOT (de ce e cheia)
