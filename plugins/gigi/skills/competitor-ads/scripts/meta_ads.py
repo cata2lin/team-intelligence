@@ -33,6 +33,7 @@ def secret(k):
     except Exception:
         return ""
 
+
 def _norm(s):
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
@@ -77,14 +78,58 @@ def parse(ads):
                     "text": (body or "").replace("\n", " ")[:90], "snap": a.get("ad_snapshot_url", "")})
     return sorted(out, key=lambda c: (c["active"], c["days"]), reverse=True)
 
-def _need_token():
+def _validate(tok):
+    """(ok, motiv) — tokenul e USER valid?"""
+    try:
+        d = requests.get(f"{G}/debug_token", params={"input_token": tok, "access_token": tok}, timeout=30).json().get("data", {})
+    except Exception as e:
+        return False, f"nu am putut valida ({e})"
+    if not d.get("is_valid"):
+        return False, "expirat/invalid"
+    if d.get("type") != "USER":
+        return False, f"e {d.get('type')} token — Ad Library cere USER token"
+    return True, ""
+
+def prompt_token():
+    """Cere interactiv un USER token, explică cum se ia, validează și-l salvează în KB."""
+    print("""
+┌─ META AD LIBRARY — am nevoie de un token ─────────────────────────────────
+│ Ad Library API merge DOAR cu un USER token de pe contul tău care a confirmat
+│ identitatea (facebook.com/ID). App tokens și System-user tokens NU merg.
+│ Tokenul expiră (~2h), așa că din când în când trebuie regenerat — normal.
+│
+│ Cum scoți unul (30 sec):
+│  1. developers.facebook.com/tools/explorer
+│  2. Meta App: oricare al tău · dropdown „User or Page" → USER TOKEN
+│  3. Generate Access Token → login cu CONTUL TĂU (cel confirmat) → Approve
+│  4. copiază tokenul (începe cu EAA…)
+└───────────────────────────────────────────────────────────────────────────""")
+    try:
+        tok = input("Lipește USER token-ul aici (Enter gol = renunț):\n> ").strip()
+    except EOFError:
+        tok = ""
+    if not tok:
+        sys.exit("anulat — fără token.")
+    ok, why = _validate(tok)
+    if not ok:
+        print(f"  ✗ {why}. Mai încearcă.\n")
+        return prompt_token()
+    subprocess.run(["uv", "run", KB, "secret-set", "META_ADLIB_TOKEN", tok], capture_output=True, text=True, timeout=60)
+    print("  ✓ token valid (USER) salvat în KB. Continui...\n")
+    return tok
+
+def resolve_token():
+    """Tokenul din KB dacă-i valid; altfel cere-l interactiv."""
     t = secret("META_ADLIB_TOKEN")
-    if not t:
-        sys.exit("lipsește META_ADLIB_TOKEN (USER token de cont confirmat — facebook.com/ID).")
-    return t
+    if t:
+        ok, why = _validate(t)
+        if ok:
+            return t
+        print(f"  META_ADLIB_TOKEN din KB: {why}.")
+    return prompt_token()
 
 def cmd_best(a):
-    token = _need_token()
+    token = resolve_token()
     for brand in a.advertisers:
         try:
             crs = parse(search(brand, a.country, a.top, token))
@@ -101,7 +146,7 @@ def cmd_best(a):
             print(f"  {tag} {c['days']:>4}z [din {c['start']}] {c['platforms'][:18]:18} „{c['text']}\"")
 
 def cmd_analyze(a):
-    token = _need_token()
+    token = resolve_token()
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import competitor_ads as ca
     crs = parse(search(a.advertiser, a.country, a.top, token))

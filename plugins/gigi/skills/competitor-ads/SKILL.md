@@ -46,7 +46,7 @@ LLM-ul vine din KB: `GEMINI_API_KEY` / `GOOGLE_AI_API_KEY` (vezi [[image-gen-ski
 |---|---|
 | **Google** Ads Transparency Center | ✅ (fără auth) — `competitor_ads.py` |
 | **TikTok** Ad Library UE | ✅ (`tiktok_ads.py`, Playwright + Chrome) |
-| **Meta** (FB/IG) Ad Library API | ✅ (`meta_ads.py`, oficial) — cere `META_ADLIB_TOKEN` = **USER token de cont confirmat** (facebook.com/ID). App/system tokens dau 2332002. Tokenul Graph API Explorer e short-lived (~2h) → exchange long-lived cu app_id+secret (60 zile). |
+| **Meta** (FB/IG) Ad Library API | ✅ (`meta_ads.py`, oficial) — cere `META_ADLIB_TOKEN` = **USER token de cont confirmat** (facebook.com/ID). App/system tokens dau 2332002. Tokenul e short-lived (~2h); când lipsește/expiră, **tool-ul îl cere INTERACTIV** (explică de unde-l iei, validează că-i USER, îl salvează singur în KB). Opțional: long-lived 60z prin `fb_exchange_token` cu app_id+secret. |
 | **Comparativ cu PERFORMANȚA noastră reală** | ⏳ enhancement: ROAS/CTR/spend per ad din conturile noastre via `gigi:meta-ads`/`tiktok-ads`/`google-ads-mcc` (la noi avem date reale, nu doar longevitate) |
 
 ## TikTok — detalii (tiktok_ads.py)
