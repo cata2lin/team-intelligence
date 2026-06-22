@@ -54,9 +54,12 @@ def load_dpd_costs(path=None):
 
 
 def load_real_transport(order_keys):
-    """{(prefix, order_name): transport_cost_fara_tva REAL} din AWBprint (per comandă, EXCLUS return labels).
-    prefix→store_uid via profit_core.PREFIX_AWB_DOMAIN ↔ AWBprint stores.name. Gol dacă AWBprint indisponibil
-    → cade pe media DPD. Acoperă ~69% din AWB-uri cu cost real; restul rămâne pe media nomenclator."""
+    """{(prefix, order_name): transport REAL ex-TVA} din AWBprint. Sursa AUTORITATIVĂ = `orders.transport_cost`
+    (cost la nivel de COMANDĂ, exact cum e urcat în AWB Arona: UN AWB principal per comandă; gross, TVA transport
+    = RO 21% mereu, curierul e RO → /1.21 = ex-TVA). NU se sumează order_awbs — rândurile multiple sunt în mare
+    DUPLICATE (același cost pe fiecare rând) → sumarea le multiplica. orders.transport_cost prinde corect și
+    duplicatul (= AWB principal) și split-ul real (= sumă). Fallback: MAX(transport_cost_fara_tva) = principalul
+    deduplicat, unde orders.transport_cost lipsește. Gol dacă AWBprint indisponibil → cade pe media DPD."""
     out = {}
     dsn = os.environ.get("DATABASE_URL_AWBPRINT")
     if not dsn:
@@ -74,10 +77,12 @@ def load_real_transport(order_keys):
             uid = pref2uid.get(prefix)
             if not uid:
                 continue
-            cur.execute("""SELECT o.order_number, SUM(a.transport_cost_fara_tva) t
+            cur.execute("""SELECT o.order_number,
+                CASE WHEN o.transport_cost > 0 THEN o.transport_cost / 1.21
+                     ELSE MAX(a.transport_cost_fara_tva) END t
                 FROM orders o JOIN order_awbs a ON a.order_id = o.id
                 WHERE o.store_uid = %s AND o.order_number = ANY(%s) AND COALESCE(a.is_return_label, false) = false
-                GROUP BY o.order_number""", (uid, names))
+                GROUP BY o.order_number, o.transport_cost""", (uid, names))
             for r in cur.fetchall():
                 if (r["t"] or 0) > 0:
                     out[(prefix, r["order_number"])] = float(r["t"])
