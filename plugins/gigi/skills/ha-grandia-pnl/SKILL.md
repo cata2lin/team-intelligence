@@ -5,6 +5,8 @@ argument-hint: "--months 2026-04,2026-05 [--prefixes GRAN,EST,GT] [--no-ha]"
 ---
 
 # ha-grandia-pnl
+
+> 🗺️ **Profitabilitate** — pipeline CANONIC + „unde găsesc ce“: `shared/HARTA.md`. Per-SKU/categorie = `metrics-cache/profit_by_sku.py` (transport real + marketing CPA); logica unică = `profit_core.py`.
 > Author: **Gigi**. NET P&L per linie (HA vs Grandia / orice prefix), din engine-ul de profitabilitate.
 
 ## Ce face

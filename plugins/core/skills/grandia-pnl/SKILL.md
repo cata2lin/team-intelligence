@@ -5,6 +5,8 @@ description: Build a live monthly P&L for the Grandia brand from Shopify (orders
 
 # grandia-pnl
 
+> 🗺️ **Profitabilitate** — pipeline CANONIC + „unde găsesc ce“: `shared/HARTA.md`. Per-SKU/categorie = `metrics-cache/profit_by_sku.py` (transport real + marketing CPA); logica unică = `profit_core.py`.
+
 > Author: **Arona core**.
 
 End-to-end recipe for a Profit & Loss report for the **Grandia** brand, fully
