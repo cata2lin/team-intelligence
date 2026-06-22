@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["pg8000>=1.30"]
+# dependencies = ["pg8000>=1.30", "paramiko>=3.0"]
 # ///
 """
 cs_stock_answer.py — RĂSPUNS INSTANT la întrebările presale de stoc:
@@ -34,6 +34,37 @@ import os, sys, re, json, subprocess, shlex, urllib.parse, argparse, datetime
 import pg8000.dbapi
 
 VPS = "root@84.46.242.181"
+
+def _vps_run(remote_cmd):
+    """Run a command on the profit VPS over SSH (paramiko, password from KB/env).
+    Zero-touch: PROFIT_SSH_HOST/USER/PASS are read from env, else the team KB.
+    Returns a CompletedProcess-like object (.stdout/.stderr/.returncode)."""
+    import os as _os, sys as _sys, types as _types, subprocess as _sp
+    def _sec(k):
+        v = _os.environ.get(k)
+        if v:
+            return v
+        kb = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                           "..", "..", "..", "core", "scripts", "kb.py")
+        try:
+            return _sp.run(["uv", "run", kb, "secret-get", k],
+                           capture_output=True, text=True, timeout=30).stdout.strip()
+        except Exception:
+            return ""
+    host = _sec("PROFIT_SSH_HOST") or "84.46.242.181"
+    user = _sec("PROFIT_SSH_USER") or "root"
+    pwd = _sec("PROFIT_SSH_PASS")
+    if not pwd:
+        _sys.exit("Lipsa PROFIT_SSH_PASS (KB/env). Ruleaza: kb.py secret-set PROFIT_SSH_PASS ...")
+    import paramiko
+    cl = paramiko.SSHClient()
+    cl.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    cl.connect(host, username=user, password=pwd, timeout=30)
+    _i, _o, _e = cl.exec_command(remote_cmd, timeout=180)
+    out = _o.read().decode(); err = _e.read().decode()
+    rc = _o.channel.recv_exit_status()
+    cl.close()
+    return _types.SimpleNamespace(stdout=out, stderr=err, returncode=rc)
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # lead-time mediu order->sosire (AIR), măsurat din TOM (~15z). Folosit doar pt ETA aproximativ.
@@ -135,8 +166,7 @@ def fetch_live_stock(sku=None, product=None):
     )
     cmd = ("cd /root/Scripturi && .venv/bin/python3 -c "
            + shlex.quote(py) + " " + shlex.quote(mode) + " " + shlex.quote(term))
-    out = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", VPS, cmd],
-                         capture_output=True, text=True, timeout=80)
+    out = _vps_run(cmd)
     txt = (out.stdout or "").strip()
     try:
         return json.loads(txt.splitlines()[-1]) if txt else []

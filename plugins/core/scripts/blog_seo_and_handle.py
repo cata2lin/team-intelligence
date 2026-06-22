@@ -30,7 +30,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from kb_env import load_secrets_into_env  # noqa: E402
 load_secrets_into_env()
 
-BASE = Path("/Users/gheorghebeschea/Downloads/Scripturi/blog-rollout")
+# SEO data (seo/seo.json) is bundled alongside this script in blog_data/ so the skill
+# runs on any teammate's machine. Set BLOG_DATA_DIR to override when regenerating.
+BASE = Path(os.environ.get("BLOG_DATA_DIR") or (Path(__file__).parent / "blog_data"))
 VERSION = os.environ["SHOPIFY_ARONA_API_VERSION"]
 CID = os.environ["SHOPIFY_ARONA_CLIENT_ID"]
 CSEC = os.environ["SHOPIFY_ARONA_CLIENT_SECRET"]

@@ -38,6 +38,10 @@ entity-escaped `&lt;p&gt;`), resolves the hero image from the main product, and
 writes `blog-rollout/articles/gt.json`. Never publish raw workflow output.
 
 ## Publish
+> Publish/SEO **run out of the box on any machine**: the article + index + SEO JSON
+> are bundled in the plugin at `scripts/blog_data/`. The `blog-rollout/` pipeline above
+> is only for authoring NEW content (maintainer's machine) — point the scripts at a fresh
+> working dir with `BLOG_DATA_DIR=/path/to/blog-rollout`.
 ```bash
 # dry-run validates handles (real + in-stock) and banned words; --draft stages
 # UNPUBLISHED for review; no flag = LIVE (confirm with the user first).

@@ -1,0 +1,2497 @@
+{
+  "store": "esteban",
+  "shop": "Maison d'Esteban",
+  "domain": "6f9e22-9d.myshopify.com",
+  "blogs": [
+    {
+      "id": "gid://shopify/Blog/110902477145",
+      "handle": "news",
+      "title": "News",
+      "articles": {
+        "edges": []
+      }
+    }
+  ],
+  "products": [
+    {
+      "handle": "esteban-essential-femei-88",
+      "url": "/products/esteban-essential-femei-88",
+      "title": "L'Essence No. 88, inspirat de Q by D&G",
+      "name": "L'Essence No. 88",
+      "inspiration": "Q by D&G",
+      "inspiration_brand": "D&G",
+      "gender": "femei",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "fresh",
+        "fructat",
+        "lemnos",
+        "nostock"
+      ],
+      "stock": 610,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-87",
+      "url": "/products/esteban-essential-femei-87",
+      "title": "L'Essence No. 87, inspirat de Lady Million Royal by Paco Rabanne",
+      "name": "L'Essence No. 87",
+      "inspiration": "Lady Million Royal by Paco Rabanne",
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral"
+      ],
+      "stock": 160,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-82",
+      "url": "/products/esteban-essential-femei-82",
+      "title": "L'Essence No. 82, inspirat de L'interdit Rouge Ultime by Givenchy",
+      "name": "L'Essence No. 82",
+      "inspiration": "L'interdit Rouge Ultime by Givenchy",
+      "inspiration_brand": "Givenchy",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "lemnos"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-76",
+      "url": "/products/esteban-essential-76",
+      "title": "L'Essence No. 76, inspirat de No 5 by Coco Chanel",
+      "name": "L'Essence No. 76",
+      "inspiration": "No 5 by Coco Chanel",
+      "inspiration_brand": "Coco Chanel",
+      "gender": "femei",
+      "family": "aldehidic",
+      "tags": [
+        "aldehidic",
+        "floral"
+      ],
+      "stock": 465,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-75",
+      "url": "/products/esteban-essential-75",
+      "title": "L'Essence No. 75, inspirat de La vie Est Belle by Lancome",
+      "name": "L'Essence No. 75",
+      "inspiration": "La vie Est Belle by Lancome",
+      "inspiration_brand": "Lancome",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "fructat",
+        "nostock"
+      ],
+      "stock": 1010,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-74",
+      "url": "/products/esteban-essential-74",
+      "title": "L'Essence No. 74, inspirat de Angel by Thierry Mugler",
+      "name": "L'Essence No. 74",
+      "inspiration": "Angel by Thierry Mugler",
+      "inspiration_brand": "Thierry Mugler",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "gurmand",
+        "oriental"
+      ],
+      "stock": 218,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-73",
+      "url": "/products/esteban-essential-73",
+      "title": "L'Essence No. 73, inspirat de Good Girl by Carolina Herrera",
+      "name": "L'Essence No. 73",
+      "inspiration": "Good Girl by Carolina Herrera",
+      "inspiration_brand": "Carolina Herrera",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "oriental"
+      ],
+      "stock": 55,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-71",
+      "url": "/products/esteban-essential-71",
+      "title": "L'Essence No. 71, inspirat de Scandal by Jean Paul Gaultier",
+      "name": "L'Essence No. 71",
+      "inspiration": "Scandal by Jean Paul Gaultier",
+      "inspiration_brand": "Jean Paul Gaultier",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "cypre",
+        "floral"
+      ],
+      "stock": 1764,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-70",
+      "url": "/products/esteban-essential-70",
+      "title": "L'Essence No. 70, inspirat de Black Opium by Yves Saint Laurent",
+      "name": "L'Essence No. 70",
+      "inspiration": "Black Opium by Yves Saint Laurent",
+      "inspiration_brand": "Yves Saint Laurent",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "oriental"
+      ],
+      "stock": 1054,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-69",
+      "url": "/products/esteban-essential-69",
+      "title": "L'Essence No. 69, inspirat de Idole by Armani",
+      "name": "L'Essence No. 69",
+      "inspiration": "Idole by Armani",
+      "inspiration_brand": "Armani",
+      "gender": "femei",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "floral"
+      ],
+      "stock": 296,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-57",
+      "url": "/products/esteban-essential-57",
+      "title": "L'Essence No. 57, inspirat de Si by Armani",
+      "name": "L'Essence No. 57",
+      "inspiration": "Si by Armani",
+      "inspiration_brand": "Armani",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "cypre",
+        "floral",
+        "fructat"
+      ],
+      "stock": 910,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-56",
+      "url": "/products/esteban-essential-56",
+      "title": "L'Essence No. 56, inspirat de Addict by Dior",
+      "name": "L'Essence No. 56",
+      "inspiration": "Addict by Dior",
+      "inspiration_brand": "Dior",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "oriental"
+      ],
+      "stock": 93,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-55",
+      "url": "/products/esteban-essential-55",
+      "title": "L'Essence No. 55, inspirat de Alien by Thierry Mugler",
+      "name": "L'Essence No. 55",
+      "inspiration": "Alien by Thierry Mugler",
+      "inspiration_brand": "Thierry Mugler",
+      "gender": "femei",
+      "family": "lemnos",
+      "tags": [
+        "lemnos",
+        "oriental"
+      ],
+      "stock": 1107,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-51",
+      "url": "/products/esteban-essential-51",
+      "title": "L'Essence No. 51, inspirat de Mademoiselle by Coco Chanel",
+      "name": "L'Essence No. 51",
+      "inspiration": "Mademoiselle by Coco Chanel",
+      "inspiration_brand": "Coco Chanel",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "cypre",
+        "floral"
+      ],
+      "stock": 742,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-49",
+      "url": "/products/esteban-essential-49",
+      "title": "L'Essence No. 49, inspirat de Miss by Dior",
+      "name": "L'Essence No. 49",
+      "inspiration": "Miss by Dior",
+      "inspiration_brand": "Dior",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-47",
+      "url": "/products/esteban-essential-47",
+      "title": "L'Essence No. 47, inspirat de My way by Armani",
+      "name": "L'Essence No. 47",
+      "inspiration": "My way by Armani",
+      "inspiration_brand": "Armani",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral"
+      ],
+      "stock": 1627,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-46",
+      "url": "/products/esteban-essential-46",
+      "title": "L'Essence No. 46, inspirat de Hypnotic Poison by Dior",
+      "name": "L'Essence No. 46",
+      "inspiration": "Hypnotic Poison by Dior",
+      "inspiration_brand": "Dior",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "oriental",
+        "vanilat"
+      ],
+      "stock": 526,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-44",
+      "url": "/products/esteban-essential-44",
+      "title": "L'Essence No. 44, inspirat de Fame by Paco Rabanne",
+      "name": "L'Essence No. 44",
+      "inspiration": "Fame by Paco Rabanne",
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "fructat"
+      ],
+      "stock": 414,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-39",
+      "url": "/products/esteban-essential-barbati-39",
+      "title": "L'Essence No. 39, inspirat de Absolu Aventus by Creed",
+      "name": "L'Essence No. 39",
+      "inspiration": "Absolu Aventus by Creed",
+      "inspiration_brand": "Creed",
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "absolut",
+        "acvatic",
+        "fructat",
+        "lemnos",
+        "set-3"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-36",
+      "url": "/products/esteban-essential-barbati-36",
+      "title": "L'Essence No. 36, inspirat de Gentleman Society by Givenchy",
+      "name": "L'Essence No. 36",
+      "inspiration": "Gentleman Society by Givenchy",
+      "inspiration_brand": "Givenchy",
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "lemnos"
+      ],
+      "stock": 425,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-35",
+      "url": "/products/esteban-essential-barbati-35",
+      "title": "L'Essence No.  35, inspirat de Scandal Pour Homme by Jean Paul Gaultier",
+      "name": "L'Essence No.  35",
+      "inspiration": "Scandal Pour Homme by Jean Paul Gaultier",
+      "inspiration_brand": "Jean Paul Gaultier",
+      "gender": "barbati",
+      "family": "lemnos",
+      "tags": [
+        "lemnos",
+        "oriental"
+      ],
+      "stock": 416,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-33",
+      "url": "/products/esteban-essential-barbati-33",
+      "title": "L'Essence No. 33, inspirat de 1 Million by Paco Rabanne",
+      "name": "L'Essence No. 33",
+      "inspiration": "1 Million by Paco Rabanne",
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "barbati",
+      "family": "lemnos",
+      "tags": [
+        "condimentat",
+        "lemnos"
+      ],
+      "stock": 2104,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-32",
+      "url": "/products/esteban-essential-barbati-32",
+      "title": "L'Essence No. 32, inspirat de Man in Black by Bvlgari",
+      "name": "L'Essence No. 32",
+      "inspiration": "Man in Black by Bvlgari",
+      "inspiration_brand": "Bvlgari",
+      "gender": "barbati",
+      "family": "oriental",
+      "tags": [
+        "condimentat",
+        "oriental"
+      ],
+      "stock": 354,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-31",
+      "url": "/products/esteban-essential-barbati-31",
+      "title": "L'Essence No. 31, inspirat de Sauvage Elixir by Dior",
+      "name": "L'Essence No. 31",
+      "inspiration": "Sauvage Elixir by Dior",
+      "inspiration_brand": "Dior",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "fresh",
+        "lemnos"
+      ],
+      "stock": 1012,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-30",
+      "url": "/products/esteban-essential-barbati-30",
+      "title": "L'Essence No. 30, inspirat de Sauvage by Dior",
+      "name": "L'Essence No. 30",
+      "inspiration": "Sauvage by Dior",
+      "inspiration_brand": "Dior",
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "aromatic",
+        "fresh"
+      ],
+      "stock": 1133,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-28",
+      "url": "/products/esteban-essential-barbati-28",
+      "title": "L'Essence No. 28, inspirat de Eros by Versace",
+      "name": "L'Essence No. 28",
+      "inspiration": "Eros by Versace",
+      "inspiration_brand": "Versace",
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "aromatic",
+        "fresh"
+      ],
+      "stock": 461,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-27",
+      "url": "/products/esteban-essential-barbati-27",
+      "title": "L'Essence No. 27, inspirat de Le Male by Jean Paul Gaultier",
+      "name": "L'Essence No. 27",
+      "inspiration": "Le Male by Jean Paul Gaultier",
+      "inspiration_brand": "Jean Paul Gaultier",
+      "gender": "barbati",
+      "family": "fresh",
+      "tags": [
+        "fresh",
+        "oriental"
+      ],
+      "stock": 165,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-21",
+      "url": "/products/esteban-essential-barbati-21",
+      "title": "L'Essence No. 21, inspirat de Code by Armani",
+      "name": "L'Essence No. 21",
+      "inspiration": "Code by Armani",
+      "inspiration_brand": "Armani",
+      "gender": "barbati",
+      "family": "fresh",
+      "tags": [
+        "fresh",
+        "oriental"
+      ],
+      "stock": 759,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-16",
+      "url": "/products/esteban-essential-barbati-16",
+      "title": "L'Essence No. 16, inspirat de Phantom by Paco Rabanne",
+      "name": "L'Essence No. 16",
+      "inspiration": "Phantom by Paco Rabanne",
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "aromatic",
+        "fresh"
+      ],
+      "stock": 157,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-12",
+      "url": "/products/esteban-essential-barbati-12",
+      "title": "L'Essence No. 12, inspirat de Gentleman by Givenchy",
+      "name": "L'Essence No. 12",
+      "inspiration": "Gentleman by Givenchy",
+      "inspiration_brand": "Givenchy",
+      "gender": "barbati",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "lemnos"
+      ],
+      "stock": 217,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-unisex-11",
+      "url": "/products/esteban-essential-unisex-11",
+      "title": "L'Essence No. 11, inspirat de Oud Wood by Tom Ford",
+      "name": "L'Essence No. 11",
+      "inspiration": "Oud Wood by Tom Ford",
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": "lemnos",
+      "tags": [
+        "lemnos",
+        "oriental"
+      ],
+      "stock": 461,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-unisex-10",
+      "url": "/products/esteban-essential-unisex-10",
+      "title": "L'Essence No. 10, inspirat de Kirke by Tiziana Terenzi",
+      "name": "L'Essence No. 10",
+      "inspiration": "Kirke by Tiziana Terenzi",
+      "inspiration_brand": "Tiziana Terenzi",
+      "gender": "unisex",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "fructat"
+      ],
+      "stock": 231,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-unisex-503",
+      "url": "/products/esteban-essential-unisex-503",
+      "title": "L'Essence No. 9, inspirat de Fucking Fabulous by Tom Ford",
+      "name": "L'Essence No. 9",
+      "inspiration": "Fucking Fabulous by Tom Ford",
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "lemnos",
+        "migdale"
+      ],
+      "stock": 214,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-unisex-7",
+      "url": "/products/esteban-essential-unisex-7",
+      "title": "L'Essence No. 7, inspirat de Vanilla Sex by Tom Ford",
+      "name": "L'Essence No. 7",
+      "inspiration": "Vanilla Sex by Tom Ford",
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "oriental",
+        "vanilat"
+      ],
+      "stock": 52,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-unisex-6",
+      "url": "/products/esteban-essential-unisex-6",
+      "title": "L'Essence No. 6, inspirat de Alexandria II by Xerjoff",
+      "name": "L'Essence No. 6",
+      "inspiration": "Alexandria II by Xerjoff",
+      "inspiration_brand": "Xerjoff",
+      "gender": "unisex",
+      "family": "lemnos",
+      "tags": [
+        "lemnos",
+        "oriental"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-unisex-5",
+      "url": "/products/esteban-essential-unisex-5",
+      "title": "L'Essence No. 5, inspirat de Opera by Sospiro",
+      "name": "L'Essence No. 5",
+      "inspiration": "Opera by Sospiro",
+      "inspiration_brand": "Sospiro",
+      "gender": "unisex",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "oriental"
+      ],
+      "stock": 128,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-unisex-4",
+      "url": "/products/esteban-essential-unisex-4",
+      "title": "L'Essence No. 4, inspirat de Erba Pura by Sospiro",
+      "name": "L'Essence No. 4",
+      "inspiration": "Erba Pura by Sospiro",
+      "inspiration_brand": "Sospiro",
+      "gender": "unisex",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "floral",
+        "fructat"
+      ],
+      "stock": 1128,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-unisex-2",
+      "url": "/products/esteban-essential-unisex-2",
+      "title": "L'Essence No. 2, inspirat de Tobacco Vanille by Tom Ford",
+      "name": "L'Essence No. 2",
+      "inspiration": "Tobacco Vanille by Tom Ford",
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": "dulce",
+      "tags": [
+        "condimentat",
+        "dulce",
+        "oriental"
+      ],
+      "stock": 420,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "parfum-surpriza",
+      "url": "/products/parfum-surpriza",
+      "title": "Parfum surpriză",
+      "name": "Parfum surpriză",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [
+        "hidden"
+      ],
+      "stock": -34,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/estebannegru1_cbea2b1d-3f16-479d-b69c-cfbadc309c18.png?v=1762259055"
+    },
+    {
+      "handle": "esteban-essential-unisex-3",
+      "url": "/products/esteban-essential-unisex-3",
+      "title": "L'Essence No. 3, inspirat din Angel's Share by Kilian",
+      "name": "L'Essence No. 3",
+      "inspiration": "Angel's Share by Kilian",
+      "inspiration_brand": "Kilian",
+      "gender": "unisex",
+      "family": "dulce",
+      "tags": [
+        "condimentat",
+        "dulce",
+        "oriental",
+        "second"
+      ],
+      "stock": 155,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-13",
+      "url": "/products/esteban-essential-barbati-13",
+      "title": "L'Essence No. 13, inspirat din Invictus Victory by Paco Rabanne",
+      "name": "L'Essence No. 13",
+      "inspiration": "Invictus Victory by Paco Rabanne",
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "barbati",
+      "family": "lemnos",
+      "tags": [
+        "lemnos",
+        "oriental",
+        "second",
+        "vanilat"
+      ],
+      "stock": 298,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-14",
+      "url": "/products/esteban-essential-barbati-14",
+      "title": "L'Essence No. 14, inspirat din Uomo by Valentino",
+      "name": "L'Essence No. 14",
+      "inspiration": "Uomo by Valentino",
+      "inspiration_brand": "Valentino",
+      "gender": "barbati",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "gourmand",
+        "lemnos",
+        "second"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-17",
+      "url": "/products/esteban-essential-barbati-17",
+      "title": "L'Essence No. 17, inspirat din Terre D'Hermes by Hermes",
+      "name": "L'Essence No. 17",
+      "inspiration": "Terre D'Hermes by Hermes",
+      "inspiration_brand": "Hermes",
+      "gender": "barbati",
+      "family": "lemnos",
+      "tags": [
+        "citrus",
+        "lemnos",
+        "second",
+        "terestru"
+      ],
+      "stock": 144,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-18",
+      "url": "/products/esteban-essential-barbati-18",
+      "title": "L'Essence No. 18, inspirat din Invictus by Paco Rabanne",
+      "name": "L'Essence No. 18",
+      "inspiration": "Invictus by Paco Rabanne",
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "fresh",
+        "lemnos",
+        "second"
+      ],
+      "stock": 960,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-19",
+      "url": "/products/esteban-essential-barbati-19",
+      "title": "L'Essence No. 19, inspirat din Light Blue Pour Homme by D&G",
+      "name": "L'Essence No. 19",
+      "inspiration": "Light Blue Pour Homme by D&G",
+      "inspiration_brand": "D&G",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "citrus",
+        "fresh",
+        "second",
+        "set-3",
+        "slow"
+      ],
+      "stock": 211,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-20",
+      "url": "/products/esteban-essential-barbati-20",
+      "title": "L'Essence No. 20, inspirat din Allure Home Sport by Coco Chanel",
+      "name": "L'Essence No. 20",
+      "inspiration": "Allure Home Sport by Coco Chanel",
+      "inspiration_brand": "Coco Chanel",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "fresh",
+        "second",
+        "sportiv"
+      ],
+      "stock": 658,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-24",
+      "url": "/products/esteban-essential-barbati-24",
+      "title": "L'Essence No. 24, inspirat din Bad Boy Le Parfum by Carolina Herrera",
+      "name": "L'Essence No. 24",
+      "inspiration": "Bad Boy Le Parfum by Carolina Herrera",
+      "inspiration_brand": "Carolina Herrera",
+      "gender": "barbati",
+      "family": "lemnos",
+      "tags": [
+        "condimentat",
+        "lemnos",
+        "oriental",
+        "second"
+      ],
+      "stock": 99,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-26",
+      "url": "/products/esteban-essential-barbati-26",
+      "title": "L'Essence No. 26, inspirat din Noir Extreme by Tom Ford",
+      "name": "L'Essence No. 26",
+      "inspiration": "Noir Extreme by Tom Ford",
+      "inspiration_brand": "Tom Ford",
+      "gender": "barbati",
+      "family": "oriental",
+      "tags": [
+        "condimentat",
+        "oriental",
+        "second",
+        "vanilat"
+      ],
+      "stock": 155,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-29",
+      "url": "/products/esteban-essential-barbati-29",
+      "title": "L'Essence No. 29, inspirat din Bottled Elixir by Hugo Boss",
+      "name": "L'Essence No. 29",
+      "inspiration": "Bottled Elixir by Hugo Boss",
+      "inspiration_brand": "Hugo Boss",
+      "gender": "barbati",
+      "family": "lemnos",
+      "tags": [
+        "condimentat",
+        "lemnos",
+        "rășinos",
+        "second"
+      ],
+      "stock": 718,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-34",
+      "url": "/products/esteban-essential-barbati-34",
+      "title": "L'Essence No. 34, inspirat din Fahrenheit by Dior",
+      "name": "L'Essence No. 34",
+      "inspiration": "Fahrenheit by Dior",
+      "inspiration_brand": "Dior",
+      "gender": "barbati",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "lemnos",
+        "pielărie",
+        "second"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-37",
+      "url": "/products/esteban-essential-barbati-37",
+      "title": "L'Essence No. 37, inspirat din Y Intense by Yves Saint Laurent",
+      "name": "L'Essence No. 37",
+      "inspiration": "Y Intense by Yves Saint Laurent",
+      "inspiration_brand": "Yves Saint Laurent",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "condimentat",
+        "lemnos",
+        "second"
+      ],
+      "stock": 294,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-38",
+      "url": "/products/esteban-essential-barbati-38",
+      "title": "L'Essence No. 38, inspirat din Stronger with you by Armani",
+      "name": "L'Essence No. 38",
+      "inspiration": "Stronger with you by Armani",
+      "inspiration_brand": "Armani",
+      "gender": "barbati",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "gourmand",
+        "oriental",
+        "second"
+      ],
+      "stock": 1489,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-40",
+      "url": "/products/esteban-essential-barbati-40",
+      "title": "L'Essence No. 40, inspirat din K by D&G",
+      "name": "L'Essence No. 40",
+      "inspiration": "K by D&G",
+      "inspiration_brand": "D&G",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "lemnos",
+        "second",
+        "set-3",
+        "verde"
+      ],
+      "stock": 229,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-42",
+      "url": "/products/esteban-essential-barbati-42",
+      "title": "L'Essence No. 42, inspirat din Acqua di Gio by Armani",
+      "name": "L'Essence No. 42",
+      "inspiration": "Acqua di Gio by Armani",
+      "inspiration_brand": "Armani",
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "aromatic",
+        "fresh",
+        "second"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-45",
+      "url": "/products/esteban-essential-femei-45",
+      "title": "L'Essence No. 45, inspirat din Lady Million by Paco Rabanne",
+      "name": "L'Essence No. 45",
+      "inspiration": "Lady Million by Paco Rabanne",
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "fructat",
+        "second"
+      ],
+      "stock": 968,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-50",
+      "url": "/products/esteban-essential-femei-50",
+      "title": "L'Essence No. 50, inspirat din Guilty by GUCCI",
+      "name": "L'Essence No. 50",
+      "inspiration": "Guilty by GUCCI",
+      "inspiration_brand": "GUCCI",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "fructat",
+        "oriental",
+        "second"
+      ],
+      "stock": 227,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-52",
+      "url": "/products/esteban-essential-femei-52",
+      "title": "L'Essence No. 52, inspirat din La Nuit Tresor by Lancome",
+      "name": "L'Essence No. 52",
+      "inspiration": "La Nuit Tresor by Lancome",
+      "inspiration_brand": "Lancome",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "gourmand",
+        "second"
+      ],
+      "stock": 200,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-53",
+      "url": "/products/esteban-essential-femei-53",
+      "title": "L'Essence No. 53, inspirat din L'interdit by Givenchy",
+      "name": "L'Essence No. 53",
+      "inspiration": "L'interdit by Givenchy",
+      "inspiration_brand": "Givenchy",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "alb",
+        "condimentat",
+        "floral",
+        "second"
+      ],
+      "stock": 115,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-58",
+      "url": "/products/esteban-essential-femei-58",
+      "title": "L'Essence No. 58, inspirat din Because it's you by Armani",
+      "name": "L'Essence No. 58",
+      "inspiration": "Because it's you by Armani",
+      "inspiration_brand": "Armani",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "fructat",
+        "second"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-59",
+      "url": "/products/esteban-essential-femei-59",
+      "title": "L'Essence No. 59, inspirat din The only one by D&G",
+      "name": "L'Essence No. 59",
+      "inspiration": "The only one by D&G",
+      "inspiration_brand": "D&G",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "gourmand",
+        "oriental",
+        "second"
+      ],
+      "stock": 226,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-61",
+      "url": "/products/esteban-essential-femei-61",
+      "title": "L'Essence No. 61, inspirat din Olympea Flora by Paco Rabanne",
+      "name": "L'Essence No. 61",
+      "inspiration": "Olympea Flora by Paco Rabanne",
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "fructat",
+        "second",
+        "vanilat"
+      ],
+      "stock": 39,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-64",
+      "url": "/products/esteban-essential-femei-64",
+      "title": "L'Essence No. 64, inspirat din Very Good Girl by Carolina Herrera",
+      "name": "L'Essence No. 64",
+      "inspiration": "Very Good Girl by Carolina Herrera",
+      "inspiration_brand": "Carolina Herrera",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "fructat",
+        "vanilat"
+      ],
+      "stock": 23,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-65",
+      "url": "/products/esteban-essential-femei-65",
+      "title": "L'Essence No. 65, inspirat din Idole by Lancome",
+      "name": "L'Essence No. 65",
+      "inspiration": "Idole by Lancome",
+      "inspiration_brand": "Lancome",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "curat",
+        "floral",
+        "fructat",
+        "second"
+      ],
+      "stock": -92,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-66",
+      "url": "/products/esteban-essential-femei-66",
+      "title": "L'Essence No. 66, inspirat din La Belle by Jean Paul Gaultier",
+      "name": "L'Essence No. 66",
+      "inspiration": "La Belle by Jean Paul Gaultier",
+      "inspiration_brand": "Jean Paul Gaultier",
+      "gender": "femei",
+      "family": "fructat",
+      "tags": [
+        "fructat",
+        "lemnos",
+        "second",
+        "vanilat"
+      ],
+      "stock": 40,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-72",
+      "url": "/products/esteban-essential-femei-72",
+      "title": "L'Essence No. 72, inspirat din So Scandal by Jean Paul Gaultier",
+      "name": "L'Essence No. 72",
+      "inspiration": "So Scandal by Jean Paul Gaultier",
+      "inspiration_brand": "Jean Paul Gaultier",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "lăptos",
+        "second"
+      ],
+      "stock": 1342,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-80",
+      "url": "/products/esteban-essential-femei-80",
+      "title": "L'Essence No. 80, inspirat din Flora Gorgeous Magnolia by GUCCI",
+      "name": "L'Essence No. 80",
+      "inspiration": "Flora Gorgeous Magnolia by GUCCI",
+      "inspiration_brand": "GUCCI",
+      "gender": "femei",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "floral",
+        "lemnos",
+        "second"
+      ],
+      "stock": 81,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-84",
+      "url": "/products/esteban-essential-femei-84",
+      "title": "L'Essence No. 84, inspirat din My Burberry by Burberry",
+      "name": "L'Essence No. 84",
+      "inspiration": "My Burberry by Burberry",
+      "inspiration_brand": "Burberry",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "proaspăt",
+        "pudrat",
+        "second"
+      ],
+      "stock": 166,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-85",
+      "url": "/products/esteban-essential-femei-85",
+      "title": "L'Essence No. 85, inspirat din La vie Est Belle Soleil Cristal by Lancone",
+      "name": "L'Essence No. 85",
+      "inspiration": "La vie Est Belle Soleil Cristal by Lancone",
+      "inspiration_brand": "Lancone",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "second",
+        "solar"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-86",
+      "url": "/products/esteban-essential-femei-86",
+      "title": "L'Essence No. 86, inspirat din Lady Million Fabulous by Paco Rabanne",
+      "name": "L'Essence No. 86",
+      "inspiration": "Lady Million Fabulous by Paco Rabanne",
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "exotic",
+        "floral",
+        "second",
+        "vanilat"
+      ],
+      "stock": 385,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-89",
+      "url": "/products/esteban-essential-femei-89",
+      "title": "L'Essence No. 89, inspirat din Devotion by D&G",
+      "name": "L'Essence No. 89",
+      "inspiration": "Devotion by D&G",
+      "inspiration_brand": "D&G",
+      "gender": "femei",
+      "family": "gourmand",
+      "tags": [
+        "citrus",
+        "gourmand",
+        "second",
+        "slow",
+        "vanilat"
+      ],
+      "stock": 466,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-unisex-91",
+      "url": "/products/esteban-essential-unisex-91",
+      "title": "L'Essence No. 91, inspirat din Lost Cherry by Tom Ford",
+      "name": "L'Essence No. 91",
+      "inspiration": "Lost Cherry by Tom Ford",
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": "fructat",
+      "tags": [
+        "condimentat",
+        "fructat",
+        "gourmand",
+        "second"
+      ],
+      "stock": 1889,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-92",
+      "url": "/products/esteban-essential-barbati-92",
+      "title": "L'Essence No. 92, inspirat din Boss Bottled by Hugo Boss",
+      "name": "L'Essence No. 92",
+      "inspiration": "Boss Bottled by Hugo Boss",
+      "inspiration_brand": "Hugo Boss",
+      "gender": "barbati",
+      "family": "dulce",
+      "tags": [
+        "condimentat",
+        "dulce",
+        "lemnos",
+        "second"
+      ],
+      "stock": 812,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-93",
+      "url": "/products/esteban-essential-femei-93",
+      "title": "L'Essence No. 93, inspirat din Paradoxe by Prada",
+      "name": "L'Essence No. 93",
+      "inspiration": "Paradoxe by Prada",
+      "inspiration_brand": "Prada",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "citrus",
+        "floral",
+        "second",
+        "vanilat"
+      ],
+      "stock": 2054,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-barbati-94",
+      "url": "/products/esteban-essential-barbati-94",
+      "title": "L'Essence No. 94, inspirat din Dior Homme Intense by Dior",
+      "name": "L'Essence No. 94",
+      "inspiration": "Dior Homme Intense by Dior",
+      "inspiration_brand": "Dior",
+      "gender": "barbati",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "lemnos",
+        "pudrat",
+        "second"
+      ],
+      "stock": 208,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "esteban-essential-femei-96",
+      "url": "/products/esteban-essential-femei-96",
+      "title": "L'Essence No. 96, inspirat din Libre Intense by Yves Saint Laurent",
+      "name": "L'Essence No. 96",
+      "inspiration": "Libre Intense by Yves Saint Laurent",
+      "inspiration_brand": "Yves Saint Laurent",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "condimentat",
+        "dulce",
+        "floral",
+        "second"
+      ],
+      "stock": 535,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-98-inspirat-din-tuscan-leather-by-tom-ford",
+      "url": "/products/lessence-no-98-inspirat-din-tuscan-leather-by-tom-ford",
+      "title": "L'Essence No. 98, inspirat din Tuscan Leather by Tom Ford",
+      "name": "L'Essence No. 98",
+      "inspiration": "Tuscan Leather by Tom Ford",
+      "inspiration_brand": "Tom Ford",
+      "gender": "femei",
+      "family": "fructat",
+      "tags": [
+        "condimentat",
+        "fructat",
+        "lemnos",
+        "second",
+        "set-3"
+      ],
+      "stock": 475,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-98-inspirat-din-baccarat-rouge-540-by-maison-francis-kurkdjian",
+      "url": "/products/lessence-no-98-inspirat-din-baccarat-rouge-540-by-maison-francis-kurkdjian",
+      "title": "L'Essence No. 99, inspirat din Baccarat Rouge 540 by Maison Francis Kurkdjian",
+      "name": "L'Essence No. 99",
+      "inspiration": "Baccarat Rouge 540 by Maison Francis Kurkdjian",
+      "inspiration_brand": "Maison Francis Kurkdjian",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "lemnos",
+        "nostock",
+        "second"
+      ],
+      "stock": 1494,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-100-inspirat-din-black-afgano-by-nasomatto",
+      "url": "/products/lessence-no-100-inspirat-din-black-afgano-by-nasomatto",
+      "title": "L'Essence No. 100, inspirat din Black Afgano by Nasomatto",
+      "name": "L'Essence No. 100",
+      "inspiration": "Black Afgano by Nasomatto",
+      "inspiration_brand": "Nasomatto",
+      "gender": "femei",
+      "family": "lemnos",
+      "tags": [
+        "condimentat",
+        "lemnos",
+        "oriental",
+        "second"
+      ],
+      "stock": -1,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-102",
+      "url": "/products/lessence-no-102",
+      "title": "L'Essence No. 102, inspirat din 212 VIP by Carolina Herrera",
+      "name": "L'Essence No. 102",
+      "inspiration": "212 VIP by Carolina Herrera",
+      "inspiration_brand": "Carolina Herrera",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "fructat",
+        "oriental"
+      ],
+      "stock": 489,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-103",
+      "url": "/products/lessence-no-103",
+      "title": "L'Essence No. 103, inspirat din Stronger With You Amber by Armani",
+      "name": "L'Essence No. 103",
+      "inspiration": "Stronger With You Amber by Armani",
+      "inspiration_brand": "Armani",
+      "gender": "unisex",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "gurmand",
+        "oriental"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-104",
+      "url": "/products/lessence-no-104",
+      "title": "L'Essence No. 104, inspirat din Ultra Male by Jean Paul Gaultier",
+      "name": "L'Essence No. 104",
+      "inspiration": "Ultra Male by Jean Paul Gaultier",
+      "inspiration_brand": "Jean Paul Gaultier",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "dulce",
+        "gurmand"
+      ],
+      "stock": 209,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-105",
+      "url": "/products/lessence-no-105",
+      "title": "L'Essence No. 105, inspirat din Chic For Men by Carolina Herrera",
+      "name": "L'Essence No. 105",
+      "inspiration": "Chic For Men by Carolina Herrera",
+      "inspiration_brand": "Carolina Herrera",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "citrus",
+        "fresh"
+      ],
+      "stock": 107,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-106",
+      "url": "/products/lessence-no-106",
+      "title": "L'Essence No. 106, inspirat din Chrome by Azzaro",
+      "name": "L'Essence No. 106",
+      "inspiration": "Chrome by Azzaro",
+      "inspiration_brand": "Azzaro",
+      "gender": "barbati",
+      "family": "acvatic",
+      "tags": [
+        "acvatic",
+        "citrus",
+        "fresh"
+      ],
+      "stock": 35,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-107",
+      "url": "/products/lessence-no-107",
+      "title": "L'Essence No. 107, inspirat din Obsession for Men by Calvin Klein",
+      "name": "L'Essence No. 107",
+      "inspiration": "Obsession for Men by Calvin Klein",
+      "inspiration_brand": "Calvin Klein",
+      "gender": "barbati",
+      "family": "lemnos",
+      "tags": [
+        "condimentat",
+        "lemnos",
+        "oriental"
+      ],
+      "stock": 248,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-108",
+      "url": "/products/lessence-no-108",
+      "title": "L'Essence No. 108, inspirat din Euphoria Liquid Gold for Men by Calvin Klein",
+      "name": "L'Essence No. 108",
+      "inspiration": "Euphoria Liquid Gold for Men by Calvin Klein",
+      "inspiration_brand": "Calvin Klein",
+      "gender": "barbati",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "lemnos",
+        "oriental"
+      ],
+      "stock": 163,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-109",
+      "url": "/products/lessence-no-109",
+      "title": "L'Essence No. 109, inspirat din MYSLF by Yves Saint Laurent",
+      "name": "L'Essence No. 109",
+      "inspiration": "MYSLF by Yves Saint Laurent",
+      "inspiration_brand": "Yves Saint Laurent",
+      "gender": "barbati",
+      "family": "fresh",
+      "tags": [
+        "citrus",
+        "fresh",
+        "lemnos"
+      ],
+      "stock": 113,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-110",
+      "url": "/products/lessence-no-110",
+      "title": "L'Essence No. 110, inspirat din Y L'Elixir for Men by Yves Saint Laurent",
+      "name": "L'Essence No. 110",
+      "inspiration": "Y L'Elixir for Men by Yves Saint Laurent",
+      "inspiration_brand": "Yves Saint Laurent",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "condimentat",
+        "lemnos"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-111",
+      "url": "/products/lessence-no-111",
+      "title": "L'Essence No. 111, inspirat din Spicebomb Dark Leather by Viktor & Rolf",
+      "name": "L'Essence No. 111",
+      "inspiration": "Spicebomb Dark Leather by Viktor & Rolf",
+      "inspiration_brand": "Viktor & Rolf",
+      "gender": "barbati",
+      "family": "lemnos",
+      "tags": [
+        "condimentat",
+        "lemnos",
+        "oriental"
+      ],
+      "stock": 235,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-112",
+      "url": "/products/lessence-no-112",
+      "title": "L'Essence No. 112, inspirat din The One Desire by Dolce & Gabbana",
+      "name": "L'Essence No. 112",
+      "inspiration": "The One Desire by Dolce & Gabbana",
+      "inspiration_brand": "Dolce & Gabbana",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "lemnos",
+        "oriental"
+      ],
+      "stock": 26,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-114",
+      "url": "/products/lessence-no-114",
+      "title": "L'Essence No. 114, inspirat din Rush by Gucci",
+      "name": "L'Essence No. 114",
+      "inspiration": "Rush by Gucci",
+      "inspiration_brand": "Gucci",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "oriental"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-115",
+      "url": "/products/lessence-no-115",
+      "title": "L'Essence No. 115, inspirat din Boss Alive by Hugo Boss",
+      "name": "L'Essence No. 115",
+      "inspiration": "Boss Alive by Hugo Boss",
+      "inspiration_brand": "Hugo Boss",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "fructat",
+        "lemnos"
+      ],
+      "stock": 237,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-116",
+      "url": "/products/lessence-no-116",
+      "title": "L'Essence No. 116, inspirat din Libre L’Absolu Platine by Yves Saint Laurent",
+      "name": "L'Essence No. 116",
+      "inspiration": "Libre L’Absolu Platine by Yves Saint Laurent",
+      "inspiration_brand": "Yves Saint Laurent",
+      "gender": "femei",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "floral",
+        "fresh"
+      ],
+      "stock": 213,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-117",
+      "url": "/products/lessence-no-117",
+      "title": "L'Essence No. 117, inspirat din Bitter Peach by Tom Ford",
+      "name": "L'Essence No. 117",
+      "inspiration": "Bitter Peach by Tom Ford",
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "fructat",
+        "gurmand"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-118",
+      "url": "/products/lessence-no-118",
+      "title": "L'Essence No. 118, inspirat din Bright Crystal by Versace",
+      "name": "L'Essence No. 118",
+      "inspiration": "Bright Crystal by Versace",
+      "inspiration_brand": "Versace",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "fresh",
+        "fructat"
+      ],
+      "stock": 302,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-119",
+      "url": "/products/lessence-no-119",
+      "title": "L'Essence No. 119, inspirat din Coco Noir by Coco Chanel",
+      "name": "L'Essence No. 119",
+      "inspiration": "Coco Noir by Coco Chanel",
+      "inspiration_brand": "Coco Chanel",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "cypre",
+        "floral",
+        "oriental"
+      ],
+      "stock": 143,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-120",
+      "url": "/products/lessence-no-120",
+      "title": "L'Essence No. 120, inspirat din Obsession by Calvin Klein",
+      "name": "L'Essence No. 120",
+      "inspiration": "Obsession by Calvin Klein",
+      "inspiration_brand": "Calvin Klein",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "condimentat",
+        "dulce",
+        "oriental"
+      ],
+      "stock": 339,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-121",
+      "url": "/products/lessence-no-121",
+      "title": "L'Essence No. 121, inspirat din Amor Amor by Cacharel",
+      "name": "L'Essence No. 121",
+      "inspiration": "Amor Amor by Cacharel",
+      "inspiration_brand": "Cacharel",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "fructat"
+      ],
+      "stock": 28,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-122",
+      "url": "/products/lessence-no-122",
+      "title": "L'Essence No. 122, inspirat din Gaultier Divine by Jean Paul Gaultier",
+      "name": "L'Essence No. 122",
+      "inspiration": "Gaultier Divine by Jean Paul Gaultier",
+      "inspiration_brand": "Jean Paul Gaultier",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "gurmand"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-124",
+      "url": "/products/lessence-no-124",
+      "title": "L'Essence No. 124, inspirat din Venus by Nina Ricci",
+      "name": "L'Essence No. 124",
+      "inspiration": "Venus by Nina Ricci",
+      "inspiration_brand": "Nina Ricci",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "fructat"
+      ],
+      "stock": 32,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-127",
+      "url": "/products/lessence-no-127",
+      "title": "L'Essence No. 127, inspirat din Queen of Silk by Creed",
+      "name": "L'Essence No. 127",
+      "inspiration": "Queen of Silk by Creed",
+      "inspiration_brand": "Creed",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "lemnos",
+        "oriental",
+        "slow"
+      ],
+      "stock": 277,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-129",
+      "url": "/products/lessence-no-129",
+      "title": "L'Essence No. 129, inspirat din Smoking Hot By Kilian",
+      "name": "L'Essence No. 129",
+      "inspiration": "Smoking Hot By Kilian",
+      "inspiration_brand": "Kilian",
+      "gender": "unisex",
+      "family": "oriental",
+      "tags": [
+        "condimentat",
+        "gurmand",
+        "oriental"
+      ],
+      "stock": 54,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-130",
+      "url": "/products/lessence-no-130",
+      "title": "L'Essence No. 130, inspirat din Dolce Melodia by Sospiro",
+      "name": "L'Essence No. 130",
+      "inspiration": "Dolce Melodia by Sospiro",
+      "inspiration_brand": "Sospiro",
+      "gender": "unisex",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "oriental"
+      ],
+      "stock": 210,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-132",
+      "url": "/products/lessence-no-132",
+      "title": "L'Essence No. 132, inspirat din Old Fashion by Kilian",
+      "name": "L'Essence No. 132",
+      "inspiration": "Old Fashion by Kilian",
+      "inspiration_brand": "Kilian",
+      "gender": "unisex",
+      "family": "lemnos",
+      "tags": [
+        "gurmand",
+        "lemnos",
+        "oriental"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-133",
+      "url": "/products/lessence-no-133",
+      "title": "L'Essence No. 133, inspirat din Apom by Maison Francis Kurkdjian",
+      "name": "L'Essence No. 133",
+      "inspiration": "Apom by Maison Francis Kurkdjian",
+      "inspiration_brand": "Maison Francis Kurkdjian",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "floral",
+        "fresh"
+      ],
+      "stock": 237,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-135",
+      "url": "/products/lessence-no-135",
+      "title": "L'Essence No. 135, inspirat din Stronger with you Sandalwood by Armani",
+      "name": "L'Essence No. 135",
+      "inspiration": "Stronger with you Sandalwood by Armani",
+      "inspiration_brand": "Armani",
+      "gender": "barbati",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "lemnos",
+        "oriental"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-136",
+      "url": "/products/lessence-no-136",
+      "title": "L'Essence No. 136, inspirat din Devotion pour homme by D&G",
+      "name": "L'Essence No. 136",
+      "inspiration": "Devotion pour homme by D&G",
+      "inspiration_brand": "D&G",
+      "gender": "barbati",
+      "family": "dulce",
+      "tags": [
+        "citrus",
+        "dulce",
+        "gurmand",
+        "New"
+      ],
+      "stock": 18,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-137",
+      "url": "/products/lessence-no-137",
+      "title": "L'Essence No. 137, inspirat din Gentleman Society Extreme by Givenchy",
+      "name": "L'Essence No. 137",
+      "inspiration": "Gentleman Society Extreme by Givenchy",
+      "inspiration_brand": "Givenchy",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "condimentat",
+        "lemnos"
+      ],
+      "stock": 68,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-138",
+      "url": "/products/lessence-no-138",
+      "title": "L'Essence No. 138, inspirat din Y L'Elixir for men by Yves Saint Laurent",
+      "name": "L'Essence No. 138",
+      "inspiration": "Y L'Elixir for men by Yves Saint Laurent",
+      "inspiration_brand": "Yves Saint Laurent",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "condimentat",
+        "lemnos"
+      ],
+      "stock": 175,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-139",
+      "url": "/products/lessence-no-139",
+      "title": "L'Essence No. 139, inspirat din Gentleman Society Ambree by Givenchy",
+      "name": "L'Essence No. 139",
+      "inspiration": "Gentleman Society Ambree by Givenchy",
+      "inspiration_brand": "Givenchy",
+      "gender": "barbati",
+      "family": "lemnos",
+      "tags": [
+        "condimentat",
+        "lemnos",
+        "oriental"
+      ],
+      "stock": 340,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-143",
+      "url": "/products/lessence-no-143",
+      "title": "L'Essence No. 143, inspirat din Ella Ella by Cacharel",
+      "name": "L'Essence No. 143",
+      "inspiration": "Ella Ella by Cacharel",
+      "inspiration_brand": "Cacharel",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "fresh",
+        "fructat"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-145",
+      "url": "/products/lessence-no-145",
+      "title": "L'Essence No. 145, inspirat din Black Opium Glitter by Yves Saint Laurent",
+      "name": "L'Essence No. 145",
+      "inspiration": "Black Opium Glitter by Yves Saint Laurent",
+      "inspiration_brand": "Yves Saint Laurent",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "gurmand"
+      ],
+      "stock": 1,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-147",
+      "url": "/products/lessence-no-147",
+      "title": "L'Essence No. 147, inspirat din Burberry her intense by Burberry",
+      "name": "L'Essence No. 147",
+      "inspiration": "Burberry her intense by Burberry",
+      "inspiration_brand": "Burberry",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "fructat",
+        "gurmand"
+      ],
+      "stock": 91,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-148",
+      "url": "/products/lessence-no-148",
+      "title": "L'Essence No. 148, inspirat din My way Ylang Ylang by Armani",
+      "name": "L'Essence No. 148",
+      "inspiration": "My way Ylang Ylang by Armani",
+      "inspiration_brand": "Armani",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "fresh"
+      ],
+      "stock": 115,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-149",
+      "url": "/products/lessence-no-149",
+      "title": "L'Essence No. 149, inspirat din Fame The Couture by Paco Rabanne",
+      "name": "L'Essence No. 149",
+      "inspiration": "Fame The Couture by Paco Rabanne",
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "fructat",
+        "New"
+      ],
+      "stock": 162,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "set-cadou-1",
+      "url": "/products/set-cadou-1",
+      "title": "Fresh Adventure",
+      "name": "Fresh Adventure",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [
+        "barbati",
+        "set-3"
+      ],
+      "stock": 175,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/adventure.jpg?v=1764685063"
+    },
+    {
+      "handle": "lessence-no-151-inspirat-din-soleil-blanc-by-tom-ford",
+      "url": "/products/lessence-no-151-inspirat-din-soleil-blanc-by-tom-ford",
+      "title": "L'Essence No. 151, inspirat din Soleil Blanc  by Tom Ford",
+      "name": "L'Essence No. 151",
+      "inspiration": "Soleil Blanc  by Tom Ford",
+      "inspiration_brand": "Tom Ford",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "alb",
+        "curat",
+        "gurmand",
+        "New"
+      ],
+      "stock": 220,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-152-inspirat-din-olympea-by-paco-rabanne",
+      "url": "/products/lessence-no-152-inspirat-din-olympea-by-paco-rabanne",
+      "title": "L'Essence No. 152, inspirat din Olympea by Paco Rabanne",
+      "name": "L'Essence No. 152",
+      "inspiration": "Olympea by Paco Rabanne",
+      "inspiration_brand": "Paco Rabanne",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "New",
+        "oriental"
+      ],
+      "stock": 1164,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-153-inspirat-din-grand-soir-by-maison-francis-kurkdjian",
+      "url": "/products/lessence-no-153-inspirat-din-grand-soir-by-maison-francis-kurkdjian",
+      "title": "L'Essence No. 153, inspirat din Grand Soir by Maison Francis Kurkdjian",
+      "name": "L'Essence No. 153",
+      "inspiration": "Grand Soir by Maison Francis Kurkdjian",
+      "inspiration_brand": "Maison Francis Kurkdjian",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "gurmand",
+        "New",
+        "oriental"
+      ],
+      "stock": 105,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-155-inspirat-din-si-passione-intense-by-armani",
+      "url": "/products/lessence-no-155-inspirat-din-si-passione-intense-by-armani",
+      "title": "L'Essence No. 155, inspirat din Si passione intense by Armani",
+      "name": "L'Essence No. 155",
+      "inspiration": "Si passione intense by Armani",
+      "inspiration_brand": "Armani",
+      "gender": "femei",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "floral",
+        "fructat",
+        "New"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-156-inspirat-din-toy-boy-by-moschino",
+      "url": "/products/lessence-no-156-inspirat-din-toy-boy-by-moschino",
+      "title": "L'Essence No. 156, inspirat din Toy boy by Moschino",
+      "name": "L'Essence No. 156",
+      "inspiration": "Toy boy by Moschino",
+      "inspiration_brand": "Moschino",
+      "gender": "femei",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "condimentat",
+        "lemnos",
+        "New"
+      ],
+      "stock": 166,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "set-cadou-de-barbați-intens-și-elegant",
+      "url": "/products/set-cadou-de-barbați-intens-și-elegant",
+      "title": "Intens și Elegant",
+      "name": "Intens și Elegant",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [
+        "barbati",
+        "set-3"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/intens.jpg?v=1764685119"
+    },
+    {
+      "handle": "set-cadou-de-barbati-pasiune",
+      "url": "/products/set-cadou-de-barbati-pasiune",
+      "title": "Pasiune",
+      "name": "Pasiune",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [
+        "barbati",
+        "set-3"
+      ],
+      "stock": 18,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/pasine.jpg?v=1764685217"
+    },
+    {
+      "handle": "cutie-de-cadou",
+      "url": "/products/cutie-de-cadou",
+      "title": "Cutie Cadou Premium pentru 3 Parfumuri (doar ambalajul, fără parfumuri)",
+      "name": "Cutie Cadou Premium pentru 3 Parfumuri (doar ambalajul",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [],
+      "stock": 7426,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/cutie-cadou_f9b6257d-17d7-4687-9fa2-1f5db164f3a7.jpg?v=1764682509"
+    },
+    {
+      "handle": "set-cadou-femei-mythic-muses",
+      "url": "/products/set-cadou-femei-mythic-muses",
+      "title": "Mythic Muses",
+      "name": "Mythic Muses",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [
+        "femei",
+        "set-3"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/mystic-muses.jpg?v=1764688299"
+    },
+    {
+      "handle": "set-cadou-barbați-fresh-impact",
+      "url": "/products/set-cadou-barbați-fresh-impact",
+      "title": "Fresh Impact",
+      "name": "Fresh Impact",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [
+        "barbati",
+        "set-3"
+      ],
+      "stock": 35,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/fresh-impact.jpg?v=1764688995"
+    },
+    {
+      "handle": "set-cadou-barbați-dark-leather",
+      "url": "/products/set-cadou-barbați-dark-leather",
+      "title": "Dark Leather",
+      "name": "Dark Leather",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [
+        "barbati",
+        "set-3"
+      ],
+      "stock": 68,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/dark-leather.jpg?v=1764689156"
+    },
+    {
+      "handle": "set-cadou-barbați-royal-signature-blend",
+      "url": "/products/set-cadou-barbați-royal-signature-blend",
+      "title": "Royal Signature Blend",
+      "name": "Royal Signature Blend",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [
+        "barbati",
+        "set-3"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/royal-signature.jpg?v=1764689332"
+    },
+    {
+      "handle": "set-cadou-barbați-daily-gentleman-kit",
+      "url": "/products/set-cadou-barbați-daily-gentleman-kit",
+      "title": "Daily Gentleman Kit",
+      "name": "Daily Gentleman Kit",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [
+        "barbati",
+        "set-3"
+      ],
+      "stock": 107,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/daily-gentleman-kit.jpg?v=1764690012"
+    },
+    {
+      "handle": "set-cadou-barbați-date-nigh-essentials",
+      "url": "/products/set-cadou-barbați-date-nigh-essentials",
+      "title": "Date Night Essentials",
+      "name": "Date Night Essentials",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [
+        "barbati",
+        "set-3"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/date-nigh.jpg?v=1764690853"
+    },
+    {
+      "handle": "alpha",
+      "url": "/products/alpha",
+      "title": "Alpha Seduction",
+      "name": "Alpha Seduction",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [
+        "barbati",
+        "set-6"
+      ],
+      "stock": 35,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/5.jpg?v=1764862332"
+    },
+    {
+      "handle": "urban-fresh",
+      "url": "/products/urban-fresh",
+      "title": "Urban Fresh",
+      "name": "Urban Fresh",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [
+        "barbati",
+        "set-6"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/6.jpg?v=1764859622"
+    },
+    {
+      "handle": "fresh-power",
+      "url": "/products/fresh-power",
+      "title": "Fresh Power",
+      "name": "Fresh Power",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [
+        "barbati",
+        "set-6"
+      ],
+      "stock": 107,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/3.jpg?v=1764859038"
+    },
+    {
+      "handle": "sweet-warm",
+      "url": "/products/sweet-warm",
+      "title": "Sweet & Warm",
+      "name": "Sweet & Warm",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [
+        "barbati",
+        "set-6"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/5.jpg?v=1764862332"
+    },
+    {
+      "handle": "floral-power-icons",
+      "url": "/products/floral-power-icons",
+      "title": "Floral Power Icons",
+      "name": "Floral Power Icons",
+      "inspiration": null,
+      "inspiration_brand": null,
+      "gender": "alt",
+      "family": null,
+      "tags": [
+        "femei",
+        "set-6"
+      ],
+      "stock": 1010,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/5.jpg?v=1764862332"
+    },
+    {
+      "handle": "lessence-no-159-inspirat-din-le-beau-by-jean-paul-gaultier",
+      "url": "/products/lessence-no-159-inspirat-din-le-beau-by-jean-paul-gaultier",
+      "title": "L'Essence No. 159, Inspirat din Le beau by Jean Paul Gaultier",
+      "name": "L'Essence No. 159",
+      "inspiration": "Le beau by Jean Paul Gaultier",
+      "inspiration_brand": "Jean Paul Gaultier",
+      "gender": "barbati",
+      "family": "dulce",
+      "tags": [
+        "cypre",
+        "dulce",
+        "floral"
+      ],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-158-inspirat-din-miss-dior-intense-by-dior",
+      "url": "/products/lessence-no-158-inspirat-din-miss-dior-intense-by-dior",
+      "title": "L'Essence No. 158, Inspirat din Miss Dior Intense by Dior",
+      "name": "L'Essence No. 158",
+      "inspiration": "Miss Dior Intense by Dior",
+      "inspiration_brand": "Dior",
+      "gender": "femei",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "dulce",
+        "fresh"
+      ],
+      "stock": 742,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-161-inspirat-din-cant-get-enough-by-initio",
+      "url": "/products/lessence-no-161-inspirat-din-cant-get-enough-by-initio",
+      "title": "L'Essence No. 161, Inspirat din Can't get Enough by Initio",
+      "name": "L'Essence No. 161",
+      "inspiration": "Can't get Enough by Initio",
+      "inspiration_brand": "Initio",
+      "gender": "unisex",
+      "family": "dulce",
+      "tags": [
+        "dulce",
+        "gurmand",
+        "oriental"
+      ],
+      "stock": 306,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-162-inspirat-din-gentleman-1972-by-ghivency",
+      "url": "/products/lessence-no-162-inspirat-din-gentleman-1972-by-ghivency",
+      "title": "L'Essence No. 162, Inspirat din Gentleman 1972 by Givenchy",
+      "name": "L'Essence No. 162",
+      "inspiration": "Gentleman 1972 by Givenchy",
+      "inspiration_brand": "Givenchy",
+      "gender": "barbati",
+      "family": "aromatic",
+      "tags": [
+        "aromatic",
+        "condimentat",
+        "lemnos"
+      ],
+      "stock": 468,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1.jpg?v=1773126463"
+    },
+    {
+      "handle": "lessence-no-164-inspirat-din-euphoria-by-calvin-klein",
+      "url": "/products/lessence-no-164-inspirat-din-euphoria-by-calvin-klein",
+      "title": "L'Essence No. 164, Inspirat din Euphoria by Calvin Klein",
+      "name": "L'Essence No. 164",
+      "inspiration": "Euphoria by Calvin Klein",
+      "inspiration_brand": "Calvin Klein",
+      "gender": "femei",
+      "family": null,
+      "tags": [],
+      "stock": 12,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1_cd91a15d-0e95-4e7f-a7b5-94d7f642b769.jpg?v=1778479860"
+    },
+    {
+      "handle": "lessence-no-165-inspirat-din-daisy-by-marc-jacobs",
+      "url": "/products/lessence-no-165-inspirat-din-daisy-by-marc-jacobs",
+      "title": "L'Essence No. 165, Inspirat din Daisy by Marc Jacobs",
+      "name": "L'Essence No. 165",
+      "inspiration": "Daisy by Marc Jacobs",
+      "inspiration_brand": "Marc Jacobs",
+      "gender": "femei",
+      "family": "floral",
+      "tags": [
+        "floral",
+        "fresh"
+      ],
+      "stock": 140,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1_e75fa03f-bad6-465a-8aeb-ed7ad92f0cd5.jpg?v=1778484015"
+    },
+    {
+      "handle": "lessence-no-166-inspirat-din-vanille-fatale-by-tom-ford",
+      "url": "/products/lessence-no-166-inspirat-din-vanille-fatale-by-tom-ford",
+      "title": "L'Essence No. 166, Inspirat din Vanille Fatale by Tom Ford",
+      "name": "L'Essence No. 166",
+      "inspiration": "Vanille Fatale by Tom Ford",
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": null,
+      "tags": [],
+      "stock": 0,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1_218381b5-156c-4072-89be-6007fe5f2c62.jpg?v=1778484317"
+    },
+    {
+      "handle": "lessence-no-167-inspirat-din-cherry-smoke-by-tom-ford",
+      "url": "/products/lessence-no-167-inspirat-din-cherry-smoke-by-tom-ford",
+      "title": "L'Essence No. 167, Inspirat din Cherry Smoke by Tom Ford",
+      "name": "L'Essence No. 167",
+      "inspiration": "Cherry Smoke by Tom Ford",
+      "inspiration_brand": "Tom Ford",
+      "gender": "unisex",
+      "family": null,
+      "tags": [],
+      "stock": 42,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1_335f933c-f025-4519-a016-60cbf1798a3a.jpg?v=1778493198"
+    },
+    {
+      "handle": "lessence-no-168-inspirat-din-crystal-noir-by-versace",
+      "url": "/products/lessence-no-168-inspirat-din-crystal-noir-by-versace",
+      "title": "L'Essence No. 168, Inspirat din Crystal Noir by Versace",
+      "name": "L'Essence No. 168",
+      "inspiration": "Crystal Noir by Versace",
+      "inspiration_brand": "Versace",
+      "gender": "femei",
+      "family": null,
+      "tags": [],
+      "stock": 11,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1_6ffe8c65-1c26-437a-aabb-9099167d7f20.jpg?v=1778493459"
+    },
+    {
+      "handle": "lessence-no-170-inspirat-din-fleur-narcotique-by-ex-nihilo",
+      "url": "/products/lessence-no-170-inspirat-din-fleur-narcotique-by-ex-nihilo",
+      "title": "L'Essence No. 170, Inspirat din Fleur Narcotique by Ex Nihilo",
+      "name": "L'Essence No. 170",
+      "inspiration": "Fleur Narcotique by Ex Nihilo",
+      "inspiration_brand": "Ex Nihilo",
+      "gender": "unisex",
+      "family": null,
+      "tags": [],
+      "stock": 275,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1_834dc46d-a931-499e-ba80-1f2689248ade.jpg?v=1778493769"
+    },
+    {
+      "handle": "lessence-no-171-inspirat-din-toy-2-by-moschino",
+      "url": "/products/lessence-no-171-inspirat-din-toy-2-by-moschino",
+      "title": "L'Essence No. 171, Inspirat din Toy 2 by Moschino",
+      "name": "L'Essence No. 171",
+      "inspiration": "Toy 2 by Moschino",
+      "inspiration_brand": "Moschino",
+      "gender": "femei",
+      "family": null,
+      "tags": [],
+      "stock": 198,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1_e1d91d49-41ea-4b98-b348-909b89727991.jpg?v=1778494037"
+    },
+    {
+      "handle": "lessence-no-172-inspirat-din-lira-by-casamorati-1888",
+      "url": "/products/lessence-no-172-inspirat-din-lira-by-casamorati-1888",
+      "title": "L'Essence No. 172, Inspirat din Lira by Casamorati 1888",
+      "name": "L'Essence No. 172",
+      "inspiration": "Lira by Casamorati 1888",
+      "inspiration_brand": "Casamorati 1888",
+      "gender": "femei",
+      "family": null,
+      "tags": [],
+      "stock": 223,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1_f96ceba4-aa40-4fd4-a8a2-2cc939ab1e72.jpg?v=1778494247"
+    },
+    {
+      "handle": "lessence-no-79-inspirat-din-carmina-by-creed",
+      "url": "/products/lessence-no-79-inspirat-din-carmina-by-creed",
+      "title": "L'Essence No. 79, Inspirat din Carmina by CREED",
+      "name": "L'Essence No. 79",
+      "inspiration": "Carmina by CREED",
+      "inspiration_brand": "CREED",
+      "gender": "femei",
+      "family": null,
+      "tags": [
+        "slow"
+      ],
+      "stock": -34,
+      "image": "https://cdn.shopify.com/s/files/1/0881/7275/7337/files/img_product_1_f96ceba4-aa40-4fd4-a8a2-2cc939ab1e72.jpg?v=1778494247"
+    }
+  ],
+  "instock_count": 117
+}
