@@ -5,6 +5,9 @@ description: Analitică RAPIDĂ de livrare / vânzări / transport / retenție /
 
 # Fulfillment analytics (AWBprint — rapid, toate magazinele)
 
+> 🗺️ **Profitabilitate** — pipeline CANONIC + „unde găsesc ce“: `shared/HARTA.md`. Per-SKU/categorie = `metrics-cache/profit_by_sku.py` (transport real + marketing CPA); logica unică = `profit_core.py`.
+> ⚠️ Pt **P&L per-SKU/categorie** canonic folosește `metrics-cache/profit_by_sku.py` (NU acest skill). Aici = livrabilitate/refuz/transport/COD/breakeven din AWBprint.
+
 Date instant din **AWBprint** (DB AWB/Frisbo, secret KB `DATABASE_URL_AWBPRINT`). De ce
 nu warehouse: `metrics.orders/order_line_items` e incomplet (GT ~15% comenzi lipsă);
 AWBprint e ~99% și instant (Postgres). E sora „pe livrare" a lui `gigi:product-sales`.

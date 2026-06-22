@@ -5,6 +5,8 @@ description: All-in P&L for ANY or ALL of the 16+ Arona brands (Esteban, GT, Nub
 
 # multi-brand-pnl
 
+> 🗺️ **Profitabilitate** — pipeline CANONIC + „unde găsesc ce“: `shared/HARTA.md`. Per-SKU/categorie = `metrics-cache/profit_by_sku.py` (transport real + marketing CPA); logica unică = `profit_core.py`.
+
 P&L "all-in" pentru oricare sau toate brandurile Arona.
 
 **DEFAULT = profit REAL** din engine-ul canonic de profitabilitate Scripturi

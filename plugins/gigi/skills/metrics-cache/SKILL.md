@@ -5,6 +5,8 @@ argument-hint: "--table customer_agg [--apply]  |  --all --apply"
 ---
 
 # metrics-cache — the shared read-cache for the warehouse
+
+> 🗺️ **Profitabilitate** — pipeline CANONIC + „unde găsesc ce“: `shared/HARTA.md`. Per-SKU/categorie = `metrics-cache/profit_by_sku.py` (transport real + marketing CPA); logica unică = `profit_core.py`.
 > Author: **Gigi**. Implements the cache layer from `shared/skills-audit.md`.
 
 Many skills (esp. the ~25 CS skills) re-derive the same expensive aggregates from
