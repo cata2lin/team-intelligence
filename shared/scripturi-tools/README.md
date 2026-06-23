@@ -6,7 +6,7 @@ Tool-uri **standalone** (rulabile, au `__main__`) din aplicația Scripturi de pe
 
 | Script | Ce face |
 |---|---|
-| `sync_raport_zilnic.py` | Backfill `daily_perf` + `profit_marketing_override` din sheet-ul „Raport Zilnic 2" (feed-ul care alimentează `multi-brand-pnl --estimat`). |
+| `sync_raport_zilnic.py` | Backfill `daily_perf` + `profit_marketing_override` din sheet-ul „CPA și financiar". **Fără arg** = tab istoric „Raport Zilnic 2" (zile complete, până ieri) → cron `0 4`. **`--today`** = tab „Raport azi" (ziua curentă, refresh ~5 min) → upsert rândul de AZI în daily_perf + refresh override-ul lunii curente → cron `*/10 6-23`. **De ce contează:** marketingul din engine-ul de P&L vine din `profit_marketing_override` (= acest sheet, sursă PRIMARĂ; `cache.product_ad_spend` e doar fallback) — deci când tokenul Meta expiră și cache-ul Meta devine 0/stale, P&L-ul pe brand rămâne corect (citește sheet-ul), iar `--today` asigură că include și ziua curentă. |
 | `sync_barcodes.py` | Sincronizează barcode-urile din toate magazinele Shopify. |
 | `sheets_labels.py` | Generează label-uri + barcode-uri din Google Sheets (per rând). |
 | `shopify_image_manager.py` | Redenumire + compresie + alt-text poze Shopify (moduri: `rename` etc.). |
