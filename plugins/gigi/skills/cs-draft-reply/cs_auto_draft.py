@@ -46,8 +46,8 @@ PLATFORM = {
     "messenger": ("Facebook Messenger", "conversațional, prietenos; privat → date OK."),
     "instagram_dm": ("Instagram DM", "conversațional, prietenos; privat → date OK."),
     "sms": ("SMS", "FOARTE scurt, fără semnătură lungă; privat → date OK."),
-    "facebook_feed_comment": ("Comentariu public Facebook", "PUBLIC → SCURT, cald, POLITICOS la PLURAL (dumneavoastra/va, NU la 'tu'); NU expune comanda/AWB/telefon; invita in privat (DM/inbox)."),
-    "instagram_comment": ("Comentariu public Instagram", "PUBLIC → SCURT, cald, POLITICOS la PLURAL (dumneavoastra/va, NU la 'tu'); NU expune comanda/AWB/telefon; invita in privat (DM)."),
+    "facebook_feed_comment": ("Comentariu public Facebook", "PUBLIC, SCURT (1-2 fraze), cald, cu 1-2 emoji, POLITICOS la PLURAL (dumneavoastra/va, NU la 'tu'); NU expune comanda/AWB/telefon. Pozitiv/lauda -> multumire calda. Intrebare/reclamatie -> raspuns scurt + INVITA CLIENTUL sa ne SCRIE in privat (inbox/Messenger) SAU sa ne SUNE la TELEFON_COMANDA (daca e dat). NU spune 'v-am scris noi in privat' (nu trimitem noi DM)."),
+    "instagram_comment": ("Comentariu public Instagram", "PUBLIC, SCURT (1-2 fraze), cald, cu 1-2 emoji, POLITICOS la PLURAL (dumneavoastra/va, NU la 'tu'); NU expune comanda/AWB/telefon. Pozitiv/lauda -> multumire calda. Intrebare/reclamatie -> raspuns scurt + INVITA CLIENTUL sa ne SCRIE in privat (DM) SAU sa ne SUNE la TELEFON_COMANDA (daca e dat). NU spune 'v-am scris noi in privat' (nu trimitem noi DM)."),
 }
 PAGE_STORE = {
     "426248277236834": "Esteban", "364899953373966": "Ofertele Zilei", "775068272350568": "Magdeal",
@@ -64,6 +64,16 @@ ORDER_PFX = {"EST": "Esteban", "GT": "George Talent", "NUB": "Nubra", "GEN": "Ge
 ORDER_RE = re.compile(r"\b(EST|GT|NUB|GRAND|GRAN|MAG|OFER|RED|BONBG|BON|CZ|PL|BELA|GEN|CARP|COV|APR|ROSSI)[ -]?(\d{4,7})\b", re.I)
 # brand -> limba pieței (semnal SIGUR de limbă, mai fiabil decât detecția LLM pe comentarii scurte)
 STORE_LANG = {"Bonhaus CZ": "cz", "Bonhaus PL": "pl", "Bonhaus BG": "bg"}
+# brand (store_name) -> telefon comenzi (luat de pe site-urile publice; fetch-brand-phones)
+STORE_PHONE = {
+    "Esteban": "0732 781 468", "George Talent": "0732 781 468",
+    "Nubra": "0729 748 961", "Grandia": "0729 748 961",
+    "Belasil": "0729 748 943", "Gento": "0729 748 943",
+    "Carpetto": "0729 748 943", "Covoria": "0729 748 943", "Rossi Nails": "0729 748 943",
+    "Apreciat": "0729 748 943", "Casa Ofertelor": "0729 748 943",
+    "Bonhaus BG": "0885493926", "Bonhaus CZ": "+420 724 216 967", "Bonhaus PL": "0376300646",
+    "Nocturna BG": "0876813240",
+}
 STORE_NORM = {"GRAND": "GRAN"}
 CH_LABEL = {"facebook_feed_comment": "FB comentariu", "facebook_message": "FB mesaj", "messenger": "Messenger",
             "instagram_comment": "IG comentariu", "instagram_message": "IG mesaj", "instagram_dm": "IG DM",
@@ -177,6 +187,7 @@ def llm(system, user, js=False):
 
 # ---- pasul de IDENTIFICARE (triaj) ----
 IDENTIFY_SYS = """Ești triajul Customer Service ARONA (magazine COD: parfumuri Esteban/GT/Nubra/Gento/Lab Noir; casă Grandia/Carpetto/Covoria; Bonhaus RO/CZ/PL/BG; Belasil; Magdeal/Ofertele Zilei/Reduceri bune/Apreciat/Rossi Nails).
+IMPORTANT — răspundem la ULTIMUL mesaj al clientului (marcat cu „>>> ULTIMUL MESAJ AL CLIENTULUI" în conversație). Firul de dinainte = DOAR context. Dacă ultimul mesaj e mulțumire / feedback pozitiv / „a ajuns" / „sunt foarte bune", atunci `category`=recenzie_feedback și NU mai e WISMO/problemă — chiar dacă firul a ÎNCEPUT cu o întrebare de livrare. Nu trata o întrebare deja rezolvată ca fiind încă deschisă.
 Citește mesajul clientului + comenzile + istoricul și IDENTIFICĂ exact problema. Întoarce STRICT JSON:
 {"problem":"<1 frază concretă: ce vrea / ce s-a întâmplat>",
  "category":"livrare_wismo|retur|schimb_swap|anulare|modificare_comanda|problema_produs|refuz_livrare|plata_factura|presale_intrebare|comanda_noua|recenzie_feedback|comentariu_social|spam_automat|altele",
@@ -189,30 +200,35 @@ Citește mesajul clientului + comenzile + istoricul și IDENTIFICĂ exact proble
  "order":"<nr comandă referit explicit sau ''>",
  "new_address":"","new_city":"","new_zip":"","new_phone":"","items":"<sku/titlu:cant sau ''>",
  "product":"<produsul concret la care se referă clientul, dacă reiese, altfel ''>",
- "comment_action":"hide|private_reply|public_and_private|public|none",
+ "comment_action":"hide|public|none",
  "spam":true|false,
  "confidence":0.0-1.0,"missing":["ce date lipsesc"]}
 SPAM (pe ORICE canal — email, DM FB/IG, comentariu): true dacă mesajul NU necesită răspuns CS — notificări automate (Meta/Facebook business, judge.me „left a review”, newsletter, reset parolă, „do not reply”, out-of-office, confirmări automate), boți, mesaje promoționale nesolicitate / spam evident. Aceste tichete se EXCLUD (nu primesc draft).
-ESCALADARE: URGENT = ANPC/juridic/amenințare (avocat, instanță, dau în judecată, denunț), chargeback, refund PROMIS dar neefectuat, client foarte agresiv. HIGH = reclamație serioasă (produs/livrare) cu client supărat, client care a scris REPETAT fără rezolvare, comandă de valoare mare / client cu multe comenzi. Altfel none.
-COMMENT_ACTION (doar comentarii PUBLICE FB/IG; pe celelalte canale = "none"). REGULA: la comentariile care merită răspuns CS punem DOUĂ mesaje — unul SCURT în comentariu (public) + unul DETALIAT în privat (DM):
-  • "hide" = DOAR spam/troll/abuz/vulgaritate/ofense (de ascuns de pe reclamă).
-  • "public_and_private" = RECLAMAȚIE/nemulțumire SAU întrebare (presale: preț/stoc/disponibilitate/culori/mărimi/„mai aveți?", ori orice întrebare reală) → mesaj PUBLIC SCURT în comentariu (reclamație: scuze scurte + „ți-am scris în privat să rezolvăm"; întrebare: răspuns scurt/general + „ți-am trimis detalii în privat"), FĂRĂ date personale + mesaj PRIVAT (DM) detaliat care chiar rezolvă.
-  • "public" = comentariu benign / întrebare minoră care merită DOAR un răspuns public scurt (fără nevoie de DM).
-  • "private_reply" = caz RAR, foarte sensibil, unde un mesaj public NU e potrivit deloc → doar privat.
-  • "none" = pozitiv/neutru/recenzie/laudă fără întrebare → se lasă cum e.
+ESCALADARE: URGENT = ANPC/juridic/amenințare (avocat, instanță, dau în judecată, denunț), chargeback, refund PROMIS dar neefectuat, client foarte agresiv. HIGH = reclamație serioasă (produs/livrare) cu client clar SUPĂRAT, SAU client care a scris REPETAT despre ACEEAȘI problemă nerezolvată și e frustrat. Altfel none. ATENȚIE: o simplă întrebare de status (WISMO) politicoasă NU se escaladează — chiar dacă clientul are nr. comandă, multe comenzi sau istoric de tichete (volumul/„a mai scris de N ori" în istoric NU e, singur, motiv de escaladare). Se rezolvă direct. COMENTARII PUBLICE (FB/IG): nemulțumire de produs / „nu funcționează" / „păcălit" / „țeapă" / „mic"/„prost" FĂRĂ ANPC/juridic/amenințare → NU escalada; primește răspuns public scurt + invitație în privat. Escaladează un comentariu public DOAR la semnale URGENT (ANPC/juridic/amenințare/refund promis).
+COMMENT_ACTION (doar comentarii PUBLICE FB/IG; pe celelalte canale = "none"). NU trimitem mesaje private (DM) — răspundem PUBLIC, scurt; dacă e nevoie de rezolvare, INVITĂM clientul să ne scrie în privat sau să sune:
+  • "hide" = DOAR spam/troll/abuz/vulgaritate/ofense/reclamă străină (de ascuns de pe postare).
+  • "public" = orice comentariu care merită un răspuns public scurt — laudă/recenzie (mulțumire caldă), întrebare presale (preț/stoc/disponibilitate/„mai aveți?"), reclamație ușoară. La întrebare/reclamație → invită clientul să ne scrie în privat (inbox) sau să ne SUNE la numărul magazinului.
+  • "none" = comentariu pur zgomot (tag de prieten fără conținut, off-topic) care nu necesită niciun răspuns → se lasă cum e.
 RĂSPUNSURILE ȘI PROCEDURILE DEPIND DE BRAND ȘI DE PRODUS: ține cont de magazin (parfumuri Esteban/GT/Nubra/Gento vs casă/mobilă Grandia/Carpetto/Covoria vs cosmetice/deals) și de produsul concret (extrage-l în „product").
 ACȚIUNE: action!="none" DOAR dacă e cerere clară de modificare adresă/telefon (modify), anulare (cancel), schimb produs (swap) sau retrimitere produs spart/lipsă (resend). Dacă nu e clar ce comandă sau lipsesc date → action="none" + missing. NU inventa nimic. Răspunde DOAR JSON."""
 
 # ---- generarea DRAFTULUI ----
 SYSTEM = """Ești agent Customer Service ARONA. Scrii ca un agent REAL (Cristina/Diana/Irina/Martina/Alexandra) — cald, politicos, natural, cu diacritice, fără limbaj robotic.
+RĂSPUNZI LA ULTIMUL MESAJ AL CLIENTULUI (marcat „>>> ULTIMUL MESAJ AL CLIENTULUI" în conversație); restul firului = context. Dacă ultimul mesaj e mulțumire / „a ajuns" / feedback pozitiv (ex. „Foarte bune, mulțumesc!") → răspunde CALD la el (te bucuri că i-au plăcut, mulțumești), NU relua întrebarea veche, NU cere AWB/nr comandă/telefon și NU trata ca WISMO.
 REGISTRU (important): FORMAL, la PLURAL, pe TOATE canalele (email, DM, chat, comentariu) — în română „dumneavoastră/vă/-ți" (NICIODATĂ „tu/ție/te/-i"); în alte limbi registrul politicos echivalent. Așa scriu agenții ARONA reali („Vă rugăm", „Vă informăm", „Vă mulțumim").
 PROCEDURI:
-- LIVRARE/WISMO: cu AWB+curier dă linkul corect DUPĂ curier (nu presupune DPD): DPD https://tracking.dpd.ro?shipmentNumber=<AWB>; Sameday https://www.sameday.ro/#awb=<AWB>; Packeta https://tracker.packeta.com/ro/?id=<AWB>; Econt https://www.econt.com/en/services/track-shipment/<AWB>. Întârziat → scuze+estimare. Fără AWB → spui că verifici și revii sau ceri nume+telefon+nr comandă.
+- LIVRARE/WISMO: răspunde DIRECT, dar NU INVENTA. DOAR dacă în context ai AWB+curier confirmat → dă statusul real + linkul corect DUPĂ curier (DPD https://tracking.dpd.ro?shipmentNumber=<AWB>; Sameday https://www.sameday.ro/#awb=<AWB>; Packeta https://tracker.packeta.com/ro/?id=<AWB>; Econt https://www.econt.com/en/services/track-shipment/<AWB>) + scuze dacă e întârziat. Dacă NU ai AWB/status confirmat în context → NU afirma statusul comenzii (NU spune „e în procesare / urmează să fie preluată"), NU promite un termen ferm în zile și NU promite tracking ca sigur — ar fi o halucinație care duce la refuz/reclamație. Spune ONEST că verifici stadiul comenzii împreună cu curierul și revii cu detaliile de livrare + tracking cât mai curând. Nu cere date pe care le ai deja; cere nume+nr comandă DOAR dacă nu poți identifica comanda.
 - RETUR: ARONA e COD și NU încurajează returul → întreabă motivul + oferă alternativă; insistă și e eligibil → formular https://bi.grandia.ro/returns?order=<nr>&email=<email> + „Suma vă va fi returnată în maximum 14 zile de la ajungerea coletului." Parfum/igienă DESIGILAT → refuz politicos.
 - PRODUS SPART (parfum): NU refund → RETRIMITERE GRATUITĂ + parfum CADOU. DEFECT/LIPSĂ (casă): cere poză; pe stoc → retrimitere/schimb; altfel retur+refund.
-- PRE-VÂNZARE: răspuns clar, încurajează comanda. RECENZIE/COMPLIMENT: mulțumește scurt și cald.
+- PRE-VÂNZARE / INTENȚIE DE CUMPĂRARE („vreau și eu", „dacă sunt bune", „cum comand", „îl iau"): răspuns CALD și entuziast care CONFIRMĂ și ÎNCURAJEAZĂ comanda — spune CUM comandă (direct de pe site SAU sunând la `TELEFON_COMANDĂ` dacă apare în context); NU deflecta seac cu „dacă aveți întrebări scrieți-ne". RECENZIE/COMPLIMENT: mulțumește scurt și cald.
+- DESCRIE PRODUSUL POTRIVIT CATEGORIEI (NU generic): parfumuri (Esteban/GT/Nubra/Gento) → miros/arome inspirate din branduri cunoscute/persistență/preț accesibil — NU „aspect plăcut" (e parfum, nu obiect); genți/încălțări → piele ecologică/aspect frumos; casă/covoare (Grandia/Carpetto/Covoria) → calitate/utilitate. Evită lauda generică „produse de calitate bună și aspect plăcut" care nu se potrivește categoriei.
+- COMANDĂ / „vreau să comand": recomandă clientului să SUNE pentru a plasa comanda, la numărul magazinului — dacă apare în context ca `TELEFON_COMANDĂ`, dă-l explicit („ne puteți suna la <număr> pentru comandă"); altfel îndrumă-l să comande de pe site / să lase un număr ca să-l sunăm.
+PRODUSE — ONESTITATE: multe produse ARONA sunt REPLICI/imitații, NU originale. Parfumurile sunt INSPIRATE din branduri cunoscute (la o fracțiune din preț), nu sunt parfumurile originale. Genți/accesorii „din piele" sunt de regulă PIELE ECOLOGICĂ / imitație, nu piele naturală. La întrebări de tip „e original?", „e piele adevărată?" → răspunde ONEST și pozitiv: spune sincer că e imitație/piele ecologică/parfum inspirat — NU pretinde că e original sau piele naturală, dar valorifică (calitate bună, aspect frumos, preț accesibil).
+COMENTARII PUBLICE (FB/IG) — CALD, NU robotic, SCURT (1-2 fraze), cu 1-2 emoji potrivite (😊❤️🙏🔥🌸): răspunde la SPIRITUL comentariului. Laudă / „subscriu" / tag de prieten / entuziasm → mulțumire caldă + entuziasm, FĂRĂ să împingi inutil „scrieți-ne în privat". Întrebare reală / nemulțumire → răspuns scurt la obiect, apoi INVITĂ CLIENTUL să ne scrie în privat (inbox/Messenger/DM) SAU să ne SUNE la `TELEFON_COMANDĂ` (dacă apare în context, dă numărul explicit). NU spune „v-am scris în privat" / „ți-am trimis detalii" — NOI nu trimitem DM; clientul ne contactează. La o întrebare SIMPLĂ (preț, dimensiune, disponibilitate) NU împinge automat „în privat": dacă ai informația, dă-o pe loc în comentariu; dacă NU o ai (nu știi produsul exact), întreabă SCURT chiar în comentariu la ce produs se referă, sau invită-l să sune/comande — „scrieți-ne în privat" doar când chiar e nevoie de date personale. Dacă în context apare „POSTAREA/RECLAMA la care comentează", folosește-o ca să identifici PRODUSUL și răspunde la obiect (NU mai întreba „ce produs", clientul comentează exact la acel produs). Dacă reclamă un canal care nu merge (ex. „sun de zile și nu răspunde nimeni"), recunoaște problema și asigură-l că revenim noi, nu-l trimite înapoi la același canal. Evită formula seacă „Vă mulțumim pentru comentariu! Dacă aveți nevoie… scrieți-ne în privat".
 REGULA DE ACȚIUNE: dacă în context apare `ACTIUNE_APLICATA: …` → confirmă acțiunea ca FĂCUTĂ. Dacă NU → nu spune niciodată că ai modificat/anulat ceva; confirmă că ai PRELUAT solicitarea sau cere datele lipsă. NU inventa.
 CALIBRARE SENTIMENT: negativ → scuze sincere + asumare + soluție; pozitiv → cald; neutru → la obiect.
+SALUT PE NUME: pe canale PRIVATE (email/DM/chat) folosește doar PRENUMELE dacă e curat; dacă numele pare concatenat/neformatat (prenume+nume lipite, fără spațiu, majusculă în interior — ex. „GheorghesiGerda") sau incert → adresare neutră. Pe COMENTARII PUBLICE (FB/IG) NU folosi numele clientului (nici prenume, nici nume de familie — ex. „doamnă Nechita") — e expunere de date personale într-un spațiu public; adresează-te neutru („Bună ziua").
+CANAL RECLAMAT: dacă clientul spune explicit că un canal NU funcționează (ex. „sun de zile și nu răspunde nimeni") → NU-l trimite înapoi la acel canal; recunoaște problema și oferă o ALTERNATIVĂ (scrieți-ne în privat cu nr. comenzii, revenim noi).
 REGULI: limba clientului; DOAR datele din context (fără AWB/prețuri/nr inventate); respectă STILUL platformei; pe canale PUBLICE (comentarii FB/IG) scrie POLITICOS, la PLURAL (dumneavoastră/vă, NICIODATĂ „tu/ție/te") și nu scrie date personale (invită în privat); gramatică corectă („ți-am scris/v-am scris", nu „te-am scris"); DOAR textul răspunsului. Email → salut + semnătură „Cu drag, Echipa <Magazin>"; dacă magazinul e necunoscut/generic, semnează „Cu drag, echipa noastră" (NU „Echipa magazinul nostru"). Comentariu public → 1-3 fraze."""
 
 HOLDING = """Ești agent CS ARONA. Cazul e ESCALADAT spre un coleg. Scrie DOAR un mesaj SCURT de AȘTEPTARE în limba clientului: confirmă că ai preluat sesizarea și că un coleg revine cât mai curând (azi/în cel mai scurt timp). Ton cald, empatic dacă e supărat. REGISTRU FORMAL, la PLURAL — în română „dumneavoastră/vă" (NU „tu/ție/te"); alte limbi: registrul politicos echivalent. NU promite soluții concrete, NU da detalii de comandă pe canal public. Email → salut + „Cu drag, Echipa <Magazin>"; dacă magazinul e necunoscut/generic, semnează „Cu drag, echipa noastră" (NU „Echipa magazinul nostru"). Comentariu public → 1-2 fraze + invitație în privat."""
@@ -274,6 +290,31 @@ def customer_ident(conv_no):
         return json.loads(out[out.index("{"):]) if "{" in out else {}
     except Exception:
         return {}
+
+
+_TAG_CACHE = {}
+AI_TAG = "ai-draft"   # tag-ul pus pe tichetele tratate de AI; suprascris de --tag (ex. ai-live la rulări live)
+def tag_id(mcp, name):
+    """Rezolvă nume tag → ID (add_tags_to_conversation acceptă DOAR UUID). Caută; dacă nu există, creează. Cache."""
+    if name in _TAG_CACHE:
+        return _TAG_CACHE[name]
+    tid = None
+    r = mcp.call("list_tags", {"query": name})
+    for t in (r.get("tags") or []) if isinstance(r, dict) else []:
+        if t.get("name") == name:
+            tid = t.get("id"); break
+    if not tid:
+        c = mcp.call("create_tag", {"name": name})
+        tid = c.get("id") if isinstance(c, dict) else None
+    if tid:
+        _TAG_CACHE[name] = tid
+    return tid
+
+def add_tags(mcp, cid, names):
+    """Atașează tag-uri (după NUME) rezolvându-le în ID-uri — fiindcă MCP cere UUID."""
+    ids = [i for i in (tag_id(mcp, n) for n in names) if i]
+    if ids and cid:
+        mcp.call("add_tags_to_conversation", {"conversation_id": cid, "tags": ids})
 
 
 def load_queue():
@@ -345,16 +386,45 @@ def run_cs_action(cmd_args, apply=False, agent=None):
         return 1, "(eroare cs-actions: %s)" % e
 
 
+_PAGE_TOK_CACHE = {}
 def fb_page_token(page_id):
-    sys_tok = secret("META_SYSTEM_TOKEN") or secret("META_USER_TOKEN")
-    if not sys_tok or not page_id:
+    """Token de PAGINĂ pt page_id. Încearcă pe rând tokenurile de sistem (un cont vede doar paginile lui).
+    Întoarce token de pagină REAL doar dacă vreun token chiar are acces la pagină; altfel None (NU minți callerul)."""
+    if not page_id:
         return None
-    try:
-        u = "https://graph.facebook.com/v19.0/%s?fields=access_token&access_token=%s" % (page_id, urllib.parse.quote(sys_tok))
-        r = json.loads(urllib.request.urlopen(u, timeout=30).read())
-        return r.get("access_token") or sys_tok
-    except Exception:
-        return sys_tok
+    if page_id in _PAGE_TOK_CACHE:
+        return _PAGE_TOK_CACHE[page_id]
+    for key in ("META_PAGES_TOKEN", "META_SYSTEM_TOKEN_3", "META_SYSTEM_TOKEN", "META_SYSTEM_TOKEN_2", "META_SYSTEM_TOKEN_4", "META_USER_TOKEN"):
+        sys_tok = secret(key)
+        if not sys_tok or sys_tok.startswith("REVOKED"):
+            continue
+        try:
+            u = "https://graph.facebook.com/v19.0/%s?fields=access_token&access_token=%s" % (page_id, urllib.parse.quote(sys_tok))
+            r = json.loads(urllib.request.urlopen(u, timeout=30).read())
+            if isinstance(r, dict) and r.get("access_token"):
+                _PAGE_TOK_CACHE[page_id] = r["access_token"]
+                return r["access_token"]
+        except Exception:
+            continue
+    _PAGE_TOK_CACHE[page_id] = None
+    return None
+
+
+def fb_post_text(post_id, page_id):
+    """Textul postării/reclamei la care comentează clientul (Graph, token de pagină). '' dacă nu avem acces."""
+    tok = fb_page_token(page_id)
+    if not tok or not post_id:
+        return ""
+    for cand in ("%s_%s" % (page_id, post_id), str(post_id)):
+        try:
+            u = "https://graph.facebook.com/v19.0/%s?fields=message,story&access_token=%s" % (urllib.parse.quote(cand), urllib.parse.quote(tok))
+            r = json.loads(urllib.request.urlopen(u, timeout=30).read())
+            msg = (r.get("message") or r.get("story") or "") if isinstance(r, dict) else ""
+            if msg:
+                return " ".join(msg.split())[:500]
+        except Exception:
+            continue
+    return ""
 
 
 def fb_hide_comment(comment_id, page_id, hide=True):
@@ -432,24 +502,50 @@ def do_approve(mcp, conv_no, agent):
             except Exception:
                 pass
     if p.get("hide"):
-        h = p["hide"]; mode = h.get("mode", "hide")
-        if mode == "private_reply":
-            print("PRIVATE REPLY (DM) #%s:" % conv_no, fb_private_reply(h.get("comment_id"), h.get("page_id"), p.get("draft") or ""))
-        elif mode == "public_and_private":
-            print("PUBLIC draft salvat + PRIVATE REPLY (DM) #%s:" % conv_no,
-                  fb_private_reply(h.get("comment_id"), h.get("page_id"), h.get("private_msg") or ""))
-        else:
-            print("HIDE #%s:" % conv_no, fb_hide_comment(h.get("comment_id"), h.get("page_id"), hide=True))
+        h = p["hide"]
+        print("HIDE #%s:" % conv_no, fb_hide_comment(h.get("comment_id"), h.get("page_id"), hide=True))
         applied_ok = True
-    # NU pune textul pe comentariul public la private_reply (DM-only) sau hide — ar fi un foot-gun de publicare
+    # la hide NU salvăm draft (comentariul se ascunde); altfel salvăm draftul public
     _cmode = (p.get("hide") or {}).get("mode")
-    if p.get("draft") and _cmode not in ("private_reply", "hide"):
+    if p.get("draft") and _cmode != "hide":
         res = mcp.call("create_draft", {"conversation_id": p["cid"], "body": p["draft"]})
         ok = not (isinstance(res, dict) and res.get("_error"))
         print("✅ DRAFT salvat (NU trimis)." if ok else "⚠️ create_draft: %s" % res)
+    if applied_ok and p.get("cid"):  # marchează tichetul drept tratat de AI
+        add_tags(mcp, p["cid"], [AI_TAG])
     if applied_ok:  # consumă acțiunile ca să nu se reaplice la o a doua rulare --approve
         p["cmd"] = None; p["hide"] = None; p["applied"] = True
         q[str(conv_no)] = p; save_queue(q)
+
+
+def do_send(mcp, conv_no, agent):
+    """TRIMITE LIVE răspunsul (draftul din coadă) la client prin send_message. Customer-facing, ireversibil.
+    Doar per-tichet, explicit. Refuză escaladările (acelea cer om) și retrimiterea."""
+    q = load_queue()
+    p = q.get(str(conv_no))
+    if not p:
+        print("Nicio propunere salvată pentru #%s. Rulează întâi flow-ul." % conv_no); return
+    if p.get("sent"):
+        print("#%s a fost deja TRIMIS — nu retrimit (evit dublarea)." % conv_no); return
+    if p.get("escalate"):
+        print("#%s e ESCALADAT → preia un om, NU trimit automat (draftul e doar mesaj de așteptare)." % conv_no); return
+    if (p.get("hide") or {}).get("mode") == "hide":
+        print("#%s e propus la HIDE (spam) — nu e de trimis un răspuns." % conv_no); return
+    draft = (p.get("draft") or "").strip()
+    cid = p.get("cid")
+    if not draft or not cid:
+        print("#%s nu are draft/conversation_id de trimis." % conv_no); return
+    res = mcp.call("send_message", {"conversation_id": cid, "body": draft})
+    ok = not (isinstance(res, dict) and res.get("_error"))
+    if ok:
+        print("📤 TRIMIS LIVE la client #%s (send_message)." % conv_no)
+        add_tags(mcp, cid, [AI_TAG, "ai-sent"])
+        # tichetul a primit răspuns → îl ÎNCHIDEM (să nu rămână open)
+        cres = mcp.call("update_conversation_status", {"conversation_id": cid, "status": "CLOSED"})
+        print("   ✅ Tichet ÎNCHIS (CLOSED) după răspuns." if not (isinstance(cres, dict) and cres.get("_error")) else "   ⚠️ close eșuat: %s" % cres)
+        p["sent"] = True; q[str(conv_no)] = p; save_queue(q)
+    else:
+        print("⚠️ send_message a EȘUAT pentru #%s: %s" % (conv_no, res))
 
 
 def escalation_note(level, reason, problem, name, phone, email, order_line, elsewhere, sent, suggested):
@@ -476,30 +572,49 @@ def main():
     ap.add_argument("--scan", type=int, default=150)
     ap.add_argument("--json", action="store_true", help="emite drafturile structurat (audit/integrare) — JSON pe ultima linie după marcajul @@JSON@@")
     ap.add_argument("--close-spam", action="store_true", help="închide (CLOSED) + tag 'spam' tichetele detectate ca spam/notificare automată")
+    ap.add_argument("--tag", default="ai-draft", help="tag-ul pus pe tichetele tratate de AI (ex. --tag ai-live pt o rulare live)")
+    ap.add_argument("--only", default=None, help="procesează DOAR aceste numere de conversație (lista separată prin virgulă) — pt regenerare țintită")
+    ap.add_argument("--send", default=None, help="nr conversație: TRIMITE LIVE răspunsul (draftul din coadă) la client via send_message — customer-facing, IREVERSIBIL (refuză escaladări/hide/retrimitere)")
     a = ap.parse_args()
+    global AI_TAG
+    AI_TAG = a.tag
     ALLOWED = set(x.strip().lower() for x in a.actions.split(",") if x.strip() and x.strip().lower() != "none")
     mcp = MCP(secret("RICHPANEL_MCP_TOKEN"))
     COURIER = {"dpd-ro": "DPD", "dpd": "DPD", "sameday": "Sameday", "packeta": "Packeta", "econt": "Econt"}
 
     if a.approve:
         do_approve(mcp, a.approve, a.agent); return
+    if a.send:
+        do_send(mcp, a.send, a.agent); return
 
-    picked, page, seen = [], 1, set()
-    while len(picked) < a.limit and len(seen) < a.scan:
-        args = {"status": "open", "page": page, "per_page": 50, "sortKey": "last_message_at", "order": "desc"}
-        if a.channel: args["channel"] = a.channel
-        r = mcp.call("list_conversations", args)
-        batch = (r.get("tickets") or r.get("conversations") or r.get("results") or []) if isinstance(r, dict) else []
-        if not batch: break
-        for t in batch:
-            cid = t.get("id") or t.get("conversation_no")
-            if cid in seen: continue
-            seen.add(cid)
-            if (t.get("last_message_sender_type") or "").lower() != "customer": continue
-            picked.append(t)
-            if len(picked) >= a.limit: break
-        if not (isinstance(r, dict) and r.get("has_more")): break
-        page += 1
+    ONLY = [x.strip().lstrip("#") for x in (a.only or "").split(",") if x.strip()]
+    picked = []
+    if ONLY:
+        # regenerare ȚINTITĂ: ia fiecare tichet DIRECT după număr (robust, indiferent de status/pagină)
+        for no in ONLY:
+            cv = mcp.call("get_conversation", {"conversation_number": no, "mode": "compact"})
+            tk = cv.get("ticket") if isinstance(cv, dict) else None
+            if tk:
+                picked.append(tk)
+            else:
+                print("  ⚠️ #%s negăsit (sărit)." % no)
+    else:
+        page, seen = 1, set()
+        while len(picked) < a.limit and len(seen) < a.scan:
+            args = {"status": "open", "page": page, "per_page": 50, "sortKey": "last_message_at", "order": "desc"}
+            if a.channel: args["channel"] = a.channel
+            r = mcp.call("list_conversations", args)
+            batch = (r.get("tickets") or r.get("conversations") or r.get("results") or []) if isinstance(r, dict) else []
+            if not batch: break
+            for t in batch:
+                cid = t.get("id") or t.get("conversation_no")
+                if cid in seen: continue
+                seen.add(cid)
+                if (t.get("last_message_sender_type") or "").lower() != "customer": continue
+                picked.append(t)
+                if len(picked) >= a.limit: break
+            if not (isinstance(r, dict) and r.get("has_more")): break
+            page += 1
 
     head = "APLICAT — drafturi + rutare escaladare scrise (acțiuni NU)" if a.create_draft else "DRY-RUN — nimic scris"
     print("═" * 92)
@@ -522,8 +637,9 @@ def main():
         subj = t.get("subject") or ""; first = t.get("first_message") or ""
         blob = subj + " " + first
 
+        last_cust = " ".join(first.split())[:400]   # mesajul CURENT al clientului (la care răspundem); implicit = primul
         if (t.get("comment_count") or 1) <= 1 and is_public:
-            tr = "- [CLIENT] " + " ".join(first.split())[:400]
+            tr = "- [CLIENT] " + last_cust
         else:
             cv = mcp.call("get_conversation", {"conversation_number": str(no), "mode": "audit", "max_messages": 20})
             msgs = (cv.get("messages_page") or {}).get("messages") or cv.get("messages") or []
@@ -532,9 +648,22 @@ def main():
                 if m.get("is_private"): continue
                 txt = " ".join((m.get("text") or "").split())
                 if not txt: continue
+                is_client = not m.get("is_ai") and not m.get("author_is_workspace_agent")
                 who = "[AI]" if m.get("is_ai") else ("[AGENT]" if m.get("author_is_workspace_agent") else "[CLIENT]")
                 lines.append("- %s %s" % (who, txt[:400]))
-            tr = "\n".join(lines) or ("- [CLIENT] " + " ".join(first.split())[:400])
+                if is_client:
+                    last_cust = txt[:400]   # reține ULTIMUL mesaj al clientului din fir
+            tr = "\n".join(lines) or ("- [CLIENT] " + last_cust)
+        # marchează explicit ULTIMUL mesaj al clientului — la EL răspundem; restul firului = doar context
+        tr = tr + "\n>>> ULTIMUL MESAJ AL CLIENTULUI (răspunde la ACESTA; restul firului = context): " + last_cust
+        # pe comentarii publice: atașează textul POSTĂRII/reclamei la care comentează clientul (clientul o vede → și noi trebuie),
+        # dacă avem token de pagină pt brandul respectiv (altfel '' → fallback la a întreba ce produs)
+        if is_public:
+            _pg = ((t.get("to") or {}).get("id") if isinstance(t.get("to"), dict) else "") or ""
+            _segs = str(cid).split("_")
+            _post_txt = fb_post_text(_segs[1], _pg) if (len(_segs) >= 2 and _pg) else ""
+            if _post_txt:
+                tr = "POSTAREA/RECLAMA la care comentează clientul (folosește-o ca să identifici PRODUSUL și să răspunzi la obiect): " + _post_txt + "\n" + tr
 
         sent_lab, sent_int = sentiment(blob + " " + tr)
         store_name = PAGE_STORE.get(((t.get("to") or {}).get("id") if isinstance(t.get("to"), dict) else None) or "") or "magazinul nostru"
@@ -583,13 +712,13 @@ def main():
             print("  [%d/%d] #%s · %s · %s · 🚫 SPAM/automat → EXCLUS (fără draft)" % (i, len(picked), no, store_name, channel))
             print("  motiv: %s" % (idn.get("problem") or " ".join((first or subj).split())[:70]))
             if a.close_spam and cid:
-                mcp.call("add_tags_to_conversation", {"conversation_id": cid, "tags": ["spam"]})
+                add_tags(mcp, cid, ["spam"])
                 res = mcp.call("update_conversation_status", {"conversation_id": cid, "status": "CLOSED"})
                 ok = not (isinstance(res, dict) and res.get("_error"))
                 print("  🗑️ Închis + tag spam." if ok else "  ⚠️ close: %s" % res)
             else:
                 print("  → ar închide+arhiva (rulează cu --close-spam ca să le închizi).")
-            rows.append({"no": no, "store": store_name, "channel": channel, "cat": cat, "spam": True, "draft": "", "private_msg": ""})
+            rows.append({"no": no, "store": store_name, "channel": channel, "cat": cat, "spam": True, "draft": ""})
             continue
 
         # escaladare: identificată de LLM SAU semnale dure
@@ -634,34 +763,28 @@ def main():
                 elif act != "none":
                     proposal_line = "ℹ️ Acțiune neclară/insuficientă → doar draft (cere date)."
 
-        # ---- 2.5) Moderare comentariu public FB/IG (depinde de brand+produs): hide spam / privat la reclamații / public+privat la presale ----
+        # ---- 2.5) Moderare comentariu public FB/IG (corectează replyzen): hide spam/abuz; restul = răspuns PUBLIC scurt (NU trimitem DM — invităm clientul în privat/telefon) ----
         hide_obj = None
         cact = idn.get("comment_action") or "none"
         page_id = ((t.get("to") or {}).get("id") if isinstance(t.get("to"), dict) else "") or ""
-        PRIV_STYLE = "se trimite PRIVAT (nu public) → empatic, preia problema, cere nr comenzii + detalii ca să rezolvi; NU mai spune „scrie-ne în privat” (deja ești în privat)."
         if is_public and cact == "hide":
             hide_obj = {"comment_id": cid, "page_id": page_id, "mode": "hide"}
             proposal_line = (proposal_line + "\n  " if proposal_line else "") + "🙈 PROPUNERE HIDE (spam/abuz) — ascunde comentariul; aprobă cu --approve %s" % no
-        elif is_public and cact == "private_reply":
-            hide_obj = {"comment_id": cid, "page_id": page_id, "mode": "private_reply"}
-            proposal_line = (proposal_line + "\n  " if proposal_line else "") + "📩 PROPUNERE PRIVATE REPLY — contactează clientul în PRIVAT (DM), nu public; aprobă cu --approve %s" % no
-            plat_label, plat_rule = "Mesaj PRIVAT (DM) către client", PRIV_STYLE   # draftul = mesajul privat
-        elif is_public and cact == "public_and_private":
-            hide_obj = {"comment_id": cid, "page_id": page_id, "mode": "public_and_private"}
-            proposal_line = (proposal_line + "\n  " if proposal_line else "") + "📣+📩 PROPUNERE PUBLIC + PRIVAT — comentariu public SCURT + DM detaliat; aprobă cu --approve %s" % no
-            plat_label, plat_rule = "Comentariu public (SCURT, politicos, PLURAL)", "PUBLIC, politicos, la PLURAL (dumneavoastra/va), 1-2 fraze, FARA date personale. Reclamatie -> scuze scurte + 'v-am scris in privat sa rezolvam'. Intrebare -> raspuns scurt/general + 'v-am trimis detalii in privat'. Gramatica corecta: 'v-am scris' / 'ti-am scris', NICIODATA 'te-am scris'. Mesajul detaliat merge SEPARAT in DM."
 
         # ---- 3) DRAFT ----
         sys_prompt = HOLDING if is_esc else SYSTEM
-        # pe canale PUBLICE redactăm datele personale STRUCTURAL (nu doar prin prompt)
-        is_dm = (hide_obj or {}).get("mode") == "private_reply"   # canal PRIVAT → datele clientului pot fi folosite în DM
-        od_ctx = od if (not is_public or is_dm) else "(comenzi ascunse — canal public, NU expune date personale)"
-        phone_ctx = (phone or "—") if (not is_public or is_dm) else "—"
-        email_ctx = (email or "—") if (not is_public or is_dm) else "—"
+        # pe canale PUBLICE redactăm datele personale STRUCTURAL (nu doar prin prompt) — comentariile rămân publice, fără DM
+        od_ctx = od if not is_public else "(comenzi ascunse — canal public, NU expune date personale)"
+        phone_ctx = (phone or "—") if not is_public else "—"
+        email_ctx = (email or "—") if not is_public else "—"
         learned = LEARNED.get(cat, "")
         learned_blk = ("\nPROCEDURA INVATATA + VOCEA AGENTILOR REALI pt '%s' (urmeaza procedura; imita tonul/structura replicilor; NU copia datele din exemple):\n%s\n" % (cat, learned[:1800])) if learned else ""
         # limba = ce a scris CLIENTUL (detecție pe text) → apoi piața brandului → apoi LLM → ro
         lang = detect_lang(blob + " " + tr) or STORE_LANG.get(store_name) or idn.get("language") or "ro"
+        # telefon de comandă (recomandă sunatul la comenzi/presale, dacă avem numărul brandului)
+        phone_order = STORE_PHONE.get(store_name, "")
+        # numărul e util la comenzi/presale ȘI la comentarii publice (invităm clientul să sune)
+        tel_blk = ("\nTELEFON_COMANDĂ: %s" % phone_order) if (phone_order and (is_public or cat in ("comanda_noua", "presale_intrebare"))) else ""
         ctx = ("PLATFORMĂ: %s — STIL: %s\nMAGAZIN/BRAND: %s\nCLIENT: %s | email=%s | tel=%s\n"
                "PROBLEMA IDENTIFICATĂ: %s\nPRODUS: %s\nCATEGORIE: %s | LIMBA: %s | SENTIMENT: %s/%s%s\n%s\n\n"
                "CONVERSAȚIA:\n%s\n\nCOMENZILE CLIENTULUI:\n%s\n\nA MAI SCRIS PE: %s\nALTE TICHETE:\n%s\n%s\n"
@@ -669,71 +792,52 @@ def main():
                    plat_label, plat_rule, store_name, name or "?", email_ctx, phone_ctx,
                    idn.get("problem") or "(neclar)", idn.get("product") or "—", cat, lang, sent_lab, sent_int,
                    "  [ESCALAT — doar mesaj de așteptare]" if is_esc else "",
-                   ("\n" + action_note) if action_note else "", tr, od_ctx, elsewhere, hist_txt, learned_blk, lang))
+                   (("\n" + action_note) if action_note else "") + tel_blk, tr, od_ctx, elsewhere, hist_txt, learned_blk, lang))
         try:
             draft, engine = llm(sys_prompt, ctx)
         except Exception as e:
             draft, engine = "(eroare LLM: %s)" % e, "—"
-        # presale public → și un MESAJ PRIVAT (DM) detaliat, pe lângă răspunsul public scurt
-        if hide_obj and hide_obj.get("mode") == "public_and_private":
-            try:
-                # DM = canal privat (poate folosi datele reale). Context DEDICAT, ca să nu repete răspunsul public.
-                priv_ctx = ("Scrie un MESAJ PRIVAT (DM) către client (canal privat — poți folosi datele lui).\n"
-                            "MAGAZIN/BRAND: %s | CLIENT: %s | tel: %s | email: %s\n"
-                            "PROBLEMA: %s | PRODUS: %s | CATEGORIE: %s\nCOMENZILE CLIENTULUI:\n%s\n\n"
-                            "MESAJUL CLIENTULUI (din comentariu):\n%s\n%s\n"
-                            "Empatic, răspunde concret (ține cont de brand+produs), cere produsul/nr comandă/detaliile lipsă ca să rezolvi. "
-                            "SCRIE ÎN LIMBA ÎN CARE A SCRIS CLIENTUL (orientativ: %s; dacă a scris în engleză/altă limbă, răspunde în limba lui). "
-                            "Scrie DOAR mesajul privat — NU relua răspunsul public și fără separatoare ('---')." % (
-                                store_name, name or "?", phone or "—", email or "—",
-                                idn.get("problem") or "?", idn.get("product") or "—", cat, od, tr, learned_blk, lang))
-                hide_obj["private_msg"] = llm(SYSTEM, priv_ctx)[0].strip()
-            except Exception:
-                hide_obj["private_msg"] = ""
 
         print("\n" + "─" * 92)
-        cmoji = {"hide": "🙈", "private_reply": "📩", "public_and_private": "📣📩"}.get((hide_obj or {}).get("mode"), "") if hide_obj else ""
+        cmoji = "🙈" if (hide_obj or {}).get("mode") == "hide" else ""
         flag = ("⛳%s " % level if is_esc else "") + ("🔧" if cmd else "") + cmoji
         print("  [%d/%d] #%s · %s · %s · %s · sent=%s/%s %s" % (i, len(picked), no, store_name, plat_label, cat, sent_lab, sent_int, flag))
         print("  client: %s | comenzi: %d | a mai scris: %s" % (name or "?", len(orders), elsewhere))
         print("  problemă: %s" % (idn.get("problem") or " ".join((first or subj).split())[:80]))
         if proposal_line:
             for ln in proposal_line.splitlines(): print("  " + ln)
-        print("  ┌─ DRAFT%s%s (%s) " % (" PUBLIC" if (hide_obj or {}).get("mode") == "public_and_private" else "", " AȘTEPTARE" if is_esc else "", engine) + "─" * 12)
+        print("  ┌─ DRAFT%s (%s) " % (" AȘTEPTARE" if is_esc else "", engine) + "─" * 12)
         for ln in draft.strip().splitlines(): print("  │ " + ln)
         print("  └" + "─" * 42)
-        if hide_obj and hide_obj.get("mode") == "public_and_private" and hide_obj.get("private_msg"):
-            print("  ┌─ + MESAJ PRIVAT (DM, detalii) " + "─" * 8)
-            for ln in hide_obj["private_msg"].splitlines(): print("  │ " + ln)
-            print("  └" + "─" * 42)
 
         queue[str(no)] = {"cid": cid, "draft": draft.strip(), "cmd": cmd, "hide": hide_obj,
                           "ctx": ctx, "action_desc": action_desc, "order": order_name,
                           "store": store_name, "cat": cat, "escalate": is_esc}
         rows.append({"no": no, "store": store_name, "channel": channel, "cat": cat, "escalate": is_esc,
-                     "language": lang, "cust_msg": " ".join((first or subj or tr or "").split())[:240],
-                     "comment_action": (hide_obj or {}).get("mode"), "draft": draft.strip(),
-                     "private_msg": (hide_obj or {}).get("private_msg", "")})
+                     "language": lang, "cust_msg": (last_cust or first or subj or "")[:240],
+                     "comment_action": (hide_obj or {}).get("mode"), "draft": draft.strip()})
         if cmd or hide_obj:
             print("  → aprobă:  uv run cs_auto_draft.py --approve %s%s" % (no, " --agent <Nume>" if cmd else ""))
 
         # ---- scrieri în Richpanel (doar cu --create-draft) ----
         if a.create_draft and cid:
             if is_esc:
-                tags = ["escaladare", "esc:%s" % level.lower()] + (["de-sunat"] if phone else [])
+                tags = [AI_TAG, "escaladare", "esc-%s" % level.lower()] + (["de-sunat"] if phone else [])
                 note = escalation_note(level, idn.get("escalation_reason") or "", idn.get("problem") or "", name, phone, email,
                                        target_line, elsewhere, "%s/%s" % (sent_lab, sent_int), idn.get("suggested_action"))
                 mcp.call("update_conversation", {"conversation_id": cid, "priority": "HIGH"})
-                mcp.call("add_tags_to_conversation", {"conversation_id": cid, "tags": tags})
+                add_tags(mcp, cid, tags)
                 mcp.call("add_private_note", {"conversation_id": cid, "body": note})
                 print("  ⛳ Rutat: HIGH + %s + notă-brief." % ("+".join(tags)))
-            # la private_reply (DM-only) și hide NU salvăm draft pe comentariul public — se aplică la --approve
-            if (hide_obj or {}).get("mode") in ("private_reply", "hide"):
-                print("  (mode %s → fără draft public; se aplică la --approve)" % hide_obj.get("mode"))
+            # la hide NU salvăm draft — comentariul se ascunde la --approve
+            if (hide_obj or {}).get("mode") == "hide":
+                print("  (hide → fără draft; se ascunde la --approve)")
             else:
                 res = mcp.call("create_draft", {"conversation_id": cid, "body": draft.strip()})
                 ok = not (isinstance(res, dict) and res.get("_error"))
-                print("  ✅ DRAFT salvat (NU trimis)." if ok else "  ⚠️ create_draft: %s" % res)
+                if ok:
+                    add_tags(mcp, cid, [AI_TAG])
+                print("  ✅ DRAFT salvat + tag %s (NU trimis)." % AI_TAG if ok else "  ⚠️ create_draft: %s" % res)
         time.sleep(0.2)
 
     save_queue(queue)

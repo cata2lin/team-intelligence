@@ -43,8 +43,14 @@ uv run cs_auto_draft.py                     # DRY-RUN: identifică + draft + esc
 uv run cs_auto_draft.py --channel email --limit 8
 uv run cs_auto_draft.py --actions modify,cancel   # ce acțiuni sunt ACTIVE (restul rămân doar draft); `none` = niciuna
 uv run cs_auto_draft.py --create-draft      # salvează DRAFTURILE + rutează escaladările (NU trimite, NU aplică acțiuni)
+uv run cs_auto_draft.py --create-draft --tag ai-live   # tag personalizat pe tichetele tratate (default ai-draft)
+uv run cs_auto_draft.py --only 273383,274159 --create-draft   # procesează DOAR aceste tichete (regenerare țintită, după număr)
 uv run cs_auto_draft.py --approve 273812 --agent Oana   # aplică acțiunea/hide propusă la un tichet + salvează draftul
+uv run cs_auto_draft.py --send 273383       # ⚠️ TRIMITE LIVE la client (send_message) — customer-facing, IREVERSIBIL
 ```
+
+> ⚠️ **Draft vs. send.** `--create-draft` scrie DOAR un draft (Richpanel nu-l trimite). `--send <conv>` trimite răspunsul LIVE la client prin metoda de server **`send_message`** (există pe serverul MCP Richpanel, deși nu e în lista implicită de unelte — apelată prin JSON-RPC). `--send` e per-tichet, explicit, și REFUZĂ escaladările/hide/retrimiterea. **Default-ul echipei rămâne draft-only.**
+> ⚠️ **`create_draft` ADAUGĂ, nu suprascrie** — fiecare rulare lasă un draft NOU pe conversație; **nu există API de ștergere a drafturilor** (curățarea = manual în UI Richpanel). Folosește `--only` + un `--tag` distinct ca să identifici lotul corect; nu re-rula la nesfârșit pe aceleași tichete.
 
 ## Pipeline per tichet
 1. **IDENTIFICARE (triaj LLM)** — întoarce JSON: problemă concretă, **produs**, categorie, limbă, severitate,
@@ -63,18 +69,24 @@ uv run cs_auto_draft.py --approve 273812 --agent Oana   # aplică acțiunea/hide
 6. **ACȚIUNE** modify/cancel/swap/resend — **propune+aprobă**: doar pe comanda **referită clar** și
    **pre-fulfillment**, rulează `gigi:cs-actions` în DRY-RUN; aplică doar cu `--approve … --agent`.
    Draftul confirmă acțiunea ca FĂCUTĂ doar dacă a fost aplicată (`ACTIUNE_APLICATA`).
-7. **MODERARE comentarii FB/IG** (`comment_action`, corectează **replyzen.ai**) — Graph API cu token de
-   pagină din `META_SYSTEM_TOKEN`:
-   - `hide` = spam/troll/abuz (`fb_hide_comment`).
-   - `private_reply` = RECLAMAȚIE reală → contact DOAR în **PRIVAT** (DM), nu public (`fb_private_reply`).
-   - `public_and_private` = întrebare **PRESALE** → **răspuns public scurt + DM cu detalii** (două drafturi).
-   - `public`/`none` = răspuns public scurt / se lasă.
+7. **MODERARE comentarii FB/IG** (`comment_action`, corectează **replyzen.ai**) — așa cum răspund
+   agenții REAL la comentarii (verificat în istoric: pozitiv→răspuns PUBLIC scurt, deseori doar un emoji;
+   negativ→ascuns; **NU se folosesc DM-uri**). **Nu trimitem mesaje private** — răspundem public și, dacă
+   e nevoie de rezolvare, **invităm clientul să ne scrie în privat sau să sune** (numărul magazinului din `STORE_PHONE`):
+   - `hide` = spam/troll/abuz/reclamă străină (`fb_hide_comment`, Graph cu token de pagină) — propus, aplicat la `--approve`.
+   - `public` = orice comentariu care merită răspuns: laudă→mulțumire caldă; întrebare/reclamație→răspuns scurt
+     + invitație „scrieți-ne în privat / sunați-ne la <număr>". Draft salvat în Richpanel (agentul îl postează).
+   - `none` = zgomot pur (tag de prieten, off-topic) → se lasă.
+   > Postarea publică efectivă + hide pe FB necesită un **Page Access Token** Meta (`pages_messaging` n-ar mai
+   > trebui — doar `pages_manage_engagement` pt hide + postare); tokenurile actuale sunt de ADS (0 pagini, exceptând
+   > Nubra+Covoria prin `META_SYSTEM_TOKEN_3`). Până atunci: comentariile rămân **draft public** + propunere hide.
 
 ## Siguranță
 - **DRY-RUN implicit**; `--create-draft` scrie doar drafturi + rutare escaladare (intern). Acțiunile pe
   comenzi și hide/unhide **nu** se aplică decât cu `--approve <conv>` (model propune+aprobă).
-- Draft-only e regula echipei (niciodată `send_message`); cazurile sensibile (igienă desigilată, ANPC) →
-  escaladare la om, nu auto-răspuns.
+- **Default = draft-only** (recomandat). Trimiterea LIVE există acum prin `--send <conv>` (metoda de server
+  `send_message`), dar e **opt-in explicit, per-tichet**, refuză escaladări/hide, și e customer-facing/ireversibil —
+  trimite DOAR răspunsuri verificate. Cazurile sensibile (igienă desigilată, ANPC) → escaladare la om, nu auto-trimitere.
 
 ## Necesită
 `RICHPANEL_MCP_TOKEN`, cheie LLM, `customer-identity` (→ `DATABASE_URL_METRICS` + SSH), `gigi:cs-actions`
