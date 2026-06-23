@@ -115,9 +115,10 @@ the wrong scope — re-run onboarding.
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Status
-Live foundation: the `SharedClaude` schema is applied and seeded (6 employees,
-51 secret keys, reference data); the Postgres credentials are populated so the
-read-only MCP servers work; `core` ships `query-postgres`, `knowledge-base`,
-`fetch-secret`; `catalin` ships the `excel-api-push` example. **To finish:** fill
-the 29 sensitive third-party secrets (`kb.py secret-set …`), and port the
-remaining `assistant/` skills/playbooks into `core`.
+Live and in daily use: **8 plugins / 105 skills**, **6 MCP servers** (5 read-only
+Postgres + chrome-devtools), the `SharedClaude` DB seeded with **134 secret keys**
+and reference data, and onboarding that installs uv/node/gh and enables everything
+at user scope. ~99 skills run as-is; the short list of owner-supplied files,
+credentials and access still needed for the remaining few — plus the full inventory
+of every database, NAS share, Drive and spreadsheet the skills use — is in
+**[shared/PROVISIONING.md](shared/PROVISIONING.md)**.
