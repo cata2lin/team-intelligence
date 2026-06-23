@@ -19,8 +19,12 @@ from core.brands import BRAND_TO_PREFIX
 DATA = BASE + "/data"
 DP_DB = DATA + "/daily_perf.db"
 PF_DB = DATA + "/profitability.db"
-CSV_URL = ("https://docs.google.com/spreadsheets/d/"
-           "1IVg0fI-_Rm7IptmOl3BmGrqtyyzn3auf0ZPuftr9vQo/export?format=csv&gid=1025107216")
+SS_ID = "1IVg0fI-_Rm7IptmOl3BmGrqtyyzn3auf0ZPuftr9vQo"
+GID_ZILNIC2 = "1025107216"      # tab istoric "Raport Zilnic 2" (zile complete, pana ieri)
+GID_RAPORT_AZI = "1787003114"   # tab "Raport azi" (ziua curenta, refresh ~5 min) — pt --today
+def csv_url(gid):
+    return "https://docs.google.com/spreadsheets/d/%s/export?format=csv&gid=%s" % (SS_ID, gid)
+CSV_URL = csv_url(GID_ZILNIC2)  # default = istoric (compat)
 
 
 def _parse_number(val):
@@ -50,19 +54,20 @@ def _parse_date(val):
     return s
 
 
-def fetch_rows():
-    req = urllib.request.Request(CSV_URL, headers={"User-Agent": "Mozilla/5.0"})
+def fetch_rows(gid=None):
+    req = urllib.request.Request(csv_url(gid) if gid else CSV_URL, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=90) as r:
         text = r.read().decode("utf-8")
     return list(csv.reader(io.StringIO(text)))
 
 
-def build_records(rows):
+def build_records(rows, force_date=None):
     recs = []
     for row in rows[1:]:
         if len(row) < 6:
             continue
-        date_str = _parse_date(row[0]); brand = row[1].strip() if len(row) > 1 else ""
+        # In --today, tab-ul "Raport azi" are data in col A; daca lipseste, cade pe force_date (azi).
+        date_str = _parse_date(row[0]) or (force_date or ""); brand = row[1].strip() if len(row) > 1 else ""
         if not date_str or not brand:
             continue
         fb = _parse_number(row[2]) if len(row) > 2 else 0
@@ -175,6 +180,23 @@ def grandia_overrides():
 
 
 if __name__ == "__main__":
+    # --today: trage DOAR ziua curenta din tab-ul "Raport azi" (refresh ~5 min) -> upsert randul de azi in
+    # daily_perf + refresh override-ul LUNII CURENTE. Pt cron des (~10 min), ca marketingul (override = sheet,
+    # sursa PRIMARA in engine) sa includa si AZI cand Meta din cache e stale (token expirat). Fara grandia/istoric.
+    if "--today" in sys.argv:
+        from datetime import date as _date
+        today = _date.today().isoformat()
+        rows = fetch_rows(GID_RAPORT_AZI)
+        recs = build_records(rows, force_date=today)
+        upsert_daily_perf(recs)
+        cur_month = today[:7]
+        n, _ = refresh_overrides(months={cur_month})
+        dp = sqlite3.connect(DP_DB)
+        d, s = dp.execute("SELECT COUNT(*), ROUND(SUM(total_spend)) FROM daily_perf WHERE date=?", (today,)).fetchone()
+        dp.close()
+        print("RAPORT AZI %s | rows=%d daily_perf upserted=%d | override-refresh(%s)=%d | azi: brands=%s total_spend=%s"
+              % (today, len(rows) - 1, len(recs), cur_month, n, d, "{:,.0f}".format(s or 0)))
+        sys.exit(0)
     rows = fetch_rows()
     recs = build_records(rows)
     upsert_daily_perf(recs)
