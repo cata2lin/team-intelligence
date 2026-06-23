@@ -29,3 +29,56 @@ Client întreabă de ridicare personală → draftul refuză politicos, citează
 ## Note
 - Playbook-ul (proceduri per categorie) e în skill — sincron cu „Documentația CS" din ClickUp. Actualizează-l când se schimbă procedurile.
 - Necesită `RICHPANEL_MCP_TOKEN`, o cheie LLM, și (prin customer-identity) `DATABASE_URL_METRICS` + SSH la Scripturi.
+
+---
+
+# cs_auto_draft.py — FLOW peste toată coada (triaj + draft + escaladare + acțiuni + hide/unhide)
+
+Varianta **batch** a lui cs_draft_reply: parcurge tichetele OPEN care **așteaptă răspuns de la noi**
+(`last_message_sender_type=='customer'`) și, pentru fiecare, face un pipeline complet. **Tot DRAFT /
+propune-aprobă** — niciun mesaj nu pleacă la client, nicio mutație fără `--approve`.
+
+```bash
+uv run cs_auto_draft.py                     # DRY-RUN: identifică + draft + escaladări + propuneri (nimic scris)
+uv run cs_auto_draft.py --channel email --limit 8
+uv run cs_auto_draft.py --actions modify,cancel   # ce acțiuni sunt ACTIVE (restul rămân doar draft); `none` = niciuna
+uv run cs_auto_draft.py --create-draft      # salvează DRAFTURILE + rutează escaladările (NU trimite, NU aplică acțiuni)
+uv run cs_auto_draft.py --approve 273812 --agent Oana   # aplică acțiunea/hide propusă la un tichet + salvează draftul
+```
+
+## Pipeline per tichet
+1. **IDENTIFICARE (triaj LLM)** — întoarce JSON: problemă concretă, **produs**, categorie, limbă, severitate,
+   `escalate`(+motiv), `suggested_action`, `action` executabilă (+params), `comment_action`.
+   Regex-ul (`categorize_hint`) e doar hint/fallback (greșea: recenzii→spam, adresă→factură).
+2. **Context 360** — platforma (`channel`→stil), identitate + **toate** comenzile, **unde a mai scris**
+   (cross-canal `customer-identity.convos`, dedup pe emailuri+telefoane), sentiment, **brand + produs**.
+3. **PROCEDURI + VOCE ÎNVĂȚATE** — dacă există `.learned_playbook.md` (generat de `gigi:cs-procedures` din
+   tichete REALE: procedura de-facto + replici-șablon reale ale agenților per categorie), se injectează
+   secțiunea categoriei în prompt → draftul urmează procedura reală și sună ca agenții. Fallback: playbook din SYSTEM.
+4. **DRAFT** adaptat **platformei + brandului + produsului**: email = complet + semnătură; comentariu public = scurt, **fără date personale**.
+5. **ESCALADARE** (ANPC/juridic, refund promis-neefectuat, client foarte supărat/repetat, VIP) → NU
+   auto-răspunde: draft scurt de **AȘTEPTARE** + (sub `--create-draft`) rutare internă în Richpanel:
+   prioritate **HIGH** (enum doar LOW/HIGH; URGENT în tag), tag `escaladare`/`esc:<lvl>`/`de-sunat`,
+   + **notă-brief** (`add_private_note`) cu problemă, telefon, comandă+AWB, unde a mai scris, acțiune sugerată.
+6. **ACȚIUNE** modify/cancel/swap/resend — **propune+aprobă**: doar pe comanda **referită clar** și
+   **pre-fulfillment**, rulează `gigi:cs-actions` în DRY-RUN; aplică doar cu `--approve … --agent`.
+   Draftul confirmă acțiunea ca FĂCUTĂ doar dacă a fost aplicată (`ACTIUNE_APLICATA`).
+7. **MODERARE comentarii FB/IG** (`comment_action`, corectează **replyzen.ai**) — Graph API cu token de
+   pagină din `META_SYSTEM_TOKEN`:
+   - `hide` = spam/troll/abuz (`fb_hide_comment`).
+   - `private_reply` = RECLAMAȚIE reală → contact DOAR în **PRIVAT** (DM), nu public (`fb_private_reply`).
+   - `public_and_private` = întrebare **PRESALE** → **răspuns public scurt + DM cu detalii** (două drafturi).
+   - `public`/`none` = răspuns public scurt / se lasă.
+
+## Siguranță
+- **DRY-RUN implicit**; `--create-draft` scrie doar drafturi + rutare escaladare (intern). Acțiunile pe
+  comenzi și hide/unhide **nu** se aplică decât cu `--approve <conv>` (model propune+aprobă).
+- Draft-only e regula echipei (niciodată `send_message`); cazurile sensibile (igienă desigilată, ANPC) →
+  escaladare la om, nu auto-răspuns.
+
+## Necesită
+`RICHPANEL_MCP_TOKEN`, cheie LLM, `customer-identity` (→ `DATABASE_URL_METRICS` + SSH), `gigi:cs-actions`
+(token-uri `write_orders`), `META_SYSTEM_TOKEN` (pt hide/unhide).
+
+> ⚠️ Apply-paths (`cs-actions --apply`, hide/unhide Graph) sunt codate dar de **validat live o dată**
+> (scope token Meta moderare + formatul exact al comment-id din ticket id).

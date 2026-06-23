@@ -1,0 +1,9 @@
+# runtime / generate — NU se urcă (PII sau se regenerează)
+# .auto_draft_proposals.json = coada de propuneri (PII: drafturi + context comandă)
+# .voice_pack.json = generat de build_voice_pack.py
+# .learned_playbook.md = generat de gigi:cs-procedures
+.auto_draft_proposals.json
+.voice_pack.json
+.learned_playbook.md
+__pycache__/
+*.pyc
