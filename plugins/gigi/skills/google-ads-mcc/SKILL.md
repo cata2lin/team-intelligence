@@ -20,6 +20,15 @@ under the MCC** — you only need the child account's **customer ID**.
 
 List all child accounts anytime: `uv run gads.py accounts`.
 
+## ⚠️ ROAS-ul raportat de Google e UMFLAT — folosește `real_roas.py`
+App-ul „Google & YouTube" de Shopify raportează un purchase pe **last-click** care **supra-creditează**
+Google (1,4–1,8× observat pe toate brandurile). NU decide scalări pe cifra din Google Ads.
+`uv run real_roas.py [--days 30] [--brand X]` = per brand **spend Google + ROAS pretins** vs
+**venit GA4 din canalele Google** (Paid Search+Shopping+Cross-network) → **ROAS REAL** + factor de umflare.
+Auto-descoperă property-urile GA4 accesibile SA-ului `looker-sheets`. Capcană: nici GA4 nu e 100%
+incremental — campania **Brand** culege cerere creată de Meta/organic; incremental real = test geo/pauză brand.
+Going-forward, măsură și mai precisă: comenzile Shopify cu `utm_source=google` (UTM pus pe toate conturile).
+
 ## Campaign & asset-group map (Esteban + Belasil)
 
 Run `uv run audit_campaigns.py` for a live view with `▶ ENABLED / ⏸ PAUSED / ✗ REMOVED` icons.
