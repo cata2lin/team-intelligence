@@ -256,7 +256,7 @@ def cmd_awb_auto(a):
     shops = load_shops()
     toks = {t["prefix"]: t for t in load_shopify_tokens()}
     for sh in shops:
-        if a.shop and sh["shopDomain"] != a.shop:
+        if skip_shop(sh, a):
             continue
         xc = XC(sh["apiKey"])
         noawb = [o for o in xc.orders(dfrom, dto) if not has_awb(o)]
@@ -307,6 +307,16 @@ def cmd_awb_auto(a):
 
 def has_awb(o):
     return any((d.get("documentType") == "SHIPPING_LABEL") for d in (o.get("documents") or []) if isinstance(d, dict))
+
+
+def skip_shop(sh, a):
+    """True dacă magazinul trebuie SĂRIT: nu e cel cerut (--shop) sau e în lista de excludere (--exclude).
+    --exclude e pt magazinele pe care validatorul de adrese RO nu le acoperă (ex Bonhaus CZ/PL/BG)."""
+    dom = sh.get("shopDomain")
+    if getattr(a, "shop", None) and dom != a.shop:
+        return True
+    excl = {x.strip() for x in (getattr(a, "exclude", "") or "").split(",") if x.strip()}
+    return dom in excl
 
 
 def order_age_hours(xc, oid):
@@ -439,7 +449,7 @@ def cmd_correct(a):
     shops = load_shops()
     toks = {t["prefix"]: t for t in load_shopify_tokens()}
     for sh in shops:
-        if a.shop and sh["shopDomain"] != a.shop:
+        if skip_shop(sh, a):
             continue
         xc = XC(sh["apiKey"])
         bad = [o for o in xc.orders(dfrom, dto) if not has_awb(o) and o.get("addressStatus") in ("WRONG", "UNKNOWN")]
@@ -489,6 +499,8 @@ def cmd_correct(a):
 
 def cmd_summary(shops, a):
     for sh in shops:
+        if skip_shop(sh, a):
+            continue
         xc = XC(sh["apiKey"])
         os_ = xc.orders(a.dfrom, a.dto)
         noawb = [o for o in os_ if not has_awb(o)]
@@ -504,7 +516,7 @@ def cmd_summary(shops, a):
 def cmd_issues(shops, a):
     rows = []
     for sh in shops:
-        if a.shop and sh["shopDomain"] != a.shop:
+        if skip_shop(sh, a):
             continue
         xc = XC(sh["apiKey"])
         os_ = xc.orders(a.dfrom, a.dto)
@@ -544,7 +556,7 @@ def cmd_recheck(a):
     dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
     names = [s.strip().lstrip("#") for s in (a.order or "").split(",") if s.strip()]
     for sh in load_shops():
-        if a.shop and sh["shopDomain"] != a.shop:
+        if skip_shop(sh, a):
             continue
         xc = XC(sh["apiKey"])
         idx = {o.get("orderName"): o for o in xc.orders(dfrom, dto)}
@@ -575,6 +587,8 @@ def main():
     ap.add_argument("--apply", action="store_true"); ap.add_argument("--json", action="store_true")
     ap.add_argument("--min-age-hours", type=int, default=0, dest="min_age_hours",
                     help="correct: sare comenzile mai noi de N ore (validarea xConnector e async/batch — multe se auto-validează). 0 = oprit.")
+    ap.add_argument("--exclude", default="",
+                    help="domenii myshopify de SĂRIT (separate prin virgulă) — ex magazinele externe (Bonhaus CZ/PL/BG) pe care validatorul RO nu le acoperă.")
     ap.add_argument("--correct", action="store_true", help="awb-auto: corectează conservator adresele proaste (xConnector ai-correct-address)")
     a = ap.parse_args()
     if a.cmd in ("awb-create", "awb-cancel", "awb-hold"):
