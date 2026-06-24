@@ -78,25 +78,42 @@ def wms_sku_to_group(pf_conn):
     return m
 
 
-# grup-BRAND (adăugat de mine, nu-i în Product Group sheet) -> prefix magazin. Restul = grup-TIP (sheet).
-PREFIX_GROUP = {"NUB": "Nubra", "CZ": "Bonhaus CZ", "PL": "Bonhaus PL", "BON": "Bonhaus RO",
-                "MAG": "Magdeal", "ROSSI": "Rossi"}
+# grup-BRAND (single-categorie, nu-s în Product Group sheet) -> prefix magazin. Restul = grup-TIP (sheet).
+# Magdeal NU e aici (Esteban 3/Reflexino = per-produs via keyword). {HA}/{HAA} în campanii = tag AGENȚIE.
+PREFIX_GROUP = {"NUB": "Nubra", "CZ": "Bonhaus CZ", "PL": "Bonhaus PL", "BON": "Bonhaus RO", "ROSSI": "Rossi"}
+import re as _re
+_SKU_IN_CAMP = _re.compile(r"HA-\d{3,5}")   # cod SKU HA-#### în numele campaniei (ex. „...ROATA ABDOMINALĂ HA-0420-")
 
 
 def wms_sku_marketing(pf_conn, metrics_cur, lo, hi):
-    """{sku_upper: marketing_ron} per-SKU din WMS. Grup-BRAND -> SKU vândute în magazinul lui (prefix), pe qty;
-    grup-TIP -> SKU din Product Group, pe qty total. Un SKU partajat primește din fiecare grup (cont) care-l rulează."""
+    """{sku_upper: marketing_ron} per-SKU din WMS. PRIORITATE: (0) cod SKU EXACT în campanie (HA-####, validat
+    că e SKU vândut) → direct pe SKU; altfel (1) keyword campanie → grup, (2) cont → grup-brand → alocat pe
+    COMENZI (qty). Grupul Test exclus. Grup-brand → SKU din magazin (prefix); grup-tip → SKU din Product Group."""
     from collections import defaultdict
-    group_spend = wms_group_spend_ron(pf_conn, metrics_cur, lo, hi)
+    fx = _load_fx(metrics_cur)
+    acc, key = _load_nomen(pf_conn)
     month = lo[:7]
-    # qty per (prefix, sku) și total, pe luna ferestrei
     qps = defaultdict(float); qtot = defaultdict(float)
     for prefix, sku, qty in pf_conn.execute(
         "SELECT prefix, sku, SUM(qty) FROM profit_order_lines WHERE month=? AND sku IS NOT NULL AND sku<>'' GROUP BY prefix, sku", (month,)):
         s = (sku or "").strip().upper()
         qps[((prefix or "").strip(), s)] += (qty or 0); qtot[s] += (qty or 0)
+    ha_skus = set(s.strip().upper() for (s,) in pf_conn.execute("SELECT DISTINCT sku FROM profit_order_lines WHERE sku LIKE 'HA-%'"))
+    out = defaultdict(float); group_spend = defaultdict(float)
+    for src, date, account, campaign, spend in pf_conn.execute(
+        "SELECT source,date,account,campaign,spend_usd FROM wms_ad_spend WHERE date>=? AND date<=?", (lo, hi)):
+        ron = (spend or 0) * _usd_ron(fx, date)
+        if ron <= 0:
+            continue
+        exact = next((m for m in _SKU_IN_CAMP.findall((campaign or "").upper()) if m in ha_skus), None)
+        if exact:                                       # (0) cod SKU exact în campanie → direct pe SKU
+            out[exact] += ron
+            continue
+        g = _group_of(acc, key, src, account, campaign)
+        if g and g.strip().lower() != "test":           # (1) keyword / (2) cont → grup
+            group_spend[g] += ron
+    # alocare grup → SKU pe comenzi
     brand_groups = set(PREFIX_GROUP.values())
-    # group -> [(sku, weight)]
     members = defaultdict(list)
     for grp in group_spend:
         pfx = next((p for p, g in PREFIX_GROUP.items() if g == grp), None)
@@ -104,7 +121,6 @@ def wms_sku_marketing(pf_conn, metrics_cur, lo, hi):
             for (p, sku), q in qps.items():
                 if p == pfx and q > 0:
                     members[grp].append((sku, q))
-    # grup-TIP din sheet (toate care NU-s brand)
     sheet = defaultdict(list)
     for sku, grp in pf_conn.execute("SELECT sku, grp FROM wms_product_group"):
         if sku and (grp or "").strip():
@@ -115,7 +131,6 @@ def wms_sku_marketing(pf_conn, metrics_cur, lo, hi):
         for sku in sheet.get(grp, []):
             if qtot.get(sku, 0) > 0:
                 members[grp].append((sku, qtot[sku]))
-    out = defaultdict(float)
     for grp, S in group_spend.items():
         mm = members.get(grp, [])
         tw = sum(w for _, w in mm)
