@@ -15,7 +15,7 @@ rămân **unfulfilled**. Skill-ul ăsta trece prin cele unfulfilled fără AWB, 
 uv run xconnector.py summary                                  # per magazin: câte fără AWB, pe ce status
 uv run xconnector.py address-issues [--shop <domain>] [--days 60] [--json]
 uv run xconnector.py recheck [--order GT1,GT2] [--days 30]    # care s-au auto-validat (VALID/PERFECT)
-uv run xconnector.py correct [--shop <domain>] [--days 60] [--min-age-hours N] [--apply]    # CRON
+uv run xconnector.py correct [--shop <domain>] [--days 60] [--min-age-hours N] [--exclude d1,d2] [--apply]  # CRON
 ```
 - `summary` — per magazin: total în fereastră, câte FĂRĂ AWB, distribuție status.
 - `address-issues` — lista comenzilor nepornite cu adresă `WRONG`/`UNKNOWN` + adresa curentă + sugestia
@@ -35,8 +35,15 @@ uv run xconnector.py correct [--shop <domain>] [--days 60] [--min-age-hours N] [
 ## Auth (cheie API xConnector + token Shopify Admin, per magazin)
 - xConnector: secret KB **`XCONNECTOR_SHOPS`** (JSON `[{shopDomain,apiKey}]`), altfel `~/.aac/input.json`.
 - Shopify (pt tagul „duplicata"): secret KB **`SHOPIFY_ADMIN_TOKENS`** (JSON `[{prefix,shopDomain,adminToken}]`).
-- Cheile **nu se printează niciodată**. Cheia xConnector costă ~$30/magazin — momentan doar **George Talent**
-  (`ix5bxc-hr.myshopify.com`).
+- Cheile **nu se printează niciodată**. Din **2026-06-24** avem chei pe **toate cele 19 magazine active**
+  (toate cu `ROLE_AUTOMATION` + 17 permisiuni, expiră 22-sep-2026), nu doar George Talent.
+
+## Magazine EXTERNE — validatorul e RO-only (`--exclude`)
+Validatorul de adrese xConnector e **centrat pe România**. Magazinele externe (**Bonhaus CZ `vthuzq-7j`,
+PL `f0yrmh-ia`, BG `ux1x6n-n2`**) primesc `WRONG`/`UNKNOWN` în masă (BG ~98% din comenzi) pentru că nu le
+înțelege adresele — iar gate-ul nostru de auto-corecție scorează pe zip/oraș/județ RO, deci NU se declanșează
+oricum pe ele. → cron-ul rulează cu **`--exclude vthuzq-7j.myshopify.com,f0yrmh-ia.myshopify.com,ux1x6n-n2.myshopify.com`**
+ca să nu irosească apeluri și să nu inunde triajul CS. Cheile lor rămân utile pt AWB/facturi/alte operații.
 
 ## Siguranță (corecția de adrese)
 Corecția urmează porțile skill-ului oficial xConnector **aac** (`/agentic-address-correction`), conservator:
