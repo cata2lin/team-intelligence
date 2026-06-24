@@ -31,7 +31,7 @@ Pentru fiecare tichet OPEN care AȘTEAPTĂ RĂSPUNS DE LA NOI (ultimul mesaj e d
 
 LLM: ANTHROPIC_API_KEY (Claude) dacă există în KB, altfel OPENAI_API_KEY. Model: env DRAFT_MODEL.
 """
-import os, re, sys, json, subprocess, urllib.request, urllib.parse, argparse, time
+import os, re, sys, json, subprocess, urllib.request, urllib.parse, urllib.error, argparse, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
@@ -74,6 +74,26 @@ STORE_PHONE = {
     "Bonhaus BG": "0885493926", "Bonhaus CZ": "+420 724 216 967", "Bonhaus PL": "0376300646",
     "Nocturna BG": "0876813240",
 }
+# brand din domeniul adresei magazinului (pt email, când nu avem 360/orders) — ex. contact@esteban.ro → Esteban
+EMAIL_BRAND = {
+    "esteban.ro": "Esteban", "george-talent.ro": "George Talent", "nubra.ro": "Nubra",
+    "grandia.ro": "Grandia", "labnoir.ro": "Lab Noir", "belasil.ro": "Belasil",
+    "gento.ro": "Gento", "carpetto.ro": "Carpetto", "covoria.ro": "Covoria",
+    "rossinails.ro": "Rossi Nails", "apreciat.ro": "Apreciat", "casaofertelor.ro": "Casa Ofertelor",
+    "magdeal.ro": "Magdeal", "ofertele-zilei.ro": "Ofertele Zilei", "reduceribune.ro": "Reduceri bune",
+    "orasulverde.ro": "Orasul Verde", "nocturna.ro": "Nocturna",
+}
+def brand_from_email(addr):
+    m = re.search(r"@([\w.-]+)", (addr or "").lower())
+    if not m:
+        return None
+    dom = m.group(1)
+    if dom in EMAIL_BRAND:
+        return EMAIL_BRAND[dom]
+    if any(b in dom for b in ("shopify", "gmail", "yahoo", "ymail", "icloud", "hotmail", "outlook", "anaf", "judgeme", "facebook", ".tech")):
+        return None
+    root = dom.split(".")[0].replace("-", " ").strip()
+    return root.title() if root else None
 STORE_NORM = {"GRAND": "GRAN"}
 CH_LABEL = {"facebook_feed_comment": "FB comentariu", "facebook_message": "FB mesaj", "messenger": "Messenger",
             "instagram_comment": "IG comentariu", "instagram_message": "IG mesaj", "instagram_dm": "IG DM",
@@ -153,11 +173,26 @@ class MCP:
                     "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "autodraft", "version": "1"}}})
     def _post(self, p):
         h = {"Authorization": "Bearer " + self.t, "Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
-        req = urllib.request.Request(MCP_URL, data=json.dumps(p).encode(), headers=h)
-        with urllib.request.urlopen(req, timeout=60) as r:
-            body = r.read().decode()
-        ln = [l for l in body.splitlines() if l.startswith("data:")]
-        return json.loads(ln[-1][5:]) if ln else json.loads(body)
+        # rezilient la rate-limit Richpanel: pe 429 (sau 5xx) așteaptă (Retry-After / backoff) și reîncearcă
+        for attempt in range(6):
+            try:
+                req = urllib.request.Request(MCP_URL, data=json.dumps(p).encode(), headers=h)
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    body = r.read().decode()
+                ln = [l for l in body.splitlines() if l.startswith("data:")]
+                return json.loads(ln[-1][5:]) if ln else json.loads(body)
+            except urllib.error.HTTPError as e:
+                if e.code in (429, 500, 502, 503, 504) and attempt < 5:
+                    ra = e.headers.get("Retry-After") if hasattr(e, "headers") else None
+                    wait = float(ra) if (ra and str(ra).isdigit()) else min(60, 2 ** attempt * 2)
+                    time.sleep(wait)
+                    continue
+                raise
+            except (urllib.error.URLError, TimeoutError, ConnectionError) as e:   # SSL handshake / read timeout / conn reset → tranzitoriu
+                if attempt < 5:
+                    time.sleep(min(30, 2 ** attempt * 2))
+                    continue
+                raise
     def call(self, name, args):
         try:
             r = self._post({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}})
@@ -167,22 +202,41 @@ class MCP:
         except Exception as e:
             return {"_error": str(e)}
 
+def _llm_http(url, body, headers):
+    # retry+backoff pe rate-limit/5xx (esențial la rulări în paralel — altfel iese „(eroare LLM 429)")
+    for attempt in range(6):
+        try:
+            req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
+            return json.loads(urllib.request.urlopen(req, timeout=90).read())
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 502, 503, 504) and attempt < 5:
+                ra = e.headers.get("Retry-After") if hasattr(e, "headers") else None
+                wait = float(ra) if (ra and str(ra).replace(".", "", 1).isdigit()) else min(90, 2 ** attempt * 3)
+                time.sleep(wait)
+                continue
+            raise
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:   # SSL handshake / read timeout / conn reset → tranzitoriu, reîncearcă
+            if attempt < 5:
+                time.sleep(min(30, 2 ** attempt * 2))
+                continue
+            raise
+
 def llm(system, user, js=False):
     ak = secret("ANTHROPIC_API_KEY")
     if ak:
         body = {"model": os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"), "max_tokens": 900,
                 "system": system, "messages": [{"role": "user", "content": user}]}
-        req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=json.dumps(body).encode(),
-                                     headers={"x-api-key": ak, "anthropic-version": "2023-06-01", "content-type": "application/json"})
-        return json.loads(urllib.request.urlopen(req, timeout=90).read())["content"][0]["text"], "claude"
+        r = _llm_http("https://api.anthropic.com/v1/messages", body,
+                      {"x-api-key": ak, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+        return r["content"][0]["text"], "claude"
     ok = secret("OPENAI_API_KEY")
     if ok:
         body = {"model": os.environ.get("DRAFT_MODEL", "gpt-4o"), "temperature": 0.2,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
         if js: body["response_format"] = {"type": "json_object"}
-        req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=json.dumps(body).encode(),
-                                     headers={"Authorization": "Bearer " + ok, "content-type": "application/json"})
-        return json.loads(urllib.request.urlopen(req, timeout=90).read())["choices"][0]["message"]["content"], "openai/gpt"
+        r = _llm_http("https://api.openai.com/v1/chat/completions", body,
+                      {"Authorization": "Bearer " + ok, "content-type": "application/json"})
+        return r["choices"][0]["message"]["content"], "openai/gpt"
     raise SystemExit("Nicio cheie LLM în KB (ANTHROPIC_API_KEY / OPENAI_API_KEY).")
 
 # ---- pasul de IDENTIFICARE (triaj) ----
@@ -571,6 +625,10 @@ def main():
     ap.add_argument("--agent", default=os.environ.get("CS_AGENT"))
     ap.add_argument("--actions", default="modify,cancel,swap,resend", help="acțiuni ACTIVE (restul doar draft); ex --actions modify,cancel | none")
     ap.add_argument("--scan", type=int, default=150)
+    ap.add_argument("--sleep", type=float, default=0.2, help="pauză (s) între tichete — crește pt rate-safety pe loturi mari (ex. 0.5)")
+    ap.add_argument("--lean", action="store_true", help="proces REDUS pt volum mare: fără 360/SSH (comenzi), fără rutare escaladare (priority/notă) — doar transcript → draft → create_draft. Mult mai rapid + mai puține scrieri Richpanel.")
+    ap.add_argument("--skip-tagged", action="store_true", help="sare tichetele care AU deja tag-ul AI (--tag) — pt cron/reluare: draftează DOAR tichetele noi, fără dubluri")
+    ap.add_argument("--no-comments", action="store_true", help="exclude complet canalele de comentarii (facebook_feed_comment/instagram_comment) — nu le draftează (ex. pt cron: comentariile rămân pt CS)")
     ap.add_argument("--json", action="store_true", help="emite drafturile structurat (audit/integrare) — JSON pe ultima linie după marcajul @@JSON@@")
     ap.add_argument("--close-spam", action="store_true", help="închide (CLOSED) + tag 'spam' tichetele detectate ca spam/notificare automată")
     ap.add_argument("--tag", default="ai-draft", help="tag-ul pus pe tichetele tratate de AI (ex. --tag ai-live pt o rulare live)")
@@ -591,14 +649,8 @@ def main():
     ONLY = [x.strip().lstrip("#") for x in (a.only or "").split(",") if x.strip()]
     picked = []
     if ONLY:
-        # regenerare ȚINTITĂ: ia fiecare tichet DIRECT după număr (robust, indiferent de status/pagină)
-        for no in ONLY:
-            cv = mcp.call("get_conversation", {"conversation_number": no, "mode": "compact"})
-            tk = cv.get("ticket") if isinstance(cv, dict) else None
-            if tk:
-                picked.append(tk)
-            else:
-                print("  ⚠️ #%s negăsit (sărit)." % no)
+        # regenerare ȚINTITĂ: stub-uri (fără fetch upfront) — tichetul se ia INCREMENTAL în buclă (evită burst-ul de citiri)
+        picked = [{"conversation_no": x, "_stub": True} for x in ONLY]
     else:
         page, seen = 1, set()
         while len(picked) < a.limit and len(seen) < a.scan:
@@ -607,15 +659,18 @@ def main():
             r = mcp.call("list_conversations", args)
             batch = (r.get("tickets") or r.get("conversations") or r.get("results") or []) if isinstance(r, dict) else []
             if not batch: break
+            new_this_page = 0
             for t in batch:
                 cid = t.get("id") or t.get("conversation_no")
                 if cid in seen: continue
-                seen.add(cid)
+                seen.add(cid); new_this_page += 1
                 if (t.get("last_message_sender_type") or "").lower() != "customer": continue
                 picked.append(t)
                 if len(picked) >= a.limit: break
-            if not (isinstance(r, dict) and r.get("has_more")): break
+            # API-ul nu setează 'has_more' fiabil → paginează cât timp apar tichete NOI; oprește când nu mai apar
+            if new_this_page == 0: break
             page += 1
+            time.sleep(0.15)  # pauză între pagini (rate-safe pe listare)
 
     head = "APLICAT — drafturi + rutare escaladare scrise (acțiuni NU)" if a.create_draft else "DRY-RUN — nimic scris"
     print("═" * 92)
@@ -626,10 +681,19 @@ def main():
     n_spam = 0
 
     for i, t in enumerate(picked, 1):
+        if t.get("_stub"):   # --only: ia tichetul ACUM (incremental), nu upfront → fără burst de citiri
+            cv0 = mcp.call("get_conversation", {"conversation_number": str(t.get("conversation_no")), "mode": "compact"})
+            tk = cv0.get("ticket") if isinstance(cv0, dict) else None
+            if not tk:
+                print("  [%d/%d] #%s negăsit (sărit)." % (i, len(picked), t.get("conversation_no"))); continue
+            t = tk
         no = t.get("conversation_no"); cid = t.get("id")
         channel = (t.get("channel") or "").lower()
         plat_label, plat_rule = PLATFORM.get(channel, (channel or "necunoscut", "ton prietenos, la obiect."))
         is_public = channel in ("facebook_feed_comment", "instagram_comment")
+        if a.no_comments and is_public:   # cron: comentariile NU se draftează → rămân pt CS (hide spam se face separat)
+            continue
+        cur_tags = list(t.get("tag_names") or [])   # pt --skip-tagged
         cust = t.get("customer") or {}
         name = cust.get("name") or ""
         email = (cust.get("email") or (t.get("from") or {}).get("email") or "").lower()
@@ -643,6 +707,7 @@ def main():
             tr = "- [CLIENT] " + last_cust
         else:
             cv = mcp.call("get_conversation", {"conversation_number": str(no), "mode": "audit", "max_messages": 20})
+            cur_tags = (cv.get("ticket") or {}).get("tag_names") or cur_tags   # tag_names reale (lista summary nu le are)
             msgs = (cv.get("messages_page") or {}).get("messages") or cv.get("messages") or []
             lines = []
             for m in msgs[-12:]:
@@ -657,6 +722,8 @@ def main():
             tr = "\n".join(lines) or ("- [CLIENT] " + last_cust)
         # marchează explicit ULTIMUL mesaj al clientului — la EL răspundem; restul firului = doar context
         tr = tr + "\n>>> ULTIMUL MESAJ AL CLIENTULUI (răspunde la ACESTA; restul firului = context): " + last_cust
+        if a.skip_tagged and AI_TAG and AI_TAG in cur_tags:   # deja draftat (cron/reluare) → sări, fără dublu
+            print("  [%d/%d] #%s · deja %s → sărit." % (i, len(picked), no, AI_TAG)); continue
         # pe comentarii publice: atașează textul POSTĂRII/reclamei la care comentează clientul (clientul o vede → și noi trebuie),
         # dacă avem token de pagină pt brandul respectiv (altfel '' → fallback la a întreba ce produs)
         if is_public:
@@ -668,10 +735,15 @@ def main():
 
         sent_lab, sent_int = sentiment(blob + " " + tr)
         store_name = PAGE_STORE.get(((t.get("to") or {}).get("id") if isinstance(t.get("to"), dict) else None) or "") or "magazinul nostru"
+        if store_name == "magazinul nostru":   # email: derivă brandul din domeniul adresei magazinului (ex. contact@esteban.ro)
+            _to_email = (t.get("to") or {}).get("email") if isinstance(t.get("to"), dict) else ""
+            store_name = brand_from_email(_to_email) or store_name
 
         orders, other = [], []
         elsewhere = "necunoscut (fără email/telefon real — pe comentarii publice nu se poate lega)"
-        if email or phone:
+        if a.lean:
+            elsewhere = "(lean — fără context 360)"
+        if (not a.lean) and (email or phone):
             ci = customer_ident(no)
             orders = ci.get("orders", []) or []
             if (store_name == "magazinul nostru") and orders:
@@ -822,8 +894,9 @@ def main():
 
         # ---- scrieri în Richpanel (doar cu --create-draft) ----
         if a.create_draft and cid:
-            if is_esc:
-                tags = [AI_TAG, "escaladare", "esc-%s" % level.lower()] + (["de-sunat"] if phone else [])
+            # rutarea escaladării (priority/tag/notă) se face DOAR în modul complet; lean = doar draftul
+            if is_esc and not a.lean:
+                tags = ([AI_TAG] if AI_TAG else []) + ["escaladare", "esc-%s" % level.lower()] + (["de-sunat"] if phone else [])
                 note = escalation_note(level, idn.get("escalation_reason") or "", idn.get("problem") or "", name, phone, email,
                                        target_line, elsewhere, "%s/%s" % (sent_lab, sent_int), idn.get("suggested_action"))
                 mcp.call("update_conversation", {"conversation_id": cid, "priority": "HIGH"})
@@ -833,13 +906,16 @@ def main():
             # la hide NU salvăm draft — comentariul se ascunde la --approve
             if (hide_obj or {}).get("mode") == "hide":
                 print("  (hide → fără draft; se ascunde la --approve)")
+            elif draft.strip().startswith("(eroare LLM") or len(draft.strip()) < 5:
+                # GARDĂ: nu salva gunoi în Richpanel (LLM picat / draft gol) — sare tichetul
+                print("  ⛔ draft invalid (eroare LLM / gol) → NU salvez (sar tichetul).")
             else:
                 res = mcp.call("create_draft", {"conversation_id": cid, "body": draft.strip()})
                 ok = not (isinstance(res, dict) and res.get("_error"))
-                if ok:
+                if ok and AI_TAG:   # tag DOAR dacă a fost cerut (--tag ""  → fără tag)
                     add_tags(mcp, cid, [AI_TAG])
-                print("  ✅ DRAFT salvat + tag %s (NU trimis)." % AI_TAG if ok else "  ⚠️ create_draft: %s" % res)
-        time.sleep(0.2)
+                print(("  ✅ DRAFT salvat%s (NU trimis)." % (" + tag %s" % AI_TAG if AI_TAG else "")) if ok else "  ⚠️ create_draft: %s" % res)
+        time.sleep(a.sleep)
 
     save_queue(queue)
     print("\n  🚫 Spam/automat: %d %s." % (n_spam, "închise (CLOSED+tag spam)" if a.close_spam else "excluse din draft (rulează --close-spam ca să le închizi)"))

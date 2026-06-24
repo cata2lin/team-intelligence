@@ -52,6 +52,20 @@ uv run cs_auto_draft.py --send 273383       # ⚠️ TRIMITE LIVE la client (sen
 > ⚠️ **Draft vs. send.** `--create-draft` scrie DOAR un draft (Richpanel nu-l trimite). `--send <conv>` trimite răspunsul LIVE la client prin metoda de server **`send_message`** (există pe serverul MCP Richpanel, deși nu e în lista implicită de unelte — apelată prin JSON-RPC). `--send` e per-tichet, explicit, și REFUZĂ escaladările/hide/retrimiterea. **Default-ul echipei rămâne draft-only.**
 > ⚠️ **`create_draft` ADAUGĂ, nu suprascrie** — fiecare rulare lasă un draft NOU pe conversație; **nu există API de ștergere a drafturilor** (curățarea = manual în UI Richpanel). Folosește `--only` + un `--tag` distinct ca să identifici lotul corect; nu re-rula la nesfârșit pe aceleași tichete.
 
+## Backlog masiv / cron (volum mare)
+Pentru a draftui TOT backlog-ul deschis, throttle-uit și fără dubluri:
+```bash
+uv run cs_auto_draft.py --channel email --create-draft --lean --no-comments \
+    --skip-tagged --tag ai-draft --limit 3000 --scan 6000 --sleep 0.5
+```
+- **`--lean`** — proces redus (fără 360/SSH, fără rutare escaladare) → mult mai rapid; brandul pe email e derivat din domeniul adresei (`brand_from_email`).
+- **`--skip-tagged`** — sare tichetele care au DEJA tag-ul `--tag` → **idempotent**, fără dubluri la rulări repetate (esențial pt cron).
+- **`--no-comments`** — exclude canalele de comentarii (rămân pt CS: hide spam / lead-uri de comandă, NU draft).
+- **`--sleep`** — pauză între tichete (rate-safety).
+- **Plafon real = rate-limit-ul OpenAI (TPM) + Richpanel (~4 req/sec)** → un singur worker secvențial, ~0.15-0.5 drafturi/sec. Paralelismul agresiv produce 429 (OpenAI → „(eroare LLM)" prins de gardă; Richpanel → backoff). `DRAFT_MODEL=gpt-4o-mini` are TPM mult mai mare.
+- **Reziliență**: retry+backoff pe 429/5xx **și** timeout/URLError (LLM + MCP); **gardă**: NU salvează draft dacă LLM a eșuat (`(eroare LLM`/gol).
+- **Cron (VPS)**: `/root/Scripturi/cs_backlog.sh` (sursează cheile din `.env`) rulat la 3h (`0 9-21/3`), `flock`-guarded; loops pe email+DM, comentarii excluse. Secretele pe VPS = `/root/Scripturi/.env` (root-600), nu KB (cron-ul n-are env KB).
+
 ## Pipeline per tichet
 1. **IDENTIFICARE (triaj LLM)** — întoarce JSON: problemă concretă, **produs**, categorie, limbă, severitate,
    `escalate`(+motiv), `suggested_action`, `action` executabilă (+params), `comment_action`.
