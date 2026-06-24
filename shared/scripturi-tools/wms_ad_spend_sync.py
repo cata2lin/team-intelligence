@@ -146,6 +146,13 @@ def build_supplement(conn):
         ("tt", "Grandia", "ACCOUNT", "Grandia RO"), ("tt", "Rossi", "ACCOUNT", "ROSSI Nails Romania"),
         ("tt", "Pijamale", "ACCOUNT", "Nocturna Europa"), ("tt", "Pijamale", "ACCOUNT", "Nocturna.ro"),
         ("tt", "Bonhaus RO", "ACCOUNT", "Casa ofertelor"),
+        # keyword-uri produs lipsă din Nomenclator (închid nemapatul; produse PARTAJATE → grup de tip-produs):
+        ("fb", "Covoare", "CAMPAIGN_KEYWORD", "COVOR MARE"), ("tt", "Covoare", "CAMPAIGN_KEYWORD", "COVOR MARE"),
+        ("fb", "Covoare", "CAMPAIGN_KEYWORD", "COVOR PUFOS"), ("tt", "Covoare", "CAMPAIGN_KEYWORD", "COVOR PUFOS"),
+        ("fb", "Covorase baie", "CAMPAIGN_KEYWORD", "COVOARE BAIE"), ("tt", "Covorase baie", "CAMPAIGN_KEYWORD", "COVOARE BAIE"),
+        ("fb", "Covorase baie", "CAMPAIGN_KEYWORD", "COVORAS BAIE"), ("tt", "Covorase baie", "CAMPAIGN_KEYWORD", "COVORAS BAIE"),
+        ("fb", "Sort", "CAMPAIGN_KEYWORD", "SORT FLORAL"), ("tt", "Sort", "CAMPAIGN_KEYWORD", "SORT FLORAL"),
+        ("fb", "Covoras magic", "CAMPAIGN_KEYWORD", "COVORAS MAGIC"), ("tt", "Covoras magic", "CAMPAIGN_KEYWORD", "COVORAS MAGIC"),
     ]
     conn.executemany("INSERT INTO wms_nomen_extra VALUES (?,?,?,?)", EXTRA)
     PREFIX_GROUP = {"NUB": "Nubra", "CZ": "Bonhaus CZ", "PL": "Bonhaus PL", "BON": "Bonhaus RO",
