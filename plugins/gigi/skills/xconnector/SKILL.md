@@ -14,18 +14,23 @@ rămân **unfulfilled**. Skill-ul ăsta trece prin cele unfulfilled fără AWB, 
 ```
 uv run xconnector.py summary                                  # per magazin: câte fără AWB, pe ce status
 uv run xconnector.py address-issues [--shop <domain>] [--days 60] [--json]
-uv run xconnector.py correct [--shop <domain>] [--days 60] [--apply]    # CRON
+uv run xconnector.py recheck [--order GT1,GT2] [--days 30]    # care s-au auto-validat (VALID/PERFECT)
+uv run xconnector.py correct [--shop <domain>] [--days 60] [--min-age-hours N] [--apply]    # CRON
 ```
 - `summary` — per magazin: total în fereastră, câte FĂRĂ AWB, distribuție status.
 - `address-issues` — lista comenzilor nepornite cu adresă `WRONG`/`UNKNOWN` + adresa curentă + sugestia
   validatorului + verdict. `--json` pt automatizări.
+- **`recheck`** — re-verifică statusul CURENT al adreselor: care s-au auto-validat (`VALID`/`PERFECT`) vs
+  încă `WRONG`/`UNKNOWN`. Cu `--order GT1,GT2` verifici o listă; fără, ia coada curentă. Read-only. Util
+  fiindcă validarea xConnector e async/batch — multe comenzi flagate se vindecă singure în câteva ore.
 - **`correct`** (cron-ul) — pt fiecare comandă fără AWB cu adresă `WRONG`/`UNKNOWN`:
   - tag **„duplicata"** (Shopify) → **skip** (nu corectez, nu trimit la AWB — se anulează separat);
   - **corectabilă** (gate aac: UN candidat cu zip/oraș/județ ≥0.95 + stradă ≥0.90 + `/zip-code` confirmă +
     număr casă păstrat) → `ai-correct-address` (cu `--apply`) → adresa devine VALID → gata de AWB;
   - **grea** (rural fără stradă / fără număr / garbage / ambiguu) → **triaj CS** (cu motiv).
-  Fără `--apply` = **dry-run** (arată ce ar face). Corecția face adresa VALID în xConnector; AWB-ul se
-  (re)creează separat (bulk în dashboard / al doilea Flow) — volumul corectabil e mic.
+  Fără `--apply` = **dry-run** (arată ce ar face). `--min-age-hours N` sare comenzile mai noi de N ore
+  (le lasă sweep-ului de validare al xConnector să le rezolve — vezi „Validarea e async" mai jos);
+  default 0 = oprit. Corecția face adresa VALID în xConnector; AWB-ul se (re)creează separat.
 
 ## Auth (cheie API xConnector + token Shopify Admin, per magazin)
 - xConnector: secret KB **`XCONNECTOR_SHOPS`** (JSON `[{shopDomain,apiKey}]`), altfel `~/.aac/input.json`.
@@ -41,11 +46,24 @@ greșit pe etichetă e mai rău decât nicio corecție* → incert = lasă la CS
 care contactează client+curier dacă o adresă invalidă ajunge la preluare. Cele grele (rural/garbage/ambiguu)
 NU se ating — merg la CS.
 
-## Ce NU poate
-❌ Creare AWB / dispatch / facturi prin cheia API — alea-s pe dashboard-ul xConnector (cookie+CSRF), cheia API
-dă 403. AWB-ul se face prin Shopify Flow (acțiunea xConnector „Create shipping label"). Skill-ul ăsta doar
-pregătește adresa (corecție → VALID) ca AWB-ul să reușească.
+## Validarea e ASYNC/BATCH — `WRONG`/`UNKNOWN` supra-flaghează (lecție 2026-06-24)
+xConnector validează adresele **asincron, în loturi**: o comandă poate sta `WRONG`/`UNKNOWN` ore→o zi, apoi
+un **sweep automat** o trece pe `VALID` **fără editare de text** (în `addressValidationHistory`: `actor:"xConnector"`,
+`eventType:VALIDATION`). Pe coada GT analizată, **~16%** din „adrese proaste" s-au auto-vindecat singure. Mai mult,
+`WRONG` **nu e predictor de eșec la livrare** — pe un eșantion, 6/8 colete cu adresă `WRONG` s-au livrat OK. →
+**nu trata un flag proaspăt ca problemă reală**: rulează `recheck` și `correct --min-age-hours N` înainte de a
+deranja CS-ul; nu bloca expedierea doar pe baza lui `WRONG`. Coada „grea" reală e mai mică decât numărul brut.
+
+## Scriere prin API — DEBLOCAT (2026-06-24)
+Docs: **https://xconnector.app/api-docs.html** (spec `/api-spec.yaml`). Creare AWB / dispatch / facturi **NU mai
+sunt dashboard-only** — sunt expuse sync prin `POST /api/actions/*` (`create-shipping-label`, `cancel-shipping-label`,
+`dispatch-order`, `estimate-shipping-price`, `create-invoice` + payment/cancel/revert, `locker-notification`),
+`POST /api/v1/picking-lists/add-order`, `GET /api/orders/by-tracking-number`. **Gate:** cer rolul `ROLE_AUTOMATION`
+pe merchant + permisiuni per-cheie (`API_CREATE_SHIPPING_LABEL` etc.) — fără ele = 403. Cheia GT actuală le are pe
+toate (17 permisiuni, inclusiv `API_ADDRESS_VALIDATE`). Skill-ul **încă nu implementează** acțiunile de scriere
+(AWB-ul rămâne pe Shopify Flow) — migrarea fluxului AWB/dispatch/factură de pe Flow pe API e următorul pas.
 
 ## Cron (VPS)
-`correct --apply` rulează periodic pe VPS (flock + log): corectează automat ce e sigur, sare duplicatele,
-scoate triajul CS. Vezi `gigi:xconnector` în KB pt detalii deploy. Pereche cu [gigi:cs-address-guard].
+`correct --apply` rulează periodic pe VPS (flock + log, `0 8-20 * * *`): corectează automat ce e sigur, sare
+duplicatele și comenzile proaspete (`--min-age-hours`), scoate triajul CS. Vezi `gigi:xconnector` în KB pt detalii
+deploy. Pereche cu [gigi:cs-address-guard].
