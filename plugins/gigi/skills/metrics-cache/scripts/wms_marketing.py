@@ -49,15 +49,18 @@ def _group_of(acc, key, plat, account, campaign):
     return None
 
 
+EXCLUDE_GROUPS = {"test"}   # „fără teste" — grupul Test nu primește marketing
+
+
 def wms_group_spend_ron(pf_conn, metrics_cur, lo, hi):
-    """{group: spend_ron} din WMS pe [lo, hi] (incl.)."""
+    """{group: spend_ron} din WMS pe [lo, hi] (incl.). Grupul Test e exclus („fără teste")."""
     fx = _load_fx(metrics_cur)
     acc, key = _load_nomen(pf_conn)
     out = defaultdict(float)
     for src, date, account, campaign, spend in pf_conn.execute(
         "SELECT source,date,account,campaign,spend_usd FROM wms_ad_spend WHERE date>=? AND date<=?", (lo, hi)):
         g = _group_of(acc, key, src, account, campaign)
-        if g:
+        if g and g.strip().lower() not in EXCLUDE_GROUPS:
             out[g] += (spend or 0) * _usd_ron(fx, date)
     return dict(out)
 
