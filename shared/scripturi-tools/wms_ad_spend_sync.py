@@ -75,6 +75,8 @@ def parse_fb(rows):
 
 
 def parse_tt(rows):
+    # WMS Tiktok NOU = per-ad: Date, Account, Campaign, Ad Group, Ad, Cost, ... (Cost = col 5 / index 5;
+    # produsul/SKU e în Ad). ad_name = Ad Group + Ad → consumatorul caută produsul/SKU acolo (ca la FB).
     out = []
     for r in rows:
         if not r or not r[0] or not r[0][0].isdigit():
@@ -82,8 +84,13 @@ def parse_tt(rows):
         d = _date_iso(r[0])
         if not d:
             continue
-        out.append(("tt", d, (r[1].strip() if len(r) > 1 else ""), (r[2].strip() if len(r) > 2 else ""),
-                    "", _num(r[3]) if len(r) > 3 else 0.0))
+        account = r[1].strip() if len(r) > 1 else ""
+        campaign = r[2].strip() if len(r) > 2 else ""
+        ad_group = r[3].strip() if len(r) > 3 else ""
+        ad = r[4].strip() if len(r) > 4 else ""
+        cost = _num(r[5]) if len(r) > 5 else 0.0
+        ad_name = (ad_group + " " + ad).strip()
+        out.append(("tt", d, account, campaign, ad_name, cost))
     return out
 
 
@@ -159,11 +166,20 @@ def build_supplement(conn):
 if __name__ == "__main__":
     svc = _svc()
     recs = []
+    # citiri rezILIENTE: dacă TT (tab mare, ~270k rânduri) dă timeout, FB tot se salvează (e critic — FB se
+    # resetează la ziua curentă, deci trebuie capturat înainte de rollover). DB acumulează (INSERT OR REPLACE).
     if "--tt-only" not in sys.argv:
-        recs += parse_fb(_read(svc, TAB_FB))
+        try:
+            recs += parse_fb(_read(svc, TAB_FB))
+        except Exception as e:
+            print("FB read FAIL:", type(e).__name__, e)
     if "--fb-only" not in sys.argv:
-        recs += parse_tt(_read(svc, TAB_TT))
-    upsert(recs)
+        try:
+            recs += parse_tt(_read(svc, TAB_TT))
+        except Exception as e:
+            print("TT read FAIL (FB tot se salvează):", type(e).__name__, e)
+    if recs:
+        upsert(recs)
     _c = sqlite3.connect(PF_DB); _c.execute("PRAGMA busy_timeout=8000;")
     nn, npg = pull_mappings(svc, _c)
     ne, npge = build_supplement(_c); _c.close()
