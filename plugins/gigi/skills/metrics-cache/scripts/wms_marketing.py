@@ -33,13 +33,22 @@ def _load_nomen(pf_conn):
         if mt == "ACCOUNT":
             acc[plat].append(((pat or "").strip().lower(), grp))
         elif mt == "CAMPAIGN_KEYWORD":
-            key[plat].append(((pat or "").strip().upper(), grp))
+            key[plat].append((_norm(pat), grp))
+    for plat in key:   # cel mai LUNG keyword (cel mai specific) câștigă — „COVORAȘ MAGIC" bate „MAGDEAL"
+        key[plat].sort(key=lambda x: -len(x[0]))
     return acc, key
 
 
-def _group_of(acc, key, plat, account, campaign):
-    a = (account or "").strip().lower(); c = (campaign or "").upper()
-    # CAMPAIGN_KEYWORD prioritar (per-produs), apoi ACCOUNT (fallback brand)
+_DIAC = str.maketrans("ĂÂÎȘŞȚŢăâîșşțţ", "AAISSTTAAISSTT")
+def _norm(s):
+    """upper + FĂRĂ diacritice (Nomenclatorul are „LAVETA ABRAZIVĂ", campania „LAVETA ABRAZIVA")."""
+    return (s or "").translate(_DIAC).upper().strip()
+
+
+def _group_of(acc, key, plat, account, campaign, ad_name=""):
+    a = (account or "").strip().lower()
+    c = _norm((campaign or "") + " " + (ad_name or ""))   # campanie + AD NAME (FB), insensibil la diacritice
+    # CAMPAIGN_KEYWORD prioritar (per-produs, cel mai lung/specific), apoi ACCOUNT (fallback brand)
     for p, g in key[plat]:
         if p and p in c:
             return g
@@ -57,9 +66,9 @@ def wms_group_spend_ron(pf_conn, metrics_cur, lo, hi):
     fx = _load_fx(metrics_cur)
     acc, key = _load_nomen(pf_conn)
     out = defaultdict(float)
-    for src, date, account, campaign, spend in pf_conn.execute(
-        "SELECT source,date,account,campaign,spend_usd FROM wms_ad_spend WHERE date>=? AND date<=?", (lo, hi)):
-        g = _group_of(acc, key, src, account, campaign)
+    for src, date, account, campaign, ad, spend in pf_conn.execute(
+        "SELECT source,date,account,campaign,ad_name,spend_usd FROM wms_ad_spend WHERE date>=? AND date<=?", (lo, hi)):
+        g = _group_of(acc, key, src, account, campaign, ad)
         if g and g.strip().lower() not in EXCLUDE_GROUPS:
             out[g] += (spend or 0) * _usd_ron(fx, date)
     return dict(out)
@@ -100,16 +109,16 @@ def wms_sku_marketing(pf_conn, metrics_cur, lo, hi):
         qps[((prefix or "").strip(), s)] += (qty or 0); qtot[s] += (qty or 0)
     ha_skus = set(s.strip().upper() for (s,) in pf_conn.execute("SELECT DISTINCT sku FROM profit_order_lines WHERE sku LIKE 'HA-%'"))
     out = defaultdict(float); group_spend = defaultdict(float)
-    for src, date, account, campaign, spend in pf_conn.execute(
-        "SELECT source,date,account,campaign,spend_usd FROM wms_ad_spend WHERE date>=? AND date<=?", (lo, hi)):
+    for src, date, account, campaign, ad, spend in pf_conn.execute(
+        "SELECT source,date,account,campaign,ad_name,spend_usd FROM wms_ad_spend WHERE date>=? AND date<=?", (lo, hi)):
         ron = (spend or 0) * _usd_ron(fx, date)
         if ron <= 0:
             continue
-        exact = next((m for m in _SKU_IN_CAMP.findall((campaign or "").upper()) if m in ha_skus), None)
-        if exact:                                       # (0) cod SKU exact în campanie → direct pe SKU
+        exact = next((m for m in _SKU_IN_CAMP.findall(((campaign or "") + " " + (ad or "")).upper()) if m in ha_skus), None)
+        if exact:                                       # (0) cod SKU exact în campanie/ad → direct pe SKU
             out[exact] += ron
             continue
-        g = _group_of(acc, key, src, account, campaign)
+        g = _group_of(acc, key, src, account, campaign, ad)
         if g and g.strip().lower() != "test":           # (1) keyword / (2) cont → grup
             group_spend[g] += ron
     # alocare grup → SKU pe comenzi
