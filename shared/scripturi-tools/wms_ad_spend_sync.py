@@ -128,18 +128,21 @@ def build_supplement(conn):
     SKU->grup pt grupurile-BRAND care NU-s în Product Group (generat din comenzi, per prefix magazin)."""
     conn.execute("DROP TABLE IF EXISTS wms_nomen_extra")
     conn.execute("CREATE TABLE wms_nomen_extra (platform TEXT, product_group TEXT, map_type TEXT, pattern TEXT)")
+    # NB: Esteban 2 -> Esteban e DEJA în Nomenclatorul sheet (account-level, tot contul). Esteban 3 + Reflexino
+    # sunt MAGDEAL MULTI-PRODUS -> PER PRODUS via keyword (NU account-fallback), deci NU le punem aici; restul
+    # neacoperit de keyword cade pe cache. „fără teste": grupul Test e exclus în wms_marketing.
     EXTRA = [
-        ("fb", "Nubra", "ACCOUNT", "Nubra"), ("fb", "Esteban", "ACCOUNT", "Esteban 3"),
+        ("fb", "Nubra", "ACCOUNT", "Nubra"),
         ("fb", "Bonhaus CZ", "ACCOUNT", "Bonhaus CZ"), ("fb", "Bonhaus RO", "ACCOUNT", "Bonhaus RO"),
         ("fb", "Bonhaus PL", "ACCOUNT", "Bonhaus PL"), ("fb", "Grandia", "ACCOUNT", "grandia.ro"),
-        ("fb", "Magdeal", "ACCOUNT", "Reflexino"), ("tt", "Nubra", "ACCOUNT", "Nubra"),
+        ("tt", "Nubra", "ACCOUNT", "Nubra"),
         ("tt", "Grandia", "ACCOUNT", "Grandia RO"), ("tt", "Rossi", "ACCOUNT", "ROSSI Nails Romania"),
         ("tt", "Pijamale", "ACCOUNT", "Nocturna Europa"), ("tt", "Pijamale", "ACCOUNT", "Nocturna.ro"),
         ("tt", "Bonhaus RO", "ACCOUNT", "Casa ofertelor"),
     ]
     conn.executemany("INSERT INTO wms_nomen_extra VALUES (?,?,?,?)", EXTRA)
     PREFIX_GROUP = {"NUB": "Nubra", "CZ": "Bonhaus CZ", "PL": "Bonhaus PL", "BON": "Bonhaus RO",
-                    "MAG": "Magdeal", "ROSSI": "Rossi"}
+                    "ROSSI": "Rossi"}
     conn.execute("DROP TABLE IF EXISTS wms_product_group_extra")
     conn.execute("CREATE TABLE wms_product_group_extra (sku TEXT, grp TEXT)")
     seen = set()
