@@ -11,15 +11,28 @@ Ce poate AZI (prin cheia API, durabil):
     = semnal de 'confirmă/corectează adresa ÎNAINTE de AWB" (prevenție refuzuri), pereche cu gigi:cs-address-guard.
   • summary — câte comenzi pe fiecare status, câte fără AWB, per magazin.
 
-Ce NU se poate (încă) prin cheia API: creare AWB / dispatch / facturi — alea-s pe dashboard-ul xConnector
-(cookie+CSRF), cheia API dă 403. Când xConnector le expune în API (sau activează /mcp), adăugăm aici.
+API DE SCRIERE — EXPUS din 2026-06-24 (docs: https://xconnector.app/api-docs.html ; spec: /api-spec.yaml).
+Creare AWB / dispatch / facturi NU mai sunt dashboard-only. Endpoint-uri sync: POST /api/actions/
+create-shipping-label, cancel-shipping-label, dispatch-order, estimate-shipping-price, create-invoice
+(+ create-invoice-payment/cancel-invoice/revert-invoice), locker-notification; POST /api/v1/picking-lists/
+add-order; GET /api/orders/by-tracking-number. BLOCAJ real: toate /api/actions/* + ai-correct-address cer
+rolul ROLE_AUTOMATION pe merchant + permisiuni per-cheie (API_CREATE_SHIPPING_LABEL etc.) — fără ele = 403.
+Pe GT (ix5bxc-hr) ROLE_AUTOMATION e încă DE ACTIVAT de vendor; până atunci AWB-ul rămâne pe Shopify Flow.
+
+LECȚIE VALIDARE (descoperit 2026-06-24): addressStatus WRONG/UNKNOWN SUPRA-flaghează. Validarea e
+asincronă/în batch — comenzi stau WRONG/UNKNOWN ore→1 zi, apoi un sweep al xConnector le trece pe VALID fără
+editare (~16% se auto-vindecă). WRONG NU e predictor de eșec la livrare (pe un eșantion, 6/8 colete cu adresă
+WRONG s-au livrat). → nu trata un flag proaspăt ca problemă reală: rulează `correct --min-age-hours N` (sare
+comenzile mai noi de N ore, lasă sweep-ul lor să ruleze) și `recheck` (vezi care s-au auto-validat) înainte
+de a deranja CS-ul.
 
 Auth: cheia API xConnector per magazin. Sursă (în ordine): secret KB `XCONNECTOR_SHOPS` (JSON
 [{shopDomain,apiKey}]), altfel `~/.aac/input.json`. NICIODATĂ printată.
 
   uv run xconnector.py summary
   uv run xconnector.py address-issues [--shop ix5bxc-hr.myshopify.com] [--days 60] [--json]
-Read-only. Nu scrie nimic în xConnector.
+  uv run xconnector.py recheck [--order GT123,GT456] [--days 30]   # care s-au auto-validat (VALID/PERFECT)
+Read-only pe xConnector (recheck/issues/summary nu scriu nimic; `correct` scrie corecții de adresă cu --apply).
 """
 import os, sys, json, re, time, hashlib, argparse, subprocess, urllib.parse, urllib.request, urllib.error
 
@@ -296,6 +309,24 @@ def has_awb(o):
     return any((d.get("documentType") == "SHIPPING_LABEL") for d in (o.get("documents") or []) if isinstance(d, dict))
 
 
+def order_age_hours(xc, oid):
+    """Vârsta comenzii în ore, din cel mai vechi eveniment de validare (addressValidationHistory).
+    None dacă nu există istoric/timestamp. Folosit de `correct --min-age-hours` ca să sară comenzile
+    proaspete (validarea xConnector e async/batch — multe se auto-validează în câteva ore)."""
+    import datetime
+    d = xc.by_id(oid)
+    ts = [h.get("timestamp") for h in (d.get("addressValidationHistory") or [])
+          if isinstance(h, dict) and h.get("timestamp")]
+    if not ts:
+        return None
+    try:
+        t0 = datetime.datetime.fromisoformat(min(ts).replace("Z", "+00:00"))
+        now = datetime.datetime.now(datetime.timezone.utc)
+        return (now - t0).total_seconds() / 3600.0
+    except Exception:
+        return None
+
+
 def fscore(m, k):
     v = m.get(k) or {}
     return (v.get("value"), v.get("score")) if isinstance(v, dict) else (v, None)
@@ -412,13 +443,21 @@ def cmd_correct(a):
             continue
         xc = XC(sh["apiKey"])
         bad = [o for o in xc.orders(dfrom, dto) if not has_awb(o) and o.get("addressStatus") in ("WRONG", "UNKNOWN")]
-        corrected = dup = cs = 0
+        corrected = dup = cs = fresh = 0
+        min_age = getattr(a, "min_age_hours", 0) or 0
         cs_rows = []
         print("═" * 74)
-        print("  %s — %d fără AWB cu adresă WRONG/UNKNOWN (%dz)%s"
-              % (sh["shopDomain"], len(bad), a.days, "" if a.apply else "  [DRY-RUN]"))
+        print("  %s — %d fără AWB cu adresă WRONG/UNKNOWN (%dz)%s%s"
+              % (sh["shopDomain"], len(bad), a.days, "" if a.apply else "  [DRY-RUN]",
+                 "  [min-age %dh]" % min_age if min_age else ""))
         for o in bad:
             name = o.get("orderName")
+            if min_age:
+                age = order_age_hours(xc, o.get("orderId"))
+                if age is not None and age < min_age:
+                    fresh += 1
+                    print("  %s  🕒 proaspăt (%.0fh < %dh) → las sweep-ul xConnector să ruleze, skip" % (name, age, min_age))
+                    continue
             st, applied, detail = correct_address(xc, o, sh["shopDomain"], apply=False)
             if st == "would-correct":
                 if "duplicata" in shopify_order_tags(name, toks):
@@ -439,8 +478,9 @@ def cmd_correct(a):
             else:
                 cs += 1
                 cs_rows.append((name, o.get("addressStatus"), detail or ""))
-        print("  → %s%d corectate · %d duplicata skip · %d → CS"
-              % ("APLICAT: " if a.apply else "ar corecta: ", corrected, dup, cs))
+        print("  → %s%d corectate · %d duplicata skip%s · %d → CS"
+              % ("APLICAT: " if a.apply else "ar corecta: ", corrected, dup,
+                 " · %d proaspete (skip)" % fresh if min_age else "", cs))
         if cs_rows:
             print("  Triaj CS (adrese grele — contact client):")
             for nm, status, why in cs_rows[:40]:
@@ -495,11 +535,46 @@ def cmd_issues(shops, a):
         print("  (corecția propriu-zisă: skill-ul xConnector aac `/agentic-address-correction`, dry-run→--apply)")
 
 
+def cmd_recheck(a):
+    """READ: re-verifică addressStatus CURENT — care s-au auto-validat (VALID/PERFECT) vs încă WRONG/UNKNOWN.
+    Validarea xConnector e async/batch, deci multe comenzi flagate se vindecă singure în câteva ore.
+    Cu --order GT1,GT2 verifică lista dată; fără, ia coada curentă fără AWB cu adresă WRONG/UNKNOWN."""
+    import datetime
+    dto = datetime.date.today().isoformat()
+    dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
+    names = [s.strip().lstrip("#") for s in (a.order or "").split(",") if s.strip()]
+    for sh in load_shops():
+        if a.shop and sh["shopDomain"] != a.shop:
+            continue
+        xc = XC(sh["apiKey"])
+        idx = {o.get("orderName"): o for o in xc.orders(dfrom, dto)}
+        if names:
+            targets = [idx.get(n, {"orderName": n, "addressStatus": "?(în afara ferestrei)"}) for n in names]
+        else:
+            targets = [o for o in idx.values() if not has_awb(o) and o.get("addressStatus") in ("WRONG", "UNKNOWN")]
+        healed = stuck = 0
+        print("═" * 60)
+        print("  %s — recheck %d comenzi (%dz)" % (sh["shopDomain"], len(targets), a.days))
+        for o in targets:
+            st = o.get("addressStatus")
+            good = st in ("VALID", "PERFECT")
+            awb = has_awb(o)
+            if good:
+                healed += 1
+            elif st in ("WRONG", "UNKNOWN"):
+                stuck += 1
+            print("  %-9s %s%s" % (o.get("orderName"), ("✅ " if good else "… ") + str(st),
+                                   "  (are AWB)" if awb else ""))
+        print("  → %d auto-validate (VALID/PERFECT) · %d încă WRONG/UNKNOWN" % (healed, stuck))
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["summary", "address-issues", "correct", "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
+    ap.add_argument("cmd", choices=["summary", "address-issues", "recheck", "correct", "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
     ap.add_argument("--shop"); ap.add_argument("--order"); ap.add_argument("--days", type=int, default=60)
     ap.add_argument("--apply", action="store_true"); ap.add_argument("--json", action="store_true")
+    ap.add_argument("--min-age-hours", type=int, default=0, dest="min_age_hours",
+                    help="correct: sare comenzile mai noi de N ore (validarea xConnector e async/batch — multe se auto-validează). 0 = oprit.")
     ap.add_argument("--correct", action="store_true", help="awb-auto: corectează conservator adresele proaste (xConnector ai-correct-address)")
     a = ap.parse_args()
     if a.cmd in ("awb-create", "awb-cancel", "awb-hold"):
@@ -510,6 +585,8 @@ def main():
         cmd_awb_auto(a); return
     if a.cmd == "correct":
         cmd_correct(a); return
+    if a.cmd == "recheck":
+        cmd_recheck(a); return
     import datetime
     a.dto = datetime.date.today().isoformat()
     a.dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
