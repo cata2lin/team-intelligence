@@ -166,18 +166,36 @@ def main():
 
     # --- MARKETING alocat pe COMENZI (CPA uniform): direct (HA-####/Google PMax) rămâne EXACT; brand/grup/unmapped
     # se distribuie pe SKU-urile țintă proporțional cu NR. COMENZI → fiecare produs poartă CPA-ul categoriei/brandului.
-    mk = {}; leftover = 0.0
+    mk = {}; leftover = 0.0; wms_sku = {}
+    # WMS = sursă primară per-SKU de la moartea tokenului Meta (token-independent, din sheet-ul WMS prin
+    # wms_ad_spend); cache.product_ad_spend rămâne pt ISTORIC (< cutover, neatins). Cutover pe DATĂ ⇒ fără dublare.
+    WMS_CUTOVER = os.environ.get("WMS_CUTOVER", "2026-06-19")
     try:
         y, mm = a.month.split("-"); mm = int(mm)
         nxt = "%d-%02d-01" % (int(y) + (1 if mm == 12 else 0), 1 if mm == 12 else mm + 1)
         if mconn is None:
             mconn = psycopg2.connect(_clean(os.environ["DATABASE_URL_METRICS"])); cur = mconn.cursor()
-        cur.execute("SELECT sku, brand_id, SUM(spend_ron) FROM cache.product_ad_spend WHERE date>=%s AND date<%s GROUP BY sku, brand_id",
-                    (a.month + "-01", nxt))
+        # Meta+TikTok din cache DOAR pe istoric (< cutover) — de la cutover le ia WMS. Google rămâne din cache
+        # pe TOATĂ luna (WMS = doar FB+TikTok, n-are Google; Google nu depinde de tokenul Meta).
+        cache_hi = min(nxt, WMS_CUTOVER)
+        cur.execute("SELECT sku, brand_id, SUM(spend_ron) FROM cache.product_ad_spend "
+                    "WHERE date>=%s AND ((platform IN ('meta','tiktok') AND date<%s) OR (platform='google' AND date<%s)) "
+                    "GROUP BY sku, brand_id",
+                    (a.month + "-01", cache_hi, nxt))
         cache_rows = cur.fetchall()
-        if mconn: mconn.close()
         # alocare CANONICĂ pe comenzi (profit_core) — direct/grup/brand, CPA uniform
         mk, leftover = pc.allocate_marketing_by_orders(cache_rows, set(sku.keys()), s2g, orders_count, brand_oc)
+        # WMS de la cutover → finalul lunii (FB+TikTok per-SKU, USD→RON, alocat pe comenzi; token-independent)
+        wms_lo = max(a.month + "-01", WMS_CUTOVER); wms_hi = a.month + "-31"
+        if wms_lo <= wms_hi:
+            try:
+                import wms_marketing
+                _wcx = sqlite3.connect(a.db)   # cx e deja închis (l.118) → conexiune proprie
+                wms_sku = wms_marketing.wms_sku_marketing(_wcx, cur, wms_lo, wms_hi)
+                _wcx.close()
+            except Exception as e:
+                sys.stderr.write(f"[wms] {type(e).__name__}: {e}; WMS=0 (fallback cache)\n")
+        if mconn: mconn.close()
     except Exception as e:
         sys.stderr.write(f"[mkt] {type(e).__name__}: {e}; marketing=0\n")
     if leftover > 100:
@@ -186,7 +204,7 @@ def main():
     # per-SKU rows
     out = []
     for s, (q, rev, cg, tr) in sku.items():
-        m = mk.get(s, 0.0)
+        m = mk.get(s, 0.0) + wms_sku.get(s, 0.0)   # cache (istoric, < cutover) + WMS (forward, ≥ cutover)
         out.append((s, s2g.get(s, "?"), q, rev, cg, tr, m, rev - cg - tr - m))
     out.sort(key=lambda x: -x[3])
 
