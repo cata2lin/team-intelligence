@@ -50,15 +50,47 @@ XBASE = "https://xconnector.app"
 VBASE = "https://address-validator.xconnector.app"
 
 
+KB_UNREACHABLE = False  # True când un apel KB EȘUEAZĂ (KB_DATABASE_URL greșit/stale ≠ 'secret lipsă')
+_KB_WARNED = False
+
+
+def _kb_secret(key):
+    """(value, ok). Setează KB_UNREACHABLE DOAR la eșec de CONEXIUNE la KB (KB_DATABASE_URL lipsă/greșit → kb.py
+    iese 3, sau eroare psycopg2). NU la 'secret absent' (kb.py iese 1 cu „secret '...' is not set" — KB e ok),
+    ca să NU strige fals 'KB inaccesibil' când doar lipsește un secret."""
+    global KB_UNREACHABLE
+    try:
+        r = subprocess.run(["uv", "run", KB, "secret-get", key], capture_output=True, text=True, timeout=30)
+    except Exception:
+        KB_UNREACHABLE = True
+        return "", False
+    if r.returncode == 0:
+        return r.stdout.strip(), True
+    err = (r.stderr or "").lower()
+    if r.returncode == 3 or any(t in err for t in (
+            "could not connect", "could not translate", "connection refused", "could not receive",
+            "operationalerror", "psycopg2", "timeout expired", "no route to host", "server closed")):
+        KB_UNREACHABLE = True   # conexiune picată / URL greșit — NU 'secret absent'
+    return "", False
+
+
+def warn_kb_if_unreachable():
+    """Avertisment UNIC, vizibil, când KB e inaccesibil — ca să NU confunzi cu 'comandă/date inexistente'."""
+    global _KB_WARNED
+    if KB_UNREACHABLE and not _KB_WARNED:
+        _KB_WARNED = True
+        print("⚠️ KB INACCESIBIL — n-am putut citi cheile din SharedClaude (verifică KB_DATABASE_URL; host "
+              "corect: 38.242.226.83:5432/SharedClaude). Asta NU înseamnă că o comandă/date 'nu există' — "
+              "e o problemă de credențiale/conexiune (vezi memoria kb-stale-cache).")
+
+
 def load_shops():
     """[{shopDomain, apiKey}] din KB (XCONNECTOR_SHOPS) sau ~/.aac/input.json. Secret — nu se printează."""
     raw = os.environ.get("XCONNECTOR_SHOPS")
     if not raw:
-        try:
-            raw = subprocess.run(["uv", "run", KB, "secret-get", "XCONNECTOR_SHOPS"],
-                                 capture_output=True, text=True, timeout=30).stdout.strip()
-        except Exception:
-            raw = ""
+        raw, ok = _kb_secret("XCONNECTOR_SHOPS")
+        if not ok:
+            warn_kb_if_unreachable()
     if raw and raw.startswith("["):
         try:
             return json.loads(raw)
@@ -255,6 +287,46 @@ def shopify_order_tags(name, toks):
     d = shopify_gql(t["shopDomain"], t["adminToken"], q)
     edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
     return [str(x).lower() for x in (edges[0]["node"].get("tags") or [])] if edges else []
+
+
+def shopify_order_id(name, st):
+    """Shopify order legacyResourceId (= orderId xConnector) după orderName. None dacă nu există / fără token.
+    Folosit ca FALLBACK de lookup când comanda e în afara ferestrei de scan xConnector (veche / volum mare)."""
+    if not st or not name:
+        return None
+    q = 'query{ orders(first:1, query:"name:%s"){ edges{ node{ legacyResourceId } } } }' % name.replace('"', "")
+    d = shopify_gql(st["shopDomain"], st["adminToken"], q)
+    edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
+    return edges[0]["node"].get("legacyResourceId") if edges else None
+
+
+def shopify_release_holds(shop, token, name):
+    """Eliberează HOLD-urile de fulfillment ale comenzii (ca să se poată face AWB). (n_eliberate, [motive])."""
+    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ fulfillmentOrders(first:10){ edges{ node{ '
+         'id status fulfillmentHolds{ reason } } } } } } } }') % (name or "").replace('"', "")
+    d = shopify_gql(shop, token, q)
+    edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
+    if not edges:
+        return 0, []
+    fos = ((edges[0]["node"].get("fulfillmentOrders") or {}).get("edges")) or []
+    # NU elibera hold-uri LEGITIME (fraudă/stoc/plată) — alea NU trebuie expediate automat.
+    protected = {"HIGH_RISK_OF_FRAUD", "INVENTORY_OUT_OF_STOCK", "AWAITING_PAYMENT"}
+    released, reasons, skipped = 0, [], []
+    for fo in fos:
+        n = fo["node"]
+        if n.get("status") != "ON_HOLD":
+            continue
+        fo_reasons = [h.get("reason") for h in (n.get("fulfillmentHolds") or [])]
+        if any(r in protected for r in fo_reasons):
+            skipped += [r for r in fo_reasons if r in protected]
+            continue  # hold legitim → îl las (NU fac AWB peste fraudă/stoc/plată)
+        m = ('mutation{ fulfillmentOrderReleaseHold(id:"%s"){ fulfillmentOrder{ status } userErrors{ message } } }') % n["id"]
+        r = shopify_gql(shop, token, m)
+        errs = (((r.get("data") or {}).get("fulfillmentOrderReleaseHold") or {}).get("userErrors")) or []
+        if not errs:
+            released += 1
+            reasons += [h.get("reason") for h in (n.get("fulfillmentHolds") or []) if h.get("reason")]
+    return released, reasons, skipped
 
 
 def cmd_awb(a):
@@ -677,6 +749,22 @@ def resolve_order(name, a, days=60):
         for o in xc.orders(dfrom, dto):
             if o.get("orderName") == name:
                 return sh, xc, o
+    # FALLBACK robust: comanda nu-i în fereastra de scan (veche SAU magazin cu volum mare > ~2400) →
+    # Shopify orderName→orderId → xConnector by-id. Merge pe ORICE comandă, indiferent de vechime/volum.
+    # (by-id NU întoarce `documents` → fără info AWB pe această cale; awb-make rămâne protejat: xConnector
+    # respinge AWB-ul dublu server-side.)
+    toks = {t.get("shopDomain"): t for t in load_shopify_tokens()}
+    for sh in load_shops():
+        if a.shop and sh["shopDomain"] != a.shop:
+            continue
+        st = toks.get(sh["shopDomain"])
+        oid = shopify_order_id(name, st) if st else None
+        if not oid:
+            continue
+        xc = XC(sh["apiKey"])
+        d = xc.by_id(oid)
+        if isinstance(d, dict) and d.get("orderName"):
+            return sh, xc, d
     return None, None, None
 
 
@@ -908,7 +996,28 @@ def cmd_awb_make(a, _resolved=None):
     print("  curier: %s [%s] · colete: %d · tip: %s · notify: %s" % (con.get("name"), con.get("id"), parcels, a.type, bool(a.notify)))
     if not a.apply:
         print("  DRY-RUN — aș POST /api/actions/create-shipping-label:\n    %s" % json.dumps(body)); return
-    _label_result(*xc.post("/api/actions/create-shipping-label", body))
+    # Adresă WRONG/UNKNOWN → corecție conservatoare înainte (best-effort; AWB-ul poate merge și fără).
+    if o.get("addressStatus") in ("WRONG", "UNKNOWN"):
+        cstt, _, _ = correct_address(xc, o, sh["shopDomain"], apply=True)
+        if cstt == "corrected":
+            print("  ✎ adresă corectată conservator înainte de AWB")
+    s, d = xc.post("/api/actions/create-shipping-label", body)
+    ok = s == 200 and isinstance(d, dict) and d.get("accepted") and any(L.get("success") for L in (d.get("shippingLabels") or []))
+    # CAPTEZ eroarea: xConnector are DOAR unfulfilled/fulfilled (NU 'on hold'). `has_awb(o)` era False (unfulfilled)
+    # → deci 'no open fulfillment order' = comanda e ON HOLD în Shopify → ELIBEREZ hold-ul și REÎNCERC pe loc.
+    msg = (d.get("errorMessage") if isinstance(d, dict) else str(d)) or ""
+    if not ok and st and ("fulfillment" in msg.lower() or "was not created" in msg.lower()):
+        nrel, reasons, skipped = shopify_release_holds(st["shopDomain"], st["adminToken"], a.order)
+        if skipped:
+            print("  ⛔ HOLD LEGITIM (%s) → NU eliberez / NU fac AWB peste fraudă/stoc/plată." % ", ".join(sorted(set(skipped))))
+        if nrel:
+            print("  ⏸️→▶️ comanda era pe HOLD (%s) → eliberat, reîncerc AWB" % (", ".join(reasons) or "fără motiv"))
+            time.sleep(1.2)  # lasă Shopify să redeschidă fulfillment order-ul
+            s, d = xc.post("/api/actions/create-shipping-label", body)
+            ok = s == 200 and isinstance(d, dict) and d.get("accepted") and any(L.get("success") for L in (d.get("shippingLabels") or []))
+        elif not skipped:
+            print("  ℹ️ unfulfilled în xConnector dar NU pe hold → cel mai probabil adresă/connector (eroare reală, nu hold).")
+    _label_result(s, d)
 
 
 def cmd_awb_void(a, _resolved=None):
@@ -1045,7 +1154,10 @@ def cmd_links(a):
         # STATUS (ce se întâmplă cu comanda) — fără Shopify: xConnector + AWBprint
         deliv = awbprint_status(o.get("orderName"))  # status livrare REAL (aggregated_status)
         disp = "expediat" if o.get("dispatched") else "neexpediat"
-        has = "AWB făcut" if awb_doc(o) else "FĂRĂ AWB"
+        if "documents" not in o:   # rezolvat prin fallback by-id (Shopify→ID) → DTO-ul n-are documents
+            has = "AWB: vezi dashboard (comandă veche, rezolvată prin ID)"
+        else:
+            has = "AWB făcut" if awb_doc(o) else "FĂRĂ AWB"
         print("  Status:     adresă=%s · %s · %s%s" % (o.get("addressStatus") or "?", has, disp,
                                                        (" · livrare=%s" % deliv) if deliv else ""))
         print("  Shopify:    %s" % L.get("shopify", "—"))
