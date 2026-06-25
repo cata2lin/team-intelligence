@@ -90,7 +90,13 @@
 - De-AI pre-publicare (RO): `gigi:ai-scrub` (scoate watermark-uri + fraze AI).
 
 ---
-### ⚠️ Capcane care au stricat lucruri înainte (citește)
+### 🏬 Ce MAGAZIN e un tichet Richpanel (NU te lua după brandul din Richpanel — e STALE)
+Magazinul unui tichet = **PAGINA pe care a venit** = câmpul **`to.id`** (page id FB/IG) → mapează cu `PAGE_STORE` din `gigi:richpanel-auto-triage` (ex `775068272350568` = MagDeal). **NICIODATĂ** după:
+- **brandul / `last_message_sender_id` din Richpanel** — e neactualizat (ex pagina MagDeal e încă etichetată „nocturna9540" → un agent a zis greșit „Nocturna");
+- numele/handle-ul clientului.
+Fallback dacă n-ai `to.id`: prefixul comenzii din mesaj (EST/GT/MAG…) → magazin. Vezi memoria [[fb-page-store-map]].
+
+## ⚠️ Capcane care au stricat lucruri înainte (citește)
 1. **Telefon negăsit** = format. Caută după ultimele **9 cifre** (`cs-customer-360` o face). Nu scrie `phone = '07…'` exact.
 2. **NU căuta raw în AWBprint** pt client/telefon — sursă greșită. `cs-customer-360` = `metrics.orders`.
 3. **„Eroare la caracter românesc" pe Windows** = lipsește `sys.stdout.reconfigure(encoding="utf-8")`. Skill-urile CS îl au.
