@@ -116,6 +116,16 @@ pe merchant + permisiuni per-cheie (`API_CREATE_SHIPPING_LABEL` etc.) — fără
 toate (17 permisiuni, inclusiv `API_ADDRESS_VALIDATE`). Skill-ul **încă nu implementează** acțiunile de scriere
 (AWB-ul rămâne pe Shopify Flow) — migrarea fluxului AWB/dispatch/factură de pe Flow pe API e următorul pas.
 
+## `fulfill` — safety-net auto-AWB peste Shopify Flow (cron 15 min)
+`uv run xconnector.py fulfill [--max-age-min 15] [--exclude …] [--apply]` — pt comenzile **open + unfulfilled mai vechi
+de N min** (Flow a avut timp și n-a făcut AWB):
+- **fără AWB + adresă VALID** → fă AWB (DPD default); **WRONG/UNKNOWN** → corecție conservatoare → dacă devine VALID, AWB; altfel CS.
+- **tag de duplicat** (`duplicata`/`duplicata3`/`duplicat4`) → regula Flow-urilor: **păstrează cea mai NOUĂ** comandă a clientului
+  (7 zile) → îi fac AWB; **cele VECHI** → le **anulez** (reason OTHER, fără refund/restock/notify, **protecție livrare**: nu anulez
+  ce a plecat). Fără client / status incert → NU expediez, NU anulez (conservator — erorile API cad pe „skip").
+- Sare automat magazinele cu AWB deja făcut. **Recomandat `--exclude` Grandia** (Dragon Star ≠ DPD) + externele (validator RO).
+- **Dry-run by default.** Sursa „plecat" = AWBprint. Consistent cu cele 2 Shopify Flow-uri de duplicate (NU le înlocuiește — le completează).
+
 ## Cron (VPS)
 `correct --apply` rulează periodic pe VPS (flock + log, `0 8-20 * * *`): corectează automat ce e sigur, sare
 duplicatele și comenzile proaspete (`--min-age-hours`), scoate triajul CS. Vezi `gigi:xconnector` în KB pt detalii

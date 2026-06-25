@@ -867,12 +867,13 @@ def awbprint_status(order_name):
                 pass
 
 
-def shopify_order_cancel(shop, token, order_gid, refund=False, restock=True, notify=False):
+def shopify_order_cancel(shop, token, order_gid, reason="CUSTOMER", refund=False, restock=True, notify=False):
     """orderCancel (Shopify Admin). refund OFF by default — NU returna bani fără decizie explicită
     (pt COD inutil; pt comenzi plătite, refund real). Întoarce listă de erori (gol = OK)."""
-    m = ('mutation{ orderCancel(orderId:"%s", reason:CUSTOMER, refund:%s, restock:%s, '
-         'notifyCustomer:%s, staffNote:"anulare CS via xconnector"){ job{ id } orderCancelUserErrors{ message } } }'
-         ) % (order_gid, "true" if refund else "false", "true" if restock else "false", "true" if notify else "false")
+    reason = reason if reason in ("CUSTOMER", "OTHER", "DECLINED", "FRAUD", "INVENTORY", "STAFF") else "OTHER"
+    m = ('mutation{ orderCancel(orderId:"%s", reason:%s, refund:%s, restock:%s, '
+         'notifyCustomer:%s, staffNote:"anulare via xconnector"){ job{ id } orderCancelUserErrors{ message } } }'
+         ) % (order_gid, reason, "true" if refund else "false", "true" if restock else "false", "true" if notify else "false")
     d = shopify_gql(shop, token, m)
     oc = (d.get("data") or {}).get("orderCancel")
     if oc is None:
@@ -941,20 +942,24 @@ def parse_iso(ts):
         return None
 
 
+DUP_TAGS = ("duplicata", "duplicata3", "duplicat4")
+
+
 def shopify_unfulfilled(shop, token, since_date, max_pages=12):
-    """Comenzi open + unfulfilled din ultimele zile: [(name, createdAt, financialStatus)]. None la auth fail."""
+    """Comenzi open + unfulfilled din ultimele zile: [(name, createdAt, financialStatus, tags[], customerGid)]. None la auth fail."""
     out, cursor = [], None
     for _ in range(max_pages):
         after = ', after:"%s"' % cursor if cursor else ""
         q = ('query{ orders(first:250%s, query:"fulfillment_status:unfulfilled AND status:open AND created_at:>=%s"){ '
-             'edges{ cursor node{ name createdAt displayFinancialStatus } } pageInfo{ hasNextPage } } }') % (after, since_date)
+             'edges{ cursor node{ name createdAt displayFinancialStatus tags customer{ id } } } pageInfo{ hasNextPage } } }') % (after, since_date)
         d = shopify_gql(shop, token, q)
         edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
         if not edges and not out and d.get("errors"):
             return None
         for e in edges:
             n = e["node"]
-            out.append((n.get("name"), n.get("createdAt"), n.get("displayFinancialStatus")))
+            out.append((n.get("name"), n.get("createdAt"), n.get("displayFinancialStatus"),
+                        [str(t).lower() for t in (n.get("tags") or [])], (n.get("customer") or {}).get("id")))
         pi = (((d.get("data") or {}).get("orders") or {}).get("pageInfo")) or {}
         if not pi.get("hasNextPage"):
             break
@@ -962,10 +967,50 @@ def shopify_unfulfilled(shop, token, since_date, max_pages=12):
     return out
 
 
+def customer_is_newest(shop, token, customer_gid, this_created, since_date):
+    """True dacă `this_created` e cea mai NOUĂ comandă NEANULATĂ a clientului în fereastră (regula „păstrează cea mai nouă").
+    None dacă fără client / nu pot determina (apelantul tratează conservator)."""
+    if not customer_gid:
+        return None
+    q = ('query{ customer(id:"%s"){ orders(first:50, query:"created_at:>=%s"){ edges{ node{ createdAt cancelledAt } } } } }'
+         ) % (customer_gid, since_date)
+    d = shopify_gql(shop, token, q)
+    edges = ((((d.get("data") or {}).get("customer") or {}).get("orders") or {}).get("edges")) or []
+    dates = [e["node"].get("createdAt") for e in edges if e.get("node") and not e["node"].get("cancelledAt")]
+    if not dates:
+        return None
+    return (this_created or "") >= max(dates)  # ISO compară lexicografic = cronologic
+
+
+def cancel_duplicate(sh, xc, o, st, name, apply):
+    """Anulează un duplicat VECHI (protecție livrare: NU anulez ce a plecat). reason OTHER, fără refund/restock/notify.
+    Întoarce: would-cancel | cancelled | shipped-skip | failed."""
+    if has_awb(o) and awbprint_status(name) in PLECATA:
+        return "shipped-skip"
+    if not apply:
+        return "would-cancel"
+    if has_awb(o):
+        body = {"orderId": o.get("orderId")}
+        cid = (awb_doc(o) or {}).get("connectorId")
+        if cid:
+            body["connectorId"] = cid
+        sv, dv = xc.post("/api/actions/cancel-shipping-label", body)
+        if not (sv == 200 and isinstance(dv, dict) and dv.get("accepted")):
+            return "failed"  # AWB plecat/eroare → NU anulez comanda
+    node = find_order(st["shopDomain"], st["adminToken"], name)
+    if not node or not node.get("id"):
+        return "failed"
+    errs = shopify_order_cancel(st["shopDomain"], st["adminToken"], node["id"],
+                                reason="OTHER", refund=False, restock=False, notify=False)
+    return "cancelled" if not errs else "failed"
+
+
 def cmd_fulfill(a):
     """Safety-net peste Shopify Flow: comenzi open+unfulfilled mai vechi de --max-age-min (Flow a ratat AWB-ul) →
     VALID → fă AWB (create-shipping-label, DPD default); WRONG/UNKNOWN → corecție conservatoare → dacă devine
-    VALID, fă AWB; altfel → CS. Sare cele cu AWB (Flow le-a făcut) + tag duplicata. Dry-run by default (--apply scrie).
+    VALID, fă AWB; altfel → CS. Sare cele cu AWB (Flow le-a făcut). DUPLICATE (tag duplicata/duplicata3/duplicat4):
+    păstrează cea mai NOUĂ comandă a clientului (→ AWB), anulează cele VECHI (reason OTHER, fără refund/restock/notify,
+    protecție livrare: nu anulez ce a plecat) — consistent cu Shopify Flow-urile. Dry-run by default (--apply scrie).
     Exclude magazinele externe (validator RO) + recomand --exclude Grandia (Dragon Star ≠ DPD)."""
     import datetime
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -973,7 +1018,7 @@ def cmd_fulfill(a):
     dto = now.date().isoformat()
     dfrom = (now - datetime.timedelta(days=a.days)).date().isoformat()
     toks_dom = {t["shopDomain"]: t for t in load_shopify_tokens()}
-    toks_pref = {t["prefix"]: t for t in load_shopify_tokens()}
+    since7 = (now - datetime.timedelta(days=7)).date().isoformat()
     for sh in load_shops():
         if skip_shop(sh, a):
             continue
@@ -987,9 +1032,9 @@ def cmd_fulfill(a):
         if unf is None:
             print("  %s — Shopify auth FAIL (OAuth-rotation?) → skip" % sh["shopDomain"]); continue
         con, cons = pick_connector(xc, a)
-        ready = fixable = hard = had_awb = noxc = dup = made = fixed = failed = 0
-        dup_rows = []
-        for name, created, fin in unf:
+        ready = fixable = hard = had_awb = noxc = made = fixed = failed = 0
+        dup_keep = dup_cancel = dup_shipped = dup_unknown = 0
+        for name, created, fin, tags, cust in unf:
             c = parse_iso(created)
             if not c or (now - c).total_seconds() / 60.0 <= max_age:
                 continue
@@ -998,9 +1043,21 @@ def cmd_fulfill(a):
                 noxc += 1; continue
             if has_awb(o):
                 had_awb += 1; continue
-            # tag duplicata → NU se expediază (e duplicat) → de REZOLVAT/anulat separat, niciodată AWB
-            if "duplicata" in shopify_order_tags(name, toks_pref):
-                dup += 1; dup_rows.append(name); continue
+            # DUPLICAT? (oricare tag) → regula: păstrează cea mai NOUĂ din grup, anulează cele vechi
+            if any(tg in tags for tg in DUP_TAGS):
+                newest = customer_is_newest(st["shopDomain"], st["adminToken"], cust, created, since7)
+                if newest is False:
+                    res = cancel_duplicate(sh, xc, o, st, name, a.apply)
+                    if res == "shipped-skip":
+                        dup_shipped += 1
+                    elif res in ("cancelled", "would-cancel"):
+                        dup_cancel += 1
+                    else:
+                        failed += 1
+                    continue
+                if newest is None:
+                    dup_unknown += 1; continue  # fără client → nu pot verifica → NU expediez, NU anulez
+                dup_keep += 1  # e cea mai nouă (de păstrat) → cade prin la logica de AWB
             ast = o.get("addressStatus")
             do_awb = ast in ("VALID", "PERFECT")
             if do_awb:
@@ -1025,12 +1082,12 @@ def cmd_fulfill(a):
                       and any(L.get("success") for L in (d.get("shippingLabels") or [])))
                 made += 1 if ok else 0
                 failed += 0 if ok else 1
-        print("  %s — unfulfilled >%dmin: %d gata(VALID) + %d corectabile + %d grele→CS  (aveau AWB: %d, fără xc: %d)"
-              % (sh["shopDomain"], max_age, ready, fixable, hard, had_awb, noxc))
+        print("  %s — unfulfilled >%dmin: AWB %d gata + %d corectabile + %d grele→CS  ·  DUP: %d păstrate, %d de-anulat, %d plecate(protejate), %d fără-client  (aveau AWB %d, fără xc %d)"
+              % (sh["shopDomain"], max_age, ready, fixable, hard, dup_keep, dup_cancel, dup_shipped, dup_unknown, had_awb, noxc))
         if a.apply:
-            print("  → APLICAT: AWB făcute %d (din care %d după corecție) · eșuate %d" % (made, fixed, failed))
+            print("  → APLICAT: AWB %d (din care %d după corecție) · duplicate anulate %d · eșuate %d" % (made, fixed, dup_cancel, failed))
         else:
-            print("  → [DRY-RUN] aș face AWB la %d (gata) + până la %d (după corecție) · %d → CS" % (ready, fixable, hard))
+            print("  → [DRY-RUN] AWB la %d gata + până la %d corectabile · aș anula %d duplicate vechi · %d → CS" % (ready, fixable, dup_cancel, hard))
 
 
 # ── FACTURI prin API (/api/actions/*-invoice) — mirror AWB: make / cancel / storno(revert) / regen / doc ──
