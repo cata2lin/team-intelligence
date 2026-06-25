@@ -1,6 +1,6 @@
 ---
 name: xconnector
-description: Punte spre xConnector (curierat) pt magazinele ARONA. CITEȘTE comenzile fără AWB cu adresă WRONG/UNKNOWN (validate de xConnector) + adresa curentă + sugestia validatorului, ȘI le CORECTEAZĂ automat conservator (aac ai-correct-address) pe cele sigure, sărind comenzile cu tag „duplicata". Comanda `correct` e cron-ul fluxului order-created: adresă proastă rămasă unfulfilled → corecție → VALID → gata de AWB; cele grele → triaj CS. Use pt „corectează adresele proaste george talent", „xconnector address issues", „cron corecție adrese awb", „comenzi fără awb cu adresă greșită". Scrie DOAR corecții de adresă (gate dur), niciodată AWB/dispatch.
+description: Punte spre xConnector (curierat) pt magazinele ARONA, pe TOATE cele 19 magazine. CITEȘTE comenzile fără AWB cu adresă WRONG/UNKNOWN + adresa curentă + sugestia validatorului, le CORECTEAZĂ automat conservator (ai-correct-address) pe cele sigure (cron `correct`), ȘI operează AWB direct prin API: `awb-make` (creează AWB cu parcelCount/curier), `awb-void` (anulează), `awb-regen` (anulează+refă cu alt nr de colete/curier), `awb-label` (link etichetă), `connectors` (listă curieri/facturare). Use pt „corectează adresele proaste", „xconnector address issues", „fă AWB / anulează AWB / regenerează AWB cu 2 colete prin xconnector", „comenzi fără awb cu adresă greșită". Scrierile AWB sunt dry-run by default (POST real doar cu --apply).
 ---
 
 # /xconnector
@@ -16,6 +16,11 @@ uv run xconnector.py summary                                  # per magazin: câ
 uv run xconnector.py address-issues [--shop <domain>] [--days 60] [--json]
 uv run xconnector.py recheck [--order GT1,GT2] [--days 30]    # care s-au auto-validat (VALID/PERFECT)
 uv run xconnector.py correct [--shop <domain>] [--days 60] [--min-age-hours N] [--exclude d1,d2] [--apply]  # CRON
+uv run xconnector.py connectors [--shop <domain>]            # curieri + facturare per magazin (id/type)
+uv run xconnector.py awb-make  --order GT123 [--shop d] [--connector ID] [--parcels N] [--type PARCEL] [--notify] [--apply]
+uv run xconnector.py awb-void  --order GT123 [--shop d] [--connector ID] [--apply]      # anulează AWB
+uv run xconnector.py awb-regen --order GT123 --parcels N [--connector ID] [--apply]     # anulează + refă cu alte condiții
+uv run xconnector.py awb-label --order GT123 [--shop d]                                  # link etichetă PDF
 ```
 - `summary` — per magazin: total în fereastră, câte FĂRĂ AWB, distribuție status.
 - `address-issues` — lista comenzilor nepornite cu adresă `WRONG`/`UNKNOWN` + adresa curentă + sugestia
@@ -31,6 +36,17 @@ uv run xconnector.py correct [--shop <domain>] [--days 60] [--min-age-hours N] [
   Fără `--apply` = **dry-run** (arată ce ar face). `--min-age-hours N` sare comenzile mai noi de N ore
   (le lasă sweep-ului de validare al xConnector să le rezolve — vezi „Validarea e async" mai jos);
   default 0 = oprit. Corecția face adresa VALID în xConnector; AWB-ul se (re)creează separat.
+
+### AWB direct prin API (operare CS, `/api/actions/*`)
+Toate rezolvă comanda după `--order GT###` (caută în `--shop` dacă dat, altfel în toate magazinele) și sunt
+**dry-run by default** — POST real DOAR cu `--apply`. `orderId` trimis la xConnector = **Shopify order ID**.
+- **`connectors`** — listă connectori per magazin: `id`, tip (`curier` vs `factură`: DPD/SAMEDAY vs SMART_BILL), activ.
+- **`awb-make`** — creează AWB: `create-shipping-label` cu `parcelCount` (`--parcels`, default 1), `parcelType`
+  (`--type`, default PARCEL), curier (`--connector ID`; obligatoriu dacă-s mai mulți curieri activi). Sare dacă
+  are deja AWB (zice să folosești `awb-regen`). La succes întoarce tracking + URL etichetă + preț.
+- **`awb-void`** — anulează AWB-ul (`cancel-shipping-label`, după orderId + connectorId).
+- **`awb-regen`** — **anulează + refă** cu alte condiții (alt `--parcels`, `--type`, `--connector`) — ex „de la 1 la 2 colete".
+- **`awb-label`** — link-ul de descărcare al etichetei (PDF) + tracking-ul, fără să recreeze nimic.
 
 ## Auth (cheie API xConnector + token Shopify Admin, per magazin)
 - xConnector: secret KB **`XCONNECTOR_SHOPS`** (JSON `[{shopDomain,apiKey}]`), altfel `~/.aac/input.json`.
