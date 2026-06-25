@@ -251,21 +251,34 @@ def clean_addr(a):
 
 
 # ───────────────────────── plasare COD (place/swap/resend) ─────────────────────────
-def place_cod(prefix, addr, items, tags, note, apply, free=False):
+def place_cod(prefix, addr, items, tags, note, apply, free=False, discount=None, shipping=None):
+    """`discount` = (sumă RON fixă, titlu) → reducere promo pe comandă (2+1 / quantity / ca originalul).
+    `shipping` = (titlu, preț RON) → linie de transport (când sub pragul de free shipping). free=resend 100%."""
     total = sum(float(p) * q for _, _, p, q in items)
+    disc_amt = float(discount[0]) if discount else 0.0
+    ship_amt = float(shipping[1]) if shipping else 0.0
+    final = 0 if free else max(0.0, total - disc_amt) + ship_amt
     print("─" * 64)
     print("  %s  magazin %s  COD%s" % ("PLASEZ" if apply else "DRY-RUN", prefix, "  (GRATIS 100%)" if free else ""))
     print("  Adresă: %s %s, %s %s, %s" % (addr.get("firstName") or "", addr.get("lastName") or "",
                                           addr.get("address1"), addr.get("city") or "", addr.get("zip") or ""))
     for _, lbl, price, q in items:
         print("    %d × %s @ %s" % (q, lbl, price))
-    print("  Total ~%.2f RON  Tag-uri: %s" % (0 if free else total, ", ".join(tags)))
+    if discount and disc_amt:
+        print("    − discount: %.2f RON (%s)" % (disc_amt, discount[1]))
+    if shipping:
+        print("    + transport: %.2f RON (%s)" % (ship_amt, shipping[0]))
+    print("  Total ~%.2f RON  Tag-uri: %s" % (final, ", ".join(tags)))
     if not apply:
         print("  → --apply ca să plasezi."); return
     di = {"lineItems": [{"variantId": v, "quantity": q} for v, _, _, q in items],
           "shippingAddress": clean_addr(addr), "billingAddress": clean_addr(addr), "tags": tags, "note": note}
     if free:
         di["appliedDiscount"] = {"value": 100.0, "valueType": "PERCENTAGE", "title": "Resend/garanție"}
+    elif discount and disc_amt > 0:
+        di["appliedDiscount"] = {"value": disc_amt, "valueType": "FIXED_AMOUNT", "title": discount[1]}
+    if shipping:
+        di["shippingLine"] = {"title": shipping[0], "price": str(round(ship_amt, 2))}
     if addr.get("email"):
         di["email"] = addr["email"]
     dc = sgql(prefix, "mutation($i:DraftOrderInput!){ draftOrderCreate(input:$i){ draftOrder{ id } userErrors{ field message } } }", {"i": di})["draftOrderCreate"]
@@ -277,6 +290,60 @@ def place_cod(prefix, addr, items, tags, note, apply, free=False):
     o = cp["draftOrder"]["order"]
     sgql(prefix, "mutation($id:ID!,$t:[String!]!){ tagsAdd(id:$id, tags:$t){ userErrors{ message } } }", {"id": o["id"], "t": tags})
     print("  ✅ PLASAT %s (COD)  tag-uri: %s" % (o["name"], ", ".join(tags)))
+
+
+# ── PROMO la plasare (discounturile AUTOMATE din Shopify NU se aplică pe draft orders → le aplic MANUAL).
+#    Vezi memoria releaseit-cod-promo-model. ──
+PERFUME_STORES = {"EST", "GT", "NUB"}                       # „Oferta 2+1 Gratis"
+SHIP_COST = {"EST": 20.0, "GT": 20.0, "NUB": 20.0}          # transport sub prag (parfum ~20, deals ~19)
+FREE_SHIP_THRESHOLD = {"EST": 150.0, "GT": 150.0, "NUB": 150.0}  # aprox; deals ~200 (de rafinat din comenzi)
+
+
+def read_order(prefix, name):
+    """Comanda ORIGINALĂ din Shopify pt replace = ACEEAȘI valoare: (items[(variantId,sku,unitPrice,qty)], discount_total, (shipTitle, shipPrice)) | None."""
+    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ totalDiscountsSet{shopMoney{amount}} '
+         'shippingLine{ title originalPriceSet{shopMoney{amount}} } '
+         'lineItems(first:50){ edges{ node{ quantity sku variant{ id } originalUnitPriceSet{shopMoney{amount}} } } } } } } }') % name.replace('"', "")
+    d = sgql(prefix, q, {})
+    edges = (((d.get("orders") or {}).get("edges")) or [])
+    if not edges:
+        return None
+    n = edges[0]["node"]
+    items, skipped = [], 0
+    for e in (n.get("lineItems") or {}).get("edges", []):
+        li = e["node"]; v = li.get("variant") or {}
+        if v.get("id"):
+            items.append((v["id"], li.get("sku") or "?",
+                          float((li.get("originalUnitPriceSet") or {}).get("shopMoney", {}).get("amount", 0) or 0), li["quantity"]))
+        else:
+            skipped += 1
+    if skipped:
+        print("  ⚠️ %d linii din comanda veche n-au variant (produs șters?) → reproduse FĂRĂ ele; verifică valoarea." % skipped)
+    disc = float((n.get("totalDiscountsSet") or {}).get("shopMoney", {}).get("amount", 0) or 0)
+    sl = n.get("shippingLine") or {}
+    ship = (sl.get("title") or "Transport",
+            float((sl.get("originalPriceSet") or {}).get("shopMoney", {}).get("amount", 0) or 0)) if sl else None
+    return items, disc, ship
+
+
+def promo_discount(prefix, items):
+    """Reducerea promo pt produse NOI. Parfumuri (EST/GT/NUB) = 2+1: la fiecare 3 produse, cel mai IEFTIN gratis.
+    Deals = quantity per-SKU (necunoscut fără config) → None (la replace, valoarea vine din comanda veche)."""
+    if prefix in PERFUME_STORES:
+        units = sorted(price for (_, _, price, q) in items for _ in range(q))  # toate unitățile, crescător
+        n_free = len(units) // 3
+        free_total = sum(units[:n_free])  # cele mai ieftine n_free unități = gratis
+        if free_total > 0:
+            return (round(free_total, 2), "Oferta 2+1 Gratis")
+    return None
+
+
+def shipping_line(prefix, items, discount):
+    """(titlu, preț) dacă subtotalul (după discount) e SUB pragul de free shipping; altfel None (gratis)."""
+    subtotal = sum(price * q for (_, _, price, q) in items) - (discount[0] if discount else 0)
+    if subtotal < FREE_SHIP_THRESHOLD.get(prefix, 200.0):
+        return ("Transport", SHIP_COST.get(prefix, 19.0))
+    return None
 
 
 # ───────────────────────── operațiuni ─────────────────────────
@@ -311,7 +378,10 @@ def op_place(a, agent):
     items = parse_items(pref, a.items)
     if not items:
         sys.exit("place: dă --items.")
-    place_cod(pref, addr, items, [agent], "comandă nouă CS | agent %s" % agent + (" | %s" % a.note if a.note else ""), a.apply)
+    discount = promo_discount(pref, items) if getattr(a, "promo", False) else None   # --promo: aplică promoția magazinului
+    ship = shipping_line(pref, items, discount) if getattr(a, "promo", False) else None
+    place_cod(pref, addr, items, [agent], "comandă nouă CS | agent %s" % agent + (" | %s" % a.note if a.note else ""),
+              a.apply, discount=discount, shipping=ship)
 
 
 def op_swap(a, agent):
@@ -327,17 +397,31 @@ def op_swap(a, agent):
 
 
 def op_replace(a, agent):
-    """REPLASARE (cancel+replace) — copiază adresa din comanda veche ca swap, DAR NU e swap (alt produs):
-    e re-plasarea aceleiași comenzi (ex edit conținut COD). Tag `replasata-cs`, NU `swap`."""
+    """RE-PLASARE — NU e swap (alt produs), e re-plasarea aceleiași comenzi (ex edit conținut COD). DOAR plasează
+    comanda nouă; **NU anulează originalul** — anulează-l ÎNTÂI, separat, cu `gigi:xconnector order-cancel`
+    (are garda „plecată") sau `cs-actions cancel`, altfel rămân 2 comenzi COD active!
+    FĂRĂ --items → reproduce comanda veche IDENTIC = ACEEAȘI VALOARE (produse + discount promo + transport, din Shopify).
+    CU --items → produse NOI, aplic promoția magazinului (parfum 2+1 / + transport sub prag). Tag `replasata-cs`, NU swap."""
     pref = (a.store or prefix_of_order(a.from_order)).upper()
     addr = ({"address1": a.address, "city": a.city, "zip": a.zip, "countryCode": "RO", "phone": a.phone, "firstName": a.name}
             if a.address else resolve_address(a.from_order))
     if not addr or not addr.get("address1"):
         sys.exit("replace: n-am adresă din %s (xConnector/Frisbo). Dă --address/--city/--zip." % a.from_order)
-    items = parse_items(pref, a.items)
-    if not items:
-        sys.exit("replace: dă --items (produsele comenzii noi).")
-    place_cod(pref, addr, items, [agent, "replasata-cs"], "REPLASARE după %s | agent %s" % (a.from_order, agent), a.apply)
+    if a.items:
+        items = parse_items(pref, a.items)
+        if not items:
+            sys.exit("replace: dă --items valide.")
+        discount = promo_discount(pref, items)            # produse noi → promoția magazinului
+        ship = shipping_line(pref, items, discount)
+    else:
+        orig = read_order(pref, a.from_order)              # reproduce comanda veche = aceeași valoare
+        if not orig or not orig[0]:
+            sys.exit("replace: nu găsesc comanda %s în Shopify (dă --items dacă vrei conținut nou)." % a.from_order)
+        items, disc, ship_orig = orig
+        discount = (disc, "Promo (ca originalul)") if disc > 0 else None
+        ship = ship_orig if (ship_orig and ship_orig[1] > 0) else None
+    place_cod(pref, addr, items, [agent, "replasata-cs"], "REPLASARE după %s | agent %s" % (a.from_order, agent),
+              a.apply, discount=discount, shipping=ship)
 
 
 def op_resend(a, agent):
@@ -471,6 +555,7 @@ def main():
     ap.add_argument("--add", help='modify: adaugă produse "term:qty;..."'); ap.add_argument("--remove", help='modify: scoate produse "term;..."')
     ap.add_argument("--set", dest="set_qty", help='modify: schimbă cantități "term:qty;..."')
     ap.add_argument("--note"); ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--promo", action="store_true", help="place/swap: aplică promoția magazinului (parfum 2+1 / transport sub prag). La `replace` fără --items, valoarea vine automat din comanda veche.")
     a = ap.parse_args()
 
     agent = CS_AGENTS.get((a.agent or os.getenv("CS_AGENT", "")).strip().lower())

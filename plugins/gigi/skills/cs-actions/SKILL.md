@@ -48,7 +48,8 @@ stoc** din piața clientului și folosește **SKU-ul ACELUI magazin** la `--item
 cs_actions.py cancel  --order GRAND17148 --store GRAN [--reason customer|inventory|declined|fraud|other] [--refund] [--no-restock]
 cs_actions.py place   --store GT --name "Ion Pop" --phone 0750... --address "Str X 1" --city Ploiesti --zip 100294 --items "SKU:2;termen:1"
 cs_actions.py swap    --from-order EST188351 --items "GD-BR-6660:1"        # SWAP REAL (alt produs/mărime) → copiază adresa + tag `swap`
-cs_actions.py replace --from-order EST188351 --items "EST-X:2"            # RE-PLASARE (cancel+replace, edit conținut) → copiază adresa + tag `replasata-cs`, NU `swap`
+cs_actions.py replace --from-order EST188351                              # RE-PLASARE „cât era comanda" → reproduce EXACT comanda veche (produse+discount promo+transport)
+cs_actions.py replace --from-order EST188351 --items "EST-X:2"            # RE-PLASARE cu conținut NOU → aplică promoția magazinului. (anulează ÎNTÂI originalul separat!) tag `replasata-cs`, NU `swap`
 cs_actions.py resend  --from-order GT44004  --items "SKU:1"               # retrimitere GRATIS (100% discount) + tag resend
 cs_actions.py modify  --order EST188351 --store EST [--address "Str Noua 9" --city Cluj --zip 400001] \
                       [--add "SKU:1"] [--remove "termen"] [--set "termen:3"]    # adresă ȘI/SAU produse (orderEdit)
@@ -56,6 +57,7 @@ cs_actions.py invoice --order GT44004                                     # fact
 ```
 - **Fără `--apply` = DRY-RUN** (arată exact ce ar face). Arată sumarul agentului, confirmă, apoi rulează cu `--apply`.
 - **COD**: `place/swap/resend` creează comandă neplătită (`paymentPending`) → se expediază, plătește la livrare.
+- **PROMO la plasare**: discounturile AUTOMATE Shopify (2+1, quantity) **NU se aplică pe draft orders** → se aplică MANUAL. **`replace --from-order X` fără `--items` = reproduce EXACT valoarea comenzii vechi** (produse + discount + transport din Shopify — „cât era comanda"). `place`/`replace --items`/`swap` cu **`--promo`** = aplică promoția magazinului: **parfumuri (EST/GT/NUB) 2+1** (la fiecare 3, cel mai ieftin gratis) + **transport sub pragul de free shipping**. Deals (quantity per-SKU) → folosește `replace` fără `--items` (copiază valoarea). Vezi [[releaseit-cod-promo-model]].
 - **Produse**: `--items "termen:cantitate;..."` (termen = SKU exact sau titlu). Ambiguu → scriptul cere SKU-ul.
 - **modify** schimbă adresa (REST, pre-fulfillment) și/sau produsele (`--add`/`--remove`/`--set` prin orderEdit→commit).
 - **Adresa la swap/resend**: xConnector (GT) / **Frisbo** (restul — org per magazin, mapat în `FRISBO_BY_PREFIX`). Fallback: `--address --city --zip`.
