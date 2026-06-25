@@ -22,6 +22,9 @@ uv run xconnector.py awb-void  --order GT123 [--shop d] [--connector ID] [--appl
 uv run xconnector.py awb-regen --order GT123 --parcels N [--connector ID] [--apply]     # anulează + refă cu alte condiții
 uv run xconnector.py awb-label --order GT123 [--shop d]                                  # link etichetă PDF
 uv run xconnector.py order-cancel --order GT123 [--shop d] [--force] [--apply]           # anulează AWB (dacă neplecat) + comanda
+uv run xconnector.py inv-make  --order GT123 [--connector ID] [--lang ro] [--apply]      # creează factură (SMART_BILL default)
+uv run xconnector.py inv-cancel | inv-storno | inv-regen --order GT123 [--apply]         # anulează / storno(revert) / regenerează
+uv run xconnector.py inv-doc   --order GT123                                             # link PDF factură
 ```
 - `summary` — per magazin: total în fereastră, câte FĂRĂ AWB, distribuție status.
 - `address-issues` — lista comenzilor nepornite cu adresă `WRONG`/`UNKNOWN` + adresa curentă + sugestia
@@ -59,6 +62,14 @@ Toate rezolvă comanda după `--order GT###` (caută în `--shop` dacă dat, alt
 `awb-make`/`awb-regen` aleg implicit **DPD Romania** dacă nu dai `--connector`. **Excepție Grandia:** are și connectorul
 **Dragon Star** pt produse voluminoase (magazii, lavoare, oglinzi, măsuțe de cafea) — pt alea dă explicit
 `--connector <id>` (vezi `connectors --shop <grandia>`). `order-cancel` folosește automat connectorul cu care s-a emis AWB-ul.
+
+### Facturi prin API (mirror AWB)
+Connector de facturare = tip **SMART_BILL** (ales automat dacă e unul singur; altfel `--connector <id>`). Dry-run by default.
+- **`inv-make`** — creează factura (`create-invoice`). Refuză dacă există deja factură → folosește `inv-regen`. `--lang ro/en`.
+- **`inv-cancel`** / **`inv-storno`** — anulează (`cancel-invoice`) / stornează (`revert-invoice`; `--refund-id` pt storno parțial pe un refund).
+- **`inv-regen`** — anulează + creează din nou (create gardat pe succesul anulării).
+- **`inv-doc`** — link-ul PDF al facturii (din documentul `INVOICE` al comenzii).
+Guard: `--connector` nebilling sau `--refund-id` nenumeric → abort (nu trimite orbește pe document financiar).
 
 ## Auth (cheie API xConnector + token Shopify Admin, per magazin)
 - xConnector: secret KB **`XCONNECTOR_SHOPS`** (JSON `[{shopDomain,apiKey}]`), altfel `~/.aac/input.json`.
