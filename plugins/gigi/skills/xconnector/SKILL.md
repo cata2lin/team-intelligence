@@ -25,7 +25,14 @@ uv run xconnector.py order-cancel --order GT123 [--shop d] [--force] [--apply]  
 uv run xconnector.py inv-make  --order GT123 [--connector ID] [--lang ro] [--apply]      # creează factură (SMART_BILL default)
 uv run xconnector.py inv-cancel | inv-storno | inv-regen --order GT123 [--apply]         # anulează / storno(revert) / regenerează
 uv run xconnector.py inv-doc   --order GT123                                             # link PDF factură
+uv run xconnector.py addr-set  --order GT123 --city "…" --zip "…" [--address1 …] [--province …] [--make-awb] [--apply]
 ```
+
+### Setare adresă (COD: adresa SE poate modifica; line items NU → ăla e cancel+replace)
+- **`addr-set`** — setează adresa de livrare în Shopify (`orderUpdate.shippingAddress`, confirmat suportat în 2026-04) la câmpurile
+  date, păstrând restul (firstName/lastName/company/countryCode). Cu **`--make-awb`** face **poll pe xConnector** până confirmă
+  resync-ul adresei noi, ABIA APOI face AWB-ul (ca să nu folosească adresa veche); dacă nu se sincronizează în ~30s → NU face AWB
+  (rulezi `awb-make` mai târziu). Dry-run by default. Merge pe toate magazinele (inclusiv Nubra — token CSV valid).
 - `summary` — per magazin: total în fereastră, câte FĂRĂ AWB, distribuție status.
 - `address-issues` — lista comenzilor nepornite cu adresă `WRONG`/`UNKNOWN` + adresa curentă + sugestia
   validatorului + verdict. `--json` pt automatizări.
