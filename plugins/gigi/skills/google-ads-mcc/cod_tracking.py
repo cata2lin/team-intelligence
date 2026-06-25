@@ -41,6 +41,37 @@ def clean(d):
     p = urlsplit(d)
     return d if not p.query else urlunsplit((p.scheme,p.netloc,p.path,urlencode([(x,y) for x,y in parse_qsl(p.query,True) if x.lower() in _OK]),p.fragment))
 
+# ── detecție COD form: semnături în storefront-ul public ──
+_UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"}
+COD_SIGNS = [
+    ("Releasit COD Form", ["_RSI_COD_FORM_SETTINGS", "releasit-cod-form", "rsi-cod-form-do-not-change", "releasit"]),
+    ("EasySell COD Form", ["easysell", "tycoonwebsolutions", "_es_cod_form", "es-cod-form"]),
+    ("Zipify OCU/COD",     ["zipify", "one click upsell"]),
+]
+def _fetch(url):
+    try: return requests.get(url, headers=_UA, timeout=20).text
+    except Exception: return ""
+def detect_cod_form(url):
+    """întoarce (are_cod_form, nume_app). Detecția app-ului e fiabilă; dacă pixelul Google Ads e
+    deja configurat în el verifici manual în app (HTML-ul minificat nu permite o citire sigură a items_array)."""
+    html = _fetch(url)
+    m = re.search(r'/products/[\w%\-]+', html)         # mai mult semnal dintr-o pagină de produs
+    if m: html += _fetch(url.rstrip("/") + m.group(0))
+    low = html.lower()
+    for app, sigs in COD_SIGNS:
+        if any(s.lower() in low for s in sigs):
+            return (True, app)
+    if ("ramburs" in low or "plata la livrare" in low) and ("cod-form" in low or "cod_form" in low):
+        return (True, "COD form (generic)")
+    return (False, None)
+def resolve_public_url(search):
+    for x in search("SELECT asset_group.final_urls FROM asset_group WHERE asset_group.status='ENABLED'") + \
+             search("SELECT campaign.tracking_url_template, campaign.final_url_suffix FROM campaign WHERE campaign.status='ENABLED' LIMIT 1"):
+        urls = (x.get("assetGroup") or {}).get("finalUrls") or []
+        if urls:
+            p = urlsplit(urls[0]); return f"{p.scheme}://{p.netloc}"
+    return None
+
 def ga4_measurement_id(hint):
     try:
         from google.oauth2 import service_account
@@ -71,6 +102,8 @@ def main():
     ap.add_argument("--cid", required=True, help="customer id Google Ads (fără liniuțe)")
     ap.add_argument("--ga4", default="", help="hint nume property GA4 (ex 'carpetto')")
     ap.add_argument("--name", default="COD Purchase", help="numele acțiunii de conversie")
+    ap.add_argument("--url", default="", help="URL public storefront (altfel îl rezolv din final_urls contului)")
+    ap.add_argument("--force", action="store_true", help="continuă setup-ul chiar dacă NU detectez COD form")
     ap.add_argument("--apply", action="store_true", help="creează acțiunea dacă lipsește (altfel doar raportează)")
     a = ap.parse_args(); CID=a.cid
     url = os.getenv("DATABASE_URL_METRICS") or _kb("DATABASE_URL_METRICS")
@@ -82,6 +115,20 @@ def main():
     H = {"Authorization":f"Bearer {tok}","developer-token":r["dev"],"login-customer-id":MCC,"Content-Type":"application/json"}
     def search(q): return requests.post(f"https://googleads.googleapis.com/v21/customers/{CID}/googleAds:search",headers=H,json={"query":q},timeout=40).json().get("results",[])
     def mut(svc, ops): return requests.post(f"https://googleads.googleapis.com/v21/customers/{CID}/{svc}:mutate",headers=H,json={"operations":ops,"validateOnly":False},timeout=40)
+
+    # ── 0) detectează dacă magazinul ARE COD form (altfel fix-ul nu se aplică) ──
+    purl = a.url or resolve_public_url(search)
+    if purl:
+        has, app = detect_cod_form(purl)
+        if has:
+            print(f"🔍 COD form detectat: {app}  ({purl}) → pune valorile de mai jos în tab-ul Conversion tracking al app-ului.")
+        else:
+            print(f"🔍 {purl}: NU am detectat COD form cunoscut → magazin pare cu checkout NATIV.")
+            print("   Pixelul standard (app Google & YouTube) ar trebui să meargă; tool-ul ăsta probabil nu e necesar.")
+            if not a.force:
+                print("   (dacă totuși vrei să continui, rulează cu --force)"); return
+    else:
+        print("🔍 (n-am putut rezolva URL-ul public — dă --url <storefront> ca să detectez COD form-ul)")
 
     aw = search("SELECT customer.conversion_tracking_setting.conversion_tracking_id FROM customer")[0]["customer"]["conversionTrackingSetting"]["conversionTrackingId"]
     ex = search(f"SELECT conversion_action.resource_name, conversion_action.primary_for_goal FROM conversion_action WHERE conversion_action.name='{a.name}'")
