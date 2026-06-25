@@ -12,6 +12,10 @@ description: Operate the Richpanel helpdesk (the team's CS inbox for all Arona b
 
 Helpdesk-ul Richpanel acoperă TOATE brandurile (org `nocturna954`; email-uri contact@esteban.ro / george-talent.ro / grandia.ro / magdeal.ro etc.). MCP-ul e un connector Claude — **Claude apelează uneltele `mcp__richpanel__*`** (nu un script `uv`).
 
+> ⚠️ **CE MAGAZIN e un tichet — NU te lua după brand/sender/org (sunt STALE/înșelătoare):**
+> `nocturna954` = **numele CONTULUI Richpanel** (acoperă toate brandurile), NU magazinul „Nocturna". De-aia `last_message_sender_id` începe cu `nocturna954_...` pe **orice** tichet — e org-ul, nu clientul/magazinul.
+> **Magazinul = pagina pe care a venit tichetul = câmpul `to.id`** (page id FB/IG) → mapează cu `PAGE_STORE` din `gigi:richpanel-auto-triage` (ex `775068272350568`=MagDeal, `421367954403103`=Apreciat…). Brandul afișat în Richpanel poate fi neactualizat (pagina MagDeal e încă etichetată „nocturna954"). Fallback: prefixul comenzii din mesaj (EST/GT/MAG…). Vezi `shared/CS.md` + memoria fb-page-store-map.
+
 ## Realitatea inboxului (de știut)
 - Volum uriaș: ~18-19k tichete noi/lună, **~2.500 backlog deschis**, prim-răspuns ~5h, **CSAT nesetat** (0).
 - Cel mai mare canal = **comentarii pe reclame Facebook** (`facebook_feed_comment`), apoi `email`. Comentariile FB au rata cea mai mică de închidere.
