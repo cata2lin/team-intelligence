@@ -894,6 +894,10 @@ def cmd_awb_make(a, _resolved=None):
     if not con:
         _ask_connector(cons); return
     st = {t.get("shopDomain"): t for t in load_shopify_tokens()}.get(sh["shopDomain"])
+    if st and not getattr(a, "force", False):  # cadou UGC/influencer → NU fac AWB (flux separat); --force dacă chiar vrei
+        if any(tg in shopify_order_tags(a.order, {st.get("prefix", ""): st}) for tg in INFLUENCER_TAGS):
+            print("  ⛔ %s are tag `influencer` (cadou UGC) → NU fac AWB. Folosește --force dacă chiar vrei." % a.order)
+            return
     if not getattr(a, "connector", None):  # rutare per-produs (Grandia → Dragon Star) doar dacă nu s-a forțat connectorul
         con = route_connector(sh, st, a.order, cons, con)
     parcels = resolve_parcels(a, st, a.order)  # nr colete din metafield (sau --parcels forțat)
@@ -1174,6 +1178,8 @@ DUP_TAGS = ("duplicata", "duplicata3", "duplicat4")
 # Comenzi PLASATE/gestionate de CS (replasare COD, swap, resend, modify) — cs-actions le taghează cu agentul CS.
 # fulfill NU le atinge (nici AWB, nici dedup): le gestionează CS, sunt diferite de comenzile clientului.
 CS_AGENT_TAGS = {"raluca", "oana", "andra", "anna", "oanao"}
+# Comenzi de tip cadou UGC/influencer (100% discount, flux separat) — NU li se face AWB automat din cron.
+INFLUENCER_TAGS = ("influencer",)
 
 
 def shopify_unfulfilled(shop, token, since_date, max_pages=12):
@@ -1284,7 +1290,7 @@ def cmd_fulfill(a):
         con, cons = pick_connector(xc, a)  # DPD Romania default — și pt externe (DPD livrează cross-border CZ/PL/BG)
         intl = sh["shopDomain"] in HERE_COUNTRY
         hkey = here_key() if intl else None
-        ready = fixable = hard = had_awb = noxc = made = fixed = failed = team_n = 0
+        ready = fixable = hard = had_awb = noxc = made = fixed = failed = team_n = infl = 0
         dup_keep = dup_cancel = dup_shipped = dup_unknown = 0
         for name, created, fin, tags, cust, source in unf:
             c = parse_iso(created)
@@ -1295,6 +1301,10 @@ def cmd_fulfill(a):
                 noxc += 1; continue
             if has_awb(o):
                 had_awb += 1; continue
+            # CADOU UGC/INFLUENCER (tag `influencer`) → NU se expediază prin cron (flux separat). Skip ÎNAINTE
+            # de team_placed, fiindcă multe sunt draft orders (altfel ar primi AWB ca team_placed).
+            if any(tg in tags for tg in INFLUENCER_TAGS):
+                infl += 1; continue
             # PLASATĂ DE CS (tag agent) sau prin DRAFT ORDER (replasare COD/swap/resend, UGC) → NU aplic dedup
             # (ar părea fals duplicat al comenzii vechi a clientului), DAR le fac AWB normal — sunt legitime de expediat.
             team_placed = any(t in CS_AGENT_TAGS for t in tags) or source == "shopify_draft_order"
@@ -1347,8 +1357,8 @@ def cmd_fulfill(a):
                 ok, _, _ = _create_label(xc, body)  # retry scurt pe throttle DPD (rafală)
                 made += 1 if ok else 0
                 failed += 0 if ok else 1
-        print("  %s — unfulfilled >%dmin: AWB %d gata + %d corectabile + %d grele→CS  ·  DUP: %d păstrate, %d de-anulat, %d plecate(protejate), %d fără-client  ·  CS/draft (AWB fără dedup): %d  (aveau AWB %d, fără xc %d)"
-              % (sh["shopDomain"], max_age, ready, fixable, hard, dup_keep, dup_cancel, dup_shipped, dup_unknown, team_n, had_awb, noxc))
+        print("  %s — unfulfilled >%dmin: AWB %d gata + %d corectabile + %d grele→CS  ·  DUP: %d păstrate, %d de-anulat, %d plecate(protejate), %d fără-client  ·  CS/draft (AWB fără dedup): %d · influencer-skip: %d  (aveau AWB %d, fără xc %d)"
+              % (sh["shopDomain"], max_age, ready, fixable, hard, dup_keep, dup_cancel, dup_shipped, dup_unknown, team_n, infl, had_awb, noxc))
         if a.apply:
             print("  → APLICAT: AWB %d (din care %d după corecție) · duplicate anulate %d · eșuate %d" % (made, fixed, dup_cancel, failed))
         else:
