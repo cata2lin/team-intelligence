@@ -197,10 +197,13 @@ def load_shopify_tokens():
     return list(by_dom.values())
 
 
-def shopify_gql(shop, token, query):
+def shopify_gql(shop, token, query, variables=None):
     url = "https://%s/admin/api/%s/graphql.json" % (shop, SHOPIFY_API)
     h = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
-    s, b = http("POST", url, h, {"query": query})
+    body = {"query": query}
+    if variables is not None:
+        body["variables"] = variables
+    s, b = http("POST", url, h, body)
     try:
         return json.loads(b)
     except Exception:
@@ -1177,11 +1180,81 @@ def cmd_inv_doc(a):
     print("  PDF: %s" % (d.get("url") or "—"))
 
 
+# ── Setare adresă comandă (Shopify orderUpdate.shippingAddress) → opțional AWB ──
+# Pt comenzi COD adresa SE poate modifica (line items NU — ăla e cancel+replace). Dry-run by default.
+def shopify_order_address(shop, token, name):
+    """(gid, shippingAddress curentă) a comenzii după nume. (None, {}) dacă negăsită."""
+    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ id shippingAddress{ '
+         'address1 address2 city zip province provinceCode countryCodeV2 firstName lastName phone company } } } } }'
+         ) % (name or "").replace('"', "")
+    d = shopify_gql(shop, token, q)
+    edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
+    if not edges:
+        return None, {}
+    n = edges[0]["node"]
+    return n.get("id"), (n.get("shippingAddress") or {})
+
+
+def cmd_addr_set(a):
+    """Setează adresa de livrare în Shopify la valorile date (păstrează restul), opțional face AWB (--make-awb).
+    Pt COD adresa e modificabilă. Dry-run by default; orderUpdate real DOAR cu --apply."""
+    sh, xc, o = resolve_order(a.order, a, a.days)
+    if not o:
+        print("Comanda %s negăsită." % a.order); return
+    st = {t.get("shopDomain"): t for t in load_shopify_tokens()}.get(sh["shopDomain"])
+    if not st:
+        print("  fără token Shopify pt %s." % sh["shopDomain"]); return
+    gid, cur = shopify_order_address(st["shopDomain"], st["adminToken"], a.order)
+    if not gid:
+        print("  Comanda %s negăsită în Shopify (%s)." % (a.order, sh["shopDomain"])); return
+    given = {"address1": a.address1, "address2": a.address2, "city": a.city,
+             "zip": a.zip, "province": a.province, "phone": a.phone}
+    if not any(v for v in given.values()):
+        print("  Nu ai dat niciun câmp (--address1/--address2/--city/--zip/--province/--phone)."); return
+    new = {"countryCode": (a.country or cur.get("countryCodeV2") or "RO")}
+    for k in ("address1", "address2", "city", "zip", "province", "phone"):
+        v = given.get(k) if given.get(k) is not None else cur.get(k)
+        if v is not None:
+            new[k] = v
+    for k in ("firstName", "lastName", "company"):
+        if cur.get(k):
+            new[k] = cur.get(k)
+    if not given.get("province") and cur.get("provinceCode"):
+        new["provinceCode"] = cur.get("provinceCode")
+    print("═" * 60)
+    print("  ADRESĂ set · %s (%s)" % (a.order, sh["shopDomain"]))
+    print("  curent: %s, %s %s (%s)" % (cur.get("address1"), cur.get("city"), cur.get("zip"), cur.get("province")))
+    print("  nou   : %s, %s %s (%s)" % (new.get("address1"), new.get("city"), new.get("zip"), new.get("province")))
+    if not a.apply:
+        print("  DRY-RUN — aș orderUpdate shippingAddress%s." % ("  + apoi awb-make" if a.make_awb else "")); return
+    m = "mutation($input: OrderInput!){ orderUpdate(input:$input){ order{ id } userErrors{ field message } } }"
+    d = shopify_gql(st["shopDomain"], st["adminToken"], m, {"input": {"id": gid, "shippingAddress": new}})
+    errs = (((d.get("data") or {}).get("orderUpdate") or {}).get("userErrors")) or d.get("errors")
+    if errs:
+        print("  ❌ Shopify orderUpdate: %s" % errs); return
+    print("  ✅ adresă actualizată în Shopify")
+    if a.make_awb:
+        print("  → aștept ca xConnector să resincronizeze adresa nouă, apoi fac AWB...")
+        target = (str(new.get("zip") or ""), (new.get("city") or "").lower(), (new.get("address1") or "").lower())
+        synced = False
+        for _ in range(10):  # ~30s
+            time.sleep(3)
+            ad = xc.by_id(o.get("orderId")).get("shippingAddress") or {}
+            if (str(ad.get("zip") or ""), (ad.get("city") or "").lower(), (ad.get("address1") or "").lower()) == target:
+                synced = True
+                break
+        if not synced:
+            print("  ⚠ xConnector n-a resincronizat încă adresa nouă → NU fac AWB acum (risc adresă veche).")
+            print("     Rulează peste câteva minute: awb-make --order %s --apply" % a.order)
+            return
+        cmd_awb_make(a, _resolved=(sh, xc, o))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["summary", "address-issues", "recheck", "correct", "connectors", "fulfill",
                                     "awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
-                                    "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc",
+                                    "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc", "addr-set",
                                     "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
     ap.add_argument("--shop"); ap.add_argument("--order"); ap.add_argument("--days", type=int, default=60)
     ap.add_argument("--apply", action="store_true"); ap.add_argument("--json", action="store_true")
@@ -1199,16 +1272,19 @@ def main():
     ap.add_argument("--max-age-min", type=int, default=15, dest="max_age_min", help="fulfill: vârsta minimă în minute a comenzii unfulfilled ca să-i facă AWB (default 15).")
     ap.add_argument("--lang", help="inv-make/regen: languageCode pt factură (ex ro/en).")
     ap.add_argument("--refund-id", dest="refund_id", help="inv-storno: Shopify refund ID (storno parțial pe un refund).")
+    ap.add_argument("--address1"); ap.add_argument("--address2"); ap.add_argument("--city")
+    ap.add_argument("--zip"); ap.add_argument("--province"); ap.add_argument("--phone"); ap.add_argument("--country")
+    ap.add_argument("--make-awb", action="store_true", dest="make_awb", help="addr-set: după setarea adresei, fă AWB.")
     ap.add_argument("--correct", action="store_true", help="awb-auto: corectează conservator adresele proaste (xConnector ai-correct-address)")
     a = ap.parse_args()
     if a.cmd in ("awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
-                 "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc"):
+                 "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc", "addr-set"):
         if not a.order:
             print("Dă --order (ex: --order GT44004)."); sys.exit(1)
         {"awb-make": cmd_awb_make, "awb-void": cmd_awb_void, "awb-regen": cmd_awb_regen,
          "awb-label": cmd_awb_label, "order-cancel": cmd_order_cancel,
          "inv-make": cmd_inv_make, "inv-cancel": cmd_inv_cancel, "inv-storno": cmd_inv_storno,
-         "inv-regen": cmd_inv_regen, "inv-doc": cmd_inv_doc}[a.cmd](a)
+         "inv-regen": cmd_inv_regen, "inv-doc": cmd_inv_doc, "addr-set": cmd_addr_set}[a.cmd](a)
         return
     if a.cmd == "connectors":
         cmd_connectors(a); return
