@@ -147,8 +147,40 @@ class XC:
 SHOPIFY_API = "2026-04"
 
 
+def _stores_csv_tokens():
+    """[{prefix, shopDomain, adminToken}] din SHOPIFY_STORES_CSV (canonic, TOATE magazinele; col prefix/shop/token).
+    Sursă: env SHOPIFY_STORES_CSV (path sau text) sau KB. NUB = OAuth-rotation (token static mort, merge pe VPS).
+    Pe VPS fără uv/KB → întoarce [] grațios (cron-ul folosește env SHOPIFY_ADMIN_TOKENS)."""
+    import csv, io
+    raw = os.environ.get("SHOPIFY_STORES_CSV") or ""
+    if raw and "\n" not in raw and os.path.exists(raw):
+        try:
+            raw = open(raw, encoding="utf-8-sig").read()
+        except Exception:
+            raw = ""
+    if not raw or "\n" not in raw:
+        try:
+            raw = subprocess.run(["uv", "run", KB, "secret-get", "SHOPIFY_STORES_CSV"],
+                                 capture_output=True, text=True, timeout=40).stdout
+        except Exception:
+            raw = ""
+    out = []
+    try:
+        for row in csv.DictReader(io.StringIO(raw)):
+            pref = (row.get("prefix") or "").strip().lstrip("﻿").upper()
+            shop = (row.get("shop") or "").strip().replace("https://", "").strip("/")
+            tok = (row.get("token") or "").strip()
+            if pref and shop and tok:
+                out.append({"prefix": pref, "shopDomain": shop, "adminToken": tok})
+    except Exception:
+        pass
+    return out
+
+
 def load_shopify_tokens():
-    """[{prefix, shopDomain, adminToken}] din KB SHOPIFY_ADMIN_TOKENS (sau env)."""
+    """[{prefix, shopDomain, adminToken}] pt TOATE magazinele: bază din SHOPIFY_STORES_CSV (canonic),
+    suprascris de SHOPIFY_ADMIN_TOKENS (env/KB) pt override-uri/tokenuri proaspete. NU se printează."""
+    by_dom = {t["shopDomain"]: t for t in _stores_csv_tokens()}
     raw = os.environ.get("SHOPIFY_ADMIN_TOKENS")
     if not raw:
         try:
@@ -157,9 +189,12 @@ def load_shopify_tokens():
         except Exception:
             raw = ""
     try:
-        return json.loads(raw) if raw.startswith("[") else []
+        for t in (json.loads(raw) if raw.startswith("[") else []):
+            if t.get("shopDomain") and t.get("adminToken"):
+                by_dom[t["shopDomain"]] = t
     except Exception:
-        return []
+        pass
+    return list(by_dom.values())
 
 
 def shopify_gql(shop, token, query):
