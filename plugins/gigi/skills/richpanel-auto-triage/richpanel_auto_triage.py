@@ -131,7 +131,8 @@ def triage(t, vips):
     to = t.get("to") or {}
     email = (frm.get("email") or (frm.get("id") if isinstance(frm.get("id"), str) and "@" in (frm.get("id") or "") else "") or "").lower()
     blob = (t.get("subject") or "") + " " + (t.get("first_message") or "")
-    # magazin
+    # magazin = PAGINA pe care a venit tichetul (`to.id` → PAGE_STORE). NU brandul/`last_message_sender_id`
+    # din Richpanel: ăla începe cu org-ul `nocturna954_...` pe ORICE tichet (cont, nu magazin) → ar da fals „Nocturna".
     store = PAGE_STORE.get((to.get("id") if isinstance(to, dict) else None) or "")
     m = ORDER_RE.search(blob)
     if not store and m:
