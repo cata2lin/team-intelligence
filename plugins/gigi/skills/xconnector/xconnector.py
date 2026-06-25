@@ -737,26 +737,54 @@ def cmd_recheck(a):
 BILLING_TYPES = {"SMART_BILL", "SMARTBILL", "SMART_BILL_RO", "FACTURIS", "OBLIO", "FGO"}
 
 
+# Prefix orderName → domeniu myshopify, STATIC (hardcodat) ca să NU depindă de SHOPIFY_STORES_CSV — care
+# pe o mașină cu KB stale lipsește, lăsând doar GT din SHOPIFY_ADMIN_TOKENS. Potrivirea e pe cel mai LUNG
+# prefix care e ÎNCEPUTUL literelor din orderName, deci e robustă la trunchiere (GRAND16613 → „GRAN").
+PREFIX_DOMAIN = {
+    "APR": "8e3700-d9", "BELA": "dvk4hu-dq", "BG": "a98a4e-16", "BON": "bonhaus", "BONBG": "ux1x6n-n2",
+    "CARP": "nxfer1-n4", "COV": "bb4nmc-pb", "CZ": "vthuzq-7j", "EST": "6f9e22-9d", "GEN": "cn54vk-uz",
+    "GRAN": "n12w89-yy", "GT": "ix5bxc-hr", "LUX": "de51c5-b8", "MAG": "covoareauto-ro", "NOC": "1eee37-2d",
+    "NUB": "bmuwvv-jy", "OFER": "ofertelezilei", "PAT": "ce-pat-ai", "PL": "f0yrmh-ia", "RED": "audusp-rf",
+    "ROSSI": "1d2bce-2",
+}
+
+
+def domain_for_order(name):
+    """Domeniul myshopify după prefixul din orderName (cel mai LUNG prefix înregistrat care e începutul
+    literelor — robust la trunchiere: GRAND16613→GRAN, BONBG…→BONBG peste BON). None dacă necunoscut."""
+    pm = re.match(r"^([A-Za-z]+)", name or "")
+    if not pm:
+        return None
+    letters = pm.group(1).upper()
+    best = ""
+    for pref in PREFIX_DOMAIN:
+        if letters.startswith(pref) and len(pref) > len(best):
+            best = pref
+    return (PREFIX_DOMAIN[best] + ".myshopify.com") if best else None
+
+
 def resolve_order(name, a, days=60):
-    """Întoarce (shop, xc, order_obj) pt orderName. Caută în --shop dacă dat, altfel în TOATE magazinele."""
+    """Întoarce (shop, xc, order_obj) pt orderName. `--shop` restrânge la un magazin; altfel INFEREZ magazinul
+    din prefixul comenzii (rapid, NU scanez toate 19) și-l încerc PRIMUL, cu fallback la restul dacă nu nimeresc."""
     import datetime
     dto = datetime.date.today().isoformat()
     dfrom = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
-    for sh in load_shops():
-        if a.shop and sh["shopDomain"] != a.shop:
-            continue
+    shops = load_shops()
+    if a.shop:
+        scan = [sh for sh in shops if sh["shopDomain"] == a.shop]
+    else:
+        guess = domain_for_order(name)  # ex MAG24088 → covoareauto-ro.myshopify.com (independent de CSV/KB)
+        scan = sorted(shops, key=lambda sh: 0 if (guess and sh["shopDomain"] == guess) else 1) if guess else shops
+    # 1) scan pe fereastră (dă `documents`/AWB) — magazinul ghicit primul → de regulă găsește din prima
+    for sh in scan:
         xc = XC(sh["apiKey"])
         for o in xc.orders(dfrom, dto):
             if o.get("orderName") == name:
                 return sh, xc, o
-    # FALLBACK robust: comanda nu-i în fereastra de scan (veche SAU magazin cu volum mare > ~2400) →
-    # Shopify orderName→orderId → xConnector by-id. Merge pe ORICE comandă, indiferent de vechime/volum.
-    # (by-id NU întoarce `documents` → fără info AWB pe această cale; awb-make rămâne protejat: xConnector
-    # respinge AWB-ul dublu server-side.)
+    # 2) FALLBACK comenzi vechi / volum mare (în afara ferestrei): Shopify orderName→orderId → xConnector by-id.
+    # (by-id NU întoarce `documents` → fără info AWB pe această cale; awb-make e protejat: xConnector respinge dublul.)
     toks = {t.get("shopDomain"): t for t in load_shopify_tokens()}
-    for sh in load_shops():
-        if a.shop and sh["shopDomain"] != a.shop:
-            continue
+    for sh in scan:
         st = toks.get(sh["shopDomain"])
         oid = shopify_order_id(name, st) if st else None
         if not oid:
@@ -1231,6 +1259,9 @@ def cmd_order_cancel(a):
     sh, xc, o = resolve_order(a.order, a, a.days)
     if not o:
         print("Comanda %s negăsită." % a.order); return
+    # „A PLECAT?" = statusul de curier din AWBprint (aggregated_status). xConnector NU expune un status real
+    # de expediere (doar `dispatched` boolean — NErelevant — și `downloaded` = status de PRINT). Testul
+    # AUTORITATIV final rămâne încercarea de a anula AWB-ul: dacă a plecat, xConnector dă eroare și ne oprim.
     status = awbprint_status(a.order)
     awb = has_awb(o)
     trk = doc_tracking(awb_doc(o))
@@ -1251,8 +1282,13 @@ def cmd_order_cancel(a):
     if not st:
         print("  ⚠ fără token Shopify pt %s în SHOPIFY_ADMIN_TOKENS → nu pot anula comanda. Nu ating nimic." % sh["shopDomain"]); return
     do_refund = bool(getattr(a, "refund", False))
+    do_notify = bool(getattr(a, "notify", False))
+    do_restock = not getattr(a, "no_restock", False)
     plan = (["anulez AWB %s (xConnector)" % (trk or "—")] if awb else []) + \
-           ["anulez comanda în Shopify%s" % (" + REFUND" if do_refund else " (fără refund)")]
+           ["anulez comanda în Shopify%s%s · email client: %s"
+            % (" + REFUND" if do_refund else " (fără refund)",
+               " + restock" if do_restock else " (FĂRĂ restock)",
+               "TRIMIT" if do_notify else "NU trimit")]
     print("  plan: %s" % "  →  ".join(plan))
     if not a.apply:
         print("  DRY-RUN — fără --apply nu execut."); return
@@ -1350,8 +1386,9 @@ def cancel_duplicate(sh, xc, o, st, name, apply):
     node = find_order(st["shopDomain"], st["adminToken"], name)
     if not node or not node.get("id"):
         return "failed"
+    # RESTOCK ON: comanda nu a plecat → trebuie repus stocul (altfel rămâne decrementat = scos din stoc).
     errs = shopify_order_cancel(st["shopDomain"], st["adminToken"], node["id"],
-                                reason="OTHER", refund=False, restock=False, notify=False)
+                                reason="OTHER", refund=False, restock=True, notify=False)
     return "cancelled" if not errs else "failed"
 
 
