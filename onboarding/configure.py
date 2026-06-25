@@ -27,6 +27,10 @@ import os
 import re
 import tempfile
 
+# Fișierele shared de context care se @import-ă ABSOLUT în global CLAUDE.md (pentru toată echipa).
+# Adaugi un fișier nou de context în shared/ → trece-l aici (și hook-ul SessionStart îl va asigura la toți).
+SHARED_CONTEXT_FILES = ("CLAUDE.team.md", "HARTA.md", "CS.md")
+
 
 def claude_home() -> str:
     home = os.path.join(os.path.expanduser("~"), ".claude")
@@ -125,11 +129,14 @@ def main() -> None:
     })
 
     # Forward slashes: stable @import across OSes and a stable idempotency check.
-    shared = os.path.join(args.team_repo, "shared", "CLAUDE.team.md").replace(os.sep, "/")
-    ensure_import(claude_md_path, f"@{shared}")
+    # TOATE fișierele shared de context se @import-ă ABSOLUT în global CLAUDE.md (NU prin nested-import în
+    # CLAUDE.team.md — ăla e regenerat de sync-ul de catalog și pierde referințele). Vezi SHARED_CONTEXT_FILES.
+    for fn in SHARED_CONTEXT_FILES:
+        p = os.path.join(args.team_repo, "shared", fn).replace(os.sep, "/")
+        ensure_import(claude_md_path, f"@{p}")
 
     print(f"[configure] NAS_ROOT + TEAM_REPO written to {settings_path}")
-    print(f"[configure] @import ensured in {claude_md_path} -> {shared}")
+    print(f"[configure] @import-uri asigurate în {claude_md_path}: {', '.join(SHARED_CONTEXT_FILES)}")
 
 
 if __name__ == "__main__":
