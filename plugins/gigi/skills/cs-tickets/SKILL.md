@@ -28,6 +28,7 @@ Helpdesk-ul Richpanel acoperă TOATE brandurile (org `nocturna954`; email-uri co
 - **Citește firul:** `get_conversation` (mode=audit pt mesaje paginate).
 - **Răspunde (DOAR DRAFT în mod testare):** `create_draft` — întotdeauna; `add_private_note` pt notițe interne. **NU folosi `send_message`** (interzis acum, vezi bannerul). Agentul uman revizuiește și trimite draftul din Richpanel.
 - **Gestionează:** `assign_conversation`, `update_conversation_status` (close), `snooze_conversation`, `add_tags_to_conversation`/`remove_tags_from_conversation`/`create_tag`.
+- **📌 REPLY = CLOSE:** după ce un răspuns e **TRIMIS**, tichetul se **ÎNCHIDE** (`update_conversation_status=closed`) — INCLUSIV escaladările (ANPC/OPC); Richpanel îl **REDESCHIDE automat** dacă clientul scrie iar. **În modul DRAFT-only de acum**, NU închide tu (draftul nu e trimis) — omul trimite din Richpanel ȘI închide. **La go-live** (când se permite `send_message`): fluxul = `send_message` → `update_conversation_status=closed`. Magazinul tichetului = `to.id` (pagina), nu brandul/org `nocturna954` (stale).
 - **Analytics:** `query_analytics` (metrics: new_conversations, closed_conversations, backlog, frt, csat; dimensions: agent|channel|team|tags; startDate/endDate) + `get_available_metrics`. `list_ai_closure_candidates` pt tichete închidibile automat.
 
 ## Workflow-uri tipice
