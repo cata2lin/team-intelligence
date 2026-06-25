@@ -14,6 +14,9 @@ one capability pool and one memory with the whole team.
 
 You are **{$EMPLOYEE_HANDLE}** on this machine.
 
+> 🎧 **Customer Service (CS)** — pentru ORICE task CS (caut comandă/client după telefon/nume/order#/AWB, status, profil 360, anulare/AWB/factură/adresă, print depozit, tichete) → **PRIMUL fișier = `shared/CS.md`**. Rutare clară pe intenții + exemple. Regula: NU improviza query raw (ex: telefon → `gigi:cs-customer-360`, NU căutare raw în AWBprint).
+@CS.md
+
 > 🗺️ **Unde găsesc ce** (date, scripturi, profitabilitate, „Vreau X → unde mă duc") → vezi **`shared/HARTA.md`** (index hand-maintained). Pipeline-ul canonic de profitabilitate, harta bazelor de date și scripturile cheie sunt acolo.
 @HARTA.md
 

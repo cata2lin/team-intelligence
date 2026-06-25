@@ -1,5 +1,7 @@
 # Hartă: unde găsesc ce (date, rapoarte, scripturi, skilluri)
 
+> 🎧 **Task de Customer Service?** (comandă/client după telefon/nume/order#/AWB, status, profil, anulare/AWB/adresă/factură, print depozit, tichete) → **mergi direct la `shared/CS.md`** (hartă CS dedicată, cu exemple). Aici e doar partea non-CS (date/profitabilitate/scripturi).
+
 > Index **hand-maintained** ca ORICE coleg/agent să știe rapid **unde caută și ce folosește**.
 > Regula de aur: înainte să improvizezi un query/script, caută aici intenția. Adaugi o capabilitate nouă → **trec-o și aici**.
 > ⚠️ Fișier SEPARAT de CLAUDE.team.md fiindcă sync-ul de catalog regenerează CLAUDE.team.md și ștergea Harta. Loadează-l cu `@shared/HARTA.md` sau citește-l direct.
