@@ -1696,9 +1696,34 @@ def date_window(a):
             datetime.date.today().isoformat())
 
 
-def _print_dialog(path):
-    """Deschide PDF-ul + dialogul de print (macOS: Preview + Cmd+P auto; Linux: xdg-open)."""
-    if sys.platform == "darwin":
+def _print_dialog(path, printer=None):
+    """Deschide dialogul de print pt PDF-ul batch, cross-platform. Depozitul e pe WINDOWS.
+    Windows: SumatraPDF `-print-dialog`/`-print-to` (standard label-print) → altfel verbul „print" → altfel viewer+Ctrl+P.
+    macOS: Preview + Cmd+P. Linux: xdg-open. `printer` (opțional) = printează DIRECT pe imprimanta dată (fără dialog)."""
+    if os.name == "nt":   # Windows (depozit)
+        import shutil
+        sumatra = next((p for p in (shutil.which("SumatraPDF"), shutil.which("SumatraPDF.exe"),
+                                    r"C:\Program Files\SumatraPDF\SumatraPDF.exe",
+                                    os.path.expandvars(r"%LOCALAPPDATA%\SumatraPDF\SumatraPDF.exe"))
+                        if p and os.path.exists(p)), None)
+        if sumatra:
+            if printer:
+                subprocess.Popen([sumatra, "-print-to", printer, "-silent", path])
+                print("  → SumatraPDF: trimis DIRECT pe imprimanta %s." % printer)
+            else:
+                subprocess.Popen([sumatra, "-print-dialog", path])
+                print("  → SumatraPDF: dialog de print deschis.")
+            return
+        try:
+            os.startfile(path, "print")   # verbul „print" al handler-ului PDF default → dialog/printare
+            print("  → trimis spre print (handler PDF default). Dacă nu apare dialogul, deschide PDF-ul și Ctrl+P.")
+        except Exception:
+            try:
+                os.startfile(path)
+                print("  → deschis în viewer. Apasă Ctrl+P pentru dialogul de print.")
+            except Exception:
+                print("  📄 PDF batch: %s (deschide-l și Ctrl+P)." % path)
+    elif sys.platform == "darwin":
         subprocess.run(["open", "-a", "Preview", path], check=False)
         try:
             time.sleep(1.5)
@@ -1809,7 +1834,7 @@ def cmd_print_batch(a):
             print("      %s — %s" % (nm, why))
     target = merged or (pdfs[0] if pdfs else None)
     if target and not getattr(a, "no_print", False):
-        _print_dialog(target)
+        _print_dialog(target, getattr(a, "printer", None))
 
 
 def main():
@@ -1857,6 +1882,7 @@ def main():
     ap.add_argument("--no-print", action="store_true", dest="no_print", help="print-batch: NU deschide dialogul de print (doar salvează/merge).")
     ap.add_argument("--test", action="store_true", help="print-batch: TEST pe etichete DEJA descărcate (downloaded=true) — zero impact pe coada reală.")
     ap.add_argument("--limit", type=int, help="print-batch: max N etichete (chunk gestionabil / test).")
+    ap.add_argument("--printer", help="print-batch (Windows+SumatraPDF): printează DIRECT pe imprimanta dată, fără dialog (batch rapid).")
     a = ap.parse_args()
     if a.cmd in ("awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
                  "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc", "addr-set"):
