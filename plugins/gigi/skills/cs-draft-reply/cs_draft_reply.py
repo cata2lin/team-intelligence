@@ -37,7 +37,8 @@ REGULI:
 - Răspunde în LIMBA clientului (română/cehă/poloneză/bulgară/engleză).
 - Ton: politicos, cald, cu diacritice. Începe cu „Bună ziua" și încheie cu „Cu drag, Echipa <Magazin>".
 - RĂSPUNDE LA ULTIMUL MESAJ + STAREA CURENTĂ a conversației. Citește TOT istoricul. **NU repeta un răspuns anterior și NU cere date pe care clientul LE-A TRIMIS DEJA** (AWB, IBAN, nr comandă, poză, adresă etc.).
-- **Dacă clientul A TRIMIS DEJA AWB-ul (returul e EXPEDIAT):** returul e pe drum — **NU-i mai da adresa de retur, NU-i cere să trimită/reexpedieze produsul, NU recere AWB/IBAN**. Confirmă scurt că ai PRIMIT AWB-ul (și IBAN-ul, dacă l-a dat) și spune doar pasul următor: „refundul de <sumă> lei se procesează după ce coletul ajunge în depozit, în maximum 14 zile". Atât.
+- **Dacă clientul A TRIMIS DEJA AWB-ul (returul e EXPEDIAT):** returul e pe drum — **NU-i mai da adresa de retur, NU-i cere să trimită/reexpedieze produsul, NU recere AWB/IBAN**. Confirmă scurt că ai PRIMIT AWB-ul (și IBAN-ul, dacă l-a dat) și spune doar pasul următor: refundul se procesează după ce coletul ajunge în depozit, în maximum 14 zile. Atât.
+- SUMA DE REFUND: folosește suma deja PRECIZATĂ de agent în conversație (dacă există). NU folosi „valoarea comenzii (cu transport)" ca sumă de refund — transportul NU se returnează. Dacă nu ești sigur de sumă, scrie general („suma aferentă produselor returnate") fără cifră, NU inventa.
 - Folosește DOAR datele primite în context (comenzi, status, AWB). NU inventa numere de AWB, date de livrare sau prețuri.
 - Fii concis (3-8 rânduri). Scrie DOAR textul răspunsului, fără explicații meta."""
 
@@ -133,8 +134,8 @@ def main():
         cust = {}
     orders = cust.get("orders", [])
     COURIER = {"dpd-ro": "DPD", "dpd": "DPD", "sameday": "Sameday", "packeta": "Packeta", "econt": "Econt"}
-    od = "\n".join("  comanda %s (%s): status=%s, curier=%s, AWB=%s, produse=%s" % (
-        o.get("o"), o.get("brand", o.get("store", "?")), o.get("deliv", "?"),
+    od = "\n".join("  comanda %s (%s): valoare comandă (cu transport)=%.0f lei, status=%s, curier=%s, AWB=%s, produse=%s" % (
+        o.get("o"), o.get("brand", o.get("store", "?")), float(o.get("total") or 0), o.get("deliv", "?"),
         COURIER.get((o.get("courier") or "").lower(), o.get("courier") or "?"), o.get("awb", "") or "—", (o.get("skus") or "")[:40])
         for o in orders[:8]) or "  (nicio comandă găsită — posibil pre-vânzare / client nou)"
     store = orders[0]["brand"] if orders else (cust.get("emails", [""])[0].split("@")[-1].split(".")[0].title() if cust.get("emails") else "magazinul nostru")
