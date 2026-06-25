@@ -728,6 +728,94 @@ def route_connector(sh, st, order_name, cons, default_con):
     return default_con
 
 
+# ── Validare adrese INTERNAȚIONALE prin HERE Geocoding (validatorul RO al xConnector dă fals WRONG/UNKNOWN) ──
+# KPI = AWB făcut. Externe au adrese bune; HERE le validează → AWB cu curierul local (home delivery, ~100% din ele).
+HERE_COUNTRY = {"vthuzq-7j.myshopify.com": "CZE", "f0yrmh-ia.myshopify.com": "POL", "ux1x6n-n2.myshopify.com": "BGR"}
+HERE_MIN_SCORE = 0.9  # curierul pt CZ/PL/BG = DPD Romania (livrează cross-border), via pick_connector default
+
+
+def here_key():
+    k = os.environ.get("HERE_API_KEY")
+    if k:
+        return k
+    try:
+        return subprocess.run(["uv", "run", KB, "secret-get", "HERE_API_KEY"],
+                              capture_output=True, text=True, timeout=30).stdout.strip()
+    except Exception:
+        return ""
+
+
+def here_validate(addr, country, key):
+    """queryScore HERE Geocoding (0-1) pt o adresă, restrâns pe țară. 0.0 la eroare/fără rezultat/fără cheie."""
+    if not key or not country:
+        return 0.0
+    q = ", ".join([x for x in [addr.get("address1"), addr.get("address2"), addr.get("city"), addr.get("zip")] if x])
+    if not q:
+        return 0.0
+    url = ("https://geocode.search.hereapi.com/v1/geocode?q=%s&in=countryCode:%s&apiKey=%s"
+           % (urllib.parse.quote(q), country, urllib.parse.quote(key)))
+    s, b = http("GET", url, {})
+    try:
+        items = json.loads(b).get("items") or []
+        return float((items[0].get("scoring") or {}).get("queryScore", 0)) if items else 0.0
+    except Exception:
+        return 0.0
+
+
+# ── Nr. COLETE pt AWB din metafield-uri Shopify (vezi memoria parcel-count-metafields) ──
+# order `xconnector.parcel-count` (total calculat), altfel ceil(Σ product box × qty), altfel 1. CEIL pe decimal (1.5→2).
+PARCEL_PRODUCT_KEYS = ("nr_cutii", "nr_produse")  # namespace custom — cutii REALE (NU `nrproduse` = nr produse parfumuri)
+
+
+def _ceil_pos(x):
+    i = int(x)
+    return i + 1 if x > i else i
+
+
+def order_parcel_count(shop, token, name):
+    if not shop or not token or not name:
+        return 1
+    # nr colete REAL = order xconnector.parcel-count (total deja calculat), altfel cutii din produs.
+    # NU folosim `custom.nrproduse` (= nr PRODUSE, există doar pe parfumuri GT/Esteban, care n-au colete multiple → 1).
+    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ '
+         'pc: metafield(namespace:"xconnector", key:"parcel-count"){ value } '
+         'lineItems(first:100){ edges{ node{ quantity product{ '
+         'k1: metafield(namespace:"custom", key:"nr_cutii"){ value } '
+         'k2: metafield(namespace:"custom", key:"nr_produse"){ value } } } } } } } } }') % name.replace('"', "")
+    d = shopify_gql(shop, token, q)
+    edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
+    if not edges:
+        return 1
+    node = edges[0]["node"]
+    pc = (node.get("pc") or {}).get("value")
+    if pc not in (None, ""):
+        try:
+            return max(1, _ceil_pos(float(pc)))
+        except Exception:
+            pass
+    total = 0.0
+    found = False
+    for e in ((node.get("lineItems") or {}).get("edges") or []):
+        li = e["node"]; p = li.get("product") or {}
+        for k in ("k1", "k2"):
+            v = (p.get(k) or {}).get("value")
+            if v not in (None, ""):
+                try:
+                    total += float(v) * (li.get("quantity") or 1); found = True; break
+                except Exception:
+                    pass
+    return max(1, _ceil_pos(total)) if (found and total > 0) else 1
+
+
+def resolve_parcels(a, st, order_name):
+    """--parcels explicit forțează; altfel auto din metafield (order/product); fallback 1."""
+    if getattr(a, "parcels", None):
+        return a.parcels
+    if st:
+        return order_parcel_count(st["shopDomain"], st["adminToken"], order_name)
+    return 1
+
+
 def _err_text(s, d):
     """Text de eroare lizibil din răspunsul xConnector (ApiErrorResponse / errorMessage / brut)."""
     if isinstance(d, dict):
@@ -776,14 +864,15 @@ def cmd_awb_make(a, _resolved=None):
     con, cons = pick_connector(xc, a)
     if not con:
         _ask_connector(cons); return
+    st = {t.get("shopDomain"): t for t in load_shopify_tokens()}.get(sh["shopDomain"])
     if not getattr(a, "connector", None):  # rutare per-produs (Grandia → Dragon Star) doar dacă nu s-a forțat connectorul
-        st = {t.get("shopDomain"): t for t in load_shopify_tokens()}.get(sh["shopDomain"])
         con = route_connector(sh, st, a.order, cons, con)
-    body = {"orderId": o.get("orderId"), "connectorId": con["id"], "parcelCount": a.parcels,
+    parcels = resolve_parcels(a, st, a.order)  # nr colete din metafield (sau --parcels forțat)
+    body = {"orderId": o.get("orderId"), "connectorId": con["id"], "parcelCount": parcels,
             "parcelType": a.type, "notifyCustomer": bool(a.notify)}
     print("═" * 60)
     print("  AWB make · %s (%s)" % (a.order, sh["shopDomain"]))
-    print("  curier: %s [%s] · colete: %d · tip: %s · notify: %s" % (con.get("name"), con.get("id"), a.parcels, a.type, bool(a.notify)))
+    print("  curier: %s [%s] · colete: %d · tip: %s · notify: %s" % (con.get("name"), con.get("id"), parcels, a.type, bool(a.notify)))
     if not a.apply:
         print("  DRY-RUN — aș POST /api/actions/create-shipping-label:\n    %s" % json.dumps(body)); return
     _label_result(*xc.post("/api/actions/create-shipping-label", body))
@@ -819,10 +908,14 @@ def cmd_awb_regen(a):
     con, cons = pick_connector(xc, a)
     if not con:
         _ask_connector(cons); return
+    st = {t.get("shopDomain"): t for t in load_shopify_tokens()}.get(sh["shopDomain"])
+    if not getattr(a, "connector", None):
+        con = route_connector(sh, st, a.order, cons, con)
+    parcels = resolve_parcels(a, st, a.order)  # nr colete din metafield (sau --parcels forțat)
     print("═" * 60)
     print("  REGEN AWB · %s (%s)" % (a.order, sh["shopDomain"]))
     print("  pas 1: anulez AWB curent (%s)" % (doc_tracking(doc) or "—"))
-    print("  pas 2: creez nou — curier %s [%s] · %d colete · %s" % (con.get("name"), con.get("id"), a.parcels, a.type))
+    print("  pas 2: creez nou — curier %s [%s] · %d colete · %s" % (con.get("name"), con.get("id"), parcels, a.type))
     if not a.apply:
         print("  DRY-RUN — fără --apply nu execut."); return
     if not o.get("orderId"):
@@ -837,7 +930,7 @@ def cmd_awb_regen(a):
         if not voided:
             print("  ⛔ void eșuat → NU recreez (risc 2 AWB-uri). Rezolvă manual."); return
         time.sleep(1.5)
-    mbody = {"orderId": o.get("orderId"), "connectorId": con["id"], "parcelCount": a.parcels,
+    mbody = {"orderId": o.get("orderId"), "connectorId": con["id"], "parcelCount": parcels,
              "parcelType": a.type, "notifyCustomer": bool(a.notify)}
     _label_result(*xc.post("/api/actions/create-shipping-label", mbody))
 
@@ -1066,7 +1159,9 @@ def cmd_fulfill(a):
         unf = shopify_unfulfilled(st["shopDomain"], st["adminToken"], dfrom)
         if unf is None:
             print("  %s — Shopify auth FAIL (OAuth-rotation?) → skip" % sh["shopDomain"]); continue
-        con, cons = pick_connector(xc, a)
+        con, cons = pick_connector(xc, a)  # DPD Romania default — și pt externe (DPD livrează cross-border CZ/PL/BG)
+        intl = sh["shopDomain"] in HERE_COUNTRY
+        hkey = here_key() if intl else None
         ready = fixable = hard = had_awb = noxc = made = fixed = failed = team_n = 0
         dup_keep = dup_cancel = dup_shipped = dup_unknown = 0
         for name, created, fin, tags, cust, source in unf:
@@ -1097,25 +1192,35 @@ def cmd_fulfill(a):
                 if newest is None:
                     dup_unknown += 1; continue  # fără client → nu pot verifica → NU expediez, NU anulez
                 dup_keep += 1  # e cea mai nouă (de păstrat) → cade prin la logica de AWB
-            ast = o.get("addressStatus")
-            do_awb = ast in ("VALID", "PERFECT")
-            if do_awb:
-                ready += 1
-            else:
-                stt, _, _ = correct_address(xc, o, sh["shopDomain"], apply=False)
-                if stt != "would-correct":
+            if intl:
+                # extern (CZ/PL/BG): validatorul RO dă fals WRONG → validez cu HERE Geocoding
+                ad = xc.by_id(o.get("orderId")).get("shippingAddress") or {}
+                do_awb = here_validate(ad, HERE_COUNTRY[sh["shopDomain"]], hkey) >= HERE_MIN_SCORE
+                if do_awb:
+                    ready += 1
+                else:
                     hard += 1; continue
-                fixable += 1
-                if a.apply:
-                    st2, _, _ = correct_address(xc, o, sh["shopDomain"], apply=True)
-                    do_awb = (st2 == "corrected")
-                    if do_awb:
-                        fixed += 1
+            else:
+                ast = o.get("addressStatus")
+                do_awb = ast in ("VALID", "PERFECT")
+                if do_awb:
+                    ready += 1
+                else:
+                    stt, _, _ = correct_address(xc, o, sh["shopDomain"], apply=False)
+                    if stt != "would-correct":
+                        hard += 1; continue
+                    fixable += 1
+                    if a.apply:
+                        st2, _, _ = correct_address(xc, o, sh["shopDomain"], apply=True)
+                        do_awb = (st2 == "corrected")
+                        if do_awb:
+                            fixed += 1
             if a.apply and do_awb:
                 ocon = route_connector(sh, st, name, cons, con)  # Grandia: voluminos → Dragon Star
                 if not ocon:
                     failed += 1; continue
-                body = {"orderId": o.get("orderId"), "connectorId": ocon["id"], "parcelCount": 1,
+                pcount = order_parcel_count(st["shopDomain"], st["adminToken"], name)  # nr colete din metafield
+                body = {"orderId": o.get("orderId"), "connectorId": ocon["id"], "parcelCount": pcount,
                         "parcelType": "PARCEL", "notifyCustomer": bool(a.notify)}
                 s, d = xc.post("/api/actions/create-shipping-label", body)
                 ok = (s == 200 and isinstance(d, dict) and d.get("accepted")
@@ -1394,7 +1499,7 @@ def main():
     ap.add_argument("--exclude", default="",
                     help="domenii myshopify de SĂRIT (separate prin virgulă) — ex magazinele externe (Bonhaus CZ/PL/BG) pe care validatorul RO nu le acoperă.")
     ap.add_argument("--connector", help="awb-make/void/regen: connectorId curier (din `connectors`). Obligatoriu dacă sunt mai mulți curieri activi.")
-    ap.add_argument("--parcels", type=int, default=1, help="awb-make/regen: număr de colete (parcelCount). Default 1.")
+    ap.add_argument("--parcels", type=int, default=None, help="awb-make/regen: FORȚEAZĂ nr de colete (parcelCount). Implicit = AUTO din metafield Shopify (order xconnector.parcel-count, altfel custom.nr_cutii|nr_produse, ceil pe decimal). Parfumurile = 1.")
     ap.add_argument("--type", default="PARCEL", help="awb-make/regen: parcelType (PARCEL/ENVELOPE). Default PARCEL.")
     ap.add_argument("--notify", action="store_true", help="awb-make/regen/order-cancel: notifyCustomer.")
     ap.add_argument("--force", action="store_true", help="order-cancel: încearcă anularea chiar dacă statusul de curier zice PLECAT (xConnector dă eroare dacă chiar a plecat).")
