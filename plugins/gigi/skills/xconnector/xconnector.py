@@ -108,6 +108,18 @@ class XC:
         s, d = self.get("/api/orders/by-id", "orderId=%s" % oid)
         return d if s == 200 and isinstance(d, dict) else {}
 
+    def post(self, path, body):
+        """POST /api/actions/* sau alt endpoint de scriere. Întoarce (status, json|text)."""
+        s, b = http("POST", XBASE + path, self.h, body)
+        try:
+            return s, json.loads(b)
+        except Exception:
+            return s, b
+
+    def list_connectors(self):
+        s, d = self.get("/api/merchant/connectors")
+        return d if s == 200 and isinstance(d, list) else []
+
     def vtoken(self):
         if not self.vtok:
             s, d = http("POST", XBASE + "/api/token", self.h)
@@ -580,17 +592,213 @@ def cmd_recheck(a):
         print("  → %d auto-validate (VALID/PERFECT) · %d încă WRONG/UNKNOWN" % (healed, stuck))
 
 
+# ── AWB direct prin API (/api/actions/*) — necesită ROLE_AUTOMATION + permisiuni write pe cheie ──
+# Scriu bani/stare → DRY-RUN by default; POST real DOAR cu --apply. orderId trimis = Shopify order ID
+# (câmpul `orderId` din /api/orders, NU merchantOrderId).
+BILLING_TYPES = {"SMART_BILL", "SMARTBILL", "SMART_BILL_RO", "FACTURIS", "OBLIO", "FGO"}
+
+
+def resolve_order(name, a, days=60):
+    """Întoarce (shop, xc, order_obj) pt orderName. Caută în --shop dacă dat, altfel în TOATE magazinele."""
+    import datetime
+    dto = datetime.date.today().isoformat()
+    dfrom = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+    for sh in load_shops():
+        if a.shop and sh["shopDomain"] != a.shop:
+            continue
+        xc = XC(sh["apiKey"])
+        for o in xc.orders(dfrom, dto):
+            if o.get("orderName") == name:
+                return sh, xc, o
+    return None, None, None
+
+
+def awb_doc(o):
+    for d in (o.get("documents") or []):
+        if isinstance(d, dict) and d.get("documentType") == "SHIPPING_LABEL":
+            return d
+    return None
+
+
+def doc_tracking(doc):
+    """AWB number: câmpul direct dacă există, altfel din param `t=` al URL-ului etichetei."""
+    if not doc:
+        return None
+    t = doc.get("trackingNumber") or doc.get("awbNumber")
+    if t:
+        return t
+    m = re.search(r"[?&]t=([^&]+)", doc.get("url") or "")
+    return m.group(1) if m else None
+
+
+def courier_connectors(xc):
+    return [c for c in xc.list_connectors() if c.get("active") and (c.get("type") or "").upper() not in BILLING_TYPES]
+
+
+def pick_connector(xc, a):
+    """(connector|None, lista_curieri). None = ambiguu (mai mulți curieri) → cere --connector."""
+    cons = courier_connectors(xc)
+    if getattr(a, "connector", None):
+        try:
+            cid = int(a.connector)
+        except (TypeError, ValueError):
+            print("  --connector trebuie să fie ID numeric (vezi `connectors`)."); return None, cons
+        m = [c for c in xc.list_connectors() if c.get("id") == cid]
+        return (m[0] if m else {"id": cid, "name": "?", "type": "?"}), cons
+    if len(cons) == 1:
+        return cons[0], cons
+    return None, cons
+
+
+def _ask_connector(cons):
+    print("  Mai mulți curieri activi — alege cu --connector ID:")
+    for c in cons:
+        print("    %-7s %-14s %s" % (c.get("id"), c.get("type"), c.get("name")))
+
+
+def _label_result(s, d):
+    if s != 200 or not isinstance(d, dict):
+        print("  ❌ eroare %s: %s" % (s, d if isinstance(d, str) else (d.get("errorDescription") or d)))
+        return
+    if not d.get("accepted"):
+        print("  ❌ respins: %s" % d.get("errorMessage", d))
+        return
+    for L in (d.get("shippingLabels") or []):
+        if L.get("success"):
+            print("  ✅ AWB %s | %s | %s RON | %s" % (L.get("trackingNumber"), L.get("carrierName"),
+                                                       L.get("price"), L.get("shippingLabelUrl")))
+        else:
+            print("  ❌ label: %s" % L.get("errorMessage"))
+
+
+def cmd_connectors(a):
+    for sh in load_shops():
+        if a.shop and sh["shopDomain"] != a.shop:
+            continue
+        xc = XC(sh["apiKey"])
+        cons = xc.list_connectors()
+        print("═" * 60)
+        print("  %s — %d connectori" % (sh["shopDomain"], len(cons)))
+        for c in cons:
+            kind = "factură" if (c.get("type") or "").upper() in BILLING_TYPES else "curier"
+            print("    %-7s %-7s %-14s %-24s %s" % (c.get("id"), kind, c.get("type"), c.get("name"),
+                                                    "activ" if c.get("active") else "INACTIV"))
+
+
+def cmd_awb_make(a, _resolved=None):
+    sh, xc, o = _resolved or resolve_order(a.order, a, a.days)
+    if not o:
+        print("Comanda %s negăsită%s." % (a.order, " în %s" % a.shop if a.shop else " (căutat în toate)")); return
+    if has_awb(o):
+        print("  ⚠ %s ARE deja AWB (%s) — folosește awb-regen ca să-l refaci (anulează + reface)." % (a.order, doc_tracking(awb_doc(o))))
+        return
+    if not o.get("orderId"):
+        print("  Comanda %s nu are orderId (Shopify) în xConnector." % a.order); return
+    con, cons = pick_connector(xc, a)
+    if not con:
+        _ask_connector(cons); return
+    body = {"orderId": o.get("orderId"), "connectorId": con["id"], "parcelCount": a.parcels,
+            "parcelType": a.type, "notifyCustomer": bool(a.notify)}
+    print("═" * 60)
+    print("  AWB make · %s (%s)" % (a.order, sh["shopDomain"]))
+    print("  curier: %s [%s] · colete: %d · tip: %s · notify: %s" % (con.get("name"), con.get("id"), a.parcels, a.type, bool(a.notify)))
+    if not a.apply:
+        print("  DRY-RUN — aș POST /api/actions/create-shipping-label:\n    %s" % json.dumps(body)); return
+    _label_result(*xc.post("/api/actions/create-shipping-label", body))
+
+
+def cmd_awb_void(a, _resolved=None):
+    sh, xc, o = _resolved or resolve_order(a.order, a, a.days)
+    if not o:
+        print("Comanda %s negăsită." % a.order); return
+    doc = awb_doc(o)
+    if not doc and not a.apply:
+        print("  %s nu are AWB (SHIPPING_LABEL) de anulat." % a.order); return
+    cid = getattr(a, "connector", None) or (doc or {}).get("connectorId")
+    body = {"orderId": o.get("orderId")}
+    if cid:
+        try:
+            body["connectorId"] = int(cid)
+        except (TypeError, ValueError):
+            print("  --connector trebuie să fie ID numeric (vezi `connectors`)."); return
+    print("  AWB void · %s · connector %s · tracking %s" % (a.order, cid, doc_tracking(doc)))
+    if not a.apply:
+        print("  DRY-RUN — aș POST /api/actions/cancel-shipping-label:\n    %s" % json.dumps(body)); return
+    s, d = xc.post("/api/actions/cancel-shipping-label", body)
+    print("  %s" % ("✅ anulat" if (s == 200 and isinstance(d, dict) and d.get("accepted")) else "❌ %s: %s" % (s, d)))
+
+
+def cmd_awb_regen(a):
+    """Anulează AWB-ul curent și îl reface cu alte condiții (parcelCount/parcelType/connector)."""
+    sh, xc, o = resolve_order(a.order, a, a.days)
+    if not o:
+        print("Comanda %s negăsită." % a.order); return
+    doc = awb_doc(o)
+    con, cons = pick_connector(xc, a)
+    if not con:
+        _ask_connector(cons); return
+    print("═" * 60)
+    print("  REGEN AWB · %s (%s)" % (a.order, sh["shopDomain"]))
+    print("  pas 1: anulez AWB curent (%s)" % (doc_tracking(doc) or "—"))
+    print("  pas 2: creez nou — curier %s [%s] · %d colete · %s" % (con.get("name"), con.get("id"), a.parcels, a.type))
+    if not a.apply:
+        print("  DRY-RUN — fără --apply nu execut."); return
+    if not o.get("orderId"):
+        print("  Comanda %s nu are orderId (Shopify) în xConnector." % a.order); return
+    if doc:
+        vbody = {"orderId": o.get("orderId")}
+        if doc.get("connectorId"):
+            vbody["connectorId"] = doc["connectorId"]
+        sv, dv = xc.post("/api/actions/cancel-shipping-label", vbody)
+        voided = (sv == 200 and isinstance(dv, dict) and dv.get("accepted"))
+        print("  void: %s" % ("✅" if voided else "❌ %s: %s" % (sv, dv)))
+        if not voided:
+            print("  ⛔ void eșuat → NU recreez (risc 2 AWB-uri). Rezolvă manual."); return
+        time.sleep(1.5)
+    mbody = {"orderId": o.get("orderId"), "connectorId": con["id"], "parcelCount": a.parcels,
+             "parcelType": a.type, "notifyCustomer": bool(a.notify)}
+    _label_result(*xc.post("/api/actions/create-shipping-label", mbody))
+
+
+def cmd_awb_label(a):
+    """Arată tracking + URL-ul de descărcare a etichetei (PDF) pt comanda dată."""
+    sh, xc, o = resolve_order(a.order, a, a.days)
+    if not o:
+        print("Comanda %s negăsită." % a.order); return
+    doc = awb_doc(o)
+    if not doc:
+        print("  %s nu are AWB." % a.order); return
+    cid, trk = doc.get("connectorId"), doc_tracking(doc)
+    url = doc.get("url") or doc.get("awbPdfUrl") or (
+        XBASE + "/api/document/shipping-label?connectorId=%s&trackingNumber=%s" % (cid, urllib.parse.quote(str(trk or ""))))
+    print("  %s (%s) · AWB %s · connector %s" % (a.order, sh["shopDomain"], trk, cid))
+    print("  etichetă: %s" % url)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["summary", "address-issues", "recheck", "correct", "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
+    ap.add_argument("cmd", choices=["summary", "address-issues", "recheck", "correct", "connectors",
+                                    "awb-make", "awb-void", "awb-regen", "awb-label",
+                                    "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
     ap.add_argument("--shop"); ap.add_argument("--order"); ap.add_argument("--days", type=int, default=60)
     ap.add_argument("--apply", action="store_true"); ap.add_argument("--json", action="store_true")
     ap.add_argument("--min-age-hours", type=int, default=0, dest="min_age_hours",
                     help="correct: sare comenzile mai noi de N ore (validarea xConnector e async/batch — multe se auto-validează). 0 = oprit.")
     ap.add_argument("--exclude", default="",
                     help="domenii myshopify de SĂRIT (separate prin virgulă) — ex magazinele externe (Bonhaus CZ/PL/BG) pe care validatorul RO nu le acoperă.")
+    ap.add_argument("--connector", help="awb-make/void/regen: connectorId curier (din `connectors`). Obligatoriu dacă sunt mai mulți curieri activi.")
+    ap.add_argument("--parcels", type=int, default=1, help="awb-make/regen: număr de colete (parcelCount). Default 1.")
+    ap.add_argument("--type", default="PARCEL", help="awb-make/regen: parcelType (PARCEL/ENVELOPE). Default PARCEL.")
+    ap.add_argument("--notify", action="store_true", help="awb-make/regen: notifyCustomer la xConnector.")
     ap.add_argument("--correct", action="store_true", help="awb-auto: corectează conservator adresele proaste (xConnector ai-correct-address)")
     a = ap.parse_args()
+    if a.cmd in ("awb-make", "awb-void", "awb-regen", "awb-label"):
+        if not a.order:
+            print("Dă --order (ex: --order GT44004)."); sys.exit(1)
+        {"awb-make": cmd_awb_make, "awb-void": cmd_awb_void, "awb-regen": cmd_awb_regen, "awb-label": cmd_awb_label}[a.cmd](a)
+        return
+    if a.cmd == "connectors":
+        cmd_connectors(a); return
     if a.cmd in ("awb-create", "awb-cancel", "awb-hold"):
         if not a.order:
             print("Dă --order (ex: --order GT44004)."); sys.exit(1)
