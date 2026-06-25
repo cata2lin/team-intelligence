@@ -21,6 +21,7 @@ uv run xconnector.py awb-make  --order GT123 [--shop d] [--connector ID] [--parc
 uv run xconnector.py awb-void  --order GT123 [--shop d] [--connector ID] [--apply]      # anulează AWB
 uv run xconnector.py awb-regen --order GT123 --parcels N [--connector ID] [--apply]     # anulează + refă cu alte condiții
 uv run xconnector.py awb-label --order GT123 [--shop d]                                  # link etichetă PDF
+uv run xconnector.py order-cancel --order GT123 [--shop d] [--force] [--apply]           # anulează AWB (dacă neplecat) + comanda
 ```
 - `summary` — per magazin: total în fereastră, câte FĂRĂ AWB, distribuție status.
 - `address-issues` — lista comenzilor nepornite cu adresă `WRONG`/`UNKNOWN` + adresa curentă + sugestia
@@ -47,6 +48,17 @@ Toate rezolvă comanda după `--order GT###` (caută în `--shop` dacă dat, alt
 - **`awb-void`** — anulează AWB-ul (`cancel-shipping-label`, după orderId + connectorId).
 - **`awb-regen`** — **anulează + refă** cu alte condiții (alt `--parcels`, `--type`, `--connector`) — ex „de la 1 la 2 colete".
 - **`awb-label`** — link-ul de descărcare al etichetei (PDF) + tracking-ul, fără să recreeze nimic.
+- **`order-cancel`** — anulează o comandă SIGUR: verifică în **AWBprint** (`orders.aggregated_status`) dacă a **PLECAT**
+  (preluată de curier: `in_transit`/`delivered`/`back_to_sender`/…) → dacă da, **REFUZ** (cu `--force` încearcă oricum);
+  dacă e **neplecată** și are AWB → anulează AWB-ul (xConnector) și **DOAR dacă reușește** → anulează comanda
+  (Shopify `orderCancel`); fără AWB → doar comanda. **`refund` OFF by default** (`--refund` doar pt comenzi plătite,
+  decizie explicită; `--no-restock` ca să nu repună stocul). Dacă anularea AWB eșuează (colet plecat) → NU anulează
+  comanda + mesaj clar „anunță CS, a plecat". Tokenul Shopify e verificat ÎNAINTE de orice scriere (nu rămâne comandă activă cu AWB anulat).
+
+### Curier default + Grandia/Dragon Star
+`awb-make`/`awb-regen` aleg implicit **DPD Romania** dacă nu dai `--connector`. **Excepție Grandia:** are și connectorul
+**Dragon Star** pt produse voluminoase (magazii, lavoare, oglinzi, măsuțe de cafea) — pt alea dă explicit
+`--connector <id>` (vezi `connectors --shop <grandia>`). `order-cancel` folosește automat connectorul cu care s-a emis AWB-ul.
 
 ## Auth (cheie API xConnector + token Shopify Admin, per magazin)
 - xConnector: secret KB **`XCONNECTOR_SHOPS`** (JSON `[{shopDomain,apiKey}]`), altfel `~/.aac/input.json`.
