@@ -943,15 +943,18 @@ def parse_iso(ts):
 
 
 DUP_TAGS = ("duplicata", "duplicata3", "duplicat4")
+# Comenzi PLASATE/gestionate de CS (replasare COD, swap, resend, modify) — cs-actions le taghează cu agentul CS.
+# fulfill NU le atinge (nici AWB, nici dedup): le gestionează CS, sunt diferite de comenzile clientului.
+CS_AGENT_TAGS = {"raluca", "oana", "andra", "anna", "oanao"}
 
 
 def shopify_unfulfilled(shop, token, since_date, max_pages=12):
-    """Comenzi open + unfulfilled din ultimele zile: [(name, createdAt, financialStatus, tags[], customerGid)]. None la auth fail."""
+    """Comenzi open + unfulfilled: [(name, createdAt, financialStatus, tags[], customerGid, sourceName)]. None la auth fail."""
     out, cursor = [], None
     for _ in range(max_pages):
         after = ', after:"%s"' % cursor if cursor else ""
         q = ('query{ orders(first:250%s, query:"fulfillment_status:unfulfilled AND status:open AND created_at:>=%s"){ '
-             'edges{ cursor node{ name createdAt displayFinancialStatus tags customer{ id } } } pageInfo{ hasNextPage } } }') % (after, since_date)
+             'edges{ cursor node{ name createdAt displayFinancialStatus tags sourceName customer{ id } } } pageInfo{ hasNextPage } } }') % (after, since_date)
         d = shopify_gql(shop, token, q)
         edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
         if not edges and not out and d.get("errors"):
@@ -959,7 +962,8 @@ def shopify_unfulfilled(shop, token, since_date, max_pages=12):
         for e in edges:
             n = e["node"]
             out.append((n.get("name"), n.get("createdAt"), n.get("displayFinancialStatus"),
-                        [str(t).lower() for t in (n.get("tags") or [])], (n.get("customer") or {}).get("id")))
+                        [str(t).lower() for t in (n.get("tags") or [])], (n.get("customer") or {}).get("id"),
+                        n.get("sourceName")))
         pi = (((d.get("data") or {}).get("orders") or {}).get("pageInfo")) or {}
         if not pi.get("hasNextPage"):
             break
@@ -1032,9 +1036,9 @@ def cmd_fulfill(a):
         if unf is None:
             print("  %s — Shopify auth FAIL (OAuth-rotation?) → skip" % sh["shopDomain"]); continue
         con, cons = pick_connector(xc, a)
-        ready = fixable = hard = had_awb = noxc = made = fixed = failed = 0
+        ready = fixable = hard = had_awb = noxc = made = fixed = failed = team_n = 0
         dup_keep = dup_cancel = dup_shipped = dup_unknown = 0
-        for name, created, fin, tags, cust in unf:
+        for name, created, fin, tags, cust, source in unf:
             c = parse_iso(created)
             if not c or (now - c).total_seconds() / 60.0 <= max_age:
                 continue
@@ -1043,8 +1047,12 @@ def cmd_fulfill(a):
                 noxc += 1; continue
             if has_awb(o):
                 had_awb += 1; continue
-            # DUPLICAT? (oricare tag) → regula: păstrează cea mai NOUĂ din grup, anulează cele vechi
-            if any(tg in tags for tg in DUP_TAGS):
+            # PLASATĂ DE CS (tag agent) sau prin DRAFT ORDER (replasare COD/swap/resend, UGC) → NU aplic dedup
+            # (ar părea fals duplicat al comenzii vechi a clientului), DAR le fac AWB normal — sunt legitime de expediat.
+            team_placed = any(t in CS_AGENT_TAGS for t in tags) or source == "shopify_draft_order"
+            if team_placed:
+                team_n += 1
+            elif any(tg in tags for tg in DUP_TAGS):
                 newest = customer_is_newest(st["shopDomain"], st["adminToken"], cust, created, since7)
                 if newest is False:
                     res = cancel_duplicate(sh, xc, o, st, name, a.apply)
@@ -1082,8 +1090,8 @@ def cmd_fulfill(a):
                       and any(L.get("success") for L in (d.get("shippingLabels") or [])))
                 made += 1 if ok else 0
                 failed += 0 if ok else 1
-        print("  %s — unfulfilled >%dmin: AWB %d gata + %d corectabile + %d grele→CS  ·  DUP: %d păstrate, %d de-anulat, %d plecate(protejate), %d fără-client  (aveau AWB %d, fără xc %d)"
-              % (sh["shopDomain"], max_age, ready, fixable, hard, dup_keep, dup_cancel, dup_shipped, dup_unknown, had_awb, noxc))
+        print("  %s — unfulfilled >%dmin: AWB %d gata + %d corectabile + %d grele→CS  ·  DUP: %d păstrate, %d de-anulat, %d plecate(protejate), %d fără-client  ·  CS/draft (AWB fără dedup): %d  (aveau AWB %d, fără xc %d)"
+              % (sh["shopDomain"], max_age, ready, fixable, hard, dup_keep, dup_cancel, dup_shipped, dup_unknown, team_n, had_awb, noxc))
         if a.apply:
             print("  → APLICAT: AWB %d (din care %d după corecție) · duplicate anulate %d · eșuate %d" % (made, fixed, dup_cancel, failed))
         else:
