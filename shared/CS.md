@@ -64,7 +64,7 @@
 ## 6. 💬 TICHETE (Richpanel)
 | Vreau … | Tool |
 |---|---|
-| draft de răspuns (în vocea CS, cu datele clientului) | `gigi:cs-draft-reply` |
+| draft de răspuns (în vocea CS, cu datele clientului) | `gigi:cs-draft-reply` — **folosește MACRO-urile CS din ClickUp** (formatul/expresiile oficiale): citește doc-ul `2kyqg8j1-3895` (v3 docs API + `CLICKUP_API_TOKEN`), alege macro-ul pe categorie+limbă, completează `{client}/{comanda}/{awb}/{magazin}/{link_retur}` cu date reale → `create_draft` (NICIODATĂ trimitere). Vezi [[cs-macros-clickup]]. |
 | triaj automat (tag + categorie + prioritate) | `gigi:richpanel-auto-triage` |
 | sentiment per tichet | `gigi:cs-sentiment` |
 | dashboard SLA (unde rămânem în urmă) | `gigi:cs-sla-dashboard` |
