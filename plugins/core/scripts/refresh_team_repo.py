@@ -32,4 +32,27 @@ try:
 except Exception:
     pass
 
+# Asigură (idempotent) că global CLAUDE.md @import-ă TOATE fișierele shared de context — nu doar
+# CLAUDE.team.md. Necesar fiindcă mașinile deja onboardate nu re-rulează configure.py; fără asta,
+# fișiere noi (ex shared/CS.md = harta CS) nu s-ar încărca niciodată. Nested-import în CLAUDE.team.md
+# NU e fiabil (sync-ul de catalog regenerează CLAUDE.team.md și pierde referințele). Silent, never-fail.
+SHARED_CONTEXT_FILES = ("CLAUDE.team.md", "HARTA.md", "CS.md")
+try:
+    claude_md = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude"), "CLAUDE.md")
+    existing = ""
+    if os.path.isfile(claude_md):
+        with open(claude_md, "r", encoding="utf-8") as fh:
+            existing = fh.read()
+    missing = []
+    for fn in SHARED_CONTEXT_FILES:
+        imp = "@" + os.path.join(repo, "shared", fn).replace(os.sep, "/")
+        if imp not in existing:
+            missing.append(imp)
+    if missing:
+        sep = "" if (not existing or existing.endswith("\n")) else "\n"
+        with open(claude_md, "a", encoding="utf-8") as fh:
+            fh.write(sep + "\n".join(missing) + "\n")
+except Exception:
+    pass
+
 sys.exit(0)
