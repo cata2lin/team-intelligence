@@ -775,10 +775,11 @@ def resolve_order(name, a, days=60):
     else:
         guess = domain_for_order(name)  # ex MAG24088 → covoareauto-ro.myshopify.com (independent de CSV/KB)
         scan = sorted(shops, key=lambda sh: 0 if (guess and sh["shopDomain"] == guess) else 1) if guess else shops
-    # 1) scan pe fereastră (dă `documents`/AWB) — magazinul ghicit primul → de regulă găsește din prima
+    # 1) scan pe fereastră (dă `documents`/AWB) — magazinul ghicit primul + sortat date DESC, ca să găsesc
+    # comenzile recente din PRIMA pagină (instant), nu „stând să caute" prin toate paginile.
     for sh in scan:
         xc = XC(sh["apiKey"])
-        for o in xc.orders(dfrom, dto):
+        for o in xc.orders(dfrom, dto, {"sort": "date", "sortDir": "desc"}):
             if o.get("orderName") == name:
                 return sh, xc, o
     # 2) FALLBACK comenzi vechi / volum mare (în afara ferestrei): Shopify orderName→orderId → xConnector by-id.

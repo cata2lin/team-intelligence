@@ -55,4 +55,27 @@ try:
 except Exception:
     pass
 
+# ── KB reachability — cauza RECURENTĂ a „nu găsește / dă erori" pe orice skill care citește secrete
+#    (xConnector, Richpanel, Shopify): un KB_DATABASE_URL stale/greșit pe acea mașină. Verific la fiecare
+#    sesiune și STRIG clar dacă KB e inaccesibil, ca agentul să știe din prima „e KB-ul, NU lipsesc datele".
+CANONICAL_KB = "38.242.226.83:5432/SharedClaude"
+try:
+    kb_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kb.py")
+    if os.path.isfile(kb_py):
+        r = subprocess.run(["uv", "run", "--no-project", kb_py, "secret-get", "__healthcheck__"],
+                           capture_output=True, text=True, timeout=25)
+        err = (r.stderr or "").lower()
+        # returncode 0 sau „is not set" = KB OK (s-a conectat). Eșec de CONEXIUNE = KB inaccesibil.
+        kb_down = (r.returncode == 3 or (r.returncode != 0 and any(t in err for t in (
+            "could not connect", "could not translate", "connection refused", "could not receive",
+            "operationalerror", "psycopg2", "timeout expired", "no route to host", "server closed"))))
+        if kb_down:
+            print("⚠️ KB INACCESIBIL pe această mașină — nu pot citi secretele din SharedClaude "
+                  "(KB_DATABASE_URL stale/greșit). TOATE skill-urile care au nevoie de credențiale "
+                  "(xConnector, Richpanel, Shopify, etc.) vor eșua / da erori — ASTA NU înseamnă că datele "
+                  "'nu există'. FIX: corectează KB_DATABASE_URL (host corect: %s) în ~/.claude/settings.json "
+                  "→ 'env', apoi repornește sesiunea (sau re-rulează onboarding/configure)." % CANONICAL_KB)
+except Exception:
+    pass
+
 sys.exit(0)
