@@ -326,6 +326,20 @@ def op_swap(a, agent):
     place_cod(pref, addr, items, [agent, "swap"], "SWAP după %s | agent %s" % (a.from_order, agent), a.apply)
 
 
+def op_replace(a, agent):
+    """REPLASARE (cancel+replace) — copiază adresa din comanda veche ca swap, DAR NU e swap (alt produs):
+    e re-plasarea aceleiași comenzi (ex edit conținut COD). Tag `replasata-cs`, NU `swap`."""
+    pref = (a.store or prefix_of_order(a.from_order)).upper()
+    addr = ({"address1": a.address, "city": a.city, "zip": a.zip, "countryCode": "RO", "phone": a.phone, "firstName": a.name}
+            if a.address else resolve_address(a.from_order))
+    if not addr or not addr.get("address1"):
+        sys.exit("replace: n-am adresă din %s (xConnector/Frisbo). Dă --address/--city/--zip." % a.from_order)
+    items = parse_items(pref, a.items)
+    if not items:
+        sys.exit("replace: dă --items (produsele comenzii noi).")
+    place_cod(pref, addr, items, [agent, "replasata-cs"], "REPLASARE după %s | agent %s" % (a.from_order, agent), a.apply)
+
+
 def op_resend(a, agent):
     pref = (a.store or prefix_of_order(a.from_order)).upper()
     addr = ({"address1": a.address, "city": a.city, "zip": a.zip, "countryCode": "RO", "phone": a.phone, "firstName": a.name}
@@ -448,7 +462,7 @@ def op_invoice(a, agent):
 # ───────────────────────── main ─────────────────────────
 def main():
     ap = argparse.ArgumentParser(description="Operațiuni CS de tip acțiune (agent-driven), multi-magazin.")
-    ap.add_argument("op", choices=["cancel", "place", "swap", "resend", "modify", "invoice"])
+    ap.add_argument("op", choices=["cancel", "place", "swap", "replace", "resend", "modify", "invoice"])
     ap.add_argument("--agent", help="Raluca/Oana/Andra/Anna/OanaO (sau env CS_AGENT)")
     ap.add_argument("--order"); ap.add_argument("--from-order"); ap.add_argument("--store")
     ap.add_argument("--items"); ap.add_argument("--name"); ap.add_argument("--phone"); ap.add_argument("--email")
@@ -462,7 +476,7 @@ def main():
     agent = CS_AGENTS.get((a.agent or os.getenv("CS_AGENT", "")).strip().lower())
     if not agent:
         sys.exit("Dă --agent (Raluca/Oana/Andra/Anna/OanaO) sau setează CS_AGENT.")
-    {"cancel": op_cancel, "place": op_place, "swap": op_swap,
+    {"cancel": op_cancel, "place": op_place, "swap": op_swap, "replace": op_replace,
      "resend": op_resend, "modify": op_modify, "invoice": op_invoice}[a.op](a, agent)
 
 

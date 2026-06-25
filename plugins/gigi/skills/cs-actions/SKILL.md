@@ -47,7 +47,8 @@ stoc** din piața clientului și folosește **SKU-ul ACELUI magazin** la `--item
 ```
 cs_actions.py cancel  --order GRAND17148 --store GRAN [--reason customer|inventory|declined|fraud|other] [--refund] [--no-restock]
 cs_actions.py place   --store GT --name "Ion Pop" --phone 0750... --address "Str X 1" --city Ploiesti --zip 100294 --items "SKU:2;termen:1"
-cs_actions.py swap    --from-order EST188351 --items "GD-BR-6660:1"        # copiază adresa + tag swap
+cs_actions.py swap    --from-order EST188351 --items "GD-BR-6660:1"        # SWAP REAL (alt produs/mărime) → copiază adresa + tag `swap`
+cs_actions.py replace --from-order EST188351 --items "EST-X:2"            # RE-PLASARE (cancel+replace, edit conținut) → copiază adresa + tag `replasata-cs`, NU `swap`
 cs_actions.py resend  --from-order GT44004  --items "SKU:1"               # retrimitere GRATIS (100% discount) + tag resend
 cs_actions.py modify  --order EST188351 --store EST [--address "Str Noua 9" --city Cluj --zip 400001] \
                       [--add "SKU:1"] [--remove "termen"] [--set "termen:3"]    # adresă ȘI/SAU produse (orderEdit)
@@ -59,7 +60,7 @@ cs_actions.py invoice --order GT44004                                     # fact
 - **modify** schimbă adresa (REST, pre-fulfillment) și/sau produsele (`--add`/`--remove`/`--set` prin orderEdit→commit).
 - **Adresa la swap/resend**: xConnector (GT) / **Frisbo** (restul — org per magazin, mapat în `FRISBO_BY_PREFIX`). Fallback: `--address --city --zip`.
 - **invoice**: SmartBill per magazin — necesită KB `SMARTBILL_STORES`=`[{prefix,email,token,cif,series}]`. ⚠ emite document fiscal REAL — testează pe o comandă întâi.
-- **Taguri**: agentul mereu; `swap`/`resend`/`garantie`/`anulat-cs`/`adresa-modificata` după caz.
+- **Taguri**: agentul mereu; apoi tag-ul OPERAȚIEI după caz. **`swap` DOAR la swap REAL** (schimbi produsul/mărimea) — NU la o simplă re-plasare. Pt cancel+replace / edit conținut COD folosește **`replace`** (tag `replasata-cs`, NU `swap`). Alte: `resend`/`anulat-cs`/`modificata-cs`.
 
 ## Auth (nimic nu se printează)
 - Shopify write per magazin: `SHOPIFY_STORES_CSV` (KB) — toate 20 au `write_orders`.
