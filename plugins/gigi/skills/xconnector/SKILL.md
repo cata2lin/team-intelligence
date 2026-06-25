@@ -28,6 +28,14 @@ uv run xconnector.py inv-doc   --order GT123                                    
 uv run xconnector.py addr-set  --order GT123 --city "…" --zip "…" [--address1 …] [--province …] [--make-awb] [--apply]
 ```
 
+### Modificare conținut comandă COD / Releaseit (cancel + replace)
+Comenzile din app-ul **COD Form (Releaseit)** au **line items BLOCATE** (nu se pot edita). Doar **adresa** se modifică
+(via `addr-set`). Dacă clientul cere schimbat CONȚINUTUL → procedura e **cancel + replace** (orchestrare, nu cod nou):
+1. **`order-cancel --order X --apply`** — anulează AWB-ul (dacă neplecat) + comanda veche.
+2. **`gigi:cs-actions` `place`** — plasează o comandă NOUĂ COD cu produsele corecte (tag agent CS).
+3. AWB-ul comenzii noi → automat din **cron-ul `fulfill`** (sau `awb-make`). Noua e tag-uită CS → `fulfill` o lasă fără dedup, dar îi face AWB.
+(NU se face order-edit pe Releaseit — line items blocate. Identifici Releaseit după `sourceName`/app.)
+
 ### Setare adresă (COD: adresa SE poate modifica; line items NU → ăla e cancel+replace)
 - **`addr-set`** — setează adresa de livrare în Shopify (`orderUpdate.shippingAddress`, confirmat suportat în 2026-04) la câmpurile
   date, păstrând restul (firstName/lastName/company/countryCode). Cu **`--make-awb`** face **poll pe xConnector** până confirmă
