@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["pg8000"]
+# dependencies = ["pg8000", "pypdf"]
 # ///
 """
 xconnector.py — punte READ-ONLY spre xConnector (curierat) pt fluxul ARONA.
@@ -378,11 +378,14 @@ def has_awb(o):
 
 
 def skip_shop(sh, a):
-    """True dacă magazinul trebuie SĂRIT: nu e cel cerut (--shop) sau e în lista de excludere (--exclude).
-    --exclude e pt magazinele pe care validatorul de adrese RO nu le acoperă (ex Bonhaus CZ/PL/BG)."""
-    dom = sh.get("shopDomain")
-    if getattr(a, "shop", None) and dom != a.shop:
-        return True
+    """True dacă magazinul trebuie SĂRIT: nu e în --shop (suportă LISTĂ comma + prefix/substring,
+    ex `--shop covoareauto-ro,bonhaus`) sau e în --exclude (validatorul RO nu acoperă CZ/PL/BG)."""
+    dom = sh.get("shopDomain") or ""
+    shop = getattr(a, "shop", None)
+    if shop:
+        wants = [w.strip() for w in shop.split(",") if w.strip()]
+        if not any(w == dom or dom.startswith(w) for w in wants):  # full domain sau prefix (ancorat, fără substring oriunde)
+            return True
     excl = {x.strip() for x in (getattr(a, "exclude", "") or "").split(",") if x.strip()}
     return dom in excl
 
@@ -1012,31 +1015,10 @@ def find_by_awb(awb, a):
     return None, None
 
 
-def dash_list_url(sh_domain, status=-1, tags=None, total_items=None, line_items=None, sku=None,
-                  search=None, sort="date", sort_dir="desc", page_size=25, page=1):
-    """URL de LISTĂ filtrată în dashboard-ul xConnector (CS dă click → vede lista, ZERO API/Shopify).
-    Paramii UI (din exemplele user): orderStatus(-1=toate), totalItemsCount, lineItemsCount, tags, sku, search,
-    sortColumn, sortDirection, pageSize, currentPage."""
-    p = [("orderStatus", status)]
-    if total_items not in (None, ""):
-        p.append(("totalItemsCount", total_items))
-    if line_items not in (None, ""):
-        p.append(("lineItemsCount", line_items))
-    if tags:
-        p.append(("tags", tags))
-    if sku:
-        p.append(("sku", sku))
-    if search:
-        p.append(("search", search))
-    p += [("sortColumn", sort), ("sortDirection", sort_dir), ("pageSize", page_size), ("currentPage", page)]
-    return "%s/shop/%s/?%s" % (XBASE, sh_domain, urllib.parse.urlencode(p))
-
-
 def cmd_links(a):
-    """CS „du-mă la comanda X" / „dă-mi lista filtrată" — totul prin xConnector (NU consumă rația Shopify).
-    Comandă precisă: `links --order GT123` sau `links --awb <tracking>` → Shopify + xConnector + tracking.
-    Listă filtrată: `links --shop <d> [--tag oriental] [--total-items 3] [--search "ion popescu"] [--status -1]` → URL dashboard.
-    `--open` deschide în browser."""
+    """CS „du-mă la comanda X" — totul prin xConnector (NU consumă rația Shopify).
+    `links --order GT123` (după nr comandă) sau `links --awb <tracking>` (după AWB) → comandă + status +
+    linkuri Shopify + xConnector + tracking. `--open` le deschide în browser."""
     if getattr(a, "awb", None) or getattr(a, "order", None):
         if getattr(a, "awb", None):
             sh, o = find_by_awb(a.awb, a)
@@ -1689,10 +1671,151 @@ def cmd_orders(a):
     print("  TOTAL: %d comenzi" % grand)
 
 
+# ── PRINT depozit: descarcă etichetele NEDESCĂRCATE (downloaded=false), grupate pe produs/cantitate/dată ──
+def _norm_date(s):
+    """Acceptă yyyy-MM-dd (API), DD/MM/YYYY (dashboard) sau DD.MM.YYYY → întoarce yyyy-MM-dd."""
+    if not s:
+        return None
+    import datetime
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d.%m.%Y", "%d-%m-%Y"):
+        try:
+            return datetime.datetime.strptime(s.strip(), fmt).date().isoformat()
+        except Exception:
+            pass
+    return s.strip()
+
+
+def date_window(a):
+    """(dfrom, dto) din --from/--to (orice format uzual) dacă date, altfel din --days."""
+    import datetime
+    fd, td = _norm_date(getattr(a, "from_date", None)), _norm_date(getattr(a, "to_date", None))
+    if fd or td:
+        return (fd or (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat(),
+                td or datetime.date.today().isoformat())
+    return ((datetime.date.today() - datetime.timedelta(days=a.days)).isoformat(),
+            datetime.date.today().isoformat())
+
+
+def _print_dialog(path):
+    """Deschide PDF-ul + dialogul de print (macOS: Preview + Cmd+P auto; Linux: xdg-open)."""
+    if sys.platform == "darwin":
+        subprocess.run(["open", "-a", "Preview", path], check=False)
+        try:
+            time.sleep(1.5)
+            subprocess.run(["osascript", "-e", 'tell application "Preview" to activate',
+                            "-e", 'delay 0.4',
+                            "-e", 'tell application "System Events" to keystroke "p" using command down'],
+                           check=False, timeout=15)
+        except Exception:
+            pass
+        print("  → deschis în Preview + dialog de print (dacă nu apare, apasă Cmd+P).")
+    elif sys.platform.startswith("linux"):
+        subprocess.run(["xdg-open", path], check=False)
+        print("  → deschis în viewer (printează de acolo).")
+    else:
+        print("  📄 PDF batch: %s (deschide-l și printează)." % path)
+
+
+def cmd_print_batch(a):
+    """Coadă de PRINT depozit: etichetele NEDESCĂRCATE (downloaded=false), GRUPATE pe produs (sort sku),
+    filtrabile pe produs (--sku), cantitate (--total-items) și interval (--from/--to). Descarcă PDF-urile,
+    le pune într-un batch (în ordinea grupată), LOGHEAZĂ timestamp-ul, deschide dialogul de print.
+    Dry-run by default (listează, NU descarcă). --apply DESCARCĂ → flip `downloaded` (ies din coada de print!).
+    Rulează LOCAL (mașina cu imprimanta — are uv + acces la secrete)."""
+    import datetime, os, csv
+    dfrom, dto = date_window(a)
+    flt = orders_filters(a)
+    flt.setdefault("sort", "sku")     # grupare implicită pe produs: 1×SKU1 împreună, apoi 1×SKU2…
+    flt.setdefault("sortDir", "asc")
+    test = bool(getattr(a, "test", False))   # TEST: țintește etichete DEJA descărcate (downloaded=true) → ZERO impact pe coada reală
+    target_dl = test                         # normal: downloaded=false (nedescărcate); test: downloaded=true
+    wants = [w.strip() for w in (a.shop or "").split(",") if w.strip()]  # doar pt afișaj; filtrarea o face skip_shop (listă + prefix)
+    pending = []
+    for sh in load_shops():
+        if skip_shop(sh, a):   # suportă --shop listă/prefix (magazine la un loc) + --exclude
+            continue
+        xc = XC(sh["apiKey"])
+        for o in xc.orders(dfrom, dto, flt):
+            doc = awb_doc(o)
+            if not doc or doc.get("downloaded") is not target_dl or not doc.get("url"):
+                continue
+            pending.append((sh["shopDomain"], o.get("orderName"), doc.get("connectorId"),
+                            doc_tracking(doc), doc.get("url"), xc.h.get("Authorization", "")))
+    if getattr(a, "limit", None):
+        pending = pending[:a.limit]   # chunk gestionabil (test sau batch parțial)
+    lbl = {k: v for k, v in flt.items() if k not in ("sort", "sortDir")}
+    print("═" * 60)
+    if test:
+        print("  🧪 TEST — folosesc etichete DEJA descărcate (downloaded=true), NU ating coada reală de print.")
+    print("  PRINT BATCH — %d etichete %s · %s→%s%s%s · grupat pe %s"
+          % (len(pending), "DEJA descărcate (test)" if test else "nedescărcate", dfrom, dto,
+             (" · magazine: " + ",".join(wants)) if wants else " · toate magazinele",
+             (" · " + json.dumps(lbl)) if lbl else "", flt.get("sort")))
+    for dom, nm, cid, trk, _, _ in pending[:60]:
+        print("    %-12s %-11s AWB %s" % (nm, dom, trk or "—"))
+    if len(pending) > 60:
+        print("    … +%d" % (len(pending) - 60))
+    if not a.apply:
+        print("  → [DRY-RUN] aș descărca %d PDF-uri (în ordinea de mai sus) + aș deschide dialogul de print." % len(pending))
+        if not test:
+            print("  ⚠️ --apply MARCHEAZĂ etichetele `downloaded` (ies din coada de print) — fă-o DOAR când chiar printezi.")
+        else:
+            print("  (test: --apply e SIGUR — etichetele sunt deja descărcate, nu se schimbă nimic în coadă.)")
+        return
+    if not pending:
+        print("  Nimic de printat."); return
+    ts = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    outdir = os.path.join(os.path.expanduser(getattr(a, "out", None) or "."), "print-batch")
+    os.makedirs(outdir, exist_ok=True)
+    pdfs, log_rows, failed = [], [], []
+    for dom, nm, cid, trk, url, auth in pending:
+        try:
+            req = urllib.request.Request(url, headers=({"Authorization": auth} if auth else {}))
+            with urllib.request.urlopen(req, timeout=45) as r:
+                b = r.read()
+            if b[:5] != b"%PDF-":
+                failed.append((nm, "răspuns non-PDF")); continue
+            fp = os.path.join(outdir, "%s_%s.pdf" % (nm, trk or "noawb"))
+            with open(fp, "wb") as f:
+                f.write(b)
+            if os.path.getsize(fp) < 100:
+                failed.append((nm, "fișier gol")); continue
+            pdfs.append(fp)
+            log_rows.append([datetime.datetime.now().isoformat(timespec="seconds"), dom, nm, trk, cid, fp])
+        except Exception as e:
+            failed.append((nm, str(e)[:80]))
+    merged = os.path.join(outdir, "batch_%s.pdf" % ts)
+    try:
+        from pypdf import PdfWriter
+        w = PdfWriter()
+        for fp in pdfs:
+            w.append(fp)
+        with open(merged, "wb") as f:
+            w.write(f)
+    except Exception as e:
+        merged = None
+        print("  (merge PDF indisponibil: %s — fișiere individuale în %s)" % (str(e)[:50], outdir))
+    logp = os.path.join(outdir, "batch_%s.csv" % ts)
+    with open(logp, "w", newline="", encoding="utf-8") as f:
+        wr = csv.writer(f)
+        wr.writerow(["downloaded_at", "shop", "order", "awb", "connectorId", "file"])
+        wr.writerows(log_rows)
+    print("  ✅ descărcate %d · eșuate %d · log %s" % (len(pdfs), len(failed), logp))
+    if merged:
+        print("  📄 batch: %s" % merged)
+    if failed:
+        print("  ⚠️ EȘUATE (NU s-au salvat — dacă s-au flip-uit pe server, recuperează manual din dashboard):")
+        for nm, why in failed[:25]:
+            print("      %s — %s" % (nm, why))
+    target = merged or (pdfs[0] if pdfs else None)
+    if target and not getattr(a, "no_print", False):
+        _print_dialog(target)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["summary", "address-issues", "recheck", "correct", "connectors", "fulfill",
-                                    "not-downloaded", "orders", "links",
+                                    "not-downloaded", "orders", "links", "print-batch",
                                     "awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
                                     "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc", "addr-set",
                                     "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
@@ -1724,12 +1847,16 @@ def main():
     ap.add_argument("--line-items", dest="line_items", help="orders: nr LINII din comandă (CSV). =1 → o singură linie.")
     ap.add_argument("--sort", choices=["sku", "totalItemsCount", "lineItemsCount", "date", "fulfillmentDate"], help="orders/not-downloaded: câmp de sortare.")
     ap.add_argument("--sort-dir", dest="sort_dir", choices=["asc", "desc"], help="orders: direcția sortării (implicit desc).")
-    # links (CS „du-mă la comanda X" / listă filtrată — totul prin xConnector, fără rația Shopify):
+    # links (CS „du-mă la comanda X" — totul prin xConnector, fără rația Shopify):
     ap.add_argument("--awb", help="links: caută comanda după AWB/tracking (xConnector by-tracking-number).")
-    ap.add_argument("--tag", help="links: listă filtrată după tag (dashboard).")
-    ap.add_argument("--search", help="links: căutare în listă (nr comandă / nume client / tracking — dashboard).")
-    ap.add_argument("--status", type=int, help="links: orderStatus în lista dashboard (-1 = toate).")
     ap.add_argument("--open", action="store_true", help="links: deschide linkurile în browser.")
+    # print-batch (PRINT depozit: descarcă etichete nedescărcate, grupate pe produs/cantitate/dată, deschide print):
+    ap.add_argument("--from", dest="from_date", help="print-batch/orders: data de început (yyyy-MM-dd sau DD/MM/YYYY).")
+    ap.add_argument("--to", dest="to_date", help="print-batch/orders: data de sfârșit (yyyy-MM-dd sau DD/MM/YYYY).")
+    ap.add_argument("--out", help="print-batch: folderul unde salvez PDF-urile + log (default: ./print-batch).")
+    ap.add_argument("--no-print", action="store_true", dest="no_print", help="print-batch: NU deschide dialogul de print (doar salvează/merge).")
+    ap.add_argument("--test", action="store_true", help="print-batch: TEST pe etichete DEJA descărcate (downloaded=true) — zero impact pe coada reală.")
+    ap.add_argument("--limit", type=int, help="print-batch: max N etichete (chunk gestionabil / test).")
     a = ap.parse_args()
     if a.cmd in ("awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
                  "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc", "addr-set"):
@@ -1758,6 +1885,8 @@ def main():
         cmd_orders(a); return
     if a.cmd == "links":
         cmd_links(a); return
+    if a.cmd == "print-batch":
+        cmd_print_batch(a); return
     if a.cmd == "recheck":
         cmd_recheck(a); return
     import datetime

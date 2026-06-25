@@ -19,6 +19,7 @@ uv run xconnector.py correct [--shop <domain>] [--days 60] [--min-age-hours N] [
 uv run xconnector.py connectors [--shop <domain>]            # curieri + facturare per magazin (id/type)
 uv run xconnector.py orders [--shop d] [--sku A] [--total-items 1] [--line-items 1] [--sort fulfillmentDate] [--sort-dir asc]  # filtrează/sortează comenzi
 uv run xconnector.py links  --order GT123 | --awb <tracking> [--open]    # CS: ce comandă + status + linkuri Shopify/xConnector/tracking
+uv run xconnector.py print-batch [--shop a,b] [--sku HA-0002] [--total-items 1] [--from 2026-06-10 --to 2026-06-14] [--limit N] [--test] [--apply]  # PRINT depozit
 uv run xconnector.py awb-make  --order GT123 [--shop d] [--connector ID] [--parcels N] [--type PARCEL] [--notify] [--apply]
 uv run xconnector.py awb-void  --order GT123 [--shop d] [--connector ID] [--apply]      # anulează AWB
 uv run xconnector.py awb-regen --order GT123 --parcels N [--connector ID] [--apply]     # anulează + refă cu alte condiții
@@ -111,6 +112,15 @@ xConnector a adăugat (2026-06) filtre pe `getOrders`, expuse prin comanda **`or
 - **Mapare ID** (cheie): API `orderId` = ID Shopify; API `merchantOrderId` = ID-ul din URL-ul dashboard xConnector.
 
 **CS order-360 = ORCHESTRARE (nu duplic):** când CS întreabă despre o comandă, combină `links` (comandă+status+linkuri, xConnector+AWBprint) **+** `gigi:cs-customer-360` (alte comenzi ale clientului, LTV, refuzuri — din DB) **+** `gigi:cs-tickets`/Richpanel (tichetele clientului). Toate **fără Shopify live** (DB/Richpanel/xConnector). Căutare CS după **nume/telefon** → `gigi:cs-customer-360` (xConnector n-are filtru pe nume/telefon; doar order#/AWB).
+
+### `print-batch` — PRINT în depozit (descarcă etichetele nedescărcate, grupate pe produs/cantitate/dată)
+`uv run xconnector.py print-batch [--shop a,b] [--sku HA-0002] [--total-items 1] [--from <d> --to <d>] [--sort sku] [--limit N] [--apply]`.
+Selectează etichetele **nedescărcate** (`downloaded=false` = coada de print), le **descarcă** (PDF), le pune într-un **batch PDF merged** în ordinea grupată, scrie un **log CSV cu `downloaded_at`** (audit „când s-a printat"), apoi **deschide dialogul de print** (macOS Preview + Cmd⌘P). Rulează **LOCAL** (mașina cu imprimanta — are uv + acces la secrete).
+- **Grupare**: implicit `sort=sku` → toate „1×SKU1" împreună, apoi „1×SKU2"… Filtre: `--sku` (produs, potrivire exactă), `--total-items` (cantitate), `--from/--to` (interval, yyyy-MM-dd sau DD/MM/YYYY).
+- **Cross-magazin**: `--shop` acceptă **listă** (`--shop covoareauto-ro,bonhaus,audusp-rf,ofertelezilei`) sau prefix → același SKU (ex HA-0002) de pe mai multe magazine, la un loc. Fără `--shop` = toate.
+- **`--limit N`** = chunk gestionabil. **`--no-print`** = doar salvează (fără dialog).
+- ⚠️ **`--apply` DESCARCĂ → flip `downloaded`** (etichetele ies din coada de print). Dry-run by default (listează, NU descarcă).
+- **`--test`** = rulează pe etichete **DEJA descărcate** (`downloaded=true`) → ZERO impact pe coada reală (pt verificare). Cu `--test`, `--apply` e sigur.
 
 ### Facturi prin API (mirror AWB)
 Connector de facturare = tip **SMART_BILL** (ales automat dacă e unul singur; altfel `--connector <id>`). Dry-run by default.
