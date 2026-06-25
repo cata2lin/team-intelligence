@@ -60,11 +60,20 @@ Comenzile din app-ul **COD Form (Releaseit)** au **line items BLOCATE** (nu se p
 Toate rezolvă comanda după `--order GT###` (caută în `--shop` dacă dat, altfel în toate magazinele) și sunt
 **dry-run by default** — POST real DOAR cu `--apply`. `orderId` trimis la xConnector = **Shopify order ID**.
 - **`connectors`** — listă connectori per magazin: `id`, tip (`curier` vs `factură`: DPD/SAMEDAY vs SMART_BILL), activ.
-- **`awb-make`** — creează AWB: `create-shipping-label` cu `parcelCount` (`--parcels`, default 1), `parcelType`
+- **`awb-make`** — creează AWB: `create-shipping-label` cu `parcelCount` **AUTO din metafield** (vezi mai jos), `parcelType`
   (`--type`, default PARCEL), curier (`--connector ID`; obligatoriu dacă-s mai mulți curieri activi). Sare dacă
   are deja AWB (zice să folosești `awb-regen`). La succes întoarce tracking + URL etichetă + preț.
 - **`awb-void`** — anulează AWB-ul (`cancel-shipping-label`, după orderId + connectorId).
 - **`awb-regen`** — **anulează + refă** cu alte condiții (alt `--parcels`, `--type`, `--connector`) — ex „de la 1 la 2 colete".
+  CS folosește asta când AWB-ul s-a făcut cu nr greșit de colete: **`awb-regen --order X --parcels 3 --apply`** = anulează AWB-ul de 1 colet și-l reface cu 3.
+
+### Nr. de colete (parcelCount) — AUTO din metafield (NU mai punem 1 greșit)
+`awb-make`/`awb-regen`/`fulfill` calculează `parcelCount` din Shopify (`order_parcel_count`), ca să nu mai facem
+AWB-uri de 1 colet când trebuiau 2-3 (sursă frecventă de eșec/etichetă greșită):
+1. order metafield **`xconnector.parcel-count`** setat → ceil(value) (totalul deja calculat de sistemul vostru);
+2. altfel **`ceil( Σ produs custom.nr_cutii|nr_produse × quantity )`** (cutii reale; Grandia/Carpetto = **decimal**, 1.5→**2**);
+3. altfel **1**. **Parfumurile (GT/Esteban) rămân mereu 1** — `custom.nrproduse` e nr de PRODUSE, nu de cutii, e ignorat.
+`--parcels N` **forțează** manual (ocolește metafield-ul). Verificat: GT/Esteban toate 1; Grandia 1/2/3/4; Belasil 1/2/3; Carpetto 2.
 - **`awb-label`** — link-ul de descărcare al etichetei (PDF) + tracking-ul, fără să recreeze nimic.
 - **`order-cancel`** — anulează o comandă SIGUR: verifică în **AWBprint** (`orders.aggregated_status`) dacă a **PLECAT**
   (preluată de curier: `in_transit`/`delivered`/`back_to_sender`/…) → dacă da, **REFUZ** (cu `--force` încearcă oricum);
@@ -99,12 +108,14 @@ Guard: `--connector` nebilling sau `--refund-id` nenumeric → abort (nu trimite
 - Cheile **nu se printează niciodată**. Din **2026-06-24** avem chei pe **toate cele 19 magazine active**
   (toate cu `ROLE_AUTOMATION` + 17 permisiuni, expiră 22-sep-2026), nu doar George Talent.
 
-## Magazine EXTERNE — validatorul e RO-only (`--exclude`)
-Validatorul de adrese xConnector e **centrat pe România**. Magazinele externe (**Bonhaus CZ `vthuzq-7j`,
-PL `f0yrmh-ia`, BG `ux1x6n-n2`**) primesc `WRONG`/`UNKNOWN` în masă (BG ~98% din comenzi) pentru că nu le
-înțelege adresele — iar gate-ul nostru de auto-corecție scorează pe zip/oraș/județ RO, deci NU se declanșează
-oricum pe ele. → cron-ul rulează cu **`--exclude vthuzq-7j.myshopify.com,f0yrmh-ia.myshopify.com,ux1x6n-n2.myshopify.com`**
-ca să nu irosească apeluri și să nu inunde triajul CS. Cheile lor rămân utile pt AWB/facturi/alte operații.
+## Magazine EXTERNE (CZ/PL/BG) — validate cu HERE Geocoding, curier DPD Romania
+Validatorul de adrese xConnector e **centrat pe România** → magazinele externe (**Bonhaus CZ `vthuzq-7j`,
+PL `f0yrmh-ia`, BG `ux1x6n-n2`**) primesc `WRONG`/`UNKNOWN` în masă (false-positive, BG ~98%). KPI-ul nostru e
+**AWB făcut**, deci pe externe `fulfill` NU folosește validatorul RO, ci **HERE Geocoding** (`here_validate`,
+cheie KB `HERE_API_KEY`): geocodează adresa în `countryCode` (CZE/POL/BGR) și dacă `queryScore ≥ 0.9` (`HERE_MIN_SCORE`)
+→ face AWB; sub prag (sau eroare HERE) → **fail-closed** = lasă la CS, nu face AWB. Curier = **DPD Romania**
+(livrează cross-border, ca toate). Externele **NU intră** în corecția de text RO (`ai-correct-address`) — doar HERE da/nu.
+Test CZ (dry-run): din 52 unfulfilled, 31 validate HERE → AWB, 21 chiar proaste → CS. Cheile lor rămân utile și pt AWB/facturi.
 
 ## Siguranță (corecția de adrese)
 Corecția urmează porțile skill-ului oficial xConnector **aac** (`/agentic-address-correction`), conservator:
@@ -127,18 +138,21 @@ Docs: **https://xconnector.app/api-docs.html** (spec `/api-spec.yaml`). Creare A
 sunt dashboard-only** — sunt expuse sync prin `POST /api/actions/*` (`create-shipping-label`, `cancel-shipping-label`,
 `dispatch-order`, `estimate-shipping-price`, `create-invoice` + payment/cancel/revert, `locker-notification`),
 `POST /api/v1/picking-lists/add-order`, `GET /api/orders/by-tracking-number`. **Gate:** cer rolul `ROLE_AUTOMATION`
-pe merchant + permisiuni per-cheie (`API_CREATE_SHIPPING_LABEL` etc.) — fără ele = 403. Cheia GT actuală le are pe
-toate (17 permisiuni, inclusiv `API_ADDRESS_VALIDATE`). Skill-ul **încă nu implementează** acțiunile de scriere
-(AWB-ul rămâne pe Shopify Flow) — migrarea fluxului AWB/dispatch/factură de pe Flow pe API e următorul pas.
+pe merchant + permisiuni per-cheie (`API_CREATE_SHIPPING_LABEL` etc.) — fără ele = 403. Toate cele 19 chei le au
+(17 permisiuni, inclusiv `API_ADDRESS_VALIDATE`). Skill-ul **implementează** acțiunile de scriere (`awb-make/void/regen`,
+facturi, `order-cancel`, `addr-set`) + cron-ul `fulfill` care face AWB peste/în completarea Shopify Flow.
 
 ## `fulfill` — safety-net auto-AWB peste Shopify Flow (cron 15 min)
 `uv run xconnector.py fulfill [--max-age-min 15] [--exclude …] [--apply]` — pt comenzile **open + unfulfilled mai vechi
 de N min** (Flow a avut timp și n-a făcut AWB):
-- **fără AWB + adresă VALID** → fă AWB (DPD default); **WRONG/UNKNOWN** → corecție conservatoare → dacă devine VALID, AWB; altfel CS.
+- **RO**: fără AWB + adresă VALID → fă AWB; **WRONG/UNKNOWN** → corecție conservatoare → dacă devine VALID, AWB; altfel CS.
+- **EXTERNE (CZ/PL/BG)**: validare **HERE Geocoding** (≥0.9) în loc de validatorul RO → AWB (DPD Romania); sub prag → CS. (vezi secțiunea EXTERNE)
+- **parcelCount AUTO** din metafield per comandă (vezi „Nr. de colete") — Grandia/Belasil/Carpetto pot fi 2-4 colete, parfumurile 1.
 - **tag de duplicat** (`duplicata`/`duplicata3`/`duplicat4`) → regula Flow-urilor: **păstrează cea mai NOUĂ** comandă a clientului
   (7 zile) → îi fac AWB; **cele VECHI** → le **anulez** (reason OTHER, fără refund/restock/notify, **protecție livrare**: nu anulez
-  ce a plecat). Fără client / status incert → NU expediez, NU anulez (conservator — erorile API cad pe „skip").
-- Sare automat magazinele cu AWB deja făcut. **Recomandat `--exclude` Grandia** (Dragon Star ≠ DPD) + externele (validator RO).
+  ce a plecat). **CS-placed / draft order** (tag agent CS sau `sourceName=shopify_draft_order`) → **NU se dedup-ează, dar PRIMESC AWB**.
+  Fără client / status incert → NU expediez, NU anulez (conservator — erorile API cad pe „skip").
+- **Grandia auto-rutează** (voluminos → Dragon Star, restul DPD) — nu mai trebuie `--exclude`. Sare automat magazinele cu AWB deja făcut.
 - **Dry-run by default.** Sursa „plecat" = AWBprint. Consistent cu cele 2 Shopify Flow-uri de duplicate (NU le înlocuiește — le completează).
 
 ## Cron (VPS)
