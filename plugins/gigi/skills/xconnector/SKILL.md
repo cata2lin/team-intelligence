@@ -35,7 +35,7 @@ uv run xconnector.py addr-set  --order GT123 --city "…" --zip "…" [--address
 Comenzile din app-ul **COD Form (Releaseit)** au **line items BLOCATE** (nu se pot edita). Doar **adresa** se modifică
 (via `addr-set`). Dacă clientul cere schimbat CONȚINUTUL → procedura e **cancel + replace** (orchestrare, nu cod nou):
 1. **`order-cancel --order X --apply`** — anulează AWB-ul (dacă neplecat) + comanda veche.
-2. **`gigi:cs-actions` `place`** — plasează o comandă NOUĂ COD cu produsele corecte (tag agent CS).
+2. **`gigi:cs-actions` `replace --from-order X`** — re-plasează COD cu produsele corecte (copiază adresa din comanda veche, tag `replasata-cs` — **NU `swap`**; swap-ul e DOAR pt schimbarea produsului/mărimii). Replasează la **aceeași valoare** (vezi promo COD [[releaseit-cod-promo-model]]).
 3. AWB-ul comenzii noi → automat din **cron-ul `fulfill`** (sau `awb-make`). Noua e tag-uită CS → `fulfill` o lasă fără dedup, dar îi face AWB.
 (NU se face order-edit pe Releaseit — line items blocate. Identifici Releaseit după `sourceName`/app.)
 
