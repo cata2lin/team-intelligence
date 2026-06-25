@@ -966,6 +966,9 @@ def cmd_awb_label(a):
         XBASE + "/api/document/shipping-label?connectorId=%s&trackingNumber=%s" % (cid, urllib.parse.quote(str(trk or ""))))
     print("  %s (%s) · AWB %s · connector %s" % (a.order, sh["shopDomain"], trk, cid))
     print("  etichetă: %s" % url)
+    if doc.get("downloaded") is False:
+        print("  ⚠️ încă NEDESCĂRCAT (în coada de print depozit) — DESCHIDEREA linkului îl marchează `downloaded`")
+        print("     și-l SCOATE din coada de print. NU deschide dacă nu vrei să-l consumi din print.")
 
 
 # ── Anulare comandă (xConnector cancel AWB + Shopify cancel order), cu gardă „plecată" ──
@@ -1151,6 +1154,24 @@ def cancel_duplicate(sh, xc, o, st, name, apply):
     return "cancelled" if not errs else "failed"
 
 
+def _create_label(xc, body, tries=3):
+    """POST create-shipping-label cu retry scurt pe eșec TRANZITORIU (throttle DPD pe rafală:
+    429/5xx sau 422 generic 'Shipping label was not created'). O adresă real-proastă (HERE a trecut-o
+    dar curierul o respinge) eșuează toate cele `tries` → rămâne la CS. Întoarce (ok, status, data)."""
+    s = d = None
+    for i in range(tries):
+        s, d = xc.post("/api/actions/create-shipping-label", body)
+        if s == 200 and isinstance(d, dict) and d.get("accepted") and \
+           any(L.get("success") for L in (d.get("shippingLabels") or [])):
+            return True, s, d
+        msg = (d.get("errorMessage") if isinstance(d, dict) else str(d)) or ""
+        transient = s in (429, 500, 502, 503, 504) or (s == 422 and "was not created" in msg)
+        if not transient or i == tries - 1:
+            break
+        time.sleep(1.5 * (i + 1))  # backoff: 1.5s, 3s
+    return False, s, d
+
+
 def cmd_fulfill(a):
     """Safety-net peste Shopify Flow: comenzi open+unfulfilled mai vechi de --max-age-min (Flow a ratat AWB-ul) →
     VALID → fă AWB (create-shipping-label, DPD default); WRONG/UNKNOWN → corecție conservatoare → dacă devine
@@ -1240,9 +1261,7 @@ def cmd_fulfill(a):
                 pcount = order_parcel_count(st["shopDomain"], st["adminToken"], name)  # nr colete din metafield
                 body = {"orderId": o.get("orderId"), "connectorId": ocon["id"], "parcelCount": pcount,
                         "parcelType": "PARCEL", "notifyCustomer": bool(a.notify)}
-                s, d = xc.post("/api/actions/create-shipping-label", body)
-                ok = (s == 200 and isinstance(d, dict) and d.get("accepted")
-                      and any(L.get("success") for L in (d.get("shippingLabels") or [])))
+                ok, _, _ = _create_label(xc, body)  # retry scurt pe throttle DPD (rafală)
                 made += 1 if ok else 0
                 failed += 0 if ok else 1
         print("  %s — unfulfilled >%dmin: AWB %d gata + %d corectabile + %d grele→CS  ·  DUP: %d păstrate, %d de-anulat, %d plecate(protejate), %d fără-client  ·  CS/draft (AWB fără dedup): %d  (aveau AWB %d, fără xc %d)"
