@@ -971,6 +971,99 @@ def cmd_awb_label(a):
         print("     și-l SCOATE din coada de print. NU deschide dacă nu vrei să-l consumi din print.")
 
 
+# ── CS: „du-mă la comanda X" — linkuri Shopify / xConnector / tracking (rezolvat 100% prin xConnector) ──
+def order_links(sh_domain, o):
+    """Linkuri pt o comandă (zero Shopify API — totul din DTO-ul xConnector):
+      shopify    = admin order (orderId = ID Shopify), xconnector = dashboard order (merchantOrderId),
+      tracking   = redirect curier (track?connectorId&trackingNumber), awb = nr tracking."""
+    out = {}
+    oid, moid = o.get("orderId"), o.get("merchantOrderId")
+    if oid:
+        out["shopify"] = "https://%s/admin/orders/%s" % (sh_domain, oid)
+    if moid:
+        out["xconnector"] = "%s/shop/%s/order?orderId=%s" % (XBASE, sh_domain, moid)
+    doc = awb_doc(o); trk = doc_tracking(doc) if doc else None
+    if trk:
+        out["awb"] = trk
+        out["tracking"] = "%s/track?connectorId=%s&trackingNumber=%s" % (XBASE, doc.get("connectorId"), urllib.parse.quote(str(trk)))
+    return out
+
+
+def _open_urls(urls):
+    opener = "open" if sys.platform == "darwin" else ("xdg-open" if sys.platform.startswith("linux") else None)
+    if not opener:
+        print("  (deschidere automată indisponibilă pe %s — copiază linkurile)" % sys.platform); return
+    for u in urls:
+        try:
+            subprocess.Popen([opener, u], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+    print("  → deschis în browser")
+
+
+def find_by_awb(awb, a):
+    """(shop, order) după tracking number, prin xConnector by-tracking-number (zero Shopify). None dacă negăsit."""
+    for s in load_shops():
+        if a.shop and s["shopDomain"] != a.shop:
+            continue
+        st, d = XC(s["apiKey"]).get("/api/orders/by-tracking-number", "trackingNumber=%s" % urllib.parse.quote(str(awb)))
+        if st == 200 and isinstance(d, dict) and d.get("orderName"):
+            return s, d
+    return None, None
+
+
+def dash_list_url(sh_domain, status=-1, tags=None, total_items=None, line_items=None, sku=None,
+                  search=None, sort="date", sort_dir="desc", page_size=25, page=1):
+    """URL de LISTĂ filtrată în dashboard-ul xConnector (CS dă click → vede lista, ZERO API/Shopify).
+    Paramii UI (din exemplele user): orderStatus(-1=toate), totalItemsCount, lineItemsCount, tags, sku, search,
+    sortColumn, sortDirection, pageSize, currentPage."""
+    p = [("orderStatus", status)]
+    if total_items not in (None, ""):
+        p.append(("totalItemsCount", total_items))
+    if line_items not in (None, ""):
+        p.append(("lineItemsCount", line_items))
+    if tags:
+        p.append(("tags", tags))
+    if sku:
+        p.append(("sku", sku))
+    if search:
+        p.append(("search", search))
+    p += [("sortColumn", sort), ("sortDirection", sort_dir), ("pageSize", page_size), ("currentPage", page)]
+    return "%s/shop/%s/?%s" % (XBASE, sh_domain, urllib.parse.urlencode(p))
+
+
+def cmd_links(a):
+    """CS „du-mă la comanda X" / „dă-mi lista filtrată" — totul prin xConnector (NU consumă rația Shopify).
+    Comandă precisă: `links --order GT123` sau `links --awb <tracking>` → Shopify + xConnector + tracking.
+    Listă filtrată: `links --shop <d> [--tag oriental] [--total-items 3] [--search "ion popescu"] [--status -1]` → URL dashboard.
+    `--open` deschide în browser."""
+    if getattr(a, "awb", None) or getattr(a, "order", None):
+        if getattr(a, "awb", None):
+            sh, o = find_by_awb(a.awb, a)
+            if not o:
+                print("AWB %s negăsit în niciun magazin." % a.awb); return
+        else:
+            sh, _, o = resolve_order(a.order, a, a.days)
+            if not o:
+                print("Comanda %s negăsită." % a.order); return
+        L = order_links(sh["shopDomain"], o)
+        print("  %s (%s)%s" % (o.get("orderName"), sh["shopDomain"], (" · AWB %s" % L["awb"]) if L.get("awb") else " · fără AWB"))
+        # STATUS (ce se întâmplă cu comanda) — fără Shopify: xConnector + AWBprint
+        deliv = awbprint_status(o.get("orderName"))  # status livrare REAL (aggregated_status)
+        disp = "expediat" if o.get("dispatched") else "neexpediat"
+        has = "AWB făcut" if awb_doc(o) else "FĂRĂ AWB"
+        print("  Status:     adresă=%s · %s · %s%s" % (o.get("addressStatus") or "?", has, disp,
+                                                       (" · livrare=%s" % deliv) if deliv else ""))
+        print("  Shopify:    %s" % L.get("shopify", "—"))
+        print("  xConnector: %s" % L.get("xconnector", "—"))
+        print("  Tracking:   %s" % L.get("tracking", "— (fără AWB)"))
+        print("  → profil client + alte comenzi: gigi:cs-customer-360 · tichete: gigi:cs-tickets (din DB/Richpanel, fără Shopify)")
+        if getattr(a, "open", False):
+            _open_urls([L[k] for k in ("shopify", "xconnector", "tracking") if L.get(k)])
+        return
+    print("Dă --order GT123 sau --awb <tracking>.")
+
+
 # ── Anulare comandă (xConnector cancel AWB + Shopify cancel order), cu gardă „plecată" ──
 # „Plecată" = preluată de curier (status AWBprint, sursa de adevăr) → NU se poate anula.
 # Neplecată + are AWB → anulez AWB apoi comanda. Fără AWB → doar comanda.
@@ -1599,7 +1692,7 @@ def cmd_orders(a):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["summary", "address-issues", "recheck", "correct", "connectors", "fulfill",
-                                    "not-downloaded", "orders",
+                                    "not-downloaded", "orders", "links",
                                     "awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
                                     "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc", "addr-set",
                                     "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
@@ -1631,6 +1724,12 @@ def main():
     ap.add_argument("--line-items", dest="line_items", help="orders: nr LINII din comandă (CSV). =1 → o singură linie.")
     ap.add_argument("--sort", choices=["sku", "totalItemsCount", "lineItemsCount", "date", "fulfillmentDate"], help="orders/not-downloaded: câmp de sortare.")
     ap.add_argument("--sort-dir", dest="sort_dir", choices=["asc", "desc"], help="orders: direcția sortării (implicit desc).")
+    # links (CS „du-mă la comanda X" / listă filtrată — totul prin xConnector, fără rația Shopify):
+    ap.add_argument("--awb", help="links: caută comanda după AWB/tracking (xConnector by-tracking-number).")
+    ap.add_argument("--tag", help="links: listă filtrată după tag (dashboard).")
+    ap.add_argument("--search", help="links: căutare în listă (nr comandă / nume client / tracking — dashboard).")
+    ap.add_argument("--status", type=int, help="links: orderStatus în lista dashboard (-1 = toate).")
+    ap.add_argument("--open", action="store_true", help="links: deschide linkurile în browser.")
     a = ap.parse_args()
     if a.cmd in ("awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
                  "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc", "addr-set"):
@@ -1657,6 +1756,8 @@ def main():
         cmd_not_downloaded(a); return
     if a.cmd == "orders":
         cmd_orders(a); return
+    if a.cmd == "links":
+        cmd_links(a); return
     if a.cmd == "recheck":
         cmd_recheck(a); return
     import datetime
