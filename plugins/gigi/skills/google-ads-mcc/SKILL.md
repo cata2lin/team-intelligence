@@ -35,7 +35,9 @@ Magazinele COD (deals) folosesc un **formular custom** (Releasit „COD Form & U
 purchase. Rezultat: **0 conversii purchase în Google Ads deși există comenzi reale** (simptom: Page View /
 View Item se trackuiesc, Purchase = 0; comenzi reale în Shopify). Max Conversions rămâne ORB → nu optimizează.
 **Diagnostic:** `SELECT segments.conversion_action_name, metrics.all_conversions FROM customer WHERE segments.date DURING LAST_30_DAYS` — dacă PURCHASE=0 dar PAGE_VIEW>0 și magazinul are comenzi → bug-ul ăsta.
-**Fix:** `uv run cod_tracking.py --cid <CID> --ga4 <hint> --apply` → creează o conversie WEBPAGE PURCHASE
+**Fix:** `uv run cod_tracking.py --cid <CID> --ga4 <hint> --apply` — întâi **AUTO-DETECTEAZĂ** dacă magazinul
+are COD form (scanează storefront-ul public, rezolvat din final_urls: recunoaște Releasit/EasySell; pe magazine cu
+checkout NATIV refuză cu un avertisment, dacă insiști `--force`). Apoi creează o conversie WEBPAGE PURCHASE
 „COD Purchase" (a noastră, nu cea app-managed), o face primary + PURCHASE goal biddable, și scoate cele 3
 valori de pus în tab-ul **Conversion/Pixel tracking** al app-ului de COD form: **Google Ads Conversion ID
 (`AW-…`) + Purchase Label + GA4 Measurement ID (`G-…`)**. Releasit/EasySell au câmp Google Ads built-in →
