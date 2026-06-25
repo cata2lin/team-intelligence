@@ -72,6 +72,8 @@
 | audit calitate răspunsuri | `gigi:cs-quality-audit` |
 | operează inboxul (triaj/răspuns/asignare) | `gigi:cs-tickets` |
 
+> 📌 **REPLY = CLOSE.** Când CS răspunde la un tichet, îl **ÎNCHIDE** — inclusiv escaladările (ANPC/OPC). Richpanel îl **REDESCHIDE automat** dacă clientul scrie iar. Deci nu lăsa tichetul deschis după ce ai răspuns. (Atribuirea magazinului rămâne din `to.id`, vezi mai jos.)
+
 ## 7. 🛡️ PREVENȚIE / PROACTIV (oprim pierderi înainte să se întâmple)
 | Risc | Tool | Exemplu |
 |---|---|---|
