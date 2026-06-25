@@ -1697,9 +1697,9 @@ def date_window(a):
 
 
 def _print_dialog(path, printer=None):
-    """Deschide dialogul de print pt PDF-ul batch, cross-platform. Depozitul e pe WINDOWS.
-    Windows: SumatraPDF `-print-dialog`/`-print-to` (standard label-print) → altfel verbul „print" → altfel viewer+Ctrl+P.
-    macOS: Preview + Cmd+P. Linux: xdg-open. `printer` (opțional) = printează DIRECT pe imprimanta dată (fără dialog)."""
+    """Deschide PDF-ul batch pt print, cross-platform. Depozitul e pe WINDOWS, printa în CHROME (ca xConnector).
+    Windows: SumatraPDF `-print-dialog`/`-print-to` dacă există → altfel deschide în CHROME (operatorul apasă Ctrl+P).
+    macOS: Preview + Cmd+P. Linux: xdg-open. `printer` (opțional, doar SumatraPDF) = printare DIRECTĂ fără dialog."""
     if os.name == "nt":   # Windows (depozit)
         import shutil
         sumatra = next((p for p in (shutil.which("SumatraPDF"), shutil.which("SumatraPDF.exe"),
@@ -1714,15 +1714,21 @@ def _print_dialog(path, printer=None):
                 subprocess.Popen([sumatra, "-print-dialog", path])
                 print("  → SumatraPDF: dialog de print deschis.")
             return
+        # Chrome (așa deschidea xConnector etichetele în depozit) → operatorul apasă Ctrl+P pt dialog
+        chrome = next((p for p in (shutil.which("chrome"), shutil.which("chrome.exe"),
+                                   r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                                   r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                                   os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"))
+                       if p and os.path.exists(p)), None)
         try:
-            os.startfile(path, "print")   # verbul „print" al handler-ului PDF default → dialog/printare
-            print("  → trimis spre print (handler PDF default). Dacă nu apare dialogul, deschide PDF-ul și Ctrl+P.")
-        except Exception:
-            try:
+            if chrome:
+                subprocess.Popen([chrome, path])
+                print("  → deschis în Chrome (ca xConnector). Apasă Ctrl+P pentru dialogul de print.")
+            else:
                 os.startfile(path)
-                print("  → deschis în viewer. Apasă Ctrl+P pentru dialogul de print.")
-            except Exception:
-                print("  📄 PDF batch: %s (deschide-l și Ctrl+P)." % path)
+                print("  → deschis în viewer-ul PDF default. Apasă Ctrl+P pentru dialogul de print.")
+        except Exception:
+            print("  📄 PDF batch: %s (deschide-l și Ctrl+P)." % path)
     elif sys.platform == "darwin":
         subprocess.run(["open", "-a", "Preview", path], check=False)
         try:
