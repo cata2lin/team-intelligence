@@ -86,11 +86,29 @@ class XC:
         except Exception:
             return s, b
 
-    def orders(self, dfrom, dto):
-        """toate comenzile în fereastră (paginat), cu addressStatus + documents."""
+    def orders(self, dfrom, dto, filters=None):
+        """toate comenzile în fereastră (paginat), cu addressStatus + documents.
+        `filters` = dict opțional cu filtrele server-side getOrders (xConnector, adăugate 2026-06):
+          - sku=<str|list>          potrivire EXACTĂ; listă → param repetat (?sku=A&sku=B)
+          - skuMode='ANY'|'ALL'     cum se combină mai multe sku (implicit ANY)
+          - excludeSku=<str|list>   exclude comenzile cu SKU-ul (cere un filtru pozitiv alături)
+          - totalItemsCount=<str>   nr TOTAL bucăți (CSV permis, ex '1' sau '1,2')
+          - lineItemsCount=<str>    nr LINII (CSV permis)
+          - sort='sku'|'totalItemsCount'|'lineItemsCount'|'date'|'fulfillmentDate'
+          - sortDir='asc'|'desc'    (implicit desc)
+        Valorile None/''/[] sunt ignorate. Listele → param repetat; restul → o singură valoare."""
+        base = [("fromOrderDate", dfrom), ("toOrderDate", dto)]
+        for k, v in (filters or {}).items():
+            if v is None or v == "" or v == []:
+                continue
+            if isinstance(v, (list, tuple)):
+                base += [(k, str(x)) for x in v if x not in (None, "")]
+            else:
+                base.append((k, str(v)))
         out, seen = [], set()
         for page in range(0, 12):
-            s, d = self.get("/api/orders", "fromOrderDate=%s&toOrderDate=%s&page=%d&size=200" % (dfrom, dto, page))
+            q = urllib.parse.urlencode(base + [("page", str(page)), ("size", "200")])
+            s, d = self.get("/api/orders", q)
             if s != 200:
                 break
             arr = d if isinstance(d, list) else (d.get("content") or d.get("orders") or [])
@@ -1465,7 +1483,8 @@ def cmd_not_downloaded(a):
             continue
         xc = XC(sh["apiKey"])
         rows = []
-        for o in xc.orders(dfrom, dto):
+        nd_filters = orders_filters(a)  # permite `--sort fulfillmentDate` (coadă de print ordonată) + sku/cantitate
+        for o in xc.orders(dfrom, dto, nd_filters):
             doc = awb_doc(o)
             if not doc or doc.get("downloaded") is not False:
                 continue
@@ -1485,10 +1504,83 @@ def cmd_not_downloaded(a):
     print("  TOTAL etichete nedescărcate: %d" % grand)
 
 
+def _csv_list(v):
+    """argument repetat (--sku A --sku B) și/sau CSV (--sku A,B) → listă plată."""
+    if not v:
+        return []
+    items = v if isinstance(v, (list, tuple)) else [v]
+    out = []
+    for it in items:
+        out += [x.strip() for x in str(it).split(",") if x.strip()]
+    return out
+
+
+def orders_filters(a):
+    """Construiește dict-ul de filtre server-side getOrders din argumentele CLI (gol dacă niciunul)."""
+    f = {}
+    sku = _csv_list(getattr(a, "sku", None))
+    if sku:
+        f["sku"] = sku
+    if getattr(a, "sku_mode", None):
+        f["skuMode"] = a.sku_mode
+    exsku = _csv_list(getattr(a, "exclude_sku", None))
+    if exsku:
+        f["excludeSku"] = exsku
+    if getattr(a, "total_items", None):
+        f["totalItemsCount"] = a.total_items
+    if getattr(a, "line_items", None):
+        f["lineItemsCount"] = a.line_items
+    if getattr(a, "sort", None):
+        f["sort"] = a.sort
+    if getattr(a, "sort_dir", None):
+        f["sortDir"] = a.sort_dir
+    return f
+
+
+def cmd_orders(a):
+    """READ: listează/filtrează comenzi cu filtrele server-side getOrders (sku/cantitate/sortare).
+    Ex: `orders --shop ix5bxc-hr --total-items 1 --sort fulfillmentDate` (mono-bucată, ordonate de livrare),
+    `orders --sku ABC123` (comenzi cu SKU-ul), `orders --total-items 2,3,4 --shop n12w89-yy` (multi-bucată Grandia)."""
+    shops = load_shops()
+    if not shops:
+        print("Nicio configurație xConnector (KB XCONNECTOR_SHOPS sau ~/.aac/input.json)."); return
+    flt = orders_filters(a)
+    if not flt and not a.shop:
+        print("Dă cel puțin un filtru (--sku/--total-items/--line-items/--sort) sau --shop. Vezi --help."); return
+    import datetime
+    dto = datetime.date.today().isoformat()
+    dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
+    grand = 0
+    for sh in shops:
+        if skip_shop(sh, a):
+            continue
+        if a.shop and a.shop not in sh["shopDomain"]:
+            continue
+        try:
+            rows = XC(sh["apiKey"]).orders(dfrom, dto, flt)
+        except Exception as e:
+            print("  %s — eroare: %s" % (sh["shopDomain"], e)); continue
+        if not rows:
+            continue
+        grand += len(rows)
+        print("═" * 60)
+        print("  %s — %d comenzi%s" % (sh["shopDomain"], len(rows), (" · filtre %s" % json.dumps(flt)) if flt else ""))
+        print("  (DTO-ul getOrders întoarce doar nume/status/AWB/expediat — cantitatea/SKU-ul sunt filtre & sortare server-side, nu câmpuri.)")
+        for o in rows[:50]:
+            awb = "AWB" if has_awb(o) else "—"
+            disp = "expediat" if o.get("dispatched") else ""
+            print("    %-11s %-9s %-4s %s"
+                  % (o.get("orderName") or o.get("orderId"), o.get("addressStatus") or "", awb, disp))
+        if len(rows) > 50:
+            print("    … +%d" % (len(rows) - 50))
+    print("─" * 60)
+    print("  TOTAL: %d comenzi" % grand)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["summary", "address-issues", "recheck", "correct", "connectors", "fulfill",
-                                    "not-downloaded",
+                                    "not-downloaded", "orders",
                                     "awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
                                     "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc", "addr-set",
                                     "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
@@ -1512,6 +1604,14 @@ def main():
     ap.add_argument("--zip"); ap.add_argument("--province"); ap.add_argument("--phone"); ap.add_argument("--country")
     ap.add_argument("--make-awb", action="store_true", dest="make_awb", help="addr-set: după setarea adresei, fă AWB.")
     ap.add_argument("--correct", action="store_true", help="awb-auto: corectează conservator adresele proaste (xConnector ai-correct-address)")
+    # Filtre server-side getOrders (xConnector, adăugate 2026-06) — pt comanda `orders` (+ `--sort` pe not-downloaded):
+    ap.add_argument("--sku", action="append", help="orders: SKU exact (repetabil sau CSV). Mai multe → vezi --sku-mode.")
+    ap.add_argument("--sku-mode", dest="sku_mode", choices=["ANY", "ALL"], help="orders: ANY (oricare, implicit) / ALL (toate SKU-urile).")
+    ap.add_argument("--exclude-sku", dest="exclude_sku", action="append", help="orders: exclude comenzile cu acest SKU (repetabil/CSV; cere un filtru pozitiv alături).")
+    ap.add_argument("--total-items", dest="total_items", help="orders: nr TOTAL bucăți (CSV, ex 1 sau 1,2). =1 → mono-bucată.")
+    ap.add_argument("--line-items", dest="line_items", help="orders: nr LINII din comandă (CSV). =1 → o singură linie.")
+    ap.add_argument("--sort", choices=["sku", "totalItemsCount", "lineItemsCount", "date", "fulfillmentDate"], help="orders/not-downloaded: câmp de sortare.")
+    ap.add_argument("--sort-dir", dest="sort_dir", choices=["asc", "desc"], help="orders: direcția sortării (implicit desc).")
     a = ap.parse_args()
     if a.cmd in ("awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
                  "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc", "addr-set"):
@@ -1536,6 +1636,8 @@ def main():
         cmd_fulfill(a); return
     if a.cmd == "not-downloaded":
         cmd_not_downloaded(a); return
+    if a.cmd == "orders":
+        cmd_orders(a); return
     if a.cmd == "recheck":
         cmd_recheck(a); return
     import datetime

@@ -17,6 +17,7 @@ uv run xconnector.py address-issues [--shop <domain>] [--days 60] [--json]
 uv run xconnector.py recheck [--order GT1,GT2] [--days 30]    # care s-au auto-validat (VALID/PERFECT)
 uv run xconnector.py correct [--shop <domain>] [--days 60] [--min-age-hours N] [--exclude d1,d2] [--apply]  # CRON
 uv run xconnector.py connectors [--shop <domain>]            # curieri + facturare per magazin (id/type)
+uv run xconnector.py orders [--shop d] [--sku A] [--total-items 1] [--line-items 1] [--sort fulfillmentDate] [--sort-dir asc]  # filtrează/sortează comenzi
 uv run xconnector.py awb-make  --order GT123 [--shop d] [--connector ID] [--parcels N] [--type PARCEL] [--notify] [--apply]
 uv run xconnector.py awb-void  --order GT123 [--shop d] [--connector ID] [--apply]      # anulează AWB
 uv run xconnector.py awb-regen --order GT123 --parcels N [--connector ID] [--apply]     # anulează + refă cu alte condiții
@@ -92,7 +93,15 @@ Dacă forțezi `--connector`, rutarea e ignorată. `order-cancel` folosește con
 `uv run xconnector.py not-downloaded [--shop d] [--days 14] [--min-age-hours N]` — comenzi cu AWB a cărui etichetă
 **nu a fost descărcată** (`document.downloaded=false`). Read-only. Fără filtru = coada de printat (cele noi); cu
 `--min-age-hours 48` → etichete VECHI nedescărcate = **potențial ghost** (AWB făcut acum 2+ zile, label niciodată
-printat → coletul probabil n-a plecat). xConnector n-are filtru server-side pe asta — se calculează client-side din câmpul `downloaded`.
+printat → coletul probabil n-a plecat). `downloaded` n-are filtru server-side — se calculează client-side; dar **acceptă `--sort fulfillmentDate`** (coadă de print ordonată).
+
+### `orders` — filtrare/sortare server-side (SKU, cantitate, sortare)
+xConnector a adăugat (2026-06) filtre pe `getOrders`, expuse prin comanda **`orders`**:
+`uv run xconnector.py orders [--shop d] [--days N] [--sku ABC] [--sku-mode ANY|ALL] [--exclude-sku XYZ] [--total-items 1|1,2] [--line-items 1] [--sort sku|totalItemsCount|lineItemsCount|date|fulfillmentDate] [--sort-dir asc|desc]`.
+- **`--sku`** potrivire EXACTĂ (repetabil sau CSV; `--sku-mode ALL` = toate, `ANY` = oricare). **`--exclude-sku`** scoate (cere un filtru pozitiv alături).
+- **`--total-items`** = nr TOTAL bucăți (`=1` → mono-bucată), **`--line-items`** = nr linii. CSV permis (`--total-items 2,3,4`).
+- Ex: `orders --shop ix5bxc-hr --total-items 1 --sort fulfillmentDate` (mono-bucată ordonate), `orders --total-items 2,3,4 --shop n12w89-yy` (multi-bucată Grandia = candidați multi-colet).
+- **DTO-ul getOrders întoarce doar** `orderName/addressStatus/dispatched/documents` — cantitatea & SKU-ul sunt **filtre & sortare server-side, NU câmpuri în răspuns** (line items rămân în Shopify). Read-only. Filtrele se pot pasa și la `not-downloaded`.
 
 ### Facturi prin API (mirror AWB)
 Connector de facturare = tip **SMART_BILL** (ales automat dacă e unul singur; altfel `--connector <id>`). Dry-run by default.
