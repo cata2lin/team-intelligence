@@ -36,6 +36,14 @@ Read-only pe xConnector (recheck/issues/summary nu scriu nimic; `correct` scrie 
 """
 import os, sys, json, re, time, hashlib, argparse, subprocess, urllib.parse, urllib.request, urllib.error
 
+# Windows (depozit + mașinile CS): consola e cp1252 → forțez UTF-8 DIN PRIMA, ca să NU crape pe
+# diacriticele românești (ț/ș/ă/î/â) sau pe caracterele „═ → ⚠️ ✅". errors=replace = niciodată crash.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
 XBASE = "https://xconnector.app"

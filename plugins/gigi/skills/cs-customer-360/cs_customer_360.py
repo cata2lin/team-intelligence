@@ -14,6 +14,13 @@ livrate vs refuzate, retururi (RMA Grandia), și flag automat "REFUZNIC SERIAL"
 import os, sys, json, subprocess, shlex, urllib.parse, argparse
 import pg8000.dbapi
 
+# Windows (mașinile CS): consola e cp1252 → forțez UTF-8 DIN PRIMA ca să NU crape pe diacritice (ț/ș/ă/î/â).
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 VPS = "root@84.46.242.181"
 
 def _vps_run(remote_cmd):
