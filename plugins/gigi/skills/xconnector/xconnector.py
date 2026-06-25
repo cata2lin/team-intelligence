@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["pg8000"]
 # ///
 """
 xconnector.py — punte READ-ONLY spre xConnector (curierat) pt fluxul ARONA.
@@ -647,6 +647,12 @@ def pick_connector(xc, a):
         return (m[0] if m else {"id": cid, "name": "?", "type": "?"}), cons
     if len(cons) == 1:
         return cons[0], cons
+    # default curier ARONA = DPD Romania (preferat numele exact, apoi orice DPD non-SWAP, apoi orice DPD)
+    dpd = ([c for c in cons if (c.get("name") or "") == "DPD Romania"]
+           or [c for c in cons if (c.get("type") or "").upper() == "DPD" and "SWAP" not in (c.get("name") or "").upper()]
+           or [c for c in cons if (c.get("type") or "").upper() == "DPD"])
+    if len(dpd) == 1:
+        return dpd[0], cons
     return None, cons
 
 
@@ -654,6 +660,13 @@ def _ask_connector(cons):
     print("  Mai mulți curieri activi — alege cu --connector ID:")
     for c in cons:
         print("    %-7s %-14s %s" % (c.get("id"), c.get("type"), c.get("name")))
+
+
+def _err_text(s, d):
+    """Text de eroare lizibil din răspunsul xConnector (ApiErrorResponse / errorMessage / brut)."""
+    if isinstance(d, dict):
+        return d.get("errorDescription") or d.get("errorMessage") or d.get("errorCode") or json.dumps(d, ensure_ascii=False)[:200]
+    return "%s %s" % (s, str(d)[:200])
 
 
 def _label_result(s, d):
@@ -775,10 +788,116 @@ def cmd_awb_label(a):
     print("  etichetă: %s" % url)
 
 
+# ── Anulare comandă (xConnector cancel AWB + Shopify cancel order), cu gardă „plecată" ──
+# „Plecată" = preluată de curier (status AWBprint, sursa de adevăr) → NU se poate anula.
+# Neplecată + are AWB → anulez AWB apoi comanda. Fără AWB → doar comanda.
+PLECATA = {"in_transit", "delivered", "back_to_sender", "returning_to_sender", "customer_pickup",
+           "unsuccessful_delivery", "refused", "deferred_delivery", "redirected", "lost", "lost_in_transit"}
+ALREADY_CANCELLED = {"cancelled"}
+
+
+def awbprint_status(order_name):
+    """aggregated_status din AWBprint (sursa de adevăr curier) pt orderName. None dacă lipsește DB/order/pg8000."""
+    try:
+        import pg8000.native
+        from urllib.parse import urlparse, unquote
+    except Exception:
+        return None
+    url = os.environ.get("DATABASE_URL_AWBPRINT") or ""
+    if not url:
+        try:
+            url = subprocess.run(["uv", "run", KB, "secret-get", "DATABASE_URL_AWBPRINT"],
+                                 capture_output=True, text=True, timeout=40).stdout.strip()
+        except Exception:
+            url = ""
+    if not url.startswith("postgres"):
+        return None
+    u = urlparse(url)
+    con = None
+    try:
+        con = pg8000.native.Connection(user=unquote(u.username or ""), password=unquote(u.password or ""),
+                                       host=u.hostname, port=u.port or 5432, database=u.path.lstrip("/"), ssl_context=True)
+        rows = con.run("select aggregated_status from orders where order_number = :n order by id desc limit 1", n=order_name)
+        return (rows[0][0] if rows else None)
+    except Exception:
+        return None
+    finally:
+        if con is not None:
+            try:
+                con.close()
+            except Exception:
+                pass
+
+
+def shopify_order_cancel(shop, token, order_gid, refund=False, restock=True, notify=False):
+    """orderCancel (Shopify Admin). refund OFF by default — NU returna bani fără decizie explicită
+    (pt COD inutil; pt comenzi plătite, refund real). Întoarce listă de erori (gol = OK)."""
+    m = ('mutation{ orderCancel(orderId:"%s", reason:CUSTOMER, refund:%s, restock:%s, '
+         'notifyCustomer:%s, staffNote:"anulare CS via xconnector"){ job{ id } orderCancelUserErrors{ message } } }'
+         ) % (order_gid, "true" if refund else "false", "true" if restock else "false", "true" if notify else "false")
+    d = shopify_gql(shop, token, m)
+    oc = (d.get("data") or {}).get("orderCancel")
+    if oc is None:
+        return d.get("errors") or [{"message": "orderCancel a întors null (răspuns Shopify neașteptat)"}]
+    return oc.get("orderCancelUserErrors") or d.get("errors")
+
+
+def cmd_order_cancel(a):
+    """Anulează o comandă: dacă e PLECATĂ (preluată de curier) → refuz; dacă e neplecată și are AWB →
+    anulez AWB (xConnector) APOI comanda (Shopify); fără AWB → doar comanda. Dry-run by default."""
+    sh, xc, o = resolve_order(a.order, a, a.days)
+    if not o:
+        print("Comanda %s negăsită." % a.order); return
+    status = awbprint_status(a.order)
+    awb = has_awb(o)
+    trk = doc_tracking(awb_doc(o))
+    print("═" * 60)
+    print("  ANULARE comandă · %s (%s)" % (a.order, sh["shopDomain"]))
+    print("  status livrare (AWBprint): %s · AWB: %s" % (status or "necunoscut", trk or "—"))
+    if status in ALREADY_CANCELLED:
+        print("  • comanda e deja anulată."); return
+    if status in PLECATA and not getattr(a, "force", False):
+        print("  ⛔ comanda a PLECAT (%s) — NU se poate anula. (forțează cu --force ca să încerci oricum;"
+              " xConnector va da eroare dacă AWB-ul chiar a plecat)." % status); return
+    if status is None and awb:
+        print("  ℹ status de curier necunoscut — încerc anularea AWB; dacă a plecat, xConnector dă eroare și mă opresc.")
+    # tokenul Shopify din MAGAZINUL găsit (nu din prefix) + comanda — verificate ÎNAINTE de orice scriere,
+    # ca să nu rămână comanda activă cu AWB anulat.
+    by_dom = {t.get("shopDomain"): t for t in load_shopify_tokens()}
+    st = by_dom.get(sh["shopDomain"])
+    if not st:
+        print("  ⚠ fără token Shopify pt %s în SHOPIFY_ADMIN_TOKENS → nu pot anula comanda. Nu ating nimic." % sh["shopDomain"]); return
+    do_refund = bool(getattr(a, "refund", False))
+    plan = (["anulez AWB %s (xConnector)" % (trk or "—")] if awb else []) + \
+           ["anulez comanda în Shopify%s" % (" + REFUND" if do_refund else " (fără refund)")]
+    print("  plan: %s" % "  →  ".join(plan))
+    if not a.apply:
+        print("  DRY-RUN — fără --apply nu execut."); return
+    node = find_order(st["shopDomain"], st["adminToken"], a.order)
+    if not node or not node.get("id"):
+        print("  Comanda %s negăsită în Shopify (%s) → nu ating nimic." % (a.order, sh["shopDomain"])); return
+    if awb:
+        body = {"orderId": o.get("orderId")}
+        cid = (awb_doc(o) or {}).get("connectorId")
+        if cid:
+            body["connectorId"] = cid
+        sv, dv = xc.post("/api/actions/cancel-shipping-label", body)
+        if not (sv == 200 and isinstance(dv, dict) and dv.get("accepted")):
+            err = _err_text(sv, dv)
+            print("  ⛔ AWB-ul NU s-a putut anula — cel mai probabil coletul A PLECAT deja la curier.")
+            print("     → NU anulez comanda. ANUNȚĂ CS/clientul: comanda a plecat, nu se mai poate anula.")
+            print("     (eroare xConnector: %s)" % err)
+            return
+        print("  ✅ AWB anulat")
+    errs = shopify_order_cancel(st["shopDomain"], st["adminToken"], node["id"],
+                                refund=do_refund, restock=not getattr(a, "no_restock", False), notify=bool(a.notify))
+    print("  %s" % ("✅ comandă anulată în Shopify" if not errs else "❌ Shopify: %s" % errs))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["summary", "address-issues", "recheck", "correct", "connectors",
-                                    "awb-make", "awb-void", "awb-regen", "awb-label",
+                                    "awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
                                     "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
     ap.add_argument("--shop"); ap.add_argument("--order"); ap.add_argument("--days", type=int, default=60)
     ap.add_argument("--apply", action="store_true"); ap.add_argument("--json", action="store_true")
@@ -789,13 +908,17 @@ def main():
     ap.add_argument("--connector", help="awb-make/void/regen: connectorId curier (din `connectors`). Obligatoriu dacă sunt mai mulți curieri activi.")
     ap.add_argument("--parcels", type=int, default=1, help="awb-make/regen: număr de colete (parcelCount). Default 1.")
     ap.add_argument("--type", default="PARCEL", help="awb-make/regen: parcelType (PARCEL/ENVELOPE). Default PARCEL.")
-    ap.add_argument("--notify", action="store_true", help="awb-make/regen: notifyCustomer la xConnector.")
+    ap.add_argument("--notify", action="store_true", help="awb-make/regen/order-cancel: notifyCustomer.")
+    ap.add_argument("--force", action="store_true", help="order-cancel: încearcă anularea chiar dacă statusul de curier zice PLECAT (xConnector dă eroare dacă chiar a plecat).")
+    ap.add_argument("--refund", action="store_true", help="order-cancel: returnează banii la anulare (OFF by default — COD n-are nevoie; comenzi plătite = decizie explicită).")
+    ap.add_argument("--no-restock", action="store_true", dest="no_restock", help="order-cancel: NU repune stocul la anulare (restock ON by default).")
     ap.add_argument("--correct", action="store_true", help="awb-auto: corectează conservator adresele proaste (xConnector ai-correct-address)")
     a = ap.parse_args()
-    if a.cmd in ("awb-make", "awb-void", "awb-regen", "awb-label"):
+    if a.cmd in ("awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel"):
         if not a.order:
             print("Dă --order (ex: --order GT44004)."); sys.exit(1)
-        {"awb-make": cmd_awb_make, "awb-void": cmd_awb_void, "awb-regen": cmd_awb_regen, "awb-label": cmd_awb_label}[a.cmd](a)
+        {"awb-make": cmd_awb_make, "awb-void": cmd_awb_void, "awb-regen": cmd_awb_regen,
+         "awb-label": cmd_awb_label, "order-cancel": cmd_order_cancel}[a.cmd](a)
         return
     if a.cmd == "connectors":
         cmd_connectors(a); return
