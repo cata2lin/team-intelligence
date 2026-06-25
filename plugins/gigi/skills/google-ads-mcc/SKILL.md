@@ -29,6 +29,21 @@ Auto-descoperă property-urile GA4 accesibile SA-ului `looker-sheets`. Capcană:
 incremental — campania **Brand** culege cerere creată de Meta/organic; incremental real = test geo/pauză brand.
 Going-forward, măsură și mai precisă: comenzile Shopify cu `utm_source=google` (UTM pus pe toate conturile).
 
+## ⚠️ Magazine cu COD FORM → purchase NU se trackuiește → `cod_tracking.py`
+Magazinele COD (deals) folosesc un **formular custom** (Releasit „COD Form & Upsells", EasySell ș.a.) care
+**ocolește checkout-ul nativ Shopify** — exact pagina pe care app-ul „Google & YouTube" trage pixelul de
+purchase. Rezultat: **0 conversii purchase în Google Ads deși există comenzi reale** (simptom: Page View /
+View Item se trackuiesc, Purchase = 0; comenzi reale în Shopify). Max Conversions rămâne ORB → nu optimizează.
+**Diagnostic:** `SELECT segments.conversion_action_name, metrics.all_conversions FROM customer WHERE segments.date DURING LAST_30_DAYS` — dacă PURCHASE=0 dar PAGE_VIEW>0 și magazinul are comenzi → bug-ul ăsta.
+**Fix:** `uv run cod_tracking.py --cid <CID> --ga4 <hint> --apply` → creează o conversie WEBPAGE PURCHASE
+„COD Purchase" (a noastră, nu cea app-managed), o face primary + PURCHASE goal biddable, și scoate cele 3
+valori de pus în tab-ul **Conversion/Pixel tracking** al app-ului de COD form: **Google Ads Conversion ID
+(`AW-…`) + Purchase Label + GA4 Measurement ID (`G-…`)**. Releasit/EasySell au câmp Google Ads built-in →
+trag singure `gtag('event','conversion', send_to, value, currency, transaction_id)` pe thank-you-ul inline —
+**fără cod în temă**. Conversiile apar în 24-48h. *Capcană atribuire:* Releasit prinde UTM nu gclid → atribuire
+prin cookie auto-tagging, **same-session** (ok pt majoritatea); pt 100% etanș = captură gclid + Offline Conversion Import.
+Carpetto (4069952156) reparat iun 2026: 14 comenzi reale / 0 conversii → COD Purchase `AW-18249884743/SoloCO7ckMUcEMfInP5D`.
+
 ## Campaign & asset-group map (Esteban + Belasil)
 
 Run `uv run audit_campaigns.py` for a live view with `▶ ENABLED / ⏸ PAUSED / ✗ REMOVED` icons.
