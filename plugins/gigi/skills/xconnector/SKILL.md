@@ -65,10 +65,17 @@ Toate rezolvă comanda după `--order GT###` (caută în `--shop` dacă dat, alt
   decizie explicită; `--no-restock` ca să nu repună stocul). Dacă anularea AWB eșuează (colet plecat) → NU anulează
   comanda + mesaj clar „anunță CS, a plecat". Tokenul Shopify e verificat ÎNAINTE de orice scriere (nu rămâne comandă activă cu AWB anulat).
 
-### Curier default + Grandia/Dragon Star
-`awb-make`/`awb-regen` aleg implicit **DPD Romania** dacă nu dai `--connector`. **Excepție Grandia:** are și connectorul
-**Dragon Star** pt produse voluminoase (magazii, lavoare, oglinzi, măsuțe de cafea) — pt alea dă explicit
-`--connector <id>` (vezi `connectors --shop <grandia>`). `order-cancel` folosește automat connectorul cu care s-a emis AWB-ul.
+### Curier default + Grandia/Dragon Star (auto-rutat)
+`awb-make`/`awb-regen`/`fulfill` aleg implicit **DPD Romania** dacă nu dai `--connector`. **Grandia auto-rutează după
+`productType`:** comenzile cu produs voluminos (`Magazii de grădină`, `Lavoare`, `Mese și măsuțe`, `Oglinzi LED`) →
+**Dragon Star** [24257]; restul → DPD [20673]. (`route_connector`/`GRANDIA_BULKY_TYPES`, citește line items din Shopify.)
+Dacă forțezi `--connector`, rutarea e ignorată. `order-cancel` folosește connectorul cu care s-a emis AWB-ul.
+
+### `not-downloaded` — etichete neprintate / ghost
+`uv run xconnector.py not-downloaded [--shop d] [--days 14] [--min-age-hours N]` — comenzi cu AWB a cărui etichetă
+**nu a fost descărcată** (`document.downloaded=false`). Read-only. Fără filtru = coada de printat (cele noi); cu
+`--min-age-hours 48` → etichete VECHI nedescărcate = **potențial ghost** (AWB făcut acum 2+ zile, label niciodată
+printat → coletul probabil n-a plecat). xConnector n-are filtru server-side pe asta — se calculează client-side din câmpul `downloaded`.
 
 ### Facturi prin API (mirror AWB)
 Connector de facturare = tip **SMART_BILL** (ales automat dacă e unul singur; altfel `--connector <id>`). Dry-run by default.
