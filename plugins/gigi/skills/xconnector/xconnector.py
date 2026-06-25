@@ -929,10 +929,259 @@ def cmd_order_cancel(a):
     print("  %s" % ("✅ comandă anulată în Shopify" if not errs else "❌ Shopify: %s" % errs))
 
 
+# ── CRON safety-net: comenzi open+unfulfilled > N min (Shopify Flow a ratat AWB-ul) → validează + fă AWB ──
+def parse_iso(ts):
+    import datetime
+    try:
+        return datetime.datetime.fromisoformat((ts or "").replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def shopify_unfulfilled(shop, token, since_date, max_pages=12):
+    """Comenzi open + unfulfilled din ultimele zile: [(name, createdAt, financialStatus)]. None la auth fail."""
+    out, cursor = [], None
+    for _ in range(max_pages):
+        after = ', after:"%s"' % cursor if cursor else ""
+        q = ('query{ orders(first:250%s, query:"fulfillment_status:unfulfilled AND status:open AND created_at:>=%s"){ '
+             'edges{ cursor node{ name createdAt displayFinancialStatus } } pageInfo{ hasNextPage } } }') % (after, since_date)
+        d = shopify_gql(shop, token, q)
+        edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
+        if not edges and not out and d.get("errors"):
+            return None
+        for e in edges:
+            n = e["node"]
+            out.append((n.get("name"), n.get("createdAt"), n.get("displayFinancialStatus")))
+        pi = (((d.get("data") or {}).get("orders") or {}).get("pageInfo")) or {}
+        if not pi.get("hasNextPage"):
+            break
+        cursor = edges[-1]["cursor"]
+    return out
+
+
+def cmd_fulfill(a):
+    """Safety-net peste Shopify Flow: comenzi open+unfulfilled mai vechi de --max-age-min (Flow a ratat AWB-ul) →
+    VALID → fă AWB (create-shipping-label, DPD default); WRONG/UNKNOWN → corecție conservatoare → dacă devine
+    VALID, fă AWB; altfel → CS. Sare cele cu AWB (Flow le-a făcut) + tag duplicata. Dry-run by default (--apply scrie).
+    Exclude magazinele externe (validator RO) + recomand --exclude Grandia (Dragon Star ≠ DPD)."""
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc)
+    max_age = getattr(a, "max_age_min", 15) or 15
+    dto = now.date().isoformat()
+    dfrom = (now - datetime.timedelta(days=a.days)).date().isoformat()
+    toks_dom = {t["shopDomain"]: t for t in load_shopify_tokens()}
+    toks_pref = {t["prefix"]: t for t in load_shopify_tokens()}
+    for sh in load_shops():
+        if skip_shop(sh, a):
+            continue
+        print("═" * 72)
+        st = toks_dom.get(sh["shopDomain"])
+        if not st:
+            print("  %s — fără token Shopify → skip" % sh["shopDomain"]); continue
+        xc = XC(sh["apiKey"])
+        xmap = {o.get("orderName"): o for o in xc.orders(dfrom, dto)}
+        unf = shopify_unfulfilled(st["shopDomain"], st["adminToken"], dfrom)
+        if unf is None:
+            print("  %s — Shopify auth FAIL (OAuth-rotation?) → skip" % sh["shopDomain"]); continue
+        con, cons = pick_connector(xc, a)
+        ready = fixable = hard = had_awb = noxc = dup = made = fixed = failed = 0
+        dup_rows = []
+        for name, created, fin in unf:
+            c = parse_iso(created)
+            if not c or (now - c).total_seconds() / 60.0 <= max_age:
+                continue
+            o = xmap.get(name)
+            if not o:
+                noxc += 1; continue
+            if has_awb(o):
+                had_awb += 1; continue
+            # tag duplicata → NU se expediază (e duplicat) → de REZOLVAT/anulat separat, niciodată AWB
+            if "duplicata" in shopify_order_tags(name, toks_pref):
+                dup += 1; dup_rows.append(name); continue
+            ast = o.get("addressStatus")
+            do_awb = ast in ("VALID", "PERFECT")
+            if do_awb:
+                ready += 1
+            else:
+                stt, _, _ = correct_address(xc, o, sh["shopDomain"], apply=False)
+                if stt != "would-correct":
+                    hard += 1; continue
+                fixable += 1
+                if a.apply:
+                    st2, _, _ = correct_address(xc, o, sh["shopDomain"], apply=True)
+                    do_awb = (st2 == "corrected")
+                    if do_awb:
+                        fixed += 1
+            if a.apply and do_awb:
+                if not con:
+                    failed += 1; continue
+                body = {"orderId": o.get("orderId"), "connectorId": con["id"], "parcelCount": 1,
+                        "parcelType": "PARCEL", "notifyCustomer": bool(a.notify)}
+                s, d = xc.post("/api/actions/create-shipping-label", body)
+                ok = (s == 200 and isinstance(d, dict) and d.get("accepted")
+                      and any(L.get("success") for L in (d.get("shippingLabels") or [])))
+                made += 1 if ok else 0
+                failed += 0 if ok else 1
+        print("  %s — unfulfilled >%dmin: %d gata(VALID) + %d corectabile + %d grele→CS  (aveau AWB: %d, fără xc: %d)"
+              % (sh["shopDomain"], max_age, ready, fixable, hard, had_awb, noxc))
+        if a.apply:
+            print("  → APLICAT: AWB făcute %d (din care %d după corecție) · eșuate %d" % (made, fixed, failed))
+        else:
+            print("  → [DRY-RUN] aș face AWB la %d (gata) + până la %d (după corecție) · %d → CS" % (ready, fixable, hard))
+
+
+# ── FACTURI prin API (/api/actions/*-invoice) — mirror AWB: make / cancel / storno(revert) / regen / doc ──
+# Connector de facturare = tip SMART_BILL (din connectors). Dry-run by default; POST real DOAR cu --apply.
+def billing_connectors(xc):
+    return [c for c in xc.list_connectors() if c.get("active") and (c.get("type") or "").upper() in BILLING_TYPES]
+
+
+def pick_billing(xc, a):
+    """(connector_facturare|None, lista). None = ambiguu/absent → cere --connector."""
+    bills = billing_connectors(xc)
+    if getattr(a, "connector", None):
+        try:
+            cid = int(a.connector)
+        except (TypeError, ValueError):
+            print("  --connector trebuie să fie ID numeric (vezi `connectors`)."); return None, bills
+        m = [c for c in xc.list_connectors() if c.get("id") == cid]
+        if m and (m[0].get("type") or "").upper() not in BILLING_TYPES:
+            print("  ⚠ connectorul %s (%s) NU e de facturare — pt facturi alege un connector SMART_BILL (vezi `connectors`)." % (cid, m[0].get("type")))
+            return None, bills
+        return (m[0] if m else {"id": cid, "name": "?", "type": "?"}), bills
+    if len(bills) == 1:
+        return bills[0], bills
+    return None, bills
+
+
+def inv_doc(o):
+    for d in (o.get("documents") or []):
+        if isinstance(d, dict) and d.get("documentType") == "INVOICE":
+            return d
+    return None
+
+
+def _invoice_result(s, d):
+    if s != 200 or not isinstance(d, dict):
+        print("  ❌ eroare: %s" % _err_text(s, d)); return
+    if not d.get("accepted"):
+        print("  ❌ respins: %s" % _err_text(s, d)); return
+    if not (d.get("invoices") or []):
+        print("  ✅ acceptat (fără detaliu factură în răspuns)"); return
+    for inv in (d.get("invoices") or []):
+        if inv.get("success"):
+            print("  ✅ %sfactură %s %s" % ("STORNO " if inv.get("storno") else "",
+                                            inv.get("invoiceSerie") or "", inv.get("invoiceNumber") or ""))
+        else:
+            print("  ❌ factură: %s" % inv.get("errorMessage"))
+
+
+def _inv_resolve(a):
+    rid = getattr(a, "refund_id", None)
+    if rid is not None:
+        try:
+            int(rid)
+        except (TypeError, ValueError):
+            print("  --refund-id trebuie să fie numeric (Shopify refund ID) — abort, ca să nu fac storno total din greșeală."); return None
+    sh, xc, o = resolve_order(a.order, a, a.days)
+    if not o:
+        print("Comanda %s negăsită%s." % (a.order, " în %s" % a.shop if a.shop else " (căutat în toate)")); return None
+    if not o.get("orderId"):
+        print("  Comanda %s nu are orderId (Shopify) în xConnector." % a.order); return None
+    con, bills = pick_billing(xc, a)
+    if not con:
+        print("  Connector de facturare ambiguu/absent — alege --connector ID:")
+        for c in bills:
+            print("    %-7s %-14s %s" % (c.get("id"), c.get("type"), c.get("name")))
+        return None
+    return sh, xc, o, con
+
+
+def _inv_body(o, con, a):
+    body = {"orderId": o.get("orderId"), "connectorId": con["id"]}
+    if getattr(a, "lang", None):
+        body["languageCode"] = a.lang
+    rid = getattr(a, "refund_id", None)
+    if rid:
+        try:
+            body["refundId"] = int(rid)
+        except (TypeError, ValueError):
+            pass
+    return body
+
+
+def cmd_inv_make(a):
+    r = _inv_resolve(a)
+    if not r:
+        return
+    sh, xc, o, con = r
+    if inv_doc(o):
+        print("  ⚠ %s are deja factură — folosește inv-regen ca să o refaci (anulează + creează)." % a.order); return
+    body = _inv_body(o, con, a)
+    print("═" * 60)
+    print("  FACTURĂ make · %s (%s) · %s [%s]" % (a.order, sh["shopDomain"], con.get("name"), con.get("id")))
+    if not a.apply:
+        print("  DRY-RUN — aș POST /api/actions/create-invoice:\n    %s" % json.dumps(body)); return
+    _invoice_result(*xc.post("/api/actions/create-invoice", body))
+
+
+def _inv_simple(a, endpoint, label):
+    r = _inv_resolve(a)
+    if not r:
+        return
+    sh, xc, o, con = r
+    body = _inv_body(o, con, a)
+    print("═" * 60)
+    print("  %s · %s (%s) · %s [%s]" % (label, a.order, sh["shopDomain"], con.get("name"), con.get("id")))
+    if not a.apply:
+        print("  DRY-RUN — aș POST %s:\n    %s" % (endpoint, json.dumps(body))); return
+    _invoice_result(*xc.post(endpoint, body))
+
+
+def cmd_inv_cancel(a):
+    _inv_simple(a, "/api/actions/cancel-invoice", "FACTURĂ cancel")
+
+
+def cmd_inv_storno(a):
+    _inv_simple(a, "/api/actions/revert-invoice", "FACTURĂ STORNO")
+
+
+def cmd_inv_regen(a):
+    """Anulează factura curentă și o reface (ca awb-regen). Create gardat pe succesul cancel-ului."""
+    r = _inv_resolve(a)
+    if not r:
+        return
+    sh, xc, o, con = r
+    print("═" * 60)
+    print("  REGEN FACTURĂ · %s (%s) · %s [%s]" % (a.order, sh["shopDomain"], con.get("name"), con.get("id")))
+    print("  pas 1: anulez factura curentă · pas 2: creez una nouă")
+    if not a.apply:
+        print("  DRY-RUN — fără --apply nu execut."); return
+    cv = xc.post("/api/actions/cancel-invoice", {"orderId": o.get("orderId"), "connectorId": con["id"]})
+    ok = (cv[0] == 200 and isinstance(cv[1], dict) and cv[1].get("accepted"))
+    print("  cancel: %s" % ("✅" if ok else "❌ %s: %s" % (cv[0], _err_text(*cv))))
+    if not ok:
+        print("  ⛔ anulare factură eșuată → NU recreez."); return
+    time.sleep(1)
+    _invoice_result(*xc.post("/api/actions/create-invoice", _inv_body(o, con, a)))
+
+
+def cmd_inv_doc(a):
+    sh, xc, o = resolve_order(a.order, a, a.days)
+    if not o:
+        print("Comanda %s negăsită." % a.order); return
+    d = inv_doc(o)
+    if not d:
+        print("  %s nu are factură (document INVOICE)." % a.order); return
+    print("  %s (%s) · factură %s" % (a.order, sh["shopDomain"], d.get("name") or ""))
+    print("  PDF: %s" % (d.get("url") or "—"))
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["summary", "address-issues", "recheck", "correct", "connectors",
+    ap.add_argument("cmd", choices=["summary", "address-issues", "recheck", "correct", "connectors", "fulfill",
                                     "awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
+                                    "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc",
                                     "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
     ap.add_argument("--shop"); ap.add_argument("--order"); ap.add_argument("--days", type=int, default=60)
     ap.add_argument("--apply", action="store_true"); ap.add_argument("--json", action="store_true")
@@ -947,13 +1196,19 @@ def main():
     ap.add_argument("--force", action="store_true", help="order-cancel: încearcă anularea chiar dacă statusul de curier zice PLECAT (xConnector dă eroare dacă chiar a plecat).")
     ap.add_argument("--refund", action="store_true", help="order-cancel: returnează banii la anulare (OFF by default — COD n-are nevoie; comenzi plătite = decizie explicită).")
     ap.add_argument("--no-restock", action="store_true", dest="no_restock", help="order-cancel: NU repune stocul la anulare (restock ON by default).")
+    ap.add_argument("--max-age-min", type=int, default=15, dest="max_age_min", help="fulfill: vârsta minimă în minute a comenzii unfulfilled ca să-i facă AWB (default 15).")
+    ap.add_argument("--lang", help="inv-make/regen: languageCode pt factură (ex ro/en).")
+    ap.add_argument("--refund-id", dest="refund_id", help="inv-storno: Shopify refund ID (storno parțial pe un refund).")
     ap.add_argument("--correct", action="store_true", help="awb-auto: corectează conservator adresele proaste (xConnector ai-correct-address)")
     a = ap.parse_args()
-    if a.cmd in ("awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel"):
+    if a.cmd in ("awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
+                 "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc"):
         if not a.order:
             print("Dă --order (ex: --order GT44004)."); sys.exit(1)
         {"awb-make": cmd_awb_make, "awb-void": cmd_awb_void, "awb-regen": cmd_awb_regen,
-         "awb-label": cmd_awb_label, "order-cancel": cmd_order_cancel}[a.cmd](a)
+         "awb-label": cmd_awb_label, "order-cancel": cmd_order_cancel,
+         "inv-make": cmd_inv_make, "inv-cancel": cmd_inv_cancel, "inv-storno": cmd_inv_storno,
+         "inv-regen": cmd_inv_regen, "inv-doc": cmd_inv_doc}[a.cmd](a)
         return
     if a.cmd == "connectors":
         cmd_connectors(a); return
@@ -965,6 +1220,8 @@ def main():
         cmd_awb_auto(a); return
     if a.cmd == "correct":
         cmd_correct(a); return
+    if a.cmd == "fulfill":
+        cmd_fulfill(a); return
     if a.cmd == "recheck":
         cmd_recheck(a); return
     import datetime
