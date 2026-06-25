@@ -700,6 +700,34 @@ def _ask_connector(cons):
         print("    %-7s %-14s %s" % (c.get("id"), c.get("type"), c.get("name")))
 
 
+# Grandia: produse voluminoase (după productType) → curier DRAGON_STAR; restul → DPD (default).
+GRANDIA_DOMAIN = "n12w89-yy.myshopify.com"
+GRANDIA_BULKY_TYPES = {"magazii de grădină", "lavoare", "mese și măsuțe", "oglinzi led"}
+
+
+def order_product_types(shop, token, name):
+    """Set de productType (lower) ale liniilor comenzii din Shopify."""
+    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ lineItems(first:100){ edges{ node{ '
+         'product{ productType } } } } } } } }') % (name or "").replace('"', "")
+    d = shopify_gql(shop, token, q)
+    edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
+    if not edges:
+        return set()
+    li = ((edges[0]["node"].get("lineItems") or {}).get("edges")) or []
+    return {((e["node"].get("product") or {}).get("productType") or "").strip().lower() for e in li}
+
+
+def route_connector(sh, st, order_name, cons, default_con):
+    """Rutare per-produs: Grandia cu produs voluminos → Dragon Star; altfel default (DPD). Alte magazine → default."""
+    if not sh or sh.get("shopDomain") != GRANDIA_DOMAIN or not st:
+        return default_con
+    if order_product_types(st["shopDomain"], st["adminToken"], order_name) & GRANDIA_BULKY_TYPES:
+        ds = [c for c in cons if (c.get("type") or "").upper() == "DRAGON_STAR" and c.get("active")]
+        if ds:
+            return ds[0]
+    return default_con
+
+
 def _err_text(s, d):
     """Text de eroare lizibil din răspunsul xConnector (ApiErrorResponse / errorMessage / brut)."""
     if isinstance(d, dict):
@@ -748,6 +776,9 @@ def cmd_awb_make(a, _resolved=None):
     con, cons = pick_connector(xc, a)
     if not con:
         _ask_connector(cons); return
+    if not getattr(a, "connector", None):  # rutare per-produs (Grandia → Dragon Star) doar dacă nu s-a forțat connectorul
+        st = {t.get("shopDomain"): t for t in load_shopify_tokens()}.get(sh["shopDomain"])
+        con = route_connector(sh, st, a.order, cons, con)
     body = {"orderId": o.get("orderId"), "connectorId": con["id"], "parcelCount": a.parcels,
             "parcelType": a.type, "notifyCustomer": bool(a.notify)}
     print("═" * 60)
@@ -1081,9 +1112,10 @@ def cmd_fulfill(a):
                     if do_awb:
                         fixed += 1
             if a.apply and do_awb:
-                if not con:
+                ocon = route_connector(sh, st, name, cons, con)  # Grandia: voluminos → Dragon Star
+                if not ocon:
                     failed += 1; continue
-                body = {"orderId": o.get("orderId"), "connectorId": con["id"], "parcelCount": 1,
+                body = {"orderId": o.get("orderId"), "connectorId": ocon["id"], "parcelCount": 1,
                         "parcelType": "PARCEL", "notifyCustomer": bool(a.notify)}
                 s, d = xc.post("/api/actions/create-shipping-label", body)
                 ok = (s == 200 and isinstance(d, dict) and d.get("accepted")
@@ -1315,9 +1347,43 @@ def cmd_addr_set(a):
         cmd_awb_make(a, _resolved=(sh, xc, o))
 
 
+def cmd_not_downloaded(a):
+    """Comenzi cu AWB a cărui ETICHETĂ nu a fost descărcată (document SHIPPING_LABEL, downloaded=false).
+    = coadă de printat / etichete uitate (cele vechi = potențial ghost). Read-only. --min-age-hours filtrează vechi."""
+    import datetime
+    dto = datetime.date.today().isoformat()
+    dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
+    min_age = getattr(a, "min_age_hours", 0) or 0
+    grand = 0
+    for sh in load_shops():
+        if skip_shop(sh, a):
+            continue
+        xc = XC(sh["apiKey"])
+        rows = []
+        for o in xc.orders(dfrom, dto):
+            doc = awb_doc(o)
+            if not doc or doc.get("downloaded") is not False:
+                continue
+            if min_age:
+                age = order_age_hours(xc, o.get("orderId"))
+                if age is not None and age < min_age:
+                    continue
+            rows.append((o.get("orderName"), doc_tracking(doc), doc.get("connectorName")))
+        grand += len(rows)
+        print("═" * 60)
+        print("  %s — %d AWB cu eticheta NEDESCĂRCATĂ%s" % (sh["shopDomain"], len(rows), " (>%dh vechime)" % min_age if min_age else ""))
+        for nm, trk, carrier in rows[:40]:
+            print("    %-10s %-14s %s" % (nm, trk or "—", carrier or ""))
+        if len(rows) > 40:
+            print("    … +%d" % (len(rows) - 40))
+    print("─" * 60)
+    print("  TOTAL etichete nedescărcate: %d" % grand)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["summary", "address-issues", "recheck", "correct", "connectors", "fulfill",
+                                    "not-downloaded",
                                     "awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
                                     "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc", "addr-set",
                                     "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
@@ -1363,6 +1429,8 @@ def main():
         cmd_correct(a); return
     if a.cmd == "fulfill":
         cmd_fulfill(a); return
+    if a.cmd == "not-downloaded":
+        cmd_not_downloaded(a); return
     if a.cmd == "recheck":
         cmd_recheck(a); return
     import datetime
