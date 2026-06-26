@@ -1915,6 +1915,34 @@ def _print_dialog(path, printer=None):
         print("  📄 PDF batch: %s (deschide-l și printează)." % path)
 
 
+def pending_sku_counts(pending):
+    """Câte etichete din coadă conțin fiecare SKU → ca să printezi întâi SKU-urile cu CELE MAI MULTE comenzi.
+    xConnector NU întoarce SKU-ul în DTO, deci iau line items din Shopify (batch, doar pt comenzile pending).
+    Întoarce [(sku, nr_etichete)] descrescător. O comandă cu mai multe SKU-uri contează la fiecare."""
+    from collections import Counter
+    toks = {t.get("shopDomain"): t for t in load_shopify_tokens()}
+    by_shop = {}
+    for row in pending:
+        by_shop.setdefault(row[0], []).append(row[1])   # row = (shopDomain, orderName, ...)
+    cnt = Counter()
+    for dom, names in by_shop.items():
+        st = toks.get(dom)
+        if not st:
+            continue
+        for i in range(0, len(names), 40):
+            chunk = [n for n in names[i:i + 40] if n]
+            if not chunk:
+                continue
+            q = ('query{ orders(first:%d, query:"%s"){ edges{ node{ lineItems(first:20){ edges{ node{ sku } } } } } } }'
+                 % (len(chunk), " OR ".join("name:%s" % n.replace('"', "") for n in chunk)))
+            d = shopify_gql(st["shopDomain"], st["adminToken"], q)
+            for e in (((d.get("data") or {}).get("orders") or {}).get("edges") or []):
+                skus = {li["node"].get("sku") for li in ((e["node"].get("lineItems") or {}).get("edges") or []) if li["node"].get("sku")}
+                for s in skus:
+                    cnt[s] += 1
+    return cnt.most_common()
+
+
 def cmd_print_batch(a):
     """Coadă de PRINT depozit: etichetele NEDESCĂRCATE (downloaded=false), GRUPATE pe produs (sort sku),
     filtrabile pe produs (--sku), cantitate (--total-items) și interval (--from/--to). Descarcă PDF-urile,
@@ -1941,6 +1969,18 @@ def cmd_print_batch(a):
                 continue
             pending.append((sh["shopDomain"], o.get("orderName"), doc.get("connectorId"),
                             doc_tracking(doc), doc.get("url"), xc.h.get("Authorization", "")))
+    if getattr(a, "by_sku", False):   # doar ARATĂ coada pe SKU (cele mai multe etichete primele) ca să alegi ce printezi
+        ranking = pending_sku_counts(pending)
+        print("═" * 60)
+        print("  COADĂ PE SKU — %d etichete %s, SKU-urile cu CELE MAI MULTE primele:"
+              % (len(pending), "deja printate" if target_dl else "nedescărcate"))
+        for sku, n in ranking[:30]:
+            print("    %-18s %d etichete" % (sku, n))
+        if len(ranking) > 30:
+            print("    … +%d SKU-uri" % (len(ranking) - 30))
+        if ranking:
+            print("  → printează SKU-ul cu cele mai multe: print-batch --sku %s --apply" % ranking[0][0])
+        return
     total_pending = len(pending)
     lim = a.limit if getattr(a, "limit", None) else 250   # MAX 250 AWB/batch (default) — restul, la rularea următoare
     pending = pending[:lim]
@@ -2062,6 +2102,7 @@ def main():
     ap.add_argument("--no-print", action="store_true", dest="no_print", help="print-batch: NU deschide dialogul de print (doar salvează/merge).")
     ap.add_argument("--test", action="store_true", help="print-batch: TEST pe etichete DEJA descărcate (downloaded=true) — zero impact pe coada reală.")
     ap.add_argument("--printed", action="store_true", help="print-batch: RE-PRINT pe etichete DEJA printate (downloaded=true) — re-printare reală a unor AWB-uri deja descărcate.")
+    ap.add_argument("--by-sku", action="store_true", dest="by_sku", help="print-batch: NU printează — arată coada GRUPATĂ pe SKU (câte etichete/SKU), cele mai multe primele, ca să alegi ce produs printezi.")
     ap.add_argument("--limit", type=int, help="print-batch: max AWB-uri/batch (implicit 250). Restul rămâne pt rularea următoare.")
     ap.add_argument("--printer", help="print-batch (Windows+SumatraPDF): printează DIRECT pe imprimanta dată, fără dialog (batch rapid).")
     a = ap.parse_args()

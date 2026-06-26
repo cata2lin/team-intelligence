@@ -121,6 +121,7 @@ Selectează etichetele **nedescărcate** (`downloaded=false` = coada de print), 
 - **Batch max 250 AWB-uri** (default `--limit 250`): dacă-s mai multe, printează 250 + zice câte rămân („rulează iar" pt batch-ul următor). `--limit N` schimbă plafonul.
 - **`--printed`** = RE-PRINT pe AWB-uri DEJA printate (downloaded=true) — re-printezi etichete deja descărcate, fără să afectezi coada de nedescărcate.
 - **Alegi ce printezi**: `--sku` (produs), `--total-items` (cantitate), `--from/--to` (interval), `--shop` (magazine), **`--sort`** (`sku` grupat pe produs = default; `totalItemsCount` = cele mai multe bucăți primele). **`--no-print`** = doar salvează (fără dialog).
+- **`--by-sku`** = NU printează, arată **coada grupată pe SKU** (câte etichete are fiecare produs în coadă, cele mai multe primele) — ca să vezi ce produs are cele mai multe comenzi de expediat și să-l printezi pe ăla (`--sku <top> --apply`). (SKU-ul nu e în DTO-ul xConnector → se ia din Shopify line items, doar pt comenzile pending.)
 - ⚠️ **`--apply` DESCARCĂ → flip `downloaded`** (etichetele ies din coada de print). Dry-run by default (listează, NU descarcă).
 - **`--test`** = rulează pe etichete **DEJA descărcate** (`downloaded=true`) → ZERO impact pe coada reală (pt verificare). Cu `--test`, `--apply` e sigur.
 
