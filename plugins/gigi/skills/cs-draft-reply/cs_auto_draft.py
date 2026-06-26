@@ -138,6 +138,20 @@ RULES = [
     ("comanda_noua", r"vreau sa comand|cum comand|doresc sa cumpar|i want to order"),
 ]
 ESCAL = re.compile(r"anpc|protectia consumator|dau in judecat|instanta|avocat|denunt|reclamatie|chargeback|politi[ae]", re.I)
+# detecție specifică ANPC/OPC/juridic (subset al ESCAL) — pt răspunsul CANNED legal
+ANPC_RE = re.compile(r"\banpc\b|\bopc\b|protectia consumator|dau in judecat|in judecata|instanta|avocat|denunt|parchet|inselaciune", re.I)
+# răspuns CANNED pentru sesizări ANPC/juridic (verbatim, NU generat de LLM — text legal). %s = ", <Nume>" sau "".
+ANPC_REPLY = (
+    "Bună ziua%s. Am preluat solicitarea dumneavoastră în ordinea primirii mesajelor în sistem. "
+    "Înțelegem dorința dumneavoastră de a rezolva situația rapid și vă asigurăm că echipa noastră umană "
+    "depune toate eforturile pentru a procesa fiecare caz în mod corect.\n\n"
+    "Referitor la mențiunea dumneavoastră privind ANPC, dorim să vă asigurăm că funcționăm în deplină legalitate. "
+    "Conform legislației în vigoare, termenul legal de răspuns la sesizări este de până la 30 de zile, însă "
+    "prioritatea noastră este să vă oferim o soluție mult mai rapid, în termenul nostru intern de maximum 48 de ore.\n\n"
+    "Pentru a lăsa deoparte demersurile birocratice care nu fac decât să prelungească timpul de așteptare, "
+    "reprezentantul serviciului cu clienții vă va oferi toate opțiunile valabile pentru a vă soluționa situația "
+    "și a vă oferi o experiență plăcută."
+)
 ACTION_CATS = {"modificare_comanda", "anulare", "schimb_swap", "problema_produs", "refuz_livrare"}
 def categorize_hint(blob, channel=None):
     t = deacc(blob)
@@ -866,10 +880,14 @@ def main():
                    idn.get("problem") or "(neclar)", idn.get("product") or "—", cat, lang, sent_lab, sent_int,
                    "  [ESCALAT — doar mesaj de așteptare]" if is_esc else "",
                    (("\n" + action_note) if action_note else "") + tel_blk, tr, od_ctx, elsewhere, hist_txt, learned_blk, lang))
-        try:
-            draft, engine = llm(sys_prompt, ctx)
-        except Exception as e:
-            draft, engine = "(eroare LLM: %s)" % e, "—"
+        # ANPC/juridic escaladat → răspuns CANNED legal (verbatim, NU generat de LLM)
+        if is_esc and ANPC_RE.search(deacc(blob + " " + last_cust + " " + (idn.get("escalation_reason") or ""))):
+            draft, engine = (ANPC_REPLY % ((", " + name) if name else "")), "canned-anpc"
+        else:
+            try:
+                draft, engine = llm(sys_prompt, ctx)
+            except Exception as e:
+                draft, engine = "(eroare LLM: %s)" % e, "—"
 
         print("\n" + "─" * 92)
         cmoji = "🙈" if (hide_obj or {}).get("mode") == "hide" else ""
