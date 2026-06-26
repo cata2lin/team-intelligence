@@ -1814,9 +1814,7 @@ def cmd_orders(a):
     dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
     grand = 0
     for sh in shops:
-        if skip_shop(sh, a):
-            continue
-        if a.shop and a.shop not in sh["shopDomain"]:
+        if skip_shop(sh, a):   # suportă --shop cu LISTĂ comma + prefix (combinație de magazine)
             continue
         try:
             rows = XC(sh["apiKey"]).orders(dfrom, dto, flt)
@@ -1976,11 +1974,19 @@ def cmd_print_batch(a):
             pending.append((sh["shopDomain"], o.get("orderName"), doc.get("connectorId"),
                             doc_tracking(doc), doc.get("url"), xc.h.get("Authorization", "")))
     if getattr(a, "sku_prefix", None):   # „toate comenzile cu HA" → păstrez doar comenzile care au un SKU pe prefixul dat
+        from collections import Counter
         pref = a.sku_prefix.upper()
         oskus = pending_order_skus(pending)
         before = len(pending)
+        resolved = sum(1 for r in pending if r[1] in oskus)   # câte comenzi din coadă au avut SKU-urile rezolvate (Shopify) — dacă << before = subnumărare (token lipsă/KB)
         pending = [r for r in pending if any((sk or "").upper().startswith(pref) for sk in oskus.get(r[1], ()))]
-        print("  🔎 filtru SKU prefix %s: %d -> %d comenzi" % (a.sku_prefix, before, len(pending)))
+        per_shop = Counter(r[0] for r in pending)
+        print("  🔎 filtru SKU prefix %s: %d etichete în coadă · %d cu SKU rezolvat (%.0f%%) → %d cu %s*"
+              % (a.sku_prefix, before, resolved, 100.0 * resolved / max(1, before), len(pending), pref))
+        if resolved < before:
+            print("     ⚠️ %d comenzi FĂRĂ SKU rezolvat (token magazin lipsă / KB instabil) — posibil subnumărate." % (before - resolved))
+        for dom, n in per_shop.most_common():
+            print("       %-30s %d" % (dom, n))
     if getattr(a, "by_sku", False):   # doar ARATĂ coada pe SKU (cele mai multe etichete primele) ca să alegi ce printezi
         ranking = pending_sku_counts(pending)
         print("═" * 60)
