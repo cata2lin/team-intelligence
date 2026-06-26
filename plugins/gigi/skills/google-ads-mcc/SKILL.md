@@ -258,6 +258,18 @@ Pașii repetabili pentru a lansa un brand pe Google Ads de la zero. Template scr
 11. **Gotchas**: PMax auto-creează un „Asset Group 1" gol + uneori „Performance Max-1" (inofensive, lasă-le paused); asset group nou = **PENDING review ~ore** apoi servește.
 12. **Ora ideală** = dimineața (~07:30 RO) zi lucrătoare. Dar **review-ul PMax întârzie servirea spre dimineață oricum**, deci lansarea de seara nu strică PMax-ul; Search-urile pornesc imediat. Scheduling = vezi memoria [[gads-skill-suite]] (rutine cloud, capcană: NU văd tooling-ul local).
 
+## Real ROAS — adevărul pe canal (vs cifra umflată Google)
+- **`real_roas.py`** — per brand: spend Google + ROAS pretins vs venit GA4 din canalele Google
+  (Paid Search+Shopping+Cross-network) ÷ spend = **ROAS REAL** + factor umflare (~1,4-1,8×).
+- **`real_roas_unified.py`** — extinde la **TOATE canalele**: per brand × {Google, Meta, TikTok},
+  spend din `cache.daily_ad_spend_ron` (RON) vs venit GA4 atribuit canalului (Google pe channel-group,
+  Meta/TikTok pe `sessionSource`) → ROAS real per canal vs **breakeven** (🔴 sub-breakeven). Răspunde
+  „pe ce canal pierdem, pe ce brand?". `uv run real_roas_unified.py --days 30`.
+  - ⚠️ GA4 last-click **sub-evaluează social** (Meta/TikTok = creare cerere, view-through) → ROAS-ul
+    social e un PLANȘEU. Magazinele **COD** (Ofertele/Casa Ofertelor) au purchase GA4 subraportat
+    (form-ul ocolește evenimentul) → venit subevaluat acolo. Adevărul cel mai bun: comenzi Shopify cu
+    `utm_source`. Breakeven per brand = aprox în `BRANDS` (calibrează din `breakeven.py`).
+
 ## Guardrails / hard rules
 - **Never print** the developer token, OAuth secret, or refresh tokens. Read from DB/secret store, use in-process.
 - **Reports are read-only.** Mutations are **dry-run by default**; require `--apply` AND user confirmation before touching a live account.
