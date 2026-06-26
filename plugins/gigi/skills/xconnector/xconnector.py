@@ -2078,14 +2078,26 @@ def cmd_print_batch(a):
     ts = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
     outdir = os.path.join(os.path.expanduser(getattr(a, "out", None) or "."), "print-batch")
     os.makedirs(outdir, exist_ok=True)
+    import time as _time
     pdfs, log_rows, failed = [], [], []
     for dom, nm, cid, trk, url, auth in pending:
+        b, err = None, None
+        for attempt in range(3):   # retry pe blip de rețea (IncompleteRead/timeout) — la print de depozit NU pierdem eticheta unui client tăcut
+            try:
+                req = urllib.request.Request(url, headers=({"Authorization": auth} if auth else {}))
+                with urllib.request.urlopen(req, timeout=45) as r:
+                    data = r.read()
+                if data[:5] != b"%PDF-":
+                    err = "răspuns non-PDF"; break   # nu e tranzitoriu — nu reîncerca
+                b, err = data, None
+                break
+            except Exception as e:
+                err = str(e)[:80]
+                if attempt < 2:
+                    _time.sleep(1.5 * (attempt + 1))   # 1.5s, 3s
+        if b is None:
+            failed.append((nm, err or "necunoscut")); continue
         try:
-            req = urllib.request.Request(url, headers=({"Authorization": auth} if auth else {}))
-            with urllib.request.urlopen(req, timeout=45) as r:
-                b = r.read()
-            if b[:5] != b"%PDF-":
-                failed.append((nm, "răspuns non-PDF")); continue
             fp = os.path.join(outdir, "%s_%s.pdf" % (nm, trk or "noawb"))
             with open(fp, "wb") as f:
                 f.write(b)
