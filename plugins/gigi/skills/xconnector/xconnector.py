@@ -146,7 +146,9 @@ class XC:
             else:
                 base.append((k, str(v)))
         out, seen = [], set()
-        for page in range(0, 12):
+        MAXP = 1000   # plafon de SIGURANȚĂ anti-buclă (200k comenzi) — fereastra reală se epuizează mult înainte; dacă SE atinge → avertizez (zero trunchiere tăcută)
+        page = 0
+        while page < MAXP:
             q = urllib.parse.urlencode(base + [("page", str(page)), ("size", "200")])
             s, d = self.get("/api/orders", q)
             if s != 200:
@@ -154,12 +156,16 @@ class XC:
             arr = d if isinstance(d, list) else (d.get("content") or d.get("orders") or [])
             if not arr:
                 break
+            added = 0
             for o in arr:
                 oid = o.get("orderId")
                 if oid not in seen:
-                    seen.add(oid); out.append(o)
-            if len(arr) < 200:
+                    seen.add(oid); out.append(o); added += 1
+            if len(arr) < 200 or added == 0:   # pagină incompletă SAU API repetă (zero noi) = epuizat
                 break
+            page += 1
+        else:   # am ieșit prin plafon, NU prin epuizare → posibil trunchiat
+            sys.stderr.write("  ⚠️ paginare oprită la plafonul de %d pagini (%s→%s) — POSIBIL TRUNCHIAT, restrânge fereastra\n" % (MAXP, dfrom, dto))
         return out
 
     def by_id(self, oid):
