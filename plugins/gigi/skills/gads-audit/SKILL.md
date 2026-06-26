@@ -38,7 +38,8 @@ by default; singurul auto-fix e limba (clar corect, reversibil).
 | **CODGAP** | spend dar ~0 conversii PURCHASE 30z = **COD form netrackuit** (pattern Carpetto/Ofertele/CZ) | `gigi:google-ads-mcc` → `cod_tracking.py` |
 | **CAPPED** | câștigător capat — `budget_lost_impression_share`>15% & ROAS>3 → bani lăsați pe masă | ridică bugetul |
 | **DRAIN** | drainer — spend>200 & ROAS<2 (sau 0 conv) → arde bani | taie/strânge tROAS/pauză |
-| **UTM** | `customer.final_url_suffix` gol (atribuire warehouse/Shopify ruptă) | setează UTM (vezi google-ads-mcc playbook) |
+| **UTM** | UTM lipsă (nici pe cont, nici pe campanii ENABLED) sau incomplet (lipsesc utm_source/medium/campaign) — atribuire warehouse/Shopify ruptă | setează `final_url_suffix` (vezi google-ads-mcc playbook) |
+| **TRACK** | **auto-tagging (gclid) OFF** → atribuire conversii/GA4 ruptă; sau conversion tracking ne-enabled | activează auto-tagging / conversion tracking |
 
 ## Reguli
 - **Read-only by default.** Doar `--fix-language` scrie (sigur). Restul = raport → decizi/aplici cu `gigi:google-ads-mcc`.
