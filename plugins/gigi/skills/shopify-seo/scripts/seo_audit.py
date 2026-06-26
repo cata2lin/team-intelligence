@@ -21,12 +21,13 @@ sys.path.insert(0, os.path.dirname(__file__))
 from shopify_lib import Store, fetch_live
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--store", required=True, help="store domain, e.g. esteban.ro")
+ap.add_argument("--store", help="store domain/key, e.g. esteban.ro (ARONA-app stores)")
 ap.add_argument("--app-prefix", default="SHOPIFY_ARONA")
+ap.add_argument("--csv-prefix", help="stores.csv prefix for any team shop (OFER, ROSSI, CARP, GEN, …)")
 A = ap.parse_args()
 OK = lambda b: "OK " if b else "** FAIL **"
 
-s = Store(A.store, A.app_prefix)
+s = Store.from_csv(A.csv_prefix) if A.csv_prefix else Store(A.store, A.app_prefix)
 pub = s.public
 
 

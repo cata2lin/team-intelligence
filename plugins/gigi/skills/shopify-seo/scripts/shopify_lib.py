@@ -61,32 +61,48 @@ class Store:
       self.public  -> custom storefront (use for live storefront fetches)
     """
 
-    def __init__(self, store: str, app_prefix: str = "SHOPIFY_ARONA"):
+    def __init__(self, store: str, app_prefix: str = "SHOPIFY_ARONA", token: str | None = None):
         import re
         store = store.replace("https://", "").replace("http://", "").strip("/")
-        if store.endswith("myshopify.com"):
-            self.admin = store
-        else:
-            key = re.sub(r"[^A-Z0-9]", "", store.upper().split(".")[0])
-            self.admin = secret(f"{app_prefix}_{key}_DOMAIN") or store
-        self.domain = self.admin  # back-compat alias
-        cid = secret(f"{app_prefix}_CLIENT_ID")
-        csec = secret(f"{app_prefix}_CLIENT_SECRET")
         self.ver = secret(f"{app_prefix}_API_VERSION") or "2025-01"
-        resp = requests.post(
-            f"https://{self.admin}/admin/oauth/access_token",
-            json={"client_id": cid, "client_secret": csec,
-                  "grant_type": "client_credentials"}, timeout=30)
-        if "application/json" not in resp.headers.get("content-type", ""):
-            raise RuntimeError(f"OAuth token endpoint did not return JSON for '{self.admin}'. "
-                               "Pass a *.myshopify.com domain or a store key whose "
-                               f"{app_prefix}_<KEY>_DOMAIN secret is set.")
-        self.tok = resp.json()["access_token"]
+        if token:
+            # explicit token (e.g. a static shpat_* from stores.csv); `store` is the
+            # myshopify admin domain. Works for ANY store, not just ARONA-app ones.
+            self.admin = store
+            self.tok = token
+        else:
+            if store.endswith("myshopify.com"):
+                self.admin = store
+            else:
+                key = re.sub(r"[^A-Z0-9]", "", store.upper().split(".")[0])
+                self.admin = secret(f"{app_prefix}_{key}_DOMAIN") or store
+            cid = secret(f"{app_prefix}_CLIENT_ID")
+            csec = secret(f"{app_prefix}_CLIENT_SECRET")
+            resp = requests.post(
+                f"https://{self.admin}/admin/oauth/access_token",
+                json={"client_id": cid, "client_secret": csec,
+                      "grant_type": "client_credentials"}, timeout=30)
+            if "application/json" not in resp.headers.get("content-type", ""):
+                raise RuntimeError(f"OAuth token endpoint did not return JSON for '{self.admin}'. "
+                                   "Pass a *.myshopify.com domain + token=, or a store key whose "
+                                   f"{app_prefix}_<KEY>_DOMAIN secret is set.")
+            self.tok = resp.json()["access_token"]
+        self.domain = self.admin  # back-compat alias
         self._theme = None
         try:
             self.public = self.gql("{shop{primaryDomain{host}}}")["shop"]["primaryDomain"]["host"]
         except Exception:
             self.public = self.admin
+
+    @classmethod
+    def from_csv(cls, prefix: str, csv_secret: str = "SHOPIFY_STORES_CSV"):
+        """Build a Store for any team shop by its stores.csv prefix (OFER, ROSSI, …)."""
+        import csv, io
+        rows = list(csv.reader(io.StringIO(secret(csv_secret))))
+        row = next((r for r in rows[1:] if r and r[0].strip().upper() == prefix.upper()), None)
+        if not row:
+            raise RuntimeError(f"prefix '{prefix}' not found in {csv_secret}")
+        return cls(row[1].strip(), token=row[2].strip())
 
     # ---- GraphQL ----
     def gql(self, query: str, variables: dict | None = None, retries: int = 6) -> dict:
