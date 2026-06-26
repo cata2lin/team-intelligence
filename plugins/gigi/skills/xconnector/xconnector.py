@@ -1915,16 +1915,14 @@ def _print_dialog(path, printer=None):
         print("  📄 PDF batch: %s (deschide-l și printează)." % path)
 
 
-def pending_sku_counts(pending):
-    """Câte etichete din coadă conțin fiecare SKU → ca să printezi întâi SKU-urile cu CELE MAI MULTE comenzi.
-    xConnector NU întoarce SKU-ul în DTO, deci iau line items din Shopify (batch, doar pt comenzile pending).
-    Întoarce [(sku, nr_etichete)] descrescător. O comandă cu mai multe SKU-uri contează la fiecare."""
-    from collections import Counter
+def pending_order_skus(pending):
+    """{orderName: set(SKU-uri)} pt comenzile din coadă — line items din Shopify (batch, DOAR comenzile pending).
+    xConnector NU întoarce SKU-ul în DTO. Folosit pt `--by-sku` (numărare) și `--sku-prefix` (filtrare ex HA-*)."""
     toks = {t.get("shopDomain"): t for t in load_shopify_tokens()}
     by_shop = {}
     for row in pending:
         by_shop.setdefault(row[0], []).append(row[1])   # row = (shopDomain, orderName, ...)
-    cnt = Counter()
+    res = {}
     for dom, names in by_shop.items():
         st = toks.get(dom)
         if not st:
@@ -1933,13 +1931,21 @@ def pending_sku_counts(pending):
             chunk = [n for n in names[i:i + 40] if n]
             if not chunk:
                 continue
-            q = ('query{ orders(first:%d, query:"%s"){ edges{ node{ lineItems(first:20){ edges{ node{ sku } } } } } } }'
+            q = ('query{ orders(first:%d, query:"%s"){ edges{ node{ name lineItems(first:20){ edges{ node{ sku } } } } } } }'
                  % (len(chunk), " OR ".join("name:%s" % n.replace('"', "") for n in chunk)))
             d = shopify_gql(st["shopDomain"], st["adminToken"], q)
             for e in (((d.get("data") or {}).get("orders") or {}).get("edges") or []):
-                skus = {li["node"].get("sku") for li in ((e["node"].get("lineItems") or {}).get("edges") or []) if li["node"].get("sku")}
-                for s in skus:
-                    cnt[s] += 1
+                res[e["node"].get("name")] = {li["node"].get("sku") for li in ((e["node"].get("lineItems") or {}).get("edges") or []) if li["node"].get("sku")}
+    return res
+
+
+def pending_sku_counts(pending):
+    """[(sku, nr_etichete)] descrescător. O comandă cu mai multe SKU-uri contează la fiecare."""
+    from collections import Counter
+    cnt = Counter()
+    for skus in pending_order_skus(pending).values():
+        for s in skus:
+            cnt[s] += 1
     return cnt.most_common()
 
 
@@ -1969,6 +1975,12 @@ def cmd_print_batch(a):
                 continue
             pending.append((sh["shopDomain"], o.get("orderName"), doc.get("connectorId"),
                             doc_tracking(doc), doc.get("url"), xc.h.get("Authorization", "")))
+    if getattr(a, "sku_prefix", None):   # „toate comenzile cu HA" → păstrez doar comenzile care au un SKU pe prefixul dat
+        pref = a.sku_prefix.upper()
+        oskus = pending_order_skus(pending)
+        before = len(pending)
+        pending = [r for r in pending if any((sk or "").upper().startswith(pref) for sk in oskus.get(r[1], ()))]
+        print("  🔎 filtru SKU prefix %s: %d -> %d comenzi" % (a.sku_prefix, before, len(pending)))
     if getattr(a, "by_sku", False):   # doar ARATĂ coada pe SKU (cele mai multe etichete primele) ca să alegi ce printezi
         ranking = pending_sku_counts(pending)
         print("═" * 60)
@@ -2103,6 +2115,7 @@ def main():
     ap.add_argument("--test", action="store_true", help="print-batch: TEST pe etichete DEJA descărcate (downloaded=true) — zero impact pe coada reală.")
     ap.add_argument("--printed", action="store_true", help="print-batch: RE-PRINT pe etichete DEJA printate (downloaded=true) — re-printare reală a unor AWB-uri deja descărcate.")
     ap.add_argument("--by-sku", action="store_true", dest="by_sku", help="print-batch: NU printează — arată coada GRUPATĂ pe SKU (câte etichete/SKU), cele mai multe primele, ca să alegi ce produs printezi.")
+    ap.add_argument("--sku-prefix", dest="sku_prefix", help="print-batch: păstrează DOAR comenzile care au un SKU pe prefixul dat (ex `HA` = toate comenzile cu produse HA-*).")
     ap.add_argument("--limit", type=int, help="print-batch: max AWB-uri/batch (implicit 250). Restul rămâne pt rularea următoare.")
     ap.add_argument("--printer", help="print-batch (Windows+SumatraPDF): printează DIRECT pe imprimanta dată, fără dialog (batch rapid).")
     a = ap.parse_args()
