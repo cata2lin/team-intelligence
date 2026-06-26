@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One-time YouTube OAuth (Desktop loopback). Prints consent URL, catches the redirect,
 exchanges for a refresh token, writes it to OUT_FILE. Secrets via env."""
-import os, sys, json, urllib.parse, urllib.request, http.server, socketserver
+import os, sys, json, urllib.parse, urllib.request, urllib.error, http.server, socketserver
 
 CID = os.environ.get("YT_CLIENT_ID") or os.environ["YOUTUBE_OAUTH_CLIENT_ID"]
 CSEC = os.environ.get("YT_CLIENT_SECRET") or os.environ["YOUTUBE_OAUTH_CLIENT_SECRET"]
@@ -39,8 +39,12 @@ if code_holder.get("err"):
 code = code_holder["code"]
 data = urllib.parse.urlencode({"code": code, "client_id": CID, "client_secret": CSEC,
     "redirect_uri": REDIR, "grant_type": "authorization_code"}).encode()
-r = urllib.request.urlopen(urllib.request.Request("https://oauth2.googleapis.com/token", data=data))
-tok = json.load(r)
+try:
+    r = urllib.request.urlopen(urllib.request.Request("https://oauth2.googleapis.com/token", data=data))
+    tok = json.load(r)
+except urllib.error.HTTPError as e:
+    body = e.read().decode(errors="replace")
+    print("EROARE schimb token (HTTP", e.code, "):", body); sys.exit(1)
 rt = tok.get("refresh_token")
 if not rt:
     print("Nu am primit refresh_token (răspuns:", list(tok.keys()), ") — verifică prompt=consent + scope."); sys.exit(1)
