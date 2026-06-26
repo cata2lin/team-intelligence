@@ -1913,9 +1913,10 @@ def _print_dialog(path, printer=None):
         print("  📄 PDF batch: %s (deschide-l și printează)." % path)
 
 
-def pending_order_skus(pending):
-    """{orderName: set(SKU-uri)} pt comenzile din coadă — line items din Shopify (batch, DOAR comenzile pending).
-    xConnector NU întoarce SKU-ul în DTO. Folosit pt `--by-sku` (numărare) și `--sku-prefix` (filtrare ex HA-*)."""
+def pending_order_lines(pending):
+    """{orderName: [(sku, qty), ...]} pt comenzile din coadă — line items din Shopify (batch, DOAR comenzile pending).
+    xConnector NU întoarce SKU/cantitate în DTO. Bază pt: filtrare (--sku-prefix), numărare (--by-sku) și
+    SORTAREA PDF-ului pe (magazin → SKU → cantitate)."""
     toks = {t.get("shopDomain"): t for t in load_shopify_tokens()}
     by_shop = {}
     for row in pending:
@@ -1929,22 +1930,52 @@ def pending_order_skus(pending):
             chunk = [n for n in names[i:i + 40] if n]
             if not chunk:
                 continue
-            q = ('query{ orders(first:%d, query:"%s"){ edges{ node{ name lineItems(first:20){ edges{ node{ sku } } } } } } }'
+            q = ('query{ orders(first:%d, query:"%s"){ edges{ node{ name lineItems(first:20){ edges{ node{ sku quantity } } } } } } }'
                  % (len(chunk), " OR ".join("name:%s" % n.replace('"', "") for n in chunk)))
             d = shopify_gql(st["shopDomain"], st["adminToken"], q)
             for e in (((d.get("data") or {}).get("orders") or {}).get("edges") or []):
-                res[e["node"].get("name")] = {li["node"].get("sku") for li in ((e["node"].get("lineItems") or {}).get("edges") or []) if li["node"].get("sku")}
+                res[e["node"].get("name")] = [(li["node"].get("sku"), li["node"].get("quantity") or 1)
+                                              for li in ((e["node"].get("lineItems") or {}).get("edges") or [])
+                                              if li["node"].get("sku")]
     return res
 
 
-def pending_sku_counts(pending):
+def pending_order_skus(pending, olines=None):
+    """{orderName: set(SKU-uri)} — derivat din pending_order_lines (o singură pasă Shopify dacă olines e dat)."""
+    ol = olines if olines is not None else pending_order_lines(pending)
+    return {nm: {s for s, _ in lines} for nm, lines in ol.items()}
+
+
+def pending_sku_counts(pending, olines=None):
     """[(sku, nr_etichete)] descrescător. O comandă cu mai multe SKU-uri contează la fiecare."""
     from collections import Counter
     cnt = Counter()
-    for skus in pending_order_skus(pending).values():
+    for skus in pending_order_skus(pending, olines).values():
         for s in skus:
             cnt[s] += 1
     return cnt.most_common()
+
+
+def order_group_key(name, olines, a):
+    """Cheia de grupare a unei comenzi în PDF: (SKU principal, cantitate). SKU principal = linia care
+    respectă filtrul (--sku-prefix / --sku) cu cea mai mare cantitate; altfel linia dominantă (qty max).
+    Comenzile fără SKU rezolvat merg la final."""
+    lines = olines.get(name) or []
+    if not lines:
+        return ("~~~~~", 0)
+    pref = (getattr(a, "sku_prefix", None) or "").upper()
+    exact = {x.strip().upper() for x in str(getattr(a, "sku", "") or "").split(",") if x.strip()}
+    cands = lines
+    if pref:
+        m = [(s, q) for s, q in lines if (s or "").upper().startswith(pref)]
+        if m:
+            cands = m
+    elif exact:
+        m = [(s, q) for s, q in lines if (s or "").upper() in exact]
+        if m:
+            cands = m
+    s, q = max(cands, key=lambda x: x[1] or 0)
+    return ((s or "~~~~~").upper(), q or 0)
 
 
 def cmd_print_batch(a):
@@ -1973,10 +2004,13 @@ def cmd_print_batch(a):
                 continue
             pending.append((sh["shopDomain"], o.get("orderName"), doc.get("connectorId"),
                             doc_tracking(doc), doc.get("url"), xc.h.get("Authorization", "")))
+    # SKU+cantitate per comandă (UNA singură pasă Shopify) — pt filtrare (--sku-prefix), numărare (--by-sku)
+    # și mai ales SORTAREA PDF-ului pe magazin→SKU→cantitate. Plătită doar când chiar e nevoie.
+    olines = pending_order_lines(pending) if (pending and (getattr(a, "sku_prefix", None) or getattr(a, "by_sku", False) or a.apply)) else {}
     if getattr(a, "sku_prefix", None):   # „toate comenzile cu HA" → păstrez doar comenzile care au un SKU pe prefixul dat
         from collections import Counter
         pref = a.sku_prefix.upper()
-        oskus = pending_order_skus(pending)
+        oskus = pending_order_skus(pending, olines)
         before = len(pending)
         resolved = sum(1 for r in pending if r[1] in oskus)   # câte comenzi din coadă au avut SKU-urile rezolvate (Shopify) — dacă << before = subnumărare (token lipsă/KB)
         pending = [r for r in pending if any((sk or "").upper().startswith(pref) for sk in oskus.get(r[1], ()))]
@@ -1988,7 +2022,7 @@ def cmd_print_batch(a):
         for dom, n in per_shop.most_common():
             print("       %-30s %d" % (dom, n))
     if getattr(a, "by_sku", False):   # doar ARATĂ coada pe SKU (cele mai multe etichete primele) ca să alegi ce printezi
-        ranking = pending_sku_counts(pending)
+        ranking = pending_sku_counts(pending, olines)
         print("═" * 60)
         print("  COADĂ PE SKU — %d etichete %s, SKU-urile cu CELE MAI MULTE primele:"
               % (len(pending), "deja printate" if target_dl else "nedescărcate"))
@@ -1999,6 +2033,9 @@ def cmd_print_batch(a):
         if ranking:
             print("  → printează SKU-ul cu cele mai multe: print-batch --sku %s --apply" % ranking[0][0])
         return
+    # ORDINEA în PDF = grupat pe MAGAZIN → SKU → CANTITATE (toate „1×HA-0001" împreună, apoi „2×HA-0001"…),
+    # NU pe ordinea brută de la xConnector (care lasă cantitățile amestecate: 1×, 2×, 1×).
+    pending.sort(key=lambda r: (r[0],) + order_group_key(r[1], olines, a) + (r[1] or "",))
     total_pending = len(pending)
     lim = a.limit if getattr(a, "limit", None) else 250   # MAX 250 AWB/batch (default) — restul, la rularea următoare
     pending = pending[:lim]
@@ -2009,15 +2046,26 @@ def cmd_print_batch(a):
         print("  🧪 TEST — folosesc etichete DEJA descărcate (downloaded=true), NU ating coada reală de print.")
     elif reprint:
         print("  🔁 RE-PRINT — etichete DEJA printate (downloaded=true). Le re-descarc pt re-printare.")
-    print("  PRINT BATCH — %d etichete %s%s · %s→%s%s%s · grupat pe %s"
+    print("  PRINT BATCH — %d etichete %s%s · %s→%s%s%s · grupat MAGAZIN→SKU→CANTITATE"
           % (len(pending), "DEJA descărcate (test)" if test else ("DEJA printate (re-print)" if reprint else "nedescărcate"),
              (" din %d (rest %d → rulează iar)" % (total_pending, remaining)) if remaining else "", dfrom, dto,
              (" · magazine: " + ",".join(wants)) if wants else " · toate magazinele",
-             (" · " + json.dumps(lbl)) if lbl else "", flt.get("sort")))
-    for dom, nm, cid, trk, _, _ in pending[:60]:
-        print("    %-12s %-11s AWB %s" % (nm, dom, trk or "—"))
-    if len(pending) > 60:
-        print("    … +%d" % (len(pending) - 60))
+             (" · " + json.dumps(lbl)) if lbl else ""))
+    if olines:   # rezumat grupat exact ca în PDF: magazin → SKU × cantitate → câte etichete
+        from collections import Counter
+        groups = Counter((r[0],) + order_group_key(r[1], olines, a) for r in pending)
+        last_dom, shown = None, 0
+        for (dom, sk, q), n in sorted(groups.items()):
+            if shown >= 60:
+                print("    … +%d grupuri" % (len(groups) - shown)); break
+            if dom != last_dom:
+                print("    ── %s" % dom); last_dom = dom; shown += 1
+            print("       %-16s ×%-3d  %d etichete" % (sk, q, n)); shown += 1
+    else:
+        for dom, nm, cid, trk, _, _ in pending[:60]:
+            print("    %-12s %-11s AWB %s" % (nm, dom, trk or "—"))
+        if len(pending) > 60:
+            print("    … +%d" % (len(pending) - 60))
     if not a.apply:
         print("  → [DRY-RUN] aș descărca %d PDF-uri (în ordinea de mai sus) + aș deschide dialogul de print." % len(pending))
         if not test:
