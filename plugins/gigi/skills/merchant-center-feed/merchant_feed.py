@@ -14,12 +14,29 @@ the SA can't self-register the GCP project, so a human registered it once.
 Usage:
     uv run merchant_feed.py --store grandia        # status + disapproved products + reasons
     uv run merchant_feed.py --all
+
+Lecții feed (iun 2026, lansări CZ + Casa Ofertelor):
+- `product_view` query CERE `product_view.id` în SELECT (altfel 400 "expected to have id").
+- "Missing shipping" (`missing_shipping_no_account_shipping_exist`) → contul n-are livrare. Fix prin
+  API: GET `accounts/v1/accounts/{A}/shippingSettings` (ia `etag`) → POST `…:insert` cu un service
+  (deliveryCountries, currencyCode, rateGroups.singleValue.flatRate.amountMicros). Etag-ul e obligatoriu.
+- "Pending initial review" (`pending_initial_policy_review_*`) = se curăță singur în ~3 zile.
+- Issue de CONT "Website needs improvement" (`policy_enforcement_account_disapproval`,
+  `accounts/v1/accounts/{A}/issues?languageCode=..`) la magazine deals = MISREPRESENTATION (countdown/
+  stoc fals/garanție preț — vezi memoria mc-deals-store-misrepresentation). **Request review = DOAR din UI**
+  Merchant Center (API-ul `accounts_v1` are doar `issues.list`, fără declanșare review).
+- "Produse pe canalul Shopify dar feed gol/parțial": verifică `datasources/v1/accounts/{A}/dataSources`
+  (sursa "Shopify App API") + `products/v1/accounts/{A}/products` (produsele EFECTIVE, nu reportul care
+  lagăie). OfferId `shopify_ZZ_...` = market ne-setat în app-ul Shopify → produse nesincronizate.
 """
 import argparse, os, subprocess, sys
 from collections import Counter
 import requests
 
-ACCOUNTS = {"grandia": "5677157050", "esteban": "5676783307", "belasil": "5582663665"}
+# Poți da fie un alias, fie direct merchant ID. Aliasuri cunoscute:
+ACCOUNTS = {"grandia": "5677157050", "esteban": "5676783307", "belasil": "5582663665",
+            "casaofertelor": "5639173332", "bonhaus_ro": "5639173332", "ofertele": "5813605780",
+            "bonhaus_cz": "5815161322"}
 
 def _kb(name):
     v = os.environ.get(name)
