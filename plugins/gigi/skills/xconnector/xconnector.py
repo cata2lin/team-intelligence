@@ -1926,8 +1926,9 @@ def cmd_print_batch(a):
     flt = orders_filters(a)
     flt.setdefault("sort", "sku")     # grupare implicită pe produs: 1×SKU1 împreună, apoi 1×SKU2…
     flt.setdefault("sortDir", "asc")
-    test = bool(getattr(a, "test", False))   # TEST: țintește etichete DEJA descărcate (downloaded=true) → ZERO impact pe coada reală
-    target_dl = test                         # normal: downloaded=false (nedescărcate); test: downloaded=true
+    test = bool(getattr(a, "test", False))        # TEST: etichete deja descărcate (verificare sigură, zero impact pe coadă)
+    reprint = bool(getattr(a, "printed", False))  # RE-PRINT: etichete DEJA printate (downloaded=true) — re-printare reală
+    target_dl = test or reprint                   # ambele țintesc downloaded=true; normal = downloaded=false (nedescărcate)
     wants = [w.strip() for w in (a.shop or "").split(",") if w.strip()]  # doar pt afișaj; filtrarea o face skip_shop (listă + prefix)
     pending = []
     for sh in load_shops():
@@ -1940,14 +1941,19 @@ def cmd_print_batch(a):
                 continue
             pending.append((sh["shopDomain"], o.get("orderName"), doc.get("connectorId"),
                             doc_tracking(doc), doc.get("url"), xc.h.get("Authorization", "")))
-    if getattr(a, "limit", None):
-        pending = pending[:a.limit]   # chunk gestionabil (test sau batch parțial)
+    total_pending = len(pending)
+    lim = a.limit if getattr(a, "limit", None) else 250   # MAX 250 AWB/batch (default) — restul, la rularea următoare
+    pending = pending[:lim]
+    remaining = total_pending - len(pending)
     lbl = {k: v for k, v in flt.items() if k not in ("sort", "sortDir")}
     print("═" * 60)
     if test:
         print("  🧪 TEST — folosesc etichete DEJA descărcate (downloaded=true), NU ating coada reală de print.")
-    print("  PRINT BATCH — %d etichete %s · %s→%s%s%s · grupat pe %s"
-          % (len(pending), "DEJA descărcate (test)" if test else "nedescărcate", dfrom, dto,
+    elif reprint:
+        print("  🔁 RE-PRINT — etichete DEJA printate (downloaded=true). Le re-descarc pt re-printare.")
+    print("  PRINT BATCH — %d etichete %s%s · %s→%s%s%s · grupat pe %s"
+          % (len(pending), "DEJA descărcate (test)" if test else ("DEJA printate (re-print)" if reprint else "nedescărcate"),
+             (" din %d (rest %d → rulează iar)" % (total_pending, remaining)) if remaining else "", dfrom, dto,
              (" · magazine: " + ",".join(wants)) if wants else " · toate magazinele",
              (" · " + json.dumps(lbl)) if lbl else "", flt.get("sort")))
     for dom, nm, cid, trk, _, _ in pending[:60]:
@@ -2055,7 +2061,8 @@ def main():
     ap.add_argument("--out", help="print-batch: folderul unde salvez PDF-urile + log (default: ./print-batch).")
     ap.add_argument("--no-print", action="store_true", dest="no_print", help="print-batch: NU deschide dialogul de print (doar salvează/merge).")
     ap.add_argument("--test", action="store_true", help="print-batch: TEST pe etichete DEJA descărcate (downloaded=true) — zero impact pe coada reală.")
-    ap.add_argument("--limit", type=int, help="print-batch: max N etichete (chunk gestionabil / test).")
+    ap.add_argument("--printed", action="store_true", help="print-batch: RE-PRINT pe etichete DEJA printate (downloaded=true) — re-printare reală a unor AWB-uri deja descărcate.")
+    ap.add_argument("--limit", type=int, help="print-batch: max AWB-uri/batch (implicit 250). Restul rămâne pt rularea următoare.")
     ap.add_argument("--printer", help="print-batch (Windows+SumatraPDF): printează DIRECT pe imprimanta dată, fără dialog (batch rapid).")
     a = ap.parse_args()
     if a.cmd in ("awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
