@@ -69,9 +69,25 @@ def audit_account(H, cid, name, cur):
         roas=vl/cst if cst else 0
         if lost>CAPPED_LOST and roas>CAPPED_ROAS: flags.append(("CAPPED","MED",f"'{c0[:28]}' ROAS {roas:.1f} dar {lost:.0%} buget pierdut → ridică"))
         if cst>DRAIN_MIN and (cv==0 or roas<DRAIN_ROAS): flags.append(("DRAIN","HIGH",f"'{c0[:28]}' spend {cst:.0f} ROAS {roas:.1f} → drainer"))
-    # F. UTM
-    u=gads(H,cid,"SELECT customer.final_url_suffix FROM customer")
-    if not (u and u[0]["customer"].get("finalUrlSuffix")): flags.append(("UTM","LOW","customer.final_url_suffix gol (lipsă UTM)"))
+    # F. UTM + TRACKING (auto-tagging/gclid, UTM complet, status conversii)
+    ct=gads(H,cid,"SELECT customer.final_url_suffix, customer.auto_tagging_enabled, customer.conversion_tracking_setting.conversion_tracking_status FROM customer")
+    if ct:
+        c0=ct[0]["customer"]; suffix=(c0.get("finalUrlSuffix") or "")
+        if not c0.get("autoTaggingEnabled"):
+            flags.append(("TRACK","HIGH","auto-tagging (gclid) OFF → atribuire conversii/GA4 ruptă"))
+        cts=(c0.get("conversionTrackingSetting") or {}).get("conversionTrackingStatus")
+        if cts and cts in ("NOT_CONVERSION_TRACKED","CONVERSION_TRACKING_NOT_ENABLED"):
+            flags.append(("TRACK","HIGH",f"conversion tracking: {cts}"))
+        if not suffix:  # fallback: UTM poate fi la nivel de CAMPANIE
+            cu=gads(H,cid,"SELECT campaign.final_url_suffix FROM campaign WHERE campaign.status='ENABLED'")
+            camp_utm=[x["campaign"].get("finalUrlSuffix") for x in cu if x["campaign"].get("finalUrlSuffix")]
+            if cu and not camp_utm:
+                flags.append(("UTM","MED","fără UTM nici pe cont nici pe campanii → atribuire warehouse/Shopify ruptă"))
+            elif not cu:
+                flags.append(("UTM","LOW","cont fără UTM (nicio campanie ENABLED încă)"))
+        else:
+            miss=[p for p in ("utm_source","utm_medium","utm_campaign") if p not in suffix.lower()]
+            if miss: flags.append(("UTM","LOW",f"UTM incomplet — lipsesc {miss}"))
     return cost, conv, flags
 
 def main():
