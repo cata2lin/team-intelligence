@@ -30,6 +30,13 @@ Grandia: 842 products, **22 disapproved (3%)** — top reasons `guns_parts_polic
 ## How to use
 Run weekly → push the disapproved list to **ClickUp** for the catalog team. Fixes: policy false-positives → appeal + retitle; landing_page_error → fix the product URL (pairs with `gigi:shopify-seo`); missing attributes → add via Shopify; price_out_of_range → check feed price vs landing price. Re-run after fixes to confirm re-approval.
 
+## Lecții feed (iun 2026 — diagnoze CZ + Esteban)
+- **`product_view` (reports/v1) LAGĂIE** ore–o zi. Pt numărul EFECTIV/curent de produse → `GET products/v1/accounts/{A}/products?pageSize=250` (paginat). Dacă userul a schimbat ceva în app și raportul nu reflectă → e lag, nu eșec; reverifică a doua zi.
+- **`offerId shopify_ZZ_…` = MARKET nesetat în app-ul Google & YouTube** (UI Shopify, NU Admin API). DAR **ZZ ≠ dezaprobare** — majoritatea produselor ZZ rămân ELIGIBLE; ZZ devine problemă doar când **sub-sincronizează** catalogul. Simptom dovedit (Bonhaus CZ): 34 produse ACTIVE publicate pe canal, dar doar 5 în feed, toate ZZ → fix = app Google&YouTube → Settings → **Target market = țara** + re-sync (offerId devine `shopify_CZ_`).
+- **Produse DRAFT/scoase din Online Store rămân FANTOME în feed** (status DISAPPROVED, `landing_page_error`, URL mort) până la un re-sync — chiar dacă în Shopify sunt deja scoase din canal (`publishedOnPublication(GooglePub)=false`). Verifică cu `gigi:shopify-stores` (`products(query:"status:draft"){…publishedOnPublication(...)}`); dacă produsul real e ACTIV + URL 200, `landing_page_error`-ul e tranzitoriu (se curăță la re-crawl). NU e nevoie de fix pe Shopify pt fantome — doar re-sync.
+- **Cross-check sănătate feed:** nr produse în Merchant Center ar trebui ≈ nr produse ACTIVE publicate pe publication-ul „Google & YouTube" în Shopify. Dacă feed-ul e mult mai mic (CZ 5 vs 34) → market nesetat în app. `publishedOnPublication=true` ≠ produs în feed.
+- ⚠️ **`ACCOUNTS` acoperă doar grandia/esteban/belasil/casaofertelor/bonhaus_ro/ofertele/bonhaus_cz** — lipsesc GT/Nubra/Carpetto/Gento (de adăugat când avem merchant ID-urile lor).
+
 ## Caveats
 - `aggregatedReportingContextStatus` aggregates across destinations; a product `ELIGIBLE` for Shopping may still have demotions. The reason codes are the actionable signal.
 - Old Content-API host (`shopping.content.googleapis.com`) is blocked in our sandbox — this uses the new `merchantapi.googleapis.com` only.
