@@ -69,3 +69,6 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/blog_add_to_footer.py" --store esteban
 - Cite only real claims (12h+, de la 45 lei, 2+1, transport gratuit >150 lei).
 - **Confirm with the user before publishing LIVE.**
 - Store-facts table + all 7 lessons: `shared/apps/blog-playbook.md`.
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:content-strategy** — planificare editorială/topic clusters. **gigi:copywriting** + **gigi:copy-editing** (Seven Sweeps). **gigi:seo-content-brief** — brief competitiv din SERP. **gigi:seo-cluster** — arhitectură hub-and-spoke.

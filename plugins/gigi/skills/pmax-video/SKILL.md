@@ -56,3 +56,6 @@ uv run scripts/pmax_video.py montage --storefront ofertelezilei.ro --brand "Ofer
 
 ## Livrare în PMax (după render)
 Urcă pe canalul YouTube al brandului + atașează la asset group (vezi `gigi:google-ads-mcc` → `yt_upload.py` + `attach_videos.py`).
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:ads-creative** + **gigi:ad-creative** — framework-uri de creative video. **gigi:ads-photoshoot** — direcție foto produs. **gigi:video** / **gigi:image** — strategie video/imagine.

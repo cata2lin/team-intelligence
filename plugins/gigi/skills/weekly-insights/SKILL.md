@@ -44,3 +44,6 @@ it currently compares 3v3 — the header always prints the exact ranges).
   barely contributing (or barely used). Rising ad-cost ratio with flat revenue = waste → `search-terms`.
 - Pair with **`gigi:ads-anomalies`** (what broke) and **`change_history.py`** (who changed what) when a
   metric moves.
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:marketing-plan** — layer strategic (plan 12 luni, audit). **gigi:ads-math** — modelare rapidă.

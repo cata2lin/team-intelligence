@@ -29,3 +29,6 @@ Run weekly. Take the flagged brands to the agency: "you spent X on Brand Y, real
 ## Caveats
 - Revenue is all-channel (can't isolate Meta/TikTok-attributed revenue from daily_perf), so MER is **blended**, not per-channel — but for accountability "is this brand profitable given the agency's spend" that's the right question.
 - A v2 could overlay the agency's platform-reported ROAS (from `meta_ad_insights_daily`) to quantify the attribution gap.
+
+## Unghiuri noi (adoptate MIT)
+- **real_roas_unified.py** (gigi:google-ads-mcc) — ROAS REAL per canal vs ce raportează agenția. **gigi:ads-attribution** — verifică modelul de atribuire al agenției.

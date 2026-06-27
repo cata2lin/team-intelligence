@@ -141,3 +141,6 @@ sheet.save("_contact.png")
 - **Capture per element**, not full-page — full-page screenshots are scaled down.
 - **No sips padding.** Native element size is already the right ratio.
 - Keep headlines short for the square; the cutout takes ~60–70% of the width.
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:image** + **gigi:ads-photoshoot** — direcție vizuală/foto produs. **gigi:ad-creative** — framework-uri creative.

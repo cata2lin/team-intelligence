@@ -49,3 +49,6 @@ conv, revenue, ROAS, profit) + breakeven ROAS + a scale/ceiling verdict.
   rougher. Step budgets ~20–30% and leave 1–2 weeks (learning), per `gigi:google-ads-mcc`.
 - Pairs with **`product-matrix`** (which products to scale), **`weekly-insights`** (real revenue), and
   `gads.py set-budget` to execute.
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:ads-budget** — alocare strategică. **gigi:ads-math** — calculatoare CPA/ROAS/breakeven rapide.

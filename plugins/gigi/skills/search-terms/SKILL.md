@@ -45,3 +45,6 @@ tag those buckets. `--min-waste` = RON of 0-conv spend to flag.
 - Competitor terms that *do* convert (e.g. "dero belasil") are comparison shoppers — keep those.
 - Pairs with **`gigi:google-ads-mcc`** (the `add-negatives`/`add-keywords` execution) and the
   brand/non-brand insight from `campaign_search_term_insight`.
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:ads-budget** — alocare buget pe baza search-terms profitabile. **gigi:seo-content-brief** — termenii cu intenție → conținut SEO.

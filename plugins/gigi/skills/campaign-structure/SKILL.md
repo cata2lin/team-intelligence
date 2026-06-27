@@ -42,3 +42,6 @@ spend, ROAS, #groups, bidding) + 🔴/🟠/🟡 recommendations.
   **`product-matrix`** (split SCALE products into their own PMax asset group), **`ad-copy`** (fix the
   below-breakeven campaign's copy before pausing), and `gads.py set-budget`/`set-status` to execute.
 - Re-review monthly or after any restructure.
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:ads-plan** — arhitectură media-plan (mix platforme, PMax+Brand). **gigi:ads-budget** — alocare. **gigi:ads-attribution** — atribuire.

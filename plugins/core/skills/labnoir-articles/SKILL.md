@@ -35,3 +35,6 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/labnoir_rewrite_articles.py"
 - Stay in the Lab Noir voice; never name the inspiration brands.
 - Keep article handles/URLs stable on rewrite (SEO).
 - Confirm with the user before publishing a new batch.
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:content-strategy** — planificare editorială/topic clusters. **gigi:copywriting** + **gigi:copy-editing** (Seven Sweeps). **gigi:seo-content-brief** — brief competitiv din SERP. **gigi:seo-cluster** — arhitectură hub-and-spoke.
