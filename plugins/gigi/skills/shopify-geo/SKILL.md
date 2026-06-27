@@ -35,3 +35,6 @@ uv run geo.py robots --url https://esteban.ro                       # can the 14
 - **The GEO correlation stats circulating online (3×, 0.737, 44% "first 30% of page") are vendor marketing — unsourced.** Use this score as a *relative* tuning heuristic, not a guarantee, and don't quote those figures to clients.
 - **`llms.txt` is NOT a citation lever** (documented with evidence in the source skills). Generating one is harmless but don't sell it as an AEO win.
 - Complements: `gigi:shopify-seo` (fix on-page/schema), `gigi:analytics` (gsc rank/opportunities for classic SEO).
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:seo-geo** + **gigi:ai-seo** — optimizare pt AI search/AEO (citare în ChatGPT/Perplexity/AI Overviews), complementar acestui scorer.

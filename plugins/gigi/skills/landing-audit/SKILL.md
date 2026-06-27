@@ -44,3 +44,6 @@ this script together = the full audit.
 - Pairs with **`gigi:cro`** (deeper RO/COD conversion playbook) and **`gigi:shopify-seo`** /
   `gigi:shopify-stores` (to implement schema, meta, theme changes).
 - Audit a page **before** you scale ad spend to it (`product-matrix` SCALE products especially).
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:ads-landing** — audit post-click cu message-match ad→LP + Core Web Vitals (Playwright). **gigi:seo-sxo** — page-type vs intent (de ce nu rankează pagina).

@@ -131,3 +131,6 @@ uv run meta.py budget   belasil <id> --lifetime 2000 # lifetime_budget
 - Watch the **currency** per account; don't sum USD + RON brands together, and remember `--daily` is in the account currency.
 - The account→brand match is by **name ILIKE** for now; for accounts that run **multiple brands** the canonical mapping (campaign-name → brand, e.g. "APRECIAT") lives in the team's **CPA/financial mapping** (a Google Sheet / the `Profitabilitate-Livrabilitate` DB) — wire that in before trusting brand totals on shared accounts.
 - The Meta token is a stored system/user token (works headless); the DB is the only interactively-authenticated piece.
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:ads-creative** + **gigi:ad-creative** — framework-uri creative. **gigi:ads-attribution** — atribuire cross-platform. **gigi:ads-budget** — alocare. **gigi:ads-server-side-tracking** — Meta CAPI (recuperează 30-40% conversii pierdute).

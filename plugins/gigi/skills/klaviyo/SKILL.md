@@ -32,3 +32,7 @@ Run `gap` first → it hands you the build list (which flows to create). Then br
 ## Caveats / v2
 - Gap match is keyword-based (EN+RO); a flow with an unusual name may be miscounted — eyeball `flows` output.
 - v2: flow/campaign **revenue reporting** (Klaviyo `flow-values-reports` — revenue/open/click per flow, needs the Placed Order metric id) and **RFM tiers** (Active/Warm/At-Risk/Lapsed) computed from `metrics.orders` + DTC benchmark comparison (open 30%+, flow-revenue 30-40%+, unsub <0.3%).
+
+## Unghiuri noi (lifecycle marketing adoptate MIT)
+- **gigi:klaviyo-flows** — construiește flow-urile lipsă (audit→creează template-uri). **gigi:emails** + **gigi:sms** — strategie email/SMS.
+- **gigi:churn-prevention** · **gigi:onboarding** · **gigi:referrals** · **gigi:lead-magnets** · **gigi:signup** · **gigi:popups** — lifecycle/retention complet.

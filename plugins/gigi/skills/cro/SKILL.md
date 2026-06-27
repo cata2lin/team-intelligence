@@ -23,3 +23,8 @@ Run on the top-traffic product & collection pages (use `gigi:analytics gsc.py` /
 ## Caveats
 - Heuristic + RO-tuned; it checks for the *presence* of conversion elements, not their visual prominence (a button can exist but be below the fold). Treat as a checklist, confirm visually for top pages.
 - Pairs with `gigi:shopify-geo` (AEO), `gigi:analytics` (where the traffic lands), `gigi:shopify-seo` (apply fixes).
+
+## Unghiuri noi (skilluri adoptate MIT)
+- **gigi:ab-testing** — design A/B cu motor de statistică (sample size, durată, semnificație) — testează fix-urile CRO riguros.
+- **gigi:offers** — design-ul OFERTEI (value equation Hormozi, garanții, scarcity) = cel mai mare lever de conversie.
+- **gigi:popups** + **gigi:signup** — lead-capture on-site. **gigi:marketing-psychology** — persuasiune. **gigi:customer-research** — VOC pt obiecțiile reale de eliminat.
