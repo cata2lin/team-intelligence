@@ -49,13 +49,20 @@ if ops:
 else:
     print("  goal-uri deja corecte")
 
-# B) DE-DUP acțiuni PURCHASE — lasă să numere doar „Google Shopping App Purchase"
-KEEP="Google Shopping App Purchase"
+# B) DE-DUP acțiuni PURCHASE — păstrează CANONICELE non-suprapuse, demote doar duplicatele generice.
+# COD-AWARE: „COD Purchase" (form Releasit) și „Google Shopping App Purchase" (checkout nativ) trag pe
+# comenzi DIFERITE (form vs checkout nativ) → NU se dublează → păstrează-le pe AMBELE primary. Demote doar
+# extra-urile (ex. generic „Purchase"). Bug vechi (KEEP="Google Shopping App Purchase") retrograda „COD
+# Purchase" pe magazine COD = exact conversia care numără acolo → NU mai face asta. Vezi [[gads-monitoring-jun2026]].
+CANON={"Google Shopping App Purchase","COD Purchase"}
 qa={"query":"SELECT conversion_action.resource_name, conversion_action.name, conversion_action.include_in_conversions_metric FROM conversion_action WHERE conversion_action.status='ENABLED' AND conversion_action.category='PURCHASE'"}
 acts=[a["conversionAction"] for a in requests.post(f"https://googleads.googleapis.com/{API}/customers/{CID}/googleAds:search",headers=H,json=qa,timeout=60).json().get("results",[])]
 counting=[a for a in acts if a.get("includeInConversionsMetric")]
-dedup=[a for a in counting if a.get("name")!=KEEP] if any(a.get("name")==KEEP for a in counting) else counting[1:]
-print(f"\nB) acțiuni PURCHASE care numără: {[a.get('name') for a in counting]}")
+if any(a.get("name") in CANON for a in counting):
+    dedup=[a for a in counting if a.get("name") not in CANON]   # demote doar non-canonicele
+else:
+    dedup=counting[1:]                                          # niciun canonic → ține prima, demote restul
+print(f"\nB) acțiuni PURCHASE care numără: {[a.get('name') for a in counting]} (canonice păstrate: {[a.get('name') for a in counting if a.get('name') in CANON]})")
 if dedup:
     dops=[{"update":{"resourceName":a["resourceName"],"primaryForGoal":False},"updateMask":"primary_for_goal"} for a in dedup]
     rr2=requests.post(f"https://googleads.googleapis.com/{API}/customers/{CID}/conversionActions:mutate",headers=H,json={"operations":dops,"validateOnly":(not apply)},timeout=60)
