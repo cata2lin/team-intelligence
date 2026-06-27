@@ -45,6 +45,7 @@ trag singure `gtag('event','conversion', send_to, value, currency, transaction_i
 **fără cod în temă**. Conversiile apar în 24-48h. *Capcană atribuire:* Releasit prinde UTM nu gclid → atribuire
 prin cookie auto-tagging, **same-session** (ok pt majoritatea); pt 100% etanș = captură gclid + Offline Conversion Import.
 Carpetto (4069952156) reparat iun 2026: 14 comenzi reale / 0 conversii → COD Purchase `AW-18249884743/SoloCO7ckMUcEMfInP5D`.
+- ⚠️ **Înainte să zici „PMax e orb pe COD", verifică dacă magazinul CHIAR are formular.** Multe magazine de parfum (ex. **Nubra, GT**) folosesc **checkout NATIV** (n-au Releasit) → „Google Shopping App Purchase" trage normal → conversiile Google mici = **cold-start / cerere reală mică, NU gaură de tracking**. Doar magazinele cu COD form (deals: Carpetto/Ofertele) au nevoie de „COD Purchase". `cod_tracking.py` auto-detectează și refuză pe checkout nativ — nu forța degeaba.
 
 ## Campaign & asset-group map (Esteban + Belasil)
 
@@ -97,6 +98,9 @@ uv run gads.py report --customer 7566352958 --query "SELECT campaign.name, campa
 ```
 `costMicros` is shown ÷1e6 (RON). Ranges: TODAY, YESTERDAY, LAST_7_DAYS, LAST_14_DAYS, LAST_30_DAYS, THIS_MONTH.
 Useful signals: `campaign.primary_status_reasons` = `BUDGET_CONSTRAINED` (→ scale), bidding strategy, asset group listing groups.
+- **Trend zilnic la nivel de CONT** (recovery, scalare, anomalii): `--query "SELECT segments.date, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.conversions_value FROM customer WHERE segments.date DURING LAST_14_DAYS ORDER BY segments.date"`. (`LAST_7_DAYS` etc. EXCLUD ziua curentă — azi e parțial; nu te mira că lipsește.)
+- **Capcană GAQL:** `metrics.search_budget_lost_impression_share` NU se poate selecta în același query cu `campaign_budget` pe toate tipurile (PMax) → query-uri SEPARATE per câmp.
+- **Capcană shell:** NU face `gads.py … --format json | uv run -` cu un heredoc — `-` citește scriptul din stdin și ajunge să interpreteze JSON-ul ca cod (`name 'false' is not defined`). Salvează JSON-ul într-un fișier, apoi rulează formatter-ul pe fișier.
 
 ## 1b. Keyword research — Keyword Planner (`kw_ideas.py`) — și pentru SEO
 Volume REALE de căutare lunară (RO) via `generateKeywordIdeas`. Read-only. **Util mai ales pt SEO** (gigi:shopify-seo): ce cuvinte au cerere → ce colecții/articole merită. Geo RO=2642, **limbă RO=1032 PESTE TOT** (și Keyword Planner ȘI targeting campanii — language constants sunt universale). 🔴 **NU 1038 = Catalană** (bug istoric care a lansat Gento/GT/Nubra/Carpetto/Ofertele pe catalană).
@@ -215,6 +219,7 @@ A PMax asset group needs a full set before it serves beyond Shopping. Build with
 - **Kill waste.** Pull `search_terms`; `add-negatives` for competitor/irrelevant 0-conversion terms (e.g. "dero", "profesional", "job").
 - **Brand coverage.** "Missing relevant keywords" / low optimization score on a brand campaign → `add-keywords` with brand variations (brand, brand+product, brand+price, brand+pareri…).
 - **Pause / fold underperformers.** A separate PMax below target (e.g. a low-AOV product at CPA ≫ target) → pause it and let the main "All Products" PMax cover those products (check listing groups: a single root filter = whole catalog).
+- **Cold-start rescue (PMax nou care DRENEAZĂ).** Un PMax proaspăt care scoate multe clickuri dar ~0 conversii cumpără trafic prost (display/partners) fără semnal. Fix: **CAP buget agresiv + tCPA ≈ breakeven** — **NU tROAS** (value-bidding cere 15-30 conv; tROAS pe o campanie cold o sufocă complet). Dacă există un **Search-Brand care convertește**, MUTĂ bugetul acolo (el e câștigătorul, e adesea capped). Reevaluează tROAS DOAR după 15-30 conv. Real (iun 2026, repornite post-Catalan): GT PMax 180→50 (ROAS 0.9) + Search-Brand 40→100 (ROAS 10.5); Nubra/Carpetto PMax 180/210→60 + tCPA 80/90. `set-budget` / `set-tcpa` (dry-run by default).
 - **Feed real video** (§4) — PMax with strong video beats asset-only; competitors in most niches run video-heavy.
 - **Don't reset learning needlessly:** big budget jumps / new bid targets re-enter learning; move in steps, leave ~2 weeks.
 - **Check budget UTILISATION before scaling.** Pull daily spend vs budget (last 7d) — only raise a budget if it's actually **capping** (spend ≥ ~90% of budget on the busy days). A campaign spending 30 of a 45 budget won't use more (it's bid/quality-limited, not budget-limited). Real wins this session: Esteban PMax capping at 700/day @ ROAS 37 (no tROAS) → raised to 1200; Belasil Brand Protect capping on demand days @ ROAS 9 → 45→65.
