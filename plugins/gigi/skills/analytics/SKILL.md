@@ -130,3 +130,7 @@ uv run dataforseo.py balance                                   # account balance
 
 ## Validation note (Jun 2026)
 GA4 vs Shopify on Esteban agreed closely (organic share 11.7% vs 11.6%, paid social 78% vs 77.6%) — so the two sources are directionally consistent, but **don't mix them at decimal precision** in one comparison; label the source per brand. GA4's edge: it separates PMax/Shopping correctly and gives conversions.
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:seo-google** — CrUX field-data (CWV real din Chrome, 25 săptămâni) + Indexing API + URL Inspection (dincolo de GSC/GA4 pe care le tragem deja).
+- **gigi:seo-dataforseo** — SERP live + keyword/backlink prin DataForSEO (avem chei în KB).
