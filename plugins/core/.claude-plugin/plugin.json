@@ -28,6 +28,22 @@
     "postgres-scentum": {
       "command": "uv",
       "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/pg_mcp_launch.py", "DATABASE_URL_SCENTUM"]
+    },
+    "postgres-pro": {
+      "command": "uv",
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_env_launch.py", "DATABASE_URI=DATABASE_URL_METRICS", "--", "uvx", "postgres-mcp", "--access-mode", "restricted"]
+    },
+    "shopify-dev": {
+      "command": "npx",
+      "args": ["-y", "@shopify/dev-mcp@latest"]
+    },
+    "klaviyo": {
+      "command": "uv",
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_env_launch.py", "PRIVATE_API_KEY=KLAVIYO_ESTEBAN_PRIVATE_KEY", "LIT:READ_ONLY=true", "--", "uvx", "klaviyo-mcp-server"]
+    },
+    "google-analytics": {
+      "command": "uv",
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_env_launch.py", "FILE:GOOGLE_APPLICATION_CREDENTIALS=GA4_SA_JSON", "--", "uvx", "analytics-mcp"]
     }
   }
 }
