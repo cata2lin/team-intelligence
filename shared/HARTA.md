@@ -35,8 +35,24 @@
 - **Spend ads per SKU/brand** → `cache.product_ad_spend` (Meta+TikTok via reguli KB + Google PMax). Live: `gigi:meta-ads`/`tiktok-ads`/`google-ads-mcc`.
 - **Cost transport real per comandă** → AWBprint **`orders.transport_cost`** (autoritativ, UN AWB principal/comandă; gross → `/1.21` = ex-TVA). **NU** suma `order_awbs` (rânduri duplicate). Fallback `MAX(transport_cost_fara_tva)` → flat (vezi profit_core.parcel_transport).
 - **Bucăți vândute per produs** → `gigi:product-sales`.
+- **Segmente clienți / RFM / LTV / retenție / churn / forecast cerere** → `gigi:data-analytics` (pe AWBprint *delivered* = venit COD real, identitate=email, per magazin/monedă; NU pe Shopify brut care include refuzurile).
 - **Livrabilitate/refuz/COD/transport** → `gigi:fulfillment-analytics` / `gigi:deliverability-monitor`.
+- **Cât/când reaprovizionez (PO planner)** → `gigi:reorder-planner` (viteză din inventory_daily_snapshots, reorder_qty + dată stockout per SKU; stock-restock-alerts = doar alertă, ăsta = cantitate).
+- **Pacing buget ads + MER pe lună** → `gigi:spend-pacing` (spend din cache.daily_ad_spend_ron token-independent, proiecție run-rate, MER per brand/canal). Snapshot zilnic = daily-ops-briefing.
+- **Saturație audiență / refresh creative (Meta+TikTok)** → `gigi:creative-fatigue` (freq↑+CTR↓/CPA↑ la nivel de cont; drill per-creativ via meta-ads/tiktok-ads).
+- **Promo COD (2+1) face bani?** → `gigi:promo-profitability` (contribuție netă/comandă pe unități/comandă, AWBprint delivered, COGS pe toate unitățile incl gratis).
 - **COGS/preț/stoc Shopify** → `gigi:shopify-stores`.
+
+## 🎯 Target CPA per magazin (aprobat 2026-06-27 — TOATE canalele)
+Pe **CPA / comandă PLASATĂ**, de aplicat pe Google + Meta + TikTok. **Regulă de aur: Google = CPA MAI MIC decât Social** (prinde brand + intenție mare, ieftin; tCPA-ul mic disciplinează PMax/non-brand-ul scump, brandul oricum e sub prag). Sursă programatică: `brandref` (`target_cpa_social` / `target_cpa_google`). Detalii + breakeven (plafon) în memoria [[target-cpa-per-store]].
+
+| Magazin | Social (Meta/TikTok) | Google |
+|---|--:|--:|
+| esteban.ro · georgetalent.ro · nubra.ro · apreciat.ro | 25 | 15 |
+| reduceribune.ro · belasil.ro | 28 | 18 |
+| ofertelezilei.ro · magdeal.ro · casaofertelor.ro · gento.ro · carpetto.ro | 30 | 20 |
+
+> Google ≈ 65% din target-ul social. Brand Search = lasă-l să culeagă tot (nu plafona). Grandia = agenție (rula ~140 vs breakeven ~69 = pierde; doar observăm). Implementare: Google `gads.py set-tcpa` (după 15-30 conv); Meta/TikTok cost-cap (`gigi:meta-ads`/`tiktok-ads`) sau prin agenție (`gigi:agency-audit` — ei dau 75-95% din spend).
 
 ## Scripturi cheie (toate cu `uv run` / `.venv/bin/python` din folderul lor)
 | Script (skill/loc) | Ce face | Exemplu |
