@@ -251,3 +251,40 @@ those stores use `../shopify-stores/scripts/shopify_gql.py --prefix <PREFIX>` (t
 content (eventual consistency) — re-read after a few seconds before concluding the edit
 failed. Separately, the **storefront** is edge-cached (very persistent): verify the THEME
 SOURCE via `asset_get`, not just the live page (`?nc=` doesn't reliably bust the full-page cache).
+
+## Footer ANPC/SOL badges & compliance links (hard-won, 2026-06)
+Surfacing the ANPC SAL + SOL icon badges in store footers (see `scripts/footer_badges.py`)
+hit a wall of theme-specific traps. The legal *content* (trader-id + ANPC links) lives in
+the Terms policy via `compliance.py`; the *visible footer icons* are this separate job.
+
+- **Verify footer colour with PIXELS, not your eyes.** chrome-devtools `take_screenshot`
+  is unreliable for footers: lazy-loaded content (review carousels) reflows the page so the
+  capture is a STALE frame, and a thin white band is easy to misread visually. Ground truth =
+  PIL-sample the saved screenshot (`im.getpixel`) **and** DOM `getComputedStyle` /
+  `document.elementsFromPoint(x,y)`. They agreed; my eyeballing the rendered PNG did not.
+- **custom-liquid footer sections are page-width-constrained** → a coloured `.footer-badges`
+  div sits ~80px narrower than the viewport, leaving gutters of the section's default bg (looks
+  like a floating box). Full-bleed it: `margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw)`
+  (NOT `width:100vw` — that adds a scrollbar). This is what `footer_badges.py` injects.
+- **GemPages footers** (Belasil: `layout/theme.gempages.footer.liquid`) paint backgrounds on
+  ROW elements with auto-generated ids (`#gXXXX`), not on semantic classes; the `<body>` shows
+  WHITE through transparent rows. To recolour a band: `<style>#id1,#id2,#outerRow{background:<hex>
+  !important}` for every white row INCLUDING the outermost. The `.anpc` badge div there is injected
+  before `</body>` in BOTH theme.liquid and theme.gempages.footer.liquid — edit both.
+- **`.anpc` div injected in theme.liquid** (Esteban/Belasil/Apreciat, the vbrmarketing image
+  pattern): it renders on the page default (white) BELOW the footer. Give it `background:<footer
+  hex>` + `padding-top` so it joins the footer band. Esteban footer black = `#232323`, Apreciat
+  dark bar = `#1a1a1a`.
+- **menuUpdate to drop ANPC/SOL text links**: fetch items WITH `resourceId`, rebuild keeping the
+  rest; pass `resourceId` for SHOP_POLICY/PAGE/BLOG items (else "Subject can't be blank"), `url`
+  for HTTP. A store often has the links in TWO menus (`footer` + `legalitate`) — find the one
+  that actually renders (match the visible SOL title wording).
+- **Ella-theme footers** wire each column to a **theme-config linklist** in the footer SECTION
+  settings, so editing the Shopify menu may NOT surface a new item — check the section settings.
+- **Rebranded store contactEmail is stale**: Casa Ofertelor's `shop.contactEmail` is
+  `contact@bonhaus.ro` (old brand) while `shop.email` is `contact@casaofertelor.ro`.
+  `compliance.py` now prefers the email whose domain matches the store domain; also sweep
+  old pages (FAQ/returns/GDPR) for the wrong-brand email.
+- **NEVER add badges without checking for existing ones first** (the duplicate-icons trap that
+  burned us across Gento/Grandia/Belasil). `footer_badges.py add` is idempotent and refuses a
+  second set unless `--force`.

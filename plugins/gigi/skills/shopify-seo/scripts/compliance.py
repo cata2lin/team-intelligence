@@ -71,7 +71,14 @@ def full_terms(dom, company, cui, regcom, address):
 def do_store(s, A):
     dom = s.public
     info = s.gql("{shop{name contactEmail email}}")["shop"]
-    email = info.get("contactEmail") or info.get("email") or f"contact@{dom}"
+    # Prefer an email whose DOMAIN matches this store's public domain. Rebranded
+    # stores carry a stale contactEmail from the old brand (e.g. Casa Ofertelor's
+    # contactEmail is contact@bonhaus.ro while shop.email is contact@casaofertelor.ro)
+    # — using it would print the wrong brand on the GDPR page.
+    base = dom.split(".")[0].replace("-", "").lower()
+    cand = [e for e in (info.get("contactEmail"), info.get("email")) if e]
+    email = next((e for e in cand if base[:6] in e.lower().replace("-", "")), None) \
+        or (cand[0] if cand else None) or f"contact@{dom}"
     out = []
     if A.gdpr:
         pages = s.rest("GET", "pages.json?limit=250")["pages"]
