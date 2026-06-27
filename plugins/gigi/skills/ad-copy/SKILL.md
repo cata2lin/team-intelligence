@@ -72,3 +72,7 @@ gone. After applying, ad strength goes **PENDING** then resettles in a few days 
   diversity + char limits + brand fit) — the methodology from the public `advertising-skills`
   (Schwartz awareness, angle multiplication) folds in here; the **execution** stays in our toolkit.
 - Pairs with **`gigi:search-terms`** (keywords + winners) and **`gigi:google-ads-mcc`** (apply/verify).
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:offers** — design-ul OFERTEI în sine (value equation Hormozi, garanții, bonus stacking, scarcity) — fix pt promoțiile COD (2+1 free, bundle, surprise-perfume).
+- **gigi:copywriting** + **gigi:copy-editing** (Seven Sweeps, editare multi-pass) + **gigi:marketing-psychology** (anchoring, loss aversion, social proof).

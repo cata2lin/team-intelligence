@@ -99,7 +99,7 @@ uv run gads.py report --customer 7566352958 --query "SELECT campaign.name, campa
 Useful signals: `campaign.primary_status_reasons` = `BUDGET_CONSTRAINED` (→ scale), bidding strategy, asset group listing groups.
 
 ## 1b. Keyword research — Keyword Planner (`kw_ideas.py`) — și pentru SEO
-Volume REALE de căutare lunară (RO) via `generateKeywordIdeas`. Read-only. **Util mai ales pt SEO** (gigi:shopify-seo): ce cuvinte au cerere → ce colecții/articole merită. Geo RO=2642, **limbă RO=1032** (Keyword Planner folosește 1032, NU 1038 care e pt targeting campanii).
+Volume REALE de căutare lunară (RO) via `generateKeywordIdeas`. Read-only. **Util mai ales pt SEO** (gigi:shopify-seo): ce cuvinte au cerere → ce colecții/articole merită. Geo RO=2642, **limbă RO=1032 PESTE TOT** (și Keyword Planner ȘI targeting campanii — language constants sunt universale). 🔴 **NU 1038 = Catalană** (bug istoric care a lansat Gento/GT/Nubra/Carpetto/Ofertele pe catalană).
 ```bash
 DATABASE_URL_METRICS=... uv run kw_ideas.py --customer 9069610821 --seeds "mobilier,canapea,lustra led"
 uv run kw_ideas.py --customer 9069610821 --url https://grandia.ro/collections/mobilier --page   # idei din pagină
@@ -275,3 +275,9 @@ Pașii repetabili pentru a lansa un brand pe Google Ads de la zero. Template scr
 - **Reports are read-only.** Mutations are **dry-run by default**; require `--apply` AND user confirmation before touching a live account.
 - The MCC can touch *every* linked brand — always pass the correct `--customer`.
 - Human-only: billing, advertiser identity verification, and the one-time YouTube OAuth **consent** (browser login).
+
+## Unghiuri noi (skilluri adoptate MIT — folosește-le împreună cu acest skill)
+- **gigi:ads-server-side-tracking** — sGTM + Meta CAPI + Enhanced Conversions: recuperează 30-40% din conversiile pierdute (iOS/ITP/adblock) + **datele de pe form-urile COD care nu trag pixelul** (fix-ul real pt flag-ul CODGAP din gads-audit). Nivelul următor după gclid/UTM.
+- **gigi:ads-attribution** — sănătatea modelului de atribuire cross-platform (AdAttributionKit iOS view-through, deduplicare).
+- **gigi:ads-creative** + **gigi:ad-copy** + **gigi:ad-banners** — framework-uri de creative/RSA. **gigi:ads-budget** + **gigi:budget-simulator** — alocare + forecast.
+- **gigi:gads-audit** — sweep multi-cont (limbă/conversii/COD/capped/drainere). **real_roas_unified.py** (aici) — ROAS real per canal vs breakeven.
