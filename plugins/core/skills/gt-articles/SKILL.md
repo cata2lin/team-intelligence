@@ -72,3 +72,6 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/blog_add_to_footer.py" --store gt --dry-ru
 - **Confirm with the user before publishing LIVE.**
 - See `shared/apps/blog-playbook.md` for the store-facts table and all 7 lessons
   (HTML escaping, banned-words-even-when-negating, session-limit fallback, etc.).
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:content-strategy** — planificare editorială/topic clusters. **gigi:copywriting** + **gigi:copy-editing** (Seven Sweeps). **gigi:seo-content-brief** — brief competitiv din SERP. **gigi:seo-cluster** — arhitectură hub-and-spoke.

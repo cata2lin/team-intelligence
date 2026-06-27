@@ -23,3 +23,6 @@ uv run daily_ops_briefing.py
 
 ## Extensie Richpanel (în curând)
 Există un MCP Richpanel (connector Claude: `https://mcp.richpanel.com/mcp`) cu volum tichete / timp de răspuns / CSAT / workload agenți. Când e conectat, linia 🟣 se completează cu numărul de tichete deschise + timp mediu de răspuns (Claude întreabă MCP-ul Richpanel și inserează cifrele în brief).
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:marketing-plan** — context strategic peste briefing-ul operațional zilnic.

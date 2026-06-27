@@ -59,3 +59,6 @@ Pentru ce ad/creativ trage vânzările (UGC de influenceri) — `gigi:meta-ads` 
   `instagram_manage_insights`) și `IG_BUSINESS_ID` (contul IG Business) → sonda `instagram` pornește.
 - **TikTok/Facebook organic search**: nu există API oficial curat (FB public search e scos din 2018,
   TikTok n-are search pt business) — rămân doar comentariile pe conținutul nostru, via Richpanel.
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:social** — strategie social organic. **gigi:competitors** + **gigi:competitor-profiling** — profilare competiție.
