@@ -172,6 +172,32 @@ uv run scripts/internal_links.py deorphan  --store esteban --map deorphan.json -
 
 Făcut pe Esteban (Jun 2026): cluster top-8 + de-orfanizate toate 15 articolele blog (bidirecțional colecție↔articol) + link de brand pe toate 133 produse. **`mutation` type-uri care înșeală:** `articleUpdate.body` = **HTML!**, `productUpdate.descriptionHtml` = **String!** (opuse — nu le confunda).
 
+## Conformitate legală (GDPR + ANPC) — `scripts/compliance.py` + `scripts/footer_badges.py`
+Două straturi, separate intenționat:
+1. **Conținut legal** (`compliance.py`, DRY-RUN default): creează pagina GDPR `/pages/stergere-date`
+   (ștergere date + retragere consimțământ) și bagă în **Termeni** identificarea comerciantului
+   (firmă/CUI/Reg.Com/sediu) + linkuri ANPC/SAL/SOL. `--store <prefix|domeniu>` sau `--all-ro`
+   (toate domeniile .ro, ACEEAȘI entitate — confirmă întâi). Idempotent. Emailul de pe pagina GDPR
+   se alege acum după **domeniul magazinului** (magazinele rebranduite au `contactEmail` vechi —
+   ex. Casa Ofertelor = `contact@bonhaus.ro`, dar trebuie casaofertelor.ro).
+```bash
+uv run scripts/compliance.py --store OFER --gdpr --anpc \
+  --company "ARONA SRL" --cui 37247302 --regcom J51/151/2017 --address "str. Dunărea nr. 9, Călărași" --apply
+```
+2. **Iconițe ANPC/SOL vizibile în footer** (`footer_badges.py`): pune badge-urile oficiale SAL+SOL
+   ca bandă **full-bleed** cu fundalul potrivit footer-ului, și scoate linkurile-text ANPC/SOL
+   redundante din meniuri. **CITEȘTE întâi culoarea reală a footer-ului în browser** (getComputedStyle)
+   și pas-o ca `--bg`. **Idempotent** — refuză a doua pereche (capcana iconițe-duble). Citește
+   `reference/pitfalls.md` → „Footer ANPC/SOL badges" pentru cazurile pe temă (Dawn custom-liquid,
+   GemPages `#gXXXX`, `.anpc` injectat în theme.liquid, Ella linklist-config).
+```bash
+uv run scripts/footer_badges.py add --store CARP --bg "#332f2e" --apply   # Dawn: secțiune custom-liquid full-bleed
+uv run scripts/footer_badges.py clean-text --store ROSSI --apply          # scoate linkuri text ANPC/SOL din meniuri
+```
+Rulat pe toate cele 21 magazine (iun 2026): pagina GDPR pe toate; trader-id+ANPC în Termeni pe toate RO;
+iconițe footer pe magazinele care nu le aveau, cu fundal = culoarea footer-ului (Esteban #232323,
+Belasil #FDDC4A, Carpetto #332f2e, Covoria #334FB4, Reduceri #121214, Apreciat #1a1a1a).
+
 ## Baseline comun pe magazinele ARONA (ce găsești pe un store nou)
 
 Din rollout-ul **Esteban / GT / Nubra** (iun 2026, baseline din Admin API) — verifică ÎNTÂI astea cu `scripts/seo_audit.py`, sunt aproape garantate pe orice store ARONA nou:
