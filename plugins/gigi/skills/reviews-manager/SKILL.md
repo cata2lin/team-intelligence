@@ -24,3 +24,6 @@ Branduri cu token în KB: Esteban, Grandia, GT, Bonhaus PL, Gento, Redbune (Redu
 ## Limitări
 - Pe magazine mari (ex. Esteban ~11.500 recenzii) `coverage` citește un eșantion (max ~2.500 recenzii) pt rating mediu/distribuție — totalele rămân exacte din count. Mărește `max_pages` în cod dacă vrei agregare completă.
 - Doar READ. Trimiterea de cereri de review / publicarea recenziilor (write) e de adăugat ulterior, confirm-gated.
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:customer-research** — VOC / review-mining: extrage insight din review-uri (obiecții, limbaj client), nu doar le gestionează.

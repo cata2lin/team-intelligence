@@ -73,3 +73,6 @@ The tool **auto-finds the owning advertiser + token** for the campaign id. `list
 - **Never print** the access token — read from DB, used in-process.
 - **Shared advertisers:** always trust the campaign-token filter; never report/mutate another brand's campaigns on a shared account. If a brand's mapping account name doesn't match a DB account, the tool warns (`cont din mapping fără potrivire în DB`) — fix the sheet/DB name.
 - Per-account **currency**; `--daily` is in the account currency.
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:ads-creative** + **gigi:ad-creative** — framework-uri creative. **gigi:ads-attribution** — atribuire. **gigi:ads-budget** — alocare. **gigi:ads-test** — A/B. **gigi:tiktok-content** — partea organică.

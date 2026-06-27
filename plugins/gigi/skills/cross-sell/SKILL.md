@@ -32,3 +32,6 @@ Per pair: **lift** (×chance — >1.5 = real association), **co** (orders contai
 ## Caveats / v2
 - Mono-product stores/baskets → few pairs; lower `--min-co` or raise `--days`.
 - v2: rank by **lift × REAL per-SKU margin** (from the profitability engine) so we push profitable complements, not just frequent ones; auto-write top-3 to product metafields (behind dry-run, like cs-actions).
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:offers** — bundle / value-stacking / 2+1 frameworks pt cross-sell.

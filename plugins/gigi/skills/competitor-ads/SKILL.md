@@ -62,3 +62,6 @@ download de chromium). Flux: nume → `biz_id` (suggestion) → reclame (search)
 - `best` e cap-at la `--limit` (100). „100 creative" poate însemna „100+".
 - Imaginile (`tpc.googlesyndication.com/archive/simgad/…`) se deschid direct ca imagini și se pot da la vision.
 - Longevitatea e proxy, nu performanță certă — un creativ vechi încă activ e foarte probabil câștigător, dar confirmă cu bunul-simț (poate fi un evergreen de brand).
+
+## Unghiuri noi (adoptate MIT)
+- **gigi:competitors** + **gigi:competitor-profiling** — research competiție dincolo de reclame. **gigi:ads-competitor** — framework de analiză ads competiție.
