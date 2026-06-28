@@ -1668,6 +1668,144 @@ def cmd_inv_doc(a):
     print("  PDF: %s" % (d.get("url") or "—"))
 
 
+# ── Facturare în MASĂ: toate comenzile PLĂTITE fără factură (shipping inclus, data = azi) ──
+def _resolve_target_shops(shop_arg, shops):
+    """--shop = CSV de domenii myshopify SAU prefixe de comandă (GT, GRAN, …) SAU 'all'/gol = toate."""
+    if not shop_arg or shop_arg.strip().lower() == "all":
+        return shops
+    wanted = set()
+    for tok in shop_arg.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        if "." in tok:
+            wanted.add(tok)                                        # domeniu complet
+        elif tok.upper() in PREFIX_DOMAIN:
+            wanted.add(PREFIX_DOMAIN[tok.upper()] + ".myshopify.com")  # prefix comandă
+        else:
+            wanted.add(tok + ".myshopify.com")                    # subdomeniu „gol"
+    return [sh for sh in shops if sh["shopDomain"] in wanted]
+
+
+def shopify_paid_uninvoiced(shop, token, since_date, max_pages=40):
+    """Comenzile Shopify PLĂTITE din fereastră, eligibile de facturat:
+    payment status = PAID, NEanulate, FĂRĂ refund, total (încasări) > 0, NEtest.
+    Întoarce listă de (orderName, {total}). None la auth fail."""
+    out, cursor, truncated = [], None, False
+    for _ in range(max_pages):
+        after = ', after:"%s"' % cursor if cursor else ""
+        q = ('query{ orders(first:100%s, query:"financial_status:paid AND created_at:>=%s"){ '
+             'edges{ cursor node{ name cancelledAt test displayFinancialStatus '
+             'currentTotalPriceSet{ shopMoney{ amount } } '
+             'totalRefundedSet{ shopMoney{ amount } } } } pageInfo{ hasNextPage } } }') % (after, since_date)
+        d = shopify_gql(shop, token, q)
+        edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
+        if not edges and not out and d.get("errors"):
+            return None
+        for e in edges:
+            n = e["node"]
+            if n.get("cancelledAt") or n.get("test"):
+                continue
+            if (n.get("displayFinancialStatus") or "").upper() != "PAID":
+                continue
+            refunded = float((((n.get("totalRefundedSet") or {}).get("shopMoney")) or {}).get("amount") or 0)
+            if refunded > 0:
+                continue
+            total = float((((n.get("currentTotalPriceSet") or {}).get("shopMoney")) or {}).get("amount") or 0)
+            if total <= 0:
+                continue
+            out.append((n.get("name"), {"total": total}))
+        pi = (((d.get("data") or {}).get("orders") or {}).get("pageInfo")) or {}
+        if not pi.get("hasNextPage"):
+            break
+        cursor = edges[-1]["cursor"]
+    else:
+        truncated = True
+    if truncated:
+        sys.stderr.write("  ⚠️ %s: paginare oprită la plafon (%d pag) — restrânge --days\n" % (shop, max_pages))
+    return out
+
+
+def cmd_inv_bulk(a):
+    """Facturează TOATE comenzile plătite din ultimele --days zile (≈2 luni) care NU au factură,
+    nu-s anulate/refunded și au încasări > 0. Shipping = inclus automat de SmartBill; data facturii = azi.
+    Dry-run by default; emite facturi DOAR cu --apply."""
+    import datetime
+    dto = datetime.date.today().isoformat()
+    dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
+    shops = load_shops()
+    if not shops:
+        print("Nicio configurație xConnector (KB XCONNECTOR_SHOPS)."); return
+    toks = {t.get("shopDomain"): t.get("adminToken") for t in load_shopify_tokens()}
+    targets = _resolve_target_shops(a.shop, shops)
+    if not targets:
+        print("Niciun magazin potrivit pt --shop=%r. Folosește prefix (GT) / domeniu / 'all'." % a.shop); return
+    print("═" * 64)
+    print("FACTURARE ÎN MASĂ · fereastră %s → %s (%d zile) · %s" % (
+        dfrom, dto, a.days, "APPLY (emite real)" if a.apply else "DRY-RUN (nimic emis)"))
+    print("Criterii: payment=PAID · neanulate · fără refund · încasări>0 · fără factură. Shipping inclus, data=azi.")
+    print("═" * 64)
+    G = dict(cand=0, inv=0, err=0, skip_inv=0, skip_xc=0, paid=0)
+    for sh in targets:
+        dom = sh["shopDomain"]
+        st = toks.get(dom)
+        if not st:
+            print("\n══ %s ══  ⚠ fără token Shopify (SHOPIFY_ADMIN_TOKENS) → skip" % dom); continue
+        xc = XC(sh["apiKey"])
+        con, bills = pick_billing(xc, a)
+        if not con:
+            tail = (" (am: %s)" % ", ".join("%s=%s" % (c.get("id"), c.get("type")) for c in bills)) if bills else ""
+            print("\n══ %s ══  ⚠ connector de facturare ambiguu/absent → alege --connector ID%s → skip" % (dom, tail)); continue
+        # 1) Shopify: comenzi plătite eligibile
+        paid = shopify_paid_uninvoiced(dom, st, dfrom)
+        if paid is None:
+            print("\n══ %s ══  ⚠ Shopify auth fail → skip" % dom); continue
+        G["paid"] += len(paid)
+        # 2) xConnector: name -> (orderId, has_invoice) în aceeași fereastră
+        xmap = {}
+        for o in xc.orders(dfrom, dto, {"sort": "date", "sortDir": "desc"}):
+            nm = o.get("orderName")
+            if nm:
+                xmap[nm] = {"orderId": o.get("orderId"), "has_inv": inv_doc(o) is not None}
+        # 3) intersecție: eligibile, în xConnector, fără factură
+        todo, n_inv, n_xc = [], 0, 0
+        for name, info in paid:
+            x = xmap.get(name)
+            if not x:
+                n_xc += 1; continue
+            if x["has_inv"]:
+                n_inv += 1; continue
+            todo.append((name, x["orderId"], info["total"]))
+        G["cand"] += len(todo); G["skip_inv"] += n_inv; G["skip_xc"] += n_xc
+        print("\n══ %s ══  [%s %s]" % (dom, con.get("type"), con.get("id")))
+        print("  plătite în fereastră: %d · au deja factură: %d · nu-s în xConnector: %d · DE FACTURAT: %d" % (
+            len(paid), n_inv, n_xc, len(todo)))
+        done = 0
+        for name, oid, total in todo:
+            if a.limit and done >= a.limit:
+                print("  … oprit la --limit %d (mai sunt %d)" % (a.limit, len(todo) - done)); break
+            if not a.apply:
+                print("  • DRY factură %-12s orderId=%s total=%.2f" % (name, oid, total)); done += 1; continue
+            body = {"orderId": oid, "connectorId": con["id"]}
+            if getattr(a, "lang", None):
+                body["languageCode"] = a.lang
+            s, d = xc.post("/api/actions/create-invoice", body)
+            ok = s == 200 and isinstance(d, dict) and d.get("accepted") and \
+                (not (d.get("invoices") or []) or any(i.get("success") for i in d.get("invoices") or []))
+            if ok:
+                inv = next((i for i in (d.get("invoices") or []) if i.get("success")), {})
+                print("  ✅ %-12s → %s %s" % (name, inv.get("invoiceSerie") or "", inv.get("invoiceNumber") or "")); G["inv"] += 1
+            else:
+                print("  ❌ %-12s → %s" % (name, _err_text(s, d))); G["err"] += 1
+            done += 1
+            time.sleep(0.2)
+    print("\n" + "═" * 64)
+    print("TOTAL: plătite=%d · candidați(fără factură)=%d · %s · deja facturate=%d · în afara xConnector=%d · erori=%d" % (
+        G["paid"], G["cand"], ("FACTURATE=%d" % G["inv"]) if a.apply else "DRY-RUN (0 emise)", G["skip_inv"], G["skip_xc"], G["err"]))
+    if not a.apply and G["cand"]:
+        print("→ Rulează din nou cu --apply ca să emiți cele %d facturi." % G["cand"])
+
+
 # ── Setare adresă comandă (Shopify orderUpdate.shippingAddress) → opțional AWB ──
 # Pt comenzi COD adresa SE poate modifica (line items NU — ăla e cancel+replace). Dry-run by default.
 def shopify_order_address(shop, token, name):
@@ -2146,7 +2284,7 @@ def main():
     ap.add_argument("cmd", choices=["summary", "address-issues", "recheck", "correct", "connectors", "fulfill",
                                     "not-downloaded", "orders", "links", "print-batch",
                                     "awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
-                                    "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc", "addr-set",
+                                    "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc", "inv-bulk", "addr-set",
                                     "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
     ap.add_argument("--shop"); ap.add_argument("--order"); ap.add_argument("--days", type=int, default=60)
     ap.add_argument("--apply", action="store_true"); ap.add_argument("--json", action="store_true")
@@ -2222,6 +2360,8 @@ def main():
         cmd_print_batch(a); return
     if a.cmd == "recheck":
         cmd_recheck(a); return
+    if a.cmd == "inv-bulk":
+        cmd_inv_bulk(a); return
     import datetime
     a.dto = datetime.date.today().isoformat()
     a.dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
