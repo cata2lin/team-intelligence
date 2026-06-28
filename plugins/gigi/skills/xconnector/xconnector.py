@@ -1763,32 +1763,46 @@ def shopify_status_by_ids(shop, token, ids, batch=50):
     Interoghează DOAR aceste comenzi (nodes by id, în loturi) — minimul de apeluri Shopify, dar fresh.
     Folosit de inv-bulk: candidații vin din xConnector (fără factură), aici verificăm DOAR plata lor,
     în loc să scanăm toate comenzile plătite (≈80% mai puține apeluri pe rația Shopify partajată).
-    {} dacă nu sunt IDs; ridică doar ce întoarce API-ul (comenzile lipsă/neaccesibile sunt omise)."""
+    {} dacă nu sunt IDs. REÎNCEARCĂ ID-urile lipsă (lot throttlat/incomplet) până nu mai e progres —
+    altfel la scară (mii de comenzi, zeci de loturi) Shopify throttle face să se piardă TĂCUT loturi
+    întregi și subnumără plătiții (ex Ofertele: 48 în loc de ~400)."""
     out = {}
     def _gid(x):
         x = str(x)
         return x if x.startswith("gid://") else "gid://shopify/Order/%s" % x
-    uniq = [i for i in dict.fromkeys(ids) if i]
+    def _num(x):
+        return str(x).rsplit("/", 1)[-1]
+    uniq = [str(i) for i in dict.fromkeys(ids) if i]
     if not uniq:
         return out
     q = ('query($ids:[ID!]!){ nodes(ids:$ids){ ... on Order { id name cancelledAt test '
          'displayFinancialStatus currentTotalPriceSet{ shopMoney{ amount } } '
          'totalRefundedSet{ shopMoney{ amount } } } } }')
-    for k in range(0, len(uniq), batch):
-        chunk = [_gid(i) for i in uniq[k:k + batch]]
-        d = shopify_gql(shop, token, q, {"ids": chunk})
-        for n in (((d.get("data") or {}).get("nodes")) or []):
-            if not isinstance(n, dict) or not n.get("id"):
-                continue
-            num = str(n["id"]).rsplit("/", 1)[-1]
-            total = float((((n.get("currentTotalPriceSet") or {}).get("shopMoney")) or {}).get("amount") or 0)
-            refunded = float((((n.get("totalRefundedSet") or {}).get("shopMoney")) or {}).get("amount") or 0)
-            out[num] = {
-                "paid": (n.get("displayFinancialStatus") or "").upper() == "PAID",
-                "total": total, "refunded": refunded,
-                "cancelled": bool(n.get("cancelledAt")) or bool(n.get("test")),
-                "name": n.get("name"),
-            }
+    pending = list(uniq)
+    for _round in range(6):
+        if not pending:
+            break
+        still = []
+        for k in range(0, len(pending), batch):
+            chunk_ids = pending[k:k + batch]
+            d = shopify_gql(shop, token, q, {"ids": [_gid(i) for i in chunk_ids]})
+            got = set()
+            for n in (((d.get("data") or {}).get("nodes")) or []):
+                if not isinstance(n, dict) or not n.get("id"):
+                    continue
+                num = _num(n["id"]); got.add(num)
+                total = float((((n.get("currentTotalPriceSet") or {}).get("shopMoney")) or {}).get("amount") or 0)
+                refunded = float((((n.get("totalRefundedSet") or {}).get("shopMoney")) or {}).get("amount") or 0)
+                out[num] = {
+                    "paid": (n.get("displayFinancialStatus") or "").upper() == "PAID",
+                    "total": total, "refunded": refunded,
+                    "cancelled": bool(n.get("cancelledAt")) or bool(n.get("test")),
+                    "name": n.get("name"),
+                }
+            still.extend(i for i in chunk_ids if _num(i) not in got)
+        if len(still) >= len(pending):
+            break   # zero progres → restul sunt probabil chiar inaccesibile (șterse), nu throttle
+        pending = still
     return out
 
 
@@ -1825,6 +1839,30 @@ def _create_invoice_rl(xc, body, max_retry=6):
             (not (d.get("invoices") or []) or any(i.get("success") for i in d.get("invoices") or []))
         return ok, s, d, False
     return False, s, d, True
+
+
+def _scan_all_orders(xc, dfrom, dto, depth=0):
+    """Scanează TOATE comenzile din [dfrom,dto], OCOLIND plafonul xConnector `getOrders` de 10000/cerere:
+    dacă o fereastră atinge plafonul (10000), o BISECTEAZĂ pe dată și re-scanează jumătățile recursiv,
+    până fiecare sub-fereastră e sub plafon. Altfel magazinele mari (Ofertele, Reduceri…) pierd comenzile
+    mai vechi de cele mai recente 10000 (exact ce-mi scăpa). Întoarce listă de comenzi (dedup pe orderName)."""
+    import datetime
+    rows = list(xc.orders(dfrom, dto, {"sort": "date", "sortDir": "desc"}))
+    if len(rows) < 10000 or depth >= 9:
+        return rows
+    d0 = datetime.date.fromisoformat(dfrom)
+    d1 = datetime.date.fromisoformat(dto)
+    if (d1 - d0).days <= 1:
+        return rows   # nu mai pot împărți (≤1 zi) — accept ce am (improbabil >10000/zi)
+    mid = d0 + datetime.timedelta(days=(d1 - d0).days // 2)
+    left = _scan_all_orders(xc, dfrom, mid.isoformat(), depth + 1)
+    right = _scan_all_orders(xc, (mid + datetime.timedelta(days=1)).isoformat(), dto, depth + 1)
+    seen, out = set(), []
+    for o in left + right:
+        nm = o.get("orderName")
+        if nm and nm not in seen:
+            seen.add(nm); out.append(o)
+    return out
 
 
 def cmd_inv_bulk(a):
@@ -1868,9 +1906,11 @@ def cmd_inv_bulk(a):
         if not con:
             tail = (" (am: %s)" % ", ".join("%s=%s" % (c.get("id"), c.get("type")) for c in bills)) if bills else ""
             print("\n══ %s ══  ⚠ connector de facturare ambiguu/absent → alege --connector ID%s → skip" % (dom, tail)); continue
-        # 1) xConnector: TOATE comenzile din fereastră + statusul facturii (ZERO Shopify — bridge-ul nostru)
+        # 1) xConnector: TOATE comenzile din fereastră + statusul facturii (ZERO Shopify — bridge-ul nostru).
+        #    _scan_all_orders bisectează fereastra ca să treacă de plafonul de 10000/cerere (altfel magazinele
+        #    mari pierd comenzile mai vechi de cele mai recente 10000).
         xorders = []
-        for o in xc.orders(dfrom, dto, {"sort": "date", "sortDir": "desc"}):
+        for o in _scan_all_orders(xc, dfrom, dto):
             nm = o.get("orderName")
             if nm:
                 xorders.append((nm, o.get("orderId"), inv_doc(o) is not None))
