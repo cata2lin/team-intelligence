@@ -155,8 +155,10 @@ Connector de facturare = tip **SMART_BILL** (ales automat dacă e unul singur; a
   - **Flux TARGETAT (minim Shopify):** ia întâi comenzile **fără factură** din xConnector (`documents`, ZERO Shopify),
     apoi verifică plata **DOAR pt ele**, după ID (`nodes(ids:…)`, în loturi) — NU mai scanează TOATE comenzile plătite
     (≈80% mai puține apeluri pe rația Shopify, partajată cu celelalte app-uri ARONA). Toate apelurile Shopify sunt **politicoase**
-    (lasă ≥50% din bucket-ul GraphQL liber + back-off pe THROTTLED). Plafon xConnector `getOrders` = **10000 comenzi/cerere**
-    (la magazine mari acoperă cele mai recente ~5 luni; pt comenzile mai vechi, rulează o a doua fereastră).
+    (lasă ≥50% din bucket-ul GraphQL liber + back-off pe THROTTLED) și **robuste la scară** (`shopify_status_by_ids` reîncearcă
+    ID-urile lipsă din loturi throttlate — altfel subnumără plătiții, ex Ofertele 48 în loc de ~400).
+  - **Plafon xConnector `getOrders` = 10000 comenzi/cerere** → `_scan_all_orders` **bisectează fereastra pe dată** când o lovește,
+    ca să prindă TOT (altfel magazinele mari — Ofertele, Reduceri Bune… cu zeci de mii de comenzi — pierd comenzile mai vechi de ultimele 10000).
   - **Internațional:** factura iese în **moneda comenzii** (CZ→CZK, PL→PLN, BG→EUR de la trecerea Bulgariei la euro) +
     echivalentul **RON** pt ANAF — automat, per comandă (verificat pe PDF-urile reale).
 
