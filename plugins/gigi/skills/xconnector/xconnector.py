@@ -151,14 +151,20 @@ class XC:
         while page < MAXP:
             q = urllib.parse.urlencode(base + [("page", str(page)), ("size", "200")])
             s = d = None
-            for attempt in range(6):   # REÎNCEARCĂ pagina pe eroare/throttle — altfel scanare PARȚIALĂ tăcută
+            for attempt in range(8):   # REÎNCEARCĂ pagina pe throttle/timeout/5xx — altfel scanare PARȚIALĂ tăcută
                 s, d = self.get("/api/orders", q)
-                if s == 200:
+                if s == 200 or s == 400:   # 200 ok; 400 = DETERMINIST (plafon de offset / cerere proastă) → nu retry
                     break
-                time.sleep(2 * (attempt + 1))
+                # 429 = rate-limit xConnector (poate ține ~1-2 min) → backoff LUNG ca să treacă peste spike;
+                # timeout/5xx → backoff scurt. Răbdarea totală (~6 min) împiedică sărirea unui magazin pe un blip.
+                time.sleep(min((15 * (attempt + 1)) if s == 429 else (3 * (attempt + 1)), 90))
             if s != 200:
-                # pagină picată definitiv după retries → NU returna tăcut parțial (ar subnumăra masiv,
-                # ex Ofertele 2600 în loc de ~13000). Ridică, ca apelantul să sară magazinul / reia.
+                if s == 400 and len(out) >= 9000:
+                    # PLAFONUL DE OFFSET al xConnector: pagina 50 (offset 10000) întoarce 400 — NU e eroare, e CAPUL.
+                    # Ieșire GRAȚIOASĂ; len(out)≈10000 declanșează bisecția pe dată în _scan_all_orders (prinde restul).
+                    break
+                # picată definitiv (throttle persistent SAU 400 la offset mic = cerere proastă) → NU returna tăcut
+                # parțial (ar subnumăra masiv, ex Ofertele 2600 în loc de ~13000). Ridică, apelantul sare/reia.
                 raise RuntimeError("xConnector getOrders a picat la pagina %d (%s→%s, status %s) după retries" % (page, dfrom, dto, s))
             arr = d if isinstance(d, list) else (d.get("content") or d.get("orders") or [])
             if not arr:
@@ -1852,28 +1858,40 @@ _SCAN_CAP_GUARD = 9500   # plafonul xConnector ≈10000; bisectăm la ≥9500 fi
                          # (10000 minus duplicate dedup-ate) — un prag de 10000 ratează exact cazul ăsta (ex Esteban).
 
 
-def _scan_all_orders(xc, dfrom, dto, depth=0):
-    """Scanează TOATE comenzile din [dfrom,dto], OCOLIND plafonul xConnector `getOrders` (≈10000/cerere):
-    dacă o fereastră se apropie de plafon (≥9500, fiindcă uneori întoarce 9999), o BISECTEAZĂ pe dată și
-    re-scanează jumătățile recursiv, până fiecare sub-fereastră e clar sub plafon. Altfel magazinele mari
-    (Ofertele, Reduceri, Esteban…) pierd comenzile mai vechi de cele mai recente ~10000. Dedup pe orderName."""
-    import datetime
-    rows = list(xc.orders(dfrom, dto, {"sort": "date", "sortDir": "desc"}))
-    if len(rows) < _SCAN_CAP_GUARD or depth >= 9:
-        return rows
-    d0 = datetime.date.fromisoformat(dfrom)
-    d1 = datetime.date.fromisoformat(dto)
-    if (d1 - d0).days <= 1:
-        return rows   # nu mai pot împărți (≤1 zi) — accept ce am (improbabil >10000/zi)
-    mid = d0 + datetime.timedelta(days=(d1 - d0).days // 2)
-    left = _scan_all_orders(xc, dfrom, mid.isoformat(), depth + 1)
-    right = _scan_all_orders(xc, (mid + datetime.timedelta(days=1)).isoformat(), dto, depth + 1)
+def _dedup_orders(lists):
     seen, out = set(), []
-    for o in left + right:
+    for o in lists:
         nm = o.get("orderName")
         if nm and nm not in seen:
             seen.add(nm); out.append(o)
     return out
+
+
+def _scan_all_orders(xc, dfrom, dto, depth=0):
+    """Scanează TOATE comenzile din [dfrom,dto], OCOLIND plafonul xConnector `getOrders` (≈10000/cerere,
+    pagina 50/offset 10000 → 400). STRATEGIE: la depth 0, dacă fereastra e mare (>25 zile), o sparge din
+    start în FELII FIXE de ~20 zile (sub plafon pt magazinele noastre) — evită risipa de a scana 50 pagini
+    (~75s) doar ca să DESCOPERE că o fereastră e capată înainte s-o împartă. Bisecția pe dată rămâne ca
+    plasă de siguranță: dacă o felie tot atinge plafonul (spike, ex Black Friday), se înjumătățește recursiv.
+    Altfel magazinele mari (Ofertele, Reduceri, Esteban…) pierd comenzile mai vechi de ultimele ~10000."""
+    import datetime
+    d0 = datetime.date.fromisoformat(dfrom)
+    d1 = datetime.date.fromisoformat(dto)
+    span = (d1 - d0).days
+    if depth == 0 and span > 25:
+        parts, cur = [], d0
+        while cur <= d1:
+            chunk_to = min(cur + datetime.timedelta(days=19), d1)
+            parts.extend(_scan_all_orders(xc, cur.isoformat(), chunk_to.isoformat(), depth=1))
+            cur = chunk_to + datetime.timedelta(days=1)
+        return _dedup_orders(parts)
+    rows = list(xc.orders(dfrom, dto, {"sort": "date", "sortDir": "desc"}))
+    if len(rows) < _SCAN_CAP_GUARD or span <= 1 or depth >= 9:
+        return rows   # sub plafon (sau nu mai pot împărți) — complet
+    mid = d0 + datetime.timedelta(days=span // 2)   # felie tot capată (spike) → bisectează
+    left = _scan_all_orders(xc, dfrom, mid.isoformat(), depth + 1)
+    right = _scan_all_orders(xc, (mid + datetime.timedelta(days=1)).isoformat(), dto, depth + 1)
+    return _dedup_orders(left + right)
 
 
 def cmd_inv_bulk(a):
