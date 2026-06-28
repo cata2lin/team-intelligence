@@ -146,14 +146,33 @@ Connector de facturare = tip **SMART_BILL** (ales automat dacă e unul singur; a
 - **`inv-cancel`** / **`inv-storno`** — anulează (`cancel-invoice`) / stornează (`revert-invoice`; `--refund-id` pt storno parțial pe un refund).
 - **`inv-regen`** — anulează + creează din nou (create gardat pe succesul anulării).
 - **`inv-doc`** — link-ul PDF al facturii (din documentul `INVOICE` al comenzii).
-- **`inv-bulk`** — **facturare ÎN MASĂ**: emite factură pt TOATE comenzile din ultimele `--days` zile (≈2 luni) care:
-  **payment status = PAID**, **neanulate**, **fără refund**, **încasări (total) > 0** și **NU au deja factură**.
-  Shipping-ul e **inclus automat** de SmartBill (factura reflectă comanda întreagă), iar **data facturii = azi** (ziua rulării).
-  Filtrarea financiară vine din **Shopify** (xConnector `getOrders` n-are payment status), iar verificarea „are deja factură"
-  + `orderId` din **xConnector** (`documents` INVOICE). `--shop` = prefix (`GT`)/domeniu/CSV/`all` (gol = toate). `--limit N` plafonează
-  emiterile/rulare. **Dry-run by default** (listează candidații per magazin); emite real DOAR cu `--apply`. Sare comenzile care nu-s
-  încă în xConnector (le raportează separat). Connector de facturare ales ca la `inv-make` (`--connector ID` dacă-s mai mulți).
-Guard: `--connector` nebilling sau `--refund-id` nenumeric → abort (nu trimite orbește pe document financiar).
+- **`inv-bulk`** — **facturare ÎN MASĂ** a comenzilor plătite fără factură pe `--days` zile (ex YTD: `--days 180`),
+  pe `--shop` (prefix `GT`/domeniu/CSV/`all`) cu `--exclude d1,d2` opțional. Criterii: **payment=PAID**, neanulate,
+  fără refund, **total>0**, **fără factură**. Shipping **inclus automat** de SmartBill; **data facturii = azi**;
+  toate pe **seria ARONA** (connectorul SMART_BILL **activ** per magazin — fiecare are exact unul; „PX"/„JG" inactive = alte serii).
+  **Dry-run by default**; emite cu `--apply`; `--limit N` plafonează emiterile/rulare.
+  Guard: `--connector` nebilling → abort. Guard anti-dublură: dacă <10% din comenzile dintr-un magazin au factură ÎN xConnector → 🚩 SKIP (facturează probabil altundeva) decât cu `--force`.
+  - **Flux TARGETAT (minim Shopify):** ia întâi comenzile **fără factură** din xConnector (`documents`, ZERO Shopify),
+    apoi verifică plata **DOAR pt ele**, după ID (`nodes(ids:…)`, în loturi) — NU mai scanează TOATE comenzile plătite
+    (≈80% mai puține apeluri pe rația Shopify, partajată cu celelalte app-uri ARONA). Toate apelurile Shopify sunt **politicoase**
+    (lasă ≥50% din bucket-ul GraphQL liber + back-off pe THROTTLED). Plafon xConnector `getOrders` = **10000 comenzi/cerere**
+    (la magazine mari acoperă cele mai recente ~5 luni; pt comenzile mai vechi, rulează o a doua fereastră).
+  - **Internațional:** factura iese în **moneda comenzii** (CZ→CZK, PL→PLN, BG→EUR de la trecerea Bulgariei la euro) +
+    echivalentul **RON** pt ANAF — automat, per comandă (verificat pe PDF-urile reale).
+
+### ⚠️ SmartBill: rate-limit + erori de business (lecție 2026-06-28 — CITEȘTE înainte de bulk)
+- **Rate-limit REAL ≈30 requesturi/fereastră** (header `X-RateLimit-Limit: 30`). La depășire → **HTTP 422** cu mesaj
+  ROMÂNESC „Ai depasit limita maxima de requesturi admisa. Vei putea executa alte requesturi **dupa N min**" =
+  **penalizare lipicioasă ~10 min** (NU se ridică cu pauze scurte; fiecare re-încercare ÎN timpul blocării **resetează** timerul).
+  De aceea `inv-bulk` **pasează adaptiv ~24/min (2.5s/factură)**, SUB plafon, cu headroom pt fluxul normal de facturare
+  al xConnector (consumă din ACELAȘI bucket), și **parsează cooldown-ul exact** din mesaj („dupa 10 min" → așteaptă 630s fără re-atac).
+- **422 = ȘI rate-limit ȘI erori de business** — se distinge după **MESAJ**, nu după status code. `inv-bulk` tratează 422 ca
+  rate-limit DOAR dacă mesajul confirmă; altfel = eroare reală (NU retry — altfel pierde ~12 min/comandă) + o raportează la final.
+- **Erori de CONFIG frecvente (blochează facturarea — fix în xConnector/SmartBill, NU prin retry):**
+  „Produsul **LIVRARE EXPRESS** nu are codul specificat" / „Produsul **PROTECTIE COLET** nu are codul specificat" —
+  linia de serviciu (livrare expres / protecție colet) n-are **cod de produs** în SmartBill. Apare pe multe magazine
+  (Belasil, deals…) și e **și motivul pt care fluxul normal le-a lăsat nefacturate**. Fix = dă cod produselor de serviciu
+  (config xConnector/SmartBill); apoi re-rulezi `inv-bulk`. SmartBill API n-are endpoint de produse (doar `GET /stocks`) → fix din UI/config.
 
 ## Auth (cheie API xConnector + token Shopify Admin, per magazin)
 - xConnector: secret KB **`XCONNECTOR_SHOPS`** (JSON `[{shopDomain,apiKey}]`), altfel `~/.aac/input.json`.
