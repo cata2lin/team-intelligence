@@ -150,9 +150,16 @@ class XC:
         page = 0
         while page < MAXP:
             q = urllib.parse.urlencode(base + [("page", str(page)), ("size", "200")])
-            s, d = self.get("/api/orders", q)
+            s = d = None
+            for attempt in range(6):   # REÎNCEARCĂ pagina pe eroare/throttle — altfel scanare PARȚIALĂ tăcută
+                s, d = self.get("/api/orders", q)
+                if s == 200:
+                    break
+                time.sleep(2 * (attempt + 1))
             if s != 200:
-                break
+                # pagină picată definitiv după retries → NU returna tăcut parțial (ar subnumăra masiv,
+                # ex Ofertele 2600 în loc de ~13000). Ridică, ca apelantul să sară magazinul / reia.
+                raise RuntimeError("xConnector getOrders a picat la pagina %d (%s→%s, status %s) după retries" % (page, dfrom, dto, s))
             arr = d if isinstance(d, list) else (d.get("content") or d.get("orders") or [])
             if not arr:
                 break
@@ -1841,14 +1848,18 @@ def _create_invoice_rl(xc, body, max_retry=6):
     return False, s, d, True
 
 
+_SCAN_CAP_GUARD = 9500   # plafonul xConnector ≈10000; bisectăm la ≥9500 fiindcă uneori întoarce 9999
+                         # (10000 minus duplicate dedup-ate) — un prag de 10000 ratează exact cazul ăsta (ex Esteban).
+
+
 def _scan_all_orders(xc, dfrom, dto, depth=0):
-    """Scanează TOATE comenzile din [dfrom,dto], OCOLIND plafonul xConnector `getOrders` de 10000/cerere:
-    dacă o fereastră atinge plafonul (10000), o BISECTEAZĂ pe dată și re-scanează jumătățile recursiv,
-    până fiecare sub-fereastră e sub plafon. Altfel magazinele mari (Ofertele, Reduceri…) pierd comenzile
-    mai vechi de cele mai recente 10000 (exact ce-mi scăpa). Întoarce listă de comenzi (dedup pe orderName)."""
+    """Scanează TOATE comenzile din [dfrom,dto], OCOLIND plafonul xConnector `getOrders` (≈10000/cerere):
+    dacă o fereastră se apropie de plafon (≥9500, fiindcă uneori întoarce 9999), o BISECTEAZĂ pe dată și
+    re-scanează jumătățile recursiv, până fiecare sub-fereastră e clar sub plafon. Altfel magazinele mari
+    (Ofertele, Reduceri, Esteban…) pierd comenzile mai vechi de cele mai recente ~10000. Dedup pe orderName."""
     import datetime
     rows = list(xc.orders(dfrom, dto, {"sort": "date", "sortDir": "desc"}))
-    if len(rows) < 10000 or depth >= 9:
+    if len(rows) < _SCAN_CAP_GUARD or depth >= 9:
         return rows
     d0 = datetime.date.fromisoformat(dfrom)
     d1 = datetime.date.fromisoformat(dto)
@@ -1910,7 +1921,12 @@ def cmd_inv_bulk(a):
         #    _scan_all_orders bisectează fereastra ca să treacă de plafonul de 10000/cerere (altfel magazinele
         #    mari pierd comenzile mai vechi de cele mai recente 10000).
         xorders = []
-        for o in _scan_all_orders(xc, dfrom, dto):
+        try:
+            scanned = _scan_all_orders(xc, dfrom, dto)
+        except Exception as e:
+            print("\n══ %s ══  ⚠ scanare xConnector eșuată (%s) → SKIP magazinul (reia la rularea următoare)" % (dom, str(e)[:120]))
+            continue
+        for o in scanned:
             nm = o.get("orderName")
             if nm:
                 xorders.append((nm, o.get("orderId"), inv_doc(o) is not None))
