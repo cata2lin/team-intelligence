@@ -157,8 +157,12 @@ Connector de facturare = tip **SMART_BILL** (ales automat dacă e unul singur; a
     (≈80% mai puține apeluri pe rația Shopify, partajată cu celelalte app-uri ARONA). Toate apelurile Shopify sunt **politicoase**
     (lasă ≥50% din bucket-ul GraphQL liber + back-off pe THROTTLED) și **robuste la scară** (`shopify_status_by_ids` reîncearcă
     ID-urile lipsă din loturi throttlate — altfel subnumără plătiții, ex Ofertele 48 în loc de ~400).
-  - **Plafon xConnector `getOrders` = 10000 comenzi/cerere** → `_scan_all_orders` **bisectează fereastra pe dată** când o lovește,
-    ca să prindă TOT (altfel magazinele mari — Ofertele, Reduceri Bune… cu zeci de mii de comenzi — pierd comenzile mai vechi de ultimele 10000).
+  - **Plafon xConnector `getOrders` ≈10000 comenzi/cerere** → `_scan_all_orders` **bisectează fereastra pe dată** la **≥9500**
+    (uneori întoarce 9999 = 10000 minus duplicate; un prag de 10000 ratează exact cazul ăsta — ex Esteban), recursiv până sub plafon.
+    Altfel magazinele mari (Ofertele, Reduceri Bune… zeci de mii de comenzi) pierd comenzile mai vechi de ultimele ~10000.
+  - **`getOrders` REÎNCEARCĂ paginile picate** (throttle/eroare) și **ridică** dacă tot pică, în loc să întoarcă tăcut o scanare
+    PARȚIALĂ (altfel un blip pe o pagină = magazin masiv subnumărat, ex Ofertele 2600 în loc de ~13000). inv-bulk **sare magazinul**
+    pe scanare eșuată (îl reia la rularea următoare — idempotent), NU sub-facturează.
   - **Internațional:** factura iese în **moneda comenzii** (CZ→CZK, PL→PLN, BG→EUR de la trecerea Bulgariei la euro) +
     echivalentul **RON** pt ANAF — automat, per comandă (verificat pe PDF-urile reale).
 
