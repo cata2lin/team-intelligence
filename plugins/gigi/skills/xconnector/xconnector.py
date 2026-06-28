@@ -181,8 +181,17 @@ class XC:
             return s, b
 
     def list_connectors(self):
-        s, d = self.get("/api/merchant/connectors")
-        return d if s == 200 and isinstance(d, list) else []
+        # cache pe instanță + retry: un blip pe acest call NU trebuie să facă un magazin întreg
+        # să pară „connector ambiguu/absent" și să-l sară (s-a întâmplat la EST în runul de 60z).
+        if getattr(self, "_conn_cache", None):
+            return self._conn_cache
+        for attempt in range(4):
+            s, d = self.get("/api/merchant/connectors")
+            if s == 200 and isinstance(d, list) and d:
+                self._conn_cache = d
+                return d
+            time.sleep(1.5 * (attempt + 1))
+        return []
 
     def vtoken(self):
         if not self.vtok:
@@ -267,11 +276,34 @@ def shopify_gql(shop, token, query, variables=None):
     body = {"query": query}
     if variables is not None:
         body["variables"] = variables
-    s, b = http("POST", url, h, body)
-    try:
-        return json.loads(b)
-    except Exception:
-        return {"_status": s, "_raw": b[:200]}
+    d = None
+    for attempt in range(6):
+        s, b = http("POST", url, h, body)
+        try:
+            d = json.loads(b)
+        except Exception:
+            return {"_status": s, "_raw": b[:200]}
+        errs = d.get("errors") or []
+        throttled = (s == 429) or any(
+            isinstance(e, dict) and (e.get("extensions") or {}).get("code") == "THROTTLED"
+            for e in errs
+        )
+        if throttled:
+            time.sleep(2 * (attempt + 1))
+            continue
+        # POLITICOS cu rația Shopify: bucket-ul GraphQL e PER-token de app, partajat cu
+        # celelalte aplicații ARONA care lovesc același magazin. Lăsăm mereu ≥50% din
+        # bucket liber pentru ele — ne oprim singuri când scădem sub jumătate, până se
+        # reumple la ~60% (la restoreRate-ul magazinului).
+        ts = (((d.get("extensions") or {}).get("cost") or {}).get("throttleStatus")) or {}
+        avail = ts.get("currentlyAvailable")
+        maxb = ts.get("maximumAvailable") or 0
+        restore = ts.get("restoreRate") or 50
+        if avail is not None and maxb and avail < maxb * 0.5:
+            need = (maxb * 0.6 - avail) / max(restore, 1)
+            time.sleep(min(max(need, 0.0), 8.0))
+        return d
+    return d
 
 
 def find_order(shop, token, name):
@@ -1726,6 +1758,75 @@ def shopify_paid_uninvoiced(shop, token, since_date, max_pages=40):
     return out
 
 
+def shopify_status_by_ids(shop, token, ids, batch=50):
+    """{order_id_numeric: {paid, total, refunded, cancelled, name}} pt o LISTĂ de Shopify order IDs.
+    Interoghează DOAR aceste comenzi (nodes by id, în loturi) — minimul de apeluri Shopify, dar fresh.
+    Folosit de inv-bulk: candidații vin din xConnector (fără factură), aici verificăm DOAR plata lor,
+    în loc să scanăm toate comenzile plătite (≈80% mai puține apeluri pe rația Shopify partajată).
+    {} dacă nu sunt IDs; ridică doar ce întoarce API-ul (comenzile lipsă/neaccesibile sunt omise)."""
+    out = {}
+    def _gid(x):
+        x = str(x)
+        return x if x.startswith("gid://") else "gid://shopify/Order/%s" % x
+    uniq = [i for i in dict.fromkeys(ids) if i]
+    if not uniq:
+        return out
+    q = ('query($ids:[ID!]!){ nodes(ids:$ids){ ... on Order { id name cancelledAt test '
+         'displayFinancialStatus currentTotalPriceSet{ shopMoney{ amount } } '
+         'totalRefundedSet{ shopMoney{ amount } } } } }')
+    for k in range(0, len(uniq), batch):
+        chunk = [_gid(i) for i in uniq[k:k + batch]]
+        d = shopify_gql(shop, token, q, {"ids": chunk})
+        for n in (((d.get("data") or {}).get("nodes")) or []):
+            if not isinstance(n, dict) or not n.get("id"):
+                continue
+            num = str(n["id"]).rsplit("/", 1)[-1]
+            total = float((((n.get("currentTotalPriceSet") or {}).get("shopMoney")) or {}).get("amount") or 0)
+            refunded = float((((n.get("totalRefundedSet") or {}).get("shopMoney")) or {}).get("amount") or 0)
+            out[num] = {
+                "paid": (n.get("displayFinancialStatus") or "").upper() == "PAID",
+                "total": total, "refunded": refunded,
+                "cancelled": bool(n.get("cancelledAt")) or bool(n.get("test")),
+                "name": n.get("name"),
+            }
+    return out
+
+
+def _create_invoice_rl(xc, body, max_retry=6):
+    """create-invoice respectând rata SmartBill. LIMITA REALĂ MĂSURATĂ: X-RateLimit-Limit=30/fereastră
+    (≈30/min); la depășire SmartBill dă 403 fără Retry-After + o penalizare „lipicioasă" (blocaj care
+    NU se ridică repede). Strategia: pasăm SUB limită (vezi pacing-ul adaptiv din emit) ca să nu declanșăm
+    penalizarea; aici doar retry RĂBDĂTOR cu cooldown de-o-fereastră dacă totuși o lovim.
+    Întoarce (ok, status, data, rate_limited) — rate_limited=True dacă am renunțat din cauza limitei."""
+    s, d = None, None
+    for attempt in range(max_retry):
+        s, d = xc.post("/api/actions/create-invoice", body)
+        txt = (json.dumps(d) if isinstance(d, (dict, list)) else str(d)).lower()
+        # ATENȚIE: SmartBill folosește HTTP 422 pt AMBELE — rate-limit ȘI erori de business (produs fără
+        # cod, date lipsă etc.). Tratăm 422 ca rate-limit DOAR dacă MESAJUL confirmă; altfel e eroare reală
+        # care NU se rezolvă prin retry (nu mai pierdem ~12 min/ordin retrying o eroare permanentă).
+        # Rate-limit: „Ai depasit limita maxima de requesturi admisa. Vei putea executa alte requesturi dupa N min".
+        rl_text = ("depasit limita maxima" in txt) or ("requesturi admisa" in txt) \
+            or ("executa alte requesturi" in txt) or ("too many request" in txt) \
+            or ("rate limit" in txt) or ("rate-limit" in txt) or ("throttl" in txt)
+        rate = rl_text or (s == 429)   # 429 = clar rate-limit; 422/403 DOAR cu mesaj de rate-limit
+        if rate:
+            m = re.search(r"dup[ăa]\s+(\d+)\s*min", txt)   # cooldown-ul exact din mesaj („dupa 10 min")
+            if m:
+                wait = int(m.group(1)) * 60 + 30
+            elif s == 422 or rl_text:
+                wait = 600   # penalizarea 422 lipicioasă ≈10 min — NU re-ataca des (resetează timerul)
+            else:
+                wait = min(60 * (attempt + 1), 180)   # 429 gentil
+            wait = min(wait, 660)
+            print("    ⏳ rate-limit SmartBill (status %s) — pauză %ds (retry %d/%d)" % (s, wait, attempt + 1, max_retry), flush=True)
+            time.sleep(wait); continue
+        ok = s == 200 and isinstance(d, dict) and d.get("accepted") and \
+            (not (d.get("invoices") or []) or any(i.get("success") for i in d.get("invoices") or []))
+        return ok, s, d, False
+    return False, s, d, True
+
+
 def cmd_inv_bulk(a):
     """Facturează TOATE comenzile plătite din ultimele --days zile (≈2 luni) care NU au factură,
     nu-s anulate/refunded și au încasări > 0. Shipping = inclus automat de SmartBill; data facturii = azi.
@@ -1738,6 +1839,12 @@ def cmd_inv_bulk(a):
         print("Nicio configurație xConnector (KB XCONNECTOR_SHOPS)."); return
     toks = {t.get("shopDomain"): t.get("adminToken") for t in load_shopify_tokens()}
     targets = _resolve_target_shops(a.shop, shops)
+    if getattr(a, "exclude", ""):
+        ex = set(d["shopDomain"] for d in _resolve_target_shops(a.exclude, shops))
+        before = len(targets)
+        targets = [sh for sh in targets if sh["shopDomain"] not in ex]
+        if before != len(targets):
+            print("  (exclus %d magazin(e) deja-procesate: %s)" % (before - len(targets), a.exclude))
     if not targets:
         print("Niciun magazin potrivit pt --shop=%r. Folosește prefix (GT) / domeniu / 'all'." % a.shop); return
     print("═" * 64)
@@ -1746,6 +1853,11 @@ def cmd_inv_bulk(a):
     print("Criterii: payment=PAID · neanulate · fără refund · încasări>0 · fără factură. Shipping inclus, data=azi.")
     print("═" * 64)
     G = dict(cand=0, inv=0, err=0, skip_inv=0, skip_xc=0, paid=0)
+    errmsgs = {}   # mesaj de eroare business → câte ori (ex „Produsul LIVRARE EXPRESS nu are codul specificat")
+    # Pacing ADAPTIV pt SmartBill (limită reală ≈30/min, penalizare lipicioasă la depășire).
+    # Pornim sub limită și încetinim singuri dacă totuși o atingem; persistă ÎNTRE magazine.
+    pace = 2.5   # secunde/factură ≈ 24/min — SUB plafonul de 30/fereastră, cu headroom pt
+                 # fluxul normal de facturare al xConnector care consumă din ACELAȘI bucket SmartBill
     for sh in targets:
         dom = sh["shopDomain"]
         st = toks.get(dom)
@@ -1756,30 +1868,30 @@ def cmd_inv_bulk(a):
         if not con:
             tail = (" (am: %s)" % ", ".join("%s=%s" % (c.get("id"), c.get("type")) for c in bills)) if bills else ""
             print("\n══ %s ══  ⚠ connector de facturare ambiguu/absent → alege --connector ID%s → skip" % (dom, tail)); continue
-        # 1) Shopify: comenzi plătite eligibile
-        paid = shopify_paid_uninvoiced(dom, st, dfrom)
-        if paid is None:
-            print("\n══ %s ══  ⚠ Shopify auth fail → skip" % dom); continue
-        G["paid"] += len(paid)
-        # 2) xConnector: name -> (orderId, has_invoice) în aceeași fereastră
-        xmap = {}
+        # 1) xConnector: TOATE comenzile din fereastră + statusul facturii (ZERO Shopify — bridge-ul nostru)
+        xorders = []
         for o in xc.orders(dfrom, dto, {"sort": "date", "sortDir": "desc"}):
             nm = o.get("orderName")
             if nm:
-                xmap[nm] = {"orderId": o.get("orderId"), "has_inv": inv_doc(o) is not None}
-        # 3) intersecție: eligibile, în xConnector, fără factură
-        todo, n_inv, n_xc = [], 0, 0
-        for name, info in paid:
-            x = xmap.get(name)
-            if not x:
-                n_xc += 1; continue
-            if x["has_inv"]:
-                n_inv += 1; continue
-            todo.append((name, x["orderId"], info["total"]))
-        G["cand"] += len(todo); G["skip_inv"] += n_inv; G["skip_xc"] += n_xc
+                xorders.append((nm, o.get("orderId"), inv_doc(o) is not None))
+        n_inv = sum(1 for _, _, hi in xorders if hi)
+        uninvoiced = [(nm, oid) for nm, oid, hi in xorders if not hi and oid]
+        # 2) Shopify TARGETAT: verifică plata DOAR pt comenzile fără factură (mic + fresh),
+        #    în loc să scanăm toate comenzile plătite (≈80% mai puține apeluri pe rația partajată)
+        stat = shopify_status_by_ids(dom, st, [oid for _, oid in uninvoiced])
+        if uninvoiced and not stat:
+            print("\n══ %s ══  ⚠ Shopify auth/empty → skip" % dom); continue
+        # 3) păstrează PLĂTITE + neanulate + fără refund + total>0
+        todo, n_paid = [], 0
+        for nm, oid in uninvoiced:
+            s_ = stat.get(str(oid).rsplit("/", 1)[-1])
+            if not s_ or not s_["paid"] or s_["cancelled"] or s_["refunded"] > 0 or s_["total"] <= 0:
+                continue
+            todo.append((nm, oid, s_["total"])); n_paid += 1
+        G["cand"] += len(todo); G["skip_inv"] += n_inv; G["paid"] += n_paid
         print("\n══ %s ══  [%s %s]" % (dom, con.get("type"), con.get("id")))
-        print("  plătite în fereastră: %d · au deja factură: %d · nu-s în xConnector: %d · DE FACTURAT: %d" % (
-            len(paid), n_inv, n_xc, len(todo)))
+        print("  comenzi xConnector: %d · cu factură: %d · fără factură: %d · din care PLĂTITE de facturat: %d" % (
+            len(xorders), n_inv, len(uninvoiced), len(todo)))
         # SAFETY: dacă aproape NICIUNA din comenzile plătite găsite în xConnector n-are factură ÎN xConnector,
         # magazinul facturează probabil ALTUNDE (SmartBill direct) → facturile nu apar aici → risc de DUBLĂ factură.
         matched = n_inv + len(todo)
@@ -1799,19 +1911,33 @@ def cmd_inv_bulk(a):
             body = {"orderId": oid, "connectorId": con["id"]}
             if getattr(a, "lang", None):
                 body["languageCode"] = a.lang
-            s, d = xc.post("/api/actions/create-invoice", body)
-            ok = s == 200 and isinstance(d, dict) and d.get("accepted") and \
-                (not (d.get("invoices") or []) or any(i.get("success") for i in d.get("invoices") or []))
+            ok, s, d, limited = _create_invoice_rl(xc, body)
             if ok:
                 inv = next((i for i in (d.get("invoices") or []) if i.get("success")), {})
                 print("  ✅ %-12s → %s %s" % (name, inv.get("invoiceSerie") or "", inv.get("invoiceNumber") or "")); G["inv"] += 1
             else:
-                print("  ❌ %-12s → %s" % (name, _err_text(s, d))); G["err"] += 1
+                em = ""
+                if isinstance(d, dict):
+                    invs = d.get("invoices") or []
+                    em = (invs[0].get("errorMessage") if invs and isinstance(invs[0], dict) else None) or d.get("errorMessage") or ""
+                em = (em or _err_text(s, d)).strip()[:90]
+                errmsgs[em] = errmsgs.get(em, 0) + 1
+                print("  ❌ %-12s → %s" % (name, em)); G["err"] += 1
+            if limited:
+                # am atins penalizarea SmartBill chiar și după retries → încetinim GLOBAL (persistă între magazine)
+                old = pace; pace = min(pace + 0.7, 4.0)
+                if pace != old:
+                    print("  🐢 încetinesc la %.1fs/factură (≈%d/min) ca să nu mai lovesc limita SmartBill" % (pace, round(60 / pace)), flush=True)
+                time.sleep(90)   # cooldown suplimentar ca să se ridice penalizarea lipicioasă
             done += 1
-            time.sleep(0.2)
+            time.sleep(pace)   # pacing adaptiv ≈28/min, SUB limita reală SmartBill de 30/fereastră
     print("\n" + "═" * 64)
-    print("TOTAL: plătite=%d · candidați(fără factură)=%d · %s · deja facturate=%d · în afara xConnector=%d · erori=%d" % (
-        G["paid"], G["cand"], ("FACTURATE=%d" % G["inv"]) if a.apply else "DRY-RUN (0 emise)", G["skip_inv"], G["skip_xc"], G["err"]))
+    print("TOTAL: candidați plătite-fără-factură=%d · %s · deja facturate(xConnector)=%d · erori=%d" % (
+        G["cand"], ("FACTURATE=%d" % G["inv"]) if a.apply else "DRY-RUN (0 emise)", G["skip_inv"], G["err"]))
+    if errmsgs:
+        print("ERORI DE BUSINESS (NU rate-limit — necesită fix config SmartBill/produs, NU se rezolvă prin retry):")
+        for msg, n in sorted(errmsgs.items(), key=lambda kv: -kv[1]):
+            print("  %4d×  %s" % (n, msg))
     if not a.apply and G["cand"]:
         print("→ Rulează din nou cu --apply ca să emiți cele %d facturi." % G["cand"])
 
