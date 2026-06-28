@@ -1694,7 +1694,7 @@ def shopify_paid_uninvoiced(shop, token, since_date, max_pages=40):
     out, cursor, truncated = [], None, False
     for _ in range(max_pages):
         after = ', after:"%s"' % cursor if cursor else ""
-        q = ('query{ orders(first:100%s, query:"financial_status:paid AND created_at:>=%s"){ '
+        q = ('query{ orders(first:100%s, sortKey:CREATED_AT, reverse:true, query:"financial_status:paid AND created_at:>=%s"){ '
              'edges{ cursor node{ name cancelledAt test displayFinancialStatus '
              'currentTotalPriceSet{ shopMoney{ amount } } '
              'totalRefundedSet{ shopMoney{ amount } } } } pageInfo{ hasNextPage } } }') % (after, since_date)
@@ -1780,6 +1780,16 @@ def cmd_inv_bulk(a):
         print("\n══ %s ══  [%s %s]" % (dom, con.get("type"), con.get("id")))
         print("  plătite în fereastră: %d · au deja factură: %d · nu-s în xConnector: %d · DE FACTURAT: %d" % (
             len(paid), n_inv, n_xc, len(todo)))
+        # SAFETY: dacă aproape NICIUNA din comenzile plătite găsite în xConnector n-are factură ÎN xConnector,
+        # magazinul facturează probabil ALTUNDE (SmartBill direct) → facturile nu apar aici → risc de DUBLĂ factură.
+        matched = n_inv + len(todo)
+        if matched >= 20 and (n_inv / matched) < 0.10:
+            print("  🚩 DOAR %.0f%% din comenzile plătite din xConnector au factură ÎN xConnector → %s facturează probabil ALTUNDE" % (
+                100.0 * n_inv / matched, dom))
+            print("     (SmartBill direct / alt sistem). Facturile existente NU apar aici ⇒ RISC DE DUBLĂ FACTURĂ.")
+            if a.apply and not a.force:
+                print("     ⛔ SKIP emitere (fără --force). Verifică întâi în SmartBill, apoi `--apply --force` dacă chiar trebuie.")
+                continue
         done = 0
         for name, oid, total in todo:
             if a.limit and done >= a.limit:
