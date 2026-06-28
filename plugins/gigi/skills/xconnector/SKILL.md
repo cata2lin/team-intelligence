@@ -26,6 +26,7 @@ uv run xconnector.py awb-regen --order GT123 --parcels N [--connector ID] [--app
 uv run xconnector.py awb-label --order GT123 [--shop d]                                  # link etichetă PDF
 uv run xconnector.py order-cancel --order GT123 [--shop d] [--force] [--apply]           # anulează AWB (dacă neplecat) + comanda
 uv run xconnector.py inv-make  --order GT123 [--connector ID] [--lang ro] [--apply]      # creează factură (SMART_BILL default)
+uv run xconnector.py capture   [--shop GT|all] [--days 60] [--limit N] [--apply]   # COD: livrat→mark paid · refuzat→tag 'refuzata' · în curs→verifică DPD
 uv run xconnector.py inv-bulk  [--shop GT|all] [--days 60] [--connector ID] [--lang ro] [--limit N] [--apply]  # FACTUREAZĂ ÎN MASĂ comenzile plătite fără factură
 uv run xconnector.py inv-cancel | inv-storno | inv-regen --order GT123 [--apply]         # anulează / storno(revert) / regenerează
 uv run xconnector.py inv-doc   --order GT123                                             # link PDF factură
@@ -125,6 +126,19 @@ Selectează etichetele **nedescărcate** (`downloaded=false` = coada de print), 
 - **`--by-sku`** = NU printează, arată **coada grupată pe SKU** (câte etichete are fiecare produs în coadă, cele mai multe primele) — ca să vezi ce produs are cele mai multe comenzi de expediat și să-l printezi pe ăla (`--sku <top> --apply`). (SKU-ul nu e în DTO-ul xConnector → se ia din Shopify line items, doar pt comenzile pending.)
 - ⚠️ **`--apply` DESCARCĂ → flip `downloaded`** (etichetele ies din coada de print). Dry-run by default (listează, NU descarcă).
 - **`--test`** = rulează pe etichete **DEJA descărcate** (`downloaded=true`) → ZERO impact pe coada reală (pt verificare). Cu `--test`, `--apply` e sigur.
+
+### `capture` — COD: mark-paid pe livrare (fluxul pending → livrat → paid → facturat)
+Pipeline-ul complet pt COD: comenzile sunt **PENDING** până le încasează curierul. `capture` rezolvă fiecare comandă PENDING
+din ultimele `--days` zile, după **statusul REAL de livrare**:
+- sursă status = **AWBprint** `aggregated_status` (batch, o conexiune); pt cele **în curs** (in_transit / unsuccessful_delivery /
+  redirected / customer_pickup / fără status) face **cross-check LIVE pe API-ul DPD** (`api.dpd.ro/v1/track`, creds `DPD_RO_*` din KB);
+- **LIVRAT** (`delivered`, sau DPD „Delivered/Collected") → **`orderMarkAsPaid`** în Shopify (= capture COD);
+- **REFUZAT / întors la expeditor** (`back_to_sender`/`returning_to_sender`/`refused`/`lost`, sau DPD „Return to Sender/Refused") → **tag `refuzata`**;
+- **ÎN CURS / nesigur** (DPD „Returned to Office", „Prepared for Self-collecting", in-transit) → **lăsat** (re-verificat la rularea următoare; NU marchez/tag prematur);
+- `incorrect_address`/`cancelled` → lăsate (CS / deja anulate).
+CONSERVATOR by design: `customer_pickup` = pregătit la locker, NU încă ridicat → NU se marchează paid; „Returned to Office" ≠ refuz.
+`--shop` prefix/domeniu/CSV/`all`; `--limit N`; **dry-run by default** (listează acțiunile), scrie în Shopify DOAR cu `--apply`.
+**Apoi** `inv-bulk` facturează cele devenite PAID. Flux uzual: `capture --shop X --apply` → `inv-bulk --shop X --apply`.
 
 ### Facturi prin API (mirror AWB)
 Connector de facturare = tip **SMART_BILL** (ales automat dacă e unul singur; altfel `--connector <id>`). Dry-run by default.

@@ -1816,6 +1816,236 @@ def cmd_inv_bulk(a):
         print("→ Rulează din nou cu --apply ca să emiți cele %d facturi." % G["cand"])
 
 
+# ── CAPTURE COD: PENDING + LIVRAT → mark paid · REFUZAT → tag · ÎN CURS → verifică DPD ──
+DELIVERED_ST = {"delivered"}   # COLECTAT + plătit COD. „customer_pickup" = pregătit la locker, NU încă ridicat → în curs.
+REFUSED_ST = {"back_to_sender", "returning_to_sender", "refused", "lost", "lost_in_transit"}
+PROGRESS_ST = {"in_transit", "waiting_for_courier", "deferred_delivery", "redirected", "on_hold", "customer_pickup",
+               "fulfilled", "not_fulfilled", "unsuccessful_delivery", "awaiting_shipment_generation_initialization", None}
+# {incorrect_address, errors_incorrect_shipping_address, cancelled} = NU le atingem (CS / deja anulate)
+
+
+def awbprint_batch(names):
+    """{order_number: (aggregated_status, tracking_number, courier_name)} dintr-o singură conexiune AWBprint."""
+    out = {}
+    if not names:
+        return out
+    try:
+        import pg8000.native
+        from urllib.parse import urlparse, unquote
+    except Exception:
+        return out
+    url = os.environ.get("DATABASE_URL_AWBPRINT") or ""
+    if not url:
+        try:
+            url = subprocess.run(["uv", "run", KB, "secret-get", "DATABASE_URL_AWBPRINT"],
+                                 capture_output=True, text=True, timeout=40).stdout.strip()
+        except Exception:
+            url = ""
+    if not url.startswith("postgres"):
+        return out
+    u = urlparse(url); con = None
+    try:
+        con = pg8000.native.Connection(user=unquote(u.username or ""), password=unquote(u.password or ""),
+                                       host=u.hostname, port=u.port or 5432, database=u.path.lstrip("/"), ssl_context=True)
+        rows = con.run("select order_number, aggregated_status, tracking_number, courier_name "
+                       "from orders where order_number = any(:ns) order by id desc", ns=list(names))
+        for nm, st, trk, cur in rows:
+            if nm not in out:   # prima = cea mai nouă (id desc)
+                out[nm] = (st, trk, cur)
+    except Exception:
+        pass
+    finally:
+        if con is not None:
+            try: con.close()
+            except Exception: pass
+    return out
+
+
+def _dpd_creds():
+    u = os.environ.get("DPD_RO_USERNAME"); p = os.environ.get("DPD_RO_PASSWORD")
+    if not u:
+        try: u = subprocess.run(["uv", "run", KB, "secret-get", "DPD_RO_USERNAME"], capture_output=True, text=True, timeout=30).stdout.strip()
+        except Exception: u = ""
+    if not p:
+        try: p = subprocess.run(["uv", "run", KB, "secret-get", "DPD_RO_PASSWORD"], capture_output=True, text=True, timeout=30).stdout.strip()
+        except Exception: p = ""
+    return (u, p) if (u and p) else (None, None)
+
+
+def dpd_track_sync(awbs):
+    """{awb: latest_description} via api.dpd.ro/v1/track (batch de 10). {} fără creds/AWB."""
+    out = {}
+    u, p = _dpd_creds()
+    uniq = [a for a in dict.fromkeys(awbs) if a]
+    if not (u and p) or not uniq:
+        return out
+    for i in range(0, len(uniq), 10):
+        batch = uniq[i:i + 10]
+        body = {"userName": u, "password": p, "language": "EN", "lastOperationOnly": True,
+                "parcels": [{"id": a} for a in batch]}
+        try:
+            s, b = http("POST", "https://api.dpd.ro/v1/track", {"Content-Type": "application/json"}, body)
+            d = json.loads(b)
+            if not isinstance(d, dict) or d.get("error"):
+                continue
+            for awb, parcel in zip(batch, d.get("parcels") or []):
+                if not isinstance(parcel, dict) or parcel.get("error"):
+                    continue
+                ops = parcel.get("operations") or []
+                if not ops:
+                    continue
+                latest = max(ops, key=lambda o: o.get("dateTime", ""))
+                out[awb] = (latest.get("description") or "").strip()
+        except Exception:
+            pass
+        time.sleep(0.2)
+    return out
+
+
+def _dpd_state(desc):
+    """Mapează descrierea DPD (EN) în delivered / refused / progress. CONSERVATOR: doar stările FINALE clare.
+    'Returned to Office'/'Prepared for Self-collecting' = ÎN CURS (poate fi redlivrat/ridicat), NU refuz/livrare."""
+    d = (desc or "").lower()
+    if any(k in d for k in ("not deliver", "undeliver", "unsuccess", "failed deliver")):
+        return "progress"
+    if ("delivered" in d) or ("collected by" in d) or ("self-collected" in d) or ("picked up by" in d):
+        return "delivered"
+    if ("refus" in d) or ("reject" in d) or ("returned to sender" in d) or ("return to sender" in d) \
+       or ("returning to sender" in d) or ("returned to consignor" in d):
+        return "refused"
+    return "progress"
+
+
+def shopify_pending_orders(shop, token, since_date, max_pages=40):
+    """Comenzi cu payment status PENDING, neanulate, total>0, în fereastră. [(name, gid, total)]. None la auth fail."""
+    out, cursor = [], None
+    for _ in range(max_pages):
+        after = ', after:"%s"' % cursor if cursor else ""
+        q = ('query{ orders(first:100%s, sortKey:CREATED_AT, reverse:true, query:"financial_status:pending AND created_at:>=%s"){ '
+             'edges{ cursor node{ id name cancelledAt test displayFinancialStatus '
+             'currentTotalPriceSet{ shopMoney{ amount } } } } pageInfo{ hasNextPage } } }') % (after, since_date)
+        d = shopify_gql(shop, token, q)
+        edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
+        if not edges and not out and d.get("errors"):
+            return None
+        for e in edges:
+            n = e["node"]
+            if n.get("cancelledAt") or n.get("test"):
+                continue
+            if (n.get("displayFinancialStatus") or "").upper() != "PENDING":
+                continue
+            total = float((((n.get("currentTotalPriceSet") or {}).get("shopMoney")) or {}).get("amount") or 0)
+            if total <= 0:
+                continue
+            out.append((n.get("name"), n.get("id"), total))
+        pi = (((d.get("data") or {}).get("orders") or {}).get("pageInfo")) or {}
+        if not pi.get("hasNextPage"):
+            break
+        cursor = edges[-1]["cursor"]
+    return out
+
+
+def shopify_mark_paid(shop, token, gid):
+    d = shopify_gql(shop, token, 'mutation($id:ID!){ orderMarkAsPaid(input:{id:$id}){ order{ displayFinancialStatus } userErrors{ field message } } }', {"id": gid})
+    r = ((d.get("data") or {}).get("orderMarkAsPaid")) or {}
+    ue = r.get("userErrors") or []
+    return (not ue and not d.get("errors")), (ue or d.get("errors") or (r.get("order") or {}).get("displayFinancialStatus"))
+
+
+def shopify_add_tags(shop, token, gid, tags):
+    d = shopify_gql(shop, token, 'mutation($id:ID!,$t:[String!]!){ tagsAdd(id:$id, tags:$t){ userErrors{ field message } } }', {"id": gid, "t": tags})
+    r = ((d.get("data") or {}).get("tagsAdd")) or {}
+    ue = r.get("userErrors") or []
+    return (not ue and not d.get("errors")), (ue or d.get("errors"))
+
+
+def cmd_capture(a):
+    """Pt comenzile COD PENDING din ultimele --days zile:
+      LIVRATE → mark paid (orderMarkAsPaid) · REFUZATE/întoarse → tag 'refuzata' · ÎN CURS → verific live DPD → resolv.
+    Apoi `inv-bulk` facturează cele plătite. Sursa status = AWBprint (aggregated_status), cross-check DPD pe cele în curs.
+    Dry-run by default; scrie în Shopify DOAR cu --apply."""
+    import datetime
+    dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
+    shops = load_shops()
+    toks = {t.get("shopDomain"): t.get("adminToken") for t in load_shopify_tokens()}
+    targets = _resolve_target_shops(a.shop, shops)
+    if not targets:
+        print("Niciun magazin potrivit pt --shop=%r." % a.shop); return
+    print("═" * 64)
+    print("CAPTURE COD · de la %s · %s" % (dfrom, "APPLY (scrie în Shopify)" if a.apply else "DRY-RUN"))
+    print("PENDING → livrat=mark paid · refuzat/întors=tag 'refuzata' · în curs=verific DPD live → resolv.")
+    print("═" * 64)
+    G = dict(pend=0, paid=0, ref=0, prog=0, err=0, skip=0)
+    for sh in targets:
+        dom = sh["shopDomain"]; st = toks.get(dom)
+        if not st:
+            print("\n══ %s ══  ⚠ fără token Shopify → skip" % dom); continue
+        pend = shopify_pending_orders(dom, st, dfrom)
+        if pend is None:
+            print("\n══ %s ══  ⚠ Shopify auth fail → skip" % dom); continue
+        G["pend"] += len(pend)
+        awb = awbprint_batch([p[0] for p in pend])
+        # 1) clasific din AWBprint; strâng cele „în curs" pe DPD (doar curier DPD + are tracking)
+        actions = {}   # name -> ('paid'|'refuzata'|'leave')
+        dpd_check = {}  # name -> tracking
+        for name, gid, total in pend:
+            stt, trk, cur = awb.get(name, (None, None, None))
+            if stt in DELIVERED_ST:
+                actions[name] = "paid"
+            elif stt in REFUSED_ST:
+                actions[name] = "refuzata"
+            elif stt in ("incorrect_address", "errors_incorrect_shipping_address", "cancelled"):
+                actions[name] = "leave"
+            else:  # în curs / fără status
+                if trk and cur and "dpd" in (cur or "").lower():
+                    dpd_check[name] = trk
+                else:
+                    actions[name] = "leave"
+        # 2) DPD live pe cele în curs
+        if dpd_check:
+            res = dpd_track_sync(list(dpd_check.values()))
+            inv = {v: k for k, v in dpd_check.items()}
+            for trk, desc in res.items():
+                nm = inv.get(trk)
+                if not nm:
+                    continue
+                stt = _dpd_state(desc)
+                actions[nm] = "paid" if stt == "delivered" else ("refuzata" if stt == "refused" else "leave")
+            for nm in dpd_check:
+                actions.setdefault(nm, "leave")
+        n_paid = sum(1 for v in actions.values() if v == "paid")
+        n_ref = sum(1 for v in actions.values() if v == "refuzata")
+        n_leave = sum(1 for v in actions.values() if v == "leave")
+        print("\n══ %s ══  PENDING: %d → de marcat PAID(livrate): %d · de tag-uit 'refuzata': %d · lăsate(în curs/CS): %d  [DPD verificate: %d]" % (
+            dom, len(pend), n_paid, n_ref, n_leave, len(dpd_check)))
+        done = 0
+        for name, gid, total in pend:
+            act = actions.get(name, "leave")
+            if act == "leave":
+                continue
+            if a.limit and done >= a.limit:
+                print("  … oprit la --limit %d" % a.limit); break
+            if not a.apply:
+                print("  • DRY %-9s %-12s total=%.2f" % (act.upper(), name, total)); done += 1; continue
+            if act == "paid":
+                ok, info = shopify_mark_paid(dom, st, gid)
+                print("  %s %-12s → PAID" % ("✅" if ok else "❌", name) if ok else "  ❌ %-12s mark-paid: %s" % (name, info))
+                G["paid" if ok else "err"] += 1
+            else:  # refuzata
+                ok, info = shopify_add_tags(dom, st, gid, ["refuzata"])
+                print("  %s %-12s → tag 'refuzata'" % ("🏷️" if ok else "❌", name) if ok else "  ❌ %-12s tag: %s" % (name, info))
+                G["ref" if ok else "err"] += 1
+            done += 1
+            time.sleep(0.15)
+    print("\n" + "═" * 64)
+    print("TOTAL: pending=%d · %s · %s · erori=%d" % (
+        G["pend"],
+        ("PAID=%d · tag refuzata=%d" % (G["paid"], G["ref"])) if a.apply else "DRY (0 scrise)",
+        "—", G["err"]))
+    if not a.apply:
+        print("→ --apply ca să scrii în Shopify, apoi `inv-bulk --apply` ca să facturezi cele plătite.")
+
+
 # ── Setare adresă comandă (Shopify orderUpdate.shippingAddress) → opțional AWB ──
 # Pt comenzi COD adresa SE poate modifica (line items NU — ăla e cancel+replace). Dry-run by default.
 def shopify_order_address(shop, token, name):
@@ -2294,7 +2524,7 @@ def main():
     ap.add_argument("cmd", choices=["summary", "address-issues", "recheck", "correct", "connectors", "fulfill",
                                     "not-downloaded", "orders", "links", "print-batch",
                                     "awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
-                                    "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc", "inv-bulk", "addr-set",
+                                    "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc", "inv-bulk", "capture", "addr-set",
                                     "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
     ap.add_argument("--shop"); ap.add_argument("--order"); ap.add_argument("--days", type=int, default=60)
     ap.add_argument("--apply", action="store_true"); ap.add_argument("--json", action="store_true")
@@ -2372,6 +2602,8 @@ def main():
         cmd_recheck(a); return
     if a.cmd == "inv-bulk":
         cmd_inv_bulk(a); return
+    if a.cmd == "capture":
+        cmd_capture(a); return
     import datetime
     a.dto = datetime.date.today().isoformat()
     a.dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
