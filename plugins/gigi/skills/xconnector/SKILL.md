@@ -26,6 +26,7 @@ uv run xconnector.py awb-regen --order GT123 --parcels N [--connector ID] [--app
 uv run xconnector.py awb-label --order GT123 [--shop d]                                  # link etichetă PDF
 uv run xconnector.py order-cancel --order GT123 [--shop d] [--force] [--apply]           # anulează AWB (dacă neplecat) + comanda
 uv run xconnector.py inv-make  --order GT123 [--connector ID] [--lang ro] [--apply]      # creează factură (SMART_BILL default)
+uv run xconnector.py inv-bulk  [--shop GT|all] [--days 60] [--connector ID] [--lang ro] [--limit N] [--apply]  # FACTUREAZĂ ÎN MASĂ comenzile plătite fără factură
 uv run xconnector.py inv-cancel | inv-storno | inv-regen --order GT123 [--apply]         # anulează / storno(revert) / regenerează
 uv run xconnector.py inv-doc   --order GT123                                             # link PDF factură
 uv run xconnector.py addr-set  --order GT123 --city "…" --zip "…" [--address1 …] [--province …] [--make-awb] [--apply]
@@ -131,6 +132,13 @@ Connector de facturare = tip **SMART_BILL** (ales automat dacă e unul singur; a
 - **`inv-cancel`** / **`inv-storno`** — anulează (`cancel-invoice`) / stornează (`revert-invoice`; `--refund-id` pt storno parțial pe un refund).
 - **`inv-regen`** — anulează + creează din nou (create gardat pe succesul anulării).
 - **`inv-doc`** — link-ul PDF al facturii (din documentul `INVOICE` al comenzii).
+- **`inv-bulk`** — **facturare ÎN MASĂ**: emite factură pt TOATE comenzile din ultimele `--days` zile (≈2 luni) care:
+  **payment status = PAID**, **neanulate**, **fără refund**, **încasări (total) > 0** și **NU au deja factură**.
+  Shipping-ul e **inclus automat** de SmartBill (factura reflectă comanda întreagă), iar **data facturii = azi** (ziua rulării).
+  Filtrarea financiară vine din **Shopify** (xConnector `getOrders` n-are payment status), iar verificarea „are deja factură"
+  + `orderId` din **xConnector** (`documents` INVOICE). `--shop` = prefix (`GT`)/domeniu/CSV/`all` (gol = toate). `--limit N` plafonează
+  emiterile/rulare. **Dry-run by default** (listează candidații per magazin); emite real DOAR cu `--apply`. Sare comenzile care nu-s
+  încă în xConnector (le raportează separat). Connector de facturare ales ca la `inv-make` (`--connector ID` dacă-s mai mulți).
 Guard: `--connector` nebilling sau `--refund-id` nenumeric → abort (nu trimite orbește pe document financiar).
 
 ## Auth (cheie API xConnector + token Shopify Admin, per magazin)
