@@ -62,6 +62,7 @@ ORDER_PFX = {"EST": "Esteban", "GT": "George Talent", "NUB": "Nubra", "GEN": "Ge
              "BON": "Bonhaus RO", "BONBG": "Bonhaus BG", "CZ": "Bonhaus CZ", "PL": "Bonhaus PL", "CARP": "Carpetto",
              "COV": "Covoria", "APR": "Apreciat", "ROSSI": "Rossi Nails"}
 ORDER_RE = re.compile(r"\b(EST|GT|NUB|GRAND|GRAN|MAG|OFER|RED|BONBG|BON|CZ|PL|BELA|GEN|CARP|COV|APR|ROSSI)[ -]?(\d{4,7})\b", re.I)
+AWB_RE = re.compile(r"\b\d{10,16}\b")   # număr de AWB menționat în mesaj (curier) — pt căutare în profit_orders
 # brand -> limba pieței (semnal SIGUR de limbă, mai fiabil decât detecția LLM pe comentarii scurte)
 STORE_LANG = {"Bonhaus CZ": "cz", "Bonhaus PL": "pl", "Bonhaus BG": "bg"}
 # brand (store_name) -> telefon comenzi (luat de pe site-urile publice; fetch-brand-phones)
@@ -384,51 +385,65 @@ def norm_phone(p):
     return d[-9:] if len(d) >= 9 else ""
 
 PROFIT_DB = os.environ.get("PROFIT_DB", "/root/Scripturi/data/profitability.db")
-def lookup_orders(email, phone, order_names=()):
+def lookup_orders(email, phone, order_names=(), awbs=()):
     """GROUNDING self-contained (pt VPS, fără SSH/uv): comenzile clientului din DB metrics (pg8000, după email/telefon/nr-comandă)
-    + status livrare/AWB/curier din profitability.db (sqlite local). Întoarce [] dacă nu merge (fail-safe)."""
+    + status livrare/AWB/curier din profitability.db (sqlite local), inclusiv căutare DUPĂ AWB. [] dacă nu merge (fail-safe)."""
     try:
         import pg8000.dbapi, sqlite3
     except Exception:
         return []
-    url = secret("DATABASE_URL_METRICS")
-    if not url or not (email or phone or order_names):
-        return []
     byname = {}
-    try:
-        u = urllib.parse.urlparse(url)
-        conn = pg8000.dbapi.connect(ssl_context=True, user=urllib.parse.unquote(u.username or ""),
-                                    password=urllib.parse.unquote(u.password or ""), host=u.hostname,
-                                    port=u.port or 5432, database=(u.path or "/").lstrip("/"))
-        cur = conn.cursor()
-        cols = 'name,"totalPrice","financialStatus","shopifyCreatedAt"'
-        rows = []
-        if email:
-            cur.execute('SELECT %s FROM orders WHERE lower(email)=lower(%%s) ORDER BY "shopifyCreatedAt" DESC LIMIT 12' % cols, (email,))
-            rows += cur.fetchall()
-        ph = norm_phone(phone)
-        if ph:
-            cur.execute('SELECT %s FROM orders WHERE phone LIKE %%s OR "shippingPhone" LIKE %%s ORDER BY "shopifyCreatedAt" DESC LIMIT 12' % cols, ("%" + ph, "%" + ph))
-            rows += cur.fetchall()
-        ons = [o for o in dict.fromkeys(order_names) if o]
-        if ons:   # și după numărul de comandă menționat în mesaj (crucial pt WISMO)
-            cur.execute('SELECT %s FROM orders WHERE name IN (%s)' % (cols, ",".join(["%s"] * len(ons))), ons)
-            rows += cur.fetchall()
-        conn.close()
-        for r in rows:
-            byname[r[0]] = {"o": r[0], "total": float(r[1] or 0), "fin": r[2], "date": str(r[3])[:10],
-                            "brand": store_prefix(r[0]) or "?", "deliv": "?", "awb": "", "courier": "", "skus": ""}
-    except Exception:
-        return list(byname.values())
-    names = list(byname.keys())
-    if names and os.path.exists(PROFIT_DB):
+    # 1) metrics (comenzi Shopify) după email/telefon/nr-comandă
+    url = secret("DATABASE_URL_METRICS")
+    if url and (email or phone or order_names):
+        try:
+            u = urllib.parse.urlparse(url)
+            conn = pg8000.dbapi.connect(ssl_context=True, user=urllib.parse.unquote(u.username or ""),
+                                        password=urllib.parse.unquote(u.password or ""), host=u.hostname,
+                                        port=u.port or 5432, database=(u.path or "/").lstrip("/"))
+            cur = conn.cursor()
+            cols = 'name,"totalPrice","financialStatus","shopifyCreatedAt"'
+            rows = []
+            if email:
+                cur.execute('SELECT %s FROM orders WHERE lower(email)=lower(%%s) ORDER BY "shopifyCreatedAt" DESC LIMIT 12' % cols, (email,))
+                rows += cur.fetchall()
+            ph = norm_phone(phone)
+            if ph:
+                cur.execute('SELECT %s FROM orders WHERE phone LIKE %%s OR "shippingPhone" LIKE %%s ORDER BY "shopifyCreatedAt" DESC LIMIT 12' % cols, ("%" + ph, "%" + ph))
+                rows += cur.fetchall()
+            ons = [o for o in dict.fromkeys(order_names) if o]
+            if ons:
+                cur.execute('SELECT %s FROM orders WHERE name IN (%s)' % (cols, ",".join(["%s"] * len(ons))), ons)
+                rows += cur.fetchall()
+            conn.close()
+            for r in rows:
+                byname[r[0]] = {"o": r[0], "total": float(r[1] or 0), "fin": r[2], "date": str(r[3])[:10],
+                                "brand": store_prefix(r[0]) or "?", "deliv": "?", "awb": "", "courier": "", "skus": ""}
+        except Exception:
+            pass
+    # 2) profit_orders (sqlite LOCAL): status/AWB/curier — pe nume (îmbogățire) ȘI pe AWB (găsește comanda din AWB-ul din mesaj)
+    aws = [a for a in dict.fromkeys(awbs) if a]
+    if os.path.exists(PROFIT_DB) and (byname or aws):
         try:
             c = sqlite3.connect(PROFIT_DB)
-            q = "SELECT order_name,status_category,skus,awb,courier_key FROM profit_orders WHERE order_name IN (%s)" % ",".join("?" * len(names))
-            for r in c.execute(q, names):
-                o = byname.get(r[0])
-                if o:
+            def _apply(r, create=False):
+                nm = r[0]
+                o = byname.get(nm)
+                if o is None and create:
+                    o = {"o": nm, "total": 0, "fin": "", "date": "", "brand": store_prefix(nm) or "?",
+                         "deliv": "?", "awb": "", "courier": "", "skus": ""}
+                    byname[nm] = o
+                if o is not None:
                     o["deliv"] = r[1] or "?"; o["skus"] = r[2] or ""; o["awb"] = r[3] or ""; o["courier"] = r[4] or ""
+            if byname:
+                names = list(byname.keys())
+                q = "SELECT order_name,status_category,skus,awb,courier_key FROM profit_orders WHERE order_name IN (%s)" % ",".join("?" * len(names))
+                for r in c.execute(q, names):
+                    _apply(r)
+            if aws:   # căutare DUPĂ AWB → găsește comanda chiar dacă n-avem email/nr-comandă (WISMO cu AWB)
+                qa = "SELECT order_name,status_category,skus,awb,courier_key FROM profit_orders WHERE awb IN (%s)" % ",".join("?" * len(aws))
+                for r in c.execute(qa, aws):
+                    _apply(r, create=True)
             c.close()
         except Exception:
             pass
@@ -831,10 +846,12 @@ def main():
 
         orders, other = [], []
         elsewhere = "necunoscut (fără email/telefon real — pe comentarii publice nu se poate lega)"
-        if a.ground and (email or phone or ORDER_RE.search(blob + " " + last_cust)):
-            # GROUNDING self-contained (VPS/cron): comenzi reale din DB metrics + status/AWB din profitability.db
-            _onames = ["".join(m.group(0).split()).replace("-", "").upper() for m in ORDER_RE.finditer(blob + " " + last_cust)]
-            orders = lookup_orders(email, phone, _onames)
+        _gtxt = blob + " " + last_cust
+        if a.ground and (email or phone or ORDER_RE.search(_gtxt) or AWB_RE.search(_gtxt)):
+            # GROUNDING self-contained (VPS/cron): comenzi reale din DB metrics + status/AWB din profitability.db (nume, nr-comandă, AWB)
+            _onames = ["".join(m.group(0).split()).replace("-", "").upper() for m in ORDER_RE.finditer(_gtxt)]
+            _awbs = AWB_RE.findall(_gtxt)
+            orders = lookup_orders(email, phone, _onames, _awbs)
             if (store_name == "magazinul nostru") and orders:
                 store_name = orders[0].get("brand") or store_name
             elsewhere = ("grounded — %d comenzi găsite în DB" % len(orders)) if orders else "grounded — nicio comandă găsită în DB"
