@@ -191,9 +191,16 @@ uv run scripts/compliance.py --store OFER --gdpr --anpc \
    `reference/pitfalls.md` → „Footer ANPC/SOL badges" pentru cazurile pe temă (Dawn custom-liquid,
    GemPages `#gXXXX`, `.anpc` injectat în theme.liquid, Ella linklist-config).
 ```bash
-uv run scripts/footer_badges.py add --store CARP --bg "#332f2e" --apply   # Dawn: secțiune custom-liquid full-bleed
-uv run scripts/footer_badges.py clean-text --store ROSSI --apply          # scoate linkuri text ANPC/SOL din meniuri
+uv run scripts/footer_badges.py add       --store CARP  --bg "#332f2e" --apply  # Dawn: secțiune custom-liquid full-bleed
+uv run scripts/footer_badges.py clean-text --store ROSSI --apply                 # scoate linkuri text ANPC/SOL (REFUZĂ dacă n-are iconițe)
+uv run scripts/footer_badges.py gdpr-link  --store RED   --apply                 # Dawn: coloană legală (Termeni/Politica/Livrare/Ștergere date) + bloc link_list
 ```
+> ⚠️ Footer Dawn: un meniu se randează DOAR dacă un **bloc `link_list`** din secțiune îl referențiază (meniul existent nu e destul — a ascuns linkul GDPR pe RED/COV). `gdpr-link` face și meniul și blocul.
+
+### Interpretarea auditului — semnale FALSE (nu risipi efort)
+- **„0/N meta produse" ≠ conținut subțire.** Magazinele deals (MAG/RED/OFER/BON/APR/COV/NOC…) au **landing pages** (GemPages/PageFly) sau blocuri temă cu copy unic (200–860 cuvinte) deși câmpul `seo.description` din API e GOL. **NU genera/suprascrie descrieri** pe semnalul API — distrugi landing-page-urile. `seo_audit.py` afișează acum nr. cuvinte din body live (>350 = lasă-l).
+- **`<title>=''` + tot FAIL pe LIVE = FETCH BLOCAT (Cloudflare), nu pagină ruptă.** Verifică în browser; Googlebot nu e blocat.
+- **`seo.title=0/N` din API = de obicei non-issue** (Shopify nu-l stochează când = titlul; `<title>` live e corect).
 Rulat pe toate cele 21 magazine (iun 2026): pagina GDPR pe toate; trader-id+ANPC în Termeni pe toate RO;
 iconițe footer pe magazinele care nu le aveau, cu fundal = culoarea footer-ului (Esteban #232323,
 Belasil #FDDC4A, Carpetto #332f2e, Covoria #334FB4, Reduceri #121214, Apreciat #1a1a1a).

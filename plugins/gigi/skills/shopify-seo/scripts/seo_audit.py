@@ -105,6 +105,19 @@ if c0:
 if prod:
     h = fetch_live(f"https://{pub}/products/{prod}")
     tp, badp = types(h); t = title_of(h); db, tok = brand_doubled(t)
+    # FETCH-BLOCK guard: deals storefronts (Cloudflare) often 403 this urllib fetch
+    # -> empty <title> + everything FAIL. That's an ARTIFACT, not a broken page.
+    if not t.strip():
+        print("[LIVE produs] <title>='' -> FETCH BLOCKED (Cloudflare). Re-check in a browser; "
+              "the live checks below are unreliable for this store.")
+    # CONTENT-RICHNESS: many stores (deals/value) build unique copy into the product
+    # PAGE (page-builder landing pages or theme blocks) while the Shopify
+    # seo.description / descriptionHtml API field stays EMPTY. So a "0/N meta" API
+    # result does NOT mean thin content — measure the rendered body before deciding
+    # to generate descriptions (don't overwrite landing pages!).
+    body_words = len(re.sub(r"<[^>]+>", " ", h).split()) if h else 0
+    rich = body_words > 350
+    print(f"[LIVE produs] body~{body_words} cuvinte {'(landing-page/rich -> NU genera descrieri)' if rich else '(subtire?)'}")
     print(f"[LIVE produs] <title>={t[:60]!r}")
     print(f"   brand_dublat={OK(not db)}{(' ('+tok+')') if db else ''} | meta_desc={OK(bool(metatag(h,'description')))} | canonical={OK(bool(re.search(r'rel=.canonical',h)))} | H1x{len(re.findall(r'<h1',h))}={OK(len(re.findall(r'<h1',h))==1)}")
     print(f"   og:image https={OK((metatag(h,'og:image','property') or '').startswith('https'))} | twitter:image={OK(bool(metatag(h,'twitter:image')))}")
