@@ -335,13 +335,16 @@ mutation field as **`null`** with **no userError** (silent). For writes use the 
 trap: a mutation result that is `null` (not `{userErrors:[…]}`) = wrong/read-only token, not a
 query error.
 
-## AI banner images: ref the real product, and watch for hallucinated text
+## AI banner images: ref the real product — its printed text is NOT a hallucination
 For blog banners (`gigi:image-gen` `hero.py`), **always `--ref` the store's real product photo**
-so it shows OUR product (the actual bottle/shed/etc.), not an invented one — Gemini preserves the
-referenced subject. BUT if the ref product carries branding, Gemini can stamp **gibberish text**
-on it (a Grandia balance bike rendered "BABY BO PABS"). Mitigate with "no text, no logos" in the
-scene, or regenerate **without `--ref`**. **Always Read (eyeball) every generated PNG before it
-goes on a live site.** Full flow + Files-upload + embed in `reference/blog-articles.md`.
+so it shows OUR product (the actual bottle/shed/bike), not an invented one — Gemini preserves the
+referenced subject faithfully, **including text printed on the product**. A Grandia balance bike
+came out with "BABY BO PABS" on it — that text is **really printed on the toy**, not a hallucination.
+Dropping `--ref` to "clean it up" produced a generic **wooden** bike = the WRONG product. So: keep
+`--ref`; compare the banner against the real product photo; only add "no invented text/logos" when
+text is genuinely fabricated (not on the real product). **Always Read (eyeball) every generated PNG
+against the real product before it goes on a live site.** Full flow + Files-upload + embed in
+`reference/blog-articles.md`.
 
 ## A blog article needs banner-in-body AND featured image (hero alone looks bare)
 New articles created with only a product-photo hero look empty next to existing ones (which have

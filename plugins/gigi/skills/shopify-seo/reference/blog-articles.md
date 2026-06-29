@@ -72,11 +72,13 @@ image url/path> --engine gemini --pro --aspect 16:9 --out <dir> --name <slug>`
   rectangular `img_product_1.jpg`; Nubra cylindrical turquoise/burgundy). Utility
   (Grandia): the real shed/canopy/hedge so the scene shows the actual item. Gemini
   preserves the referenced subject faithfully (incl. our label).
-- **Garbled text gotcha:** if the ref product carries branding, Gemini may hallucinate
-  gibberish text on it (the Grandia balance bike came out "BABY BO PABS"). Fix: add
-  "no text, no logos" to the scene, or regenerate **without `--ref`** for a clean
-  representative shot. **Always eyeball every generated banner (Read the PNG) before
-  publishing to a live site.**
+- **Product text is faithful, not a hallucination:** Gemini reproduces text PRINTED on
+  the ref product. The Grandia balance bike's "BABY BO PABS" is really on the toy — it
+  looks like garbled AI text but it's authentic. **Do NOT drop `--ref` to "clean up" such
+  text** — you lose the actual product (we got a generic WOODEN bike that way, the wrong
+  product). Keep `--ref`, compare the banner to the real product photo, and only add "no
+  invented text/logos" when text is genuinely fabricated (absent from the real product).
+  **Always Read every generated banner against the real product before publishing.**
 - The Esteban dupe products all share one generic bottle render; that's fine to use as
   the ref (it IS our bottle/label).
 
