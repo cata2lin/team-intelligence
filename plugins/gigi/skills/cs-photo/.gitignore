@@ -1,0 +1,8 @@
+# registru postări (date, crește incremental, machine-local) — NU se commite
+fb_post_registry.sqlite
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+# imagini descărcate ad-hoc
+poze/
