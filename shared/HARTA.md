@@ -16,6 +16,12 @@
 | **KB SharedClaude** | `core:knowledge-base` (`kb.py`) | secrete, log activitate, fișiere, **resurse/lecții** (`resource-list`) | secretele DOAR aici |
 
 ## PROFITABILITATE — pipeline CANONIC (citește asta înainte de orice calcul de profit)
+> ⚠️ **DATELE: cache-urile derivate MINT per-brand — la verdict pe BANI confirmă la SURSĂ** (dovedit iun-2026, vezi [[profit-data-sources-truth]]):
+> - **LIVRATE / venit livrat** → **AWBprint** (`gigi:fulfillment-analytics`). Engine-ul/`multi_brand_pnl --range` SUB-numără livratele pe fereastră recentă (~1.6×: Esteban 5.713 engine vs 10.079 real) → profit FALS-negativ. NU judeca luna curentă la mijloc pe „livrate" din engine.
+> - **SPEND ads** → **LIVE platform API** (`gigi:meta-ads`/`tiktok-ads`/`google-ads-mcc`). `cache.daily_ad_spend_ron` Meta (`source=awbprint`) e umflat per-brand (**Grandia 4,5×: 230k warehouse vs 51k live** → −198k FALS, real ≈ −19k). Google+TikTok din cache s-au confirmat corecte; Esteban Meta corect. **Verifică Meta LIVE înainte să tai buget.** Acoperire token FB: pe toate mai puțin PAT „Ce Pat Ai".
+> - **COGS** → Shopify `variants.costPerItem` (engine poate subestima: Grandia 37% asumat vs 41,7% real).
+> - Regula de aur: 3× în iun-2026 cache-ul a mințit; SINGURUL adevăr = AWBprint (livrare) + platform API (spend) + Shopify (COGS).
+
 **Regula unică**: `Contribuție = Venit − COGS − Transport − Marketing`, **ex-TVA** pe venit/COGS/transport (TVA deductibil), marketing NET, **doar comenzi LIVRATE**. Logica e într-un singur loc:
 
 - **`profit_core.py`** (metrics-cache/scripts + `/root/Scripturi/profit_core.py`) = **SINGLE SOURCE**. Funcții: `vat_for_country/prefix` (RO.21/BG.20/CZ.21/PL.23/HU.27/SK.23/HR.25), `cogs_ron` (override+conversie RON), `parcel_transport` (cascadă: **real_cost → media DPD nomenclator → flat**; `real_cost` = **`orders.transport_cost` autoritativ per comandă, NU suma `order_awbs`**), `refusal_transport_multiplier` (orice colet plecat ×1; **NU ×2** pe intl — intl deja mai scump, RO n-are cost retur), `is_revenue`, `allocate_marketing_by_orders` (CPA uniform), `prefix_brandid`, `PREFIX_AWB_DOMAIN`. **Orice motor de profit nou IMPORTĂ asta.**
