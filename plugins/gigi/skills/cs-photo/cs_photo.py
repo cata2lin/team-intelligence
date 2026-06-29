@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["pg8000"]
 # ///
 """
 cs_photo.py — modulul CANONIC de „vedere" a pozelor pentru un tichet Richpanel.
@@ -397,14 +397,77 @@ def ad_for_ticket(ticket, describe_ad=True, use_cache=True, store_hint="", skip_
     return res
 
 
+_CATALOG_STOP = {"produsul", "produs", "produse", "promovat", "promoveaza", "este", "sunt", "pentru", "reclama", "care",
+                 "avand", "culoare", "culori", "design", "poza", "ofera", "unui", "unei", "dintr", "intr", "negru",
+                 "negre", "alb", "albe", "prezentat", "prezentata", "model", "modele", "inferior", "superior", "imagine"}
+
+
+def _brand_from_title(og_title):
+    """Normalizează og:title („Ofertele-Zilei.ro", „MagDeal.ro") → nume brand pt metrics.brands (case-insensitiv la query)."""
+    t = re.sub(r"\.(ro|com|cz|pl|bg|hu|sk|hr)\b", "", og_title or "", flags=re.I)
+    t = re.sub(r"\s+by\s+.*$", "", t, flags=re.I)   # „... by George Talent"
+    return " ".join(re.sub(r"[-_.]+", " ", t).split())
+
+
+def catalog_match(store, text, limit=3):
+    """Potrivește produsul din reclamă cu CATALOGUL (metrics products/variants) → preț+stoc reale. store = nume brand."""
+    url = secret("DATABASE_URL_METRICS")
+    if not url or not store or not text:
+        return []
+    stop = {_deacc(s) for s in _CATALOG_STOP}
+    seen, kw = set(), []
+    for w in re.findall(r"[a-zăâîșțA-ZĂÂÎȘȚ]{4,}", text):
+        wl = w.lower()
+        if _deacc(wl) in stop or wl in seen:
+            continue
+        seen.add(wl)
+        kw.append(wl)
+    kw = kw[:6]
+    if not kw:
+        return []
+    try:
+        import pg8000.dbapi
+        u = urllib.parse.urlparse(url)
+        conn = pg8000.dbapi.connect(ssl_context=True, user=urllib.parse.unquote(u.username or ""),
+                                    password=urllib.parse.unquote(u.password or ""), host=u.hostname,
+                                    port=u.port or 5432, database=(u.path or "/").lstrip("/").split("?")[0])
+        cur = conn.cursor()
+        like = ["%" + w + "%" for w in kw]
+        score = " + ".join(["(lower(p.title) LIKE %s)::int" for _ in kw])
+        where_or = " OR ".join(["lower(p.title) LIKE %s" for _ in kw])
+        sql = ('SELECT p.title, v.price, v."inventoryQuantity", v.sku, (%s) AS sc '
+               'FROM products p JOIN variants v ON v."productId"=p.id LEFT JOIN brands b ON b.id=p."brandId" '
+               'WHERE lower(b.name)=lower(%%s) AND (%s) ORDER BY sc DESC, v.price::numeric LIMIT %%s' % (score, where_or))
+        cur.execute(sql, like + [store] + like + [limit * 4])
+        rows = cur.fetchall()
+        conn.close()
+        out, seen_t = [], set()
+        for title, price, stoc, sku, sc in rows:
+            if title in seen_t or sc < 1:
+                continue
+            seen_t.add(title)
+            out.append({"title": title, "price": price, "stock": stoc, "sku": sku, "score": sc})
+            if len(out) >= limit:
+                break
+        # întoarce doar dacă top-ul are potrivire decentă (≥2 cuvinte) sau un singur rezultat clar
+        return out if out and (out[0]["score"] >= 2 or len(out) == 1) else out[:1] if out else []
+    except Exception:
+        return []
+
+
 def ad_block(ticket, describe_ad=True, store_hint=""):
-    """Bloc text pt context (sau '') — reclama pe care comentează clientul. '' și pe magazinele mono-produs (sărite)."""
+    """Bloc text pt context (sau '') — reclama pe care comentează clientul + PRODUSUL din catalog (preț/stoc). '' pe mono-produs (sărite)."""
     ad = ad_for_ticket(ticket, describe_ad=describe_ad, store_hint=store_hint)
     if not ad or ad.get("skipped") or not ad.get("product"):
         return ""
+    cat = catalog_match(store_hint or _brand_from_title(ad.get("store", "")), (ad["product"] + " " + (ad.get("copy") or "")))
+    cat_txt = ""
+    if cat:
+        cat_txt = " | PRODUS în CATALOG (preț/stoc REALE — folosește-le): " + "; ".join(
+            "%s — %s lei%s" % (c["title"][:55], c["price"], (" (stoc %s)" % c["stock"]) if c.get("stock") is not None else "") for c in cat)
     extra = (" | Text reclamă: %s" % ad["copy"]) if ad.get("copy") else ""
-    return ("RECLAMA/POSTAREA pe care comentează clientul (folosește-o ca să identifici PRODUSUL și să răspunzi la obiect): %s%s%s" % (
-        ad["product"], (" [magazin: %s]" % ad["store"]) if ad.get("store") else "", extra))
+    return ("RECLAMA/POSTAREA pe care comentează clientul (identifică PRODUSUL și răspunde la obiect, INCLUSIV PREȚUL din CATALOG dacă apare): %s%s%s%s" % (
+        ad["product"], (" [magazin: %s]" % ad["store"]) if ad.get("store") else "", cat_txt, extra))
 
 
 # ───────────────────────── CLI ─────────────────────────
