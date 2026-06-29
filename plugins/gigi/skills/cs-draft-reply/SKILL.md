@@ -66,6 +66,19 @@ uv run cs_auto_draft.py --channel email --create-draft --lean --no-comments \
 - **Reziliență**: retry+backoff pe 429/5xx **și** timeout/URLError (LLM + MCP); **gardă**: NU salvează draft dacă LLM a eșuat (`(eroare LLM`/gol).
 - **Cron (VPS)**: `/root/Scripturi/cs_backlog.sh` (sursează cheile din `.env`) rulat la 3h (`0 9-21/3`), `flock`-guarded; loops pe email+DM, comentarii excluse. Secretele pe VPS = `/root/Scripturi/.env` (root-600), nu KB (cron-ul n-are env KB).
 
+## 📷 Poze client (`--photos`, implicit PORNIT)
+Draftul **VEDE conținutul pozelor** atașate de client. MCP-ul taie bytes-ii imaginilor, dar dă URL-ul
+(bucket public S3 `richpanel-data`) → flow-ul le descarcă + le descrie cu un model vizual și injectează
+conținutul în context (atât în triaj cât și în draft). Astfel:
+- **retur/defect** → draftul confirmă defectul văzut în poză și tratează cazul (parfum spart → retrimitere+cadou; obiect casă defect → retrimitere/schimb/refund), **fără să mai ceară altă poză**;
+- **dispută livrare** → ține cont de dovada din poză (SMS/email curier, AWB, „colet blocat la depozit");
+- pozele = **dovadă reală** → EXCEPTATE de la filtrul anti-halucinare (le-am văzut efectiv).
+Robustețe: **dedup pe nume fișier** (atașamentul se repetă în thread), **skip imagini < 12KB** (logo/semnătură
+de email), **URL percent-encodat** (pozele WhatsApp au spații în nume). Plafon 4 poze/tichet (`max_imgs`).
+Cost: o cerere vizuală DOAR pe tichetele CU poze (rare). `--no-photos` dezactivează. Indicator în output:
+`📷 N poză(e) văzută(e) → folosite în draft`. Engine separat: `VISION_MODEL` (default `gpt-4o-mini`).
+> Skill înrudit: **`gigi:cs-photo`** = varianta standalone (dă un tichet → descrie pozele, pt validare manuală retur/defect).
+
 ## Pipeline per tichet
 1. **IDENTIFICARE (triaj LLM)** — întoarce JSON: problemă concretă, **produs**, categorie, limbă, severitate,
    `escalate`(+motiv), `suggested_action`, `action` executabilă (+params), `comment_action`.

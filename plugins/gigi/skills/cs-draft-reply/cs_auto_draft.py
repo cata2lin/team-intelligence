@@ -31,7 +31,7 @@ Pentru fiecare tichet OPEN care AȘTEAPTĂ RĂSPUNS DE LA NOI (ultimul mesaj e d
 
 LLM: ANTHROPIC_API_KEY (Claude) dacă există în KB, altfel OPENAI_API_KEY. Model: env DRAFT_MODEL.
 """
-import os, re, sys, json, subprocess, urllib.request, urllib.parse, urllib.error, argparse, time
+import os, re, sys, json, base64, subprocess, urllib.request, urllib.parse, urllib.error, argparse, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
@@ -265,6 +265,80 @@ def llm(system, user, js=False):
         return r["choices"][0]["message"]["content"], "openai/gpt"
     raise SystemExit("Nicio cheie LLM în KB (ANTHROPIC_API_KEY / OPENAI_API_KEY).")
 
+# ---- VEDERE POZE (atașamentele clientului) ----
+# Richpanel taie bytes-ii inline dar dă URL-ul (bucket public S3 richpanel-data). Le descărcăm + le
+# „vedem" cu un model vizual → conținutul descris intră în context, ca draftul să țină cont de poze.
+_IMG_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
+
+def _enc_url(u):
+    """Percent-encode path/query (pozele WhatsApp au spații în nume → urllib crapă pe URL neîncodat)."""
+    p = urllib.parse.urlsplit(u)
+    return urllib.parse.urlunsplit((p.scheme, p.netloc, urllib.parse.quote(p.path), urllib.parse.quote(p.query, safe="=&%"), p.fragment))
+VISION_SYS = ("Ești asistent CS ARONA. Descrie pe SCURT (1-2 fraze, factual, în română) ce arată poza trimisă de client: "
+              "produs defect/spart/deteriorat (zi exact ce e rupt/lipsă/greșit), dovadă de livrare (AWB, SMS/email curier + ce status), "
+              "etichetă/colet, captură de ecran (ce text/aplicație). Dacă e relevant pentru o reclamație (defect/retur/livrare), spune clar ce DOVEDEȘTE. Fără speculații.")
+
+def _vision_describe(img_bytes, ctype, ctx):
+    b64 = base64.b64encode(img_bytes).decode()
+    ak = secret("ANTHROPIC_API_KEY")
+    if ak:
+        body = {"model": os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"), "max_tokens": 300, "system": VISION_SYS,
+                "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": "Context tichet: " + (ctx or "—")},
+                    {"type": "image", "source": {"type": "base64", "media_type": ctype, "data": b64}}]}]}
+        r = _llm_http("https://api.anthropic.com/v1/messages", body,
+                      {"x-api-key": ak, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+        return r["content"][0]["text"].strip()
+    ok = secret("OPENAI_API_KEY")
+    if ok:
+        body = {"model": os.environ.get("VISION_MODEL", "gpt-4o-mini"), "temperature": 0, "messages": [
+            {"role": "system", "content": VISION_SYS},
+            {"role": "user", "content": [
+                {"type": "text", "text": "Context tichet: " + (ctx or "—")},
+                {"type": "image_url", "image_url": {"url": "data:%s;base64,%s" % (ctype, b64)}}]}]}
+        r = _llm_http("https://api.openai.com/v1/chat/completions", body,
+                      {"Authorization": "Bearer " + ok, "content-type": "application/json"})
+        return r["choices"][0]["message"]["content"].strip()
+    return ""
+
+def describe_photos(msgs, ctx, max_imgs=4, min_bytes=12000):
+    """Extrage pozele trimise de CLIENT din mesaje, le descarcă + le descrie. Întoarce un bloc text pt context (sau '').
+    Dedup pe nume fișier (același atașament se repetă în thread-ul de email) + skip imagini mici (logo/semnătură)."""
+    urls, seen = [], set()
+    for m in msgs:
+        if m.get("is_ai") or m.get("author_is_workspace_agent"):
+            continue  # doar atașamentele clientului
+        for at in (m.get("attachments") or []):
+            u = at.get("url") or at.get("href") or at.get("downloadUrl") or ""
+            if not u or not u.lower().split("?")[0].endswith(_IMG_EXT):
+                continue
+            key = u.split("/")[-1].split("?")[0].lower()   # nume fișier — același logo/poză repetat în fir = o dată
+            if key in seen:
+                continue
+            seen.add(key)
+            urls.append(u)
+    if not urls:
+        return ""
+    out = []
+    for u in urls:
+        if len(out) >= max_imgs:
+            break
+        try:
+            data = urllib.request.urlopen(_enc_url(u), timeout=45).read()
+            if len(data) < min_bytes:   # logo/semnătură/spacer/tracking-pixel din email — nu e poză-dovadă
+                continue
+            ext = u.lower().split("?")[0].rsplit(".", 1)[-1]
+            ctype = {"png": "image/png", "webp": "image/webp", "gif": "image/gif"}.get(ext, "image/jpeg")
+            d = _vision_describe(data, ctype, ctx)
+            if d:
+                out.append("  [%d] %s" % (len(out) + 1, d))
+        except Exception as e:
+            print("  ⚠️ poză necitită (%s): %s" % (u.split("/")[-1][:30], str(e)[:60]), file=sys.stderr)
+    if not out:
+        return ""
+    return ("POZE TRIMISE DE CLIENT (conținutul REAL al imaginilor — le-am VĂZUT; folosește-le ca dovadă, NU intră sub anti-halucinare; "
+            "NU cere altă poză dacă clientul a trimis deja):\n" + "\n".join(out))
+
 # ---- pasul de IDENTIFICARE (triaj) ----
 IDENTIFY_SYS = """Ești triajul Customer Service ARONA (magazine COD: parfumuri Esteban/GT/Nubra/Gento/Lab Noir; casă Grandia/Carpetto/Covoria; Bonhaus RO/CZ/PL/BG; Belasil; Magdeal/Ofertele Zilei/Reduceri bune/Apreciat/Rossi Nails).
 IMPORTANT — răspundem la ULTIMUL mesaj al clientului (marcat cu „>>> ULTIMUL MESAJ AL CLIENTULUI" în conversație). Firul de dinainte = DOAR context. Dacă ultimul mesaj e mulțumire / feedback pozitiv / „a ajuns" / „sunt foarte bune", atunci `category`=recenzie_feedback și NU mai e WISMO/problemă — chiar dacă firul a ÎNCEPUT cu o întrebare de livrare. Nu trata o întrebare deja rezolvată ca fiind încă deschisă.
@@ -302,6 +376,7 @@ SYSTEM = """Ești agent Customer Service ARONA. Scrii ca un agent REAL (Cristina
   • să INVENTEZI un număr de telefon — folosește DOAR `TELEFON_COMANDĂ` dacă apare în context; altfel NU da niciun număr;
   • să confirmi capabilități nesigure (ex. livrare internațională) fără bază.
 CE FACI ÎN SCHIMB când NU ai datele: cere-i POLITICOS clientului ce-ți lipsește — **numărul comenzii SAU un număr de telefon** (pt orice ține de o comandă: status/anulare/retur/modificare) — sau spune ONEST „verificăm și revenim cât mai curând", FĂRĂ să inventezi. La întrebări de produs (preț/dimensiuni/stoc) fără date: îndrumă spre site sau spune că revii cu detaliile exacte — NU inventa cifre.
+📷 POZE CLIENT — EXCEPȚIE de la anti-halucinare: dacă în context apare secțiunea „POZE TRIMISE DE CLIENT (conținutul REAL al imaginilor…)", acela e conținutul pozelor pe care le-am VĂZUT efectiv → e informație REALĂ, folosește-o ca DOVADĂ. La produs defect/spart confirmă ce se vede în poză și tratează cazul (parfum spart → retrimitere gratuită + cadou; obiect casă defect, pe stoc → retrimitere/schimb; altfel retur+refund). La dovadă de livrare în poză (SMS/email curier, AWB, status) ține cont de ce arată (ex. coletul e blocat la depozit / livrare eșuată) și asigură clientul că reglăm livrarea. NU cere clientului o poză dacă deja a trimis una (e descrisă aici). NU descrie toată poza înapoi clientului — doar acționează pe baza ei.
 RĂSPUNZI LA ULTIMUL MESAJ AL CLIENTULUI (marcat „>>> ULTIMUL MESAJ AL CLIENTULUI" în conversație); restul firului = context. Dacă ultimul mesaj e mulțumire / „a ajuns" / feedback pozitiv (ex. „Foarte bune, mulțumesc!") → răspunde CALD la el (te bucuri că i-au plăcut, mulțumești), NU relua întrebarea veche, NU cere AWB/nr comandă/telefon și NU trata ca WISMO.
 REGISTRU (important): FORMAL, la PLURAL, pe TOATE canalele (email, DM, chat, comentariu) — în română „dumneavoastră/vă/-ți" (NICIODATĂ „tu/ție/te/-i"); în alte limbi registrul politicos echivalent. Așa scriu agenții ARONA reali („Vă rugăm", „Vă informăm", „Vă mulțumim").
 PROCEDURI:
@@ -733,6 +808,7 @@ def main():
     ap.add_argument("--ground", action="store_true", help="GROUNDING self-contained (pt VPS/cron): caută comenzile clientului DIRECT din DB metrics + profitability.db (fără SSH/uv) → draftul are status/AWB real. Mai lent ca lean, dar fără halucinări de comandă.")
     ap.add_argument("--skip-tagged", action="store_true", help="sare tichetele care AU deja tag-ul AI (--tag) — pt cron/reluare: draftează DOAR tichetele noi, fără dubluri")
     ap.add_argument("--no-comments", action="store_true", help="exclude complet canalele de comentarii (facebook_feed_comment/instagram_comment) — nu le draftează (ex. pt cron: comentariile rămân pt CS)")
+    ap.add_argument("--photos", action=argparse.BooleanOptionalAction, default=True, help="VEDE pozele atașate de client (descarcă + descrie vizual) → draftul ține cont de conținut (defect/dovadă livrare). --no-photos dezactivează. Costă o cerere vizuală DOAR pe tichetele cu poze (rare).")
     ap.add_argument("--apply-send", action="store_true", help="⚠️ LIVE: TRIMITE răspunsul la client (send_message) + închide tichetul, în loc de draft — DOAR pe ne-escaladate + ne-comentariu (escaladările/comentariile rămân draft, le ia un om). Customer-facing, IREVERSIBIL. Necesită --create-draft.")
     ap.add_argument("--json", action="store_true", help="emite drafturile structurat (audit/integrare) — JSON pe ultima linie după marcajul @@JSON@@")
     ap.add_argument("--close-spam", action="store_true", help="închide (CLOSED) + tag 'spam' tichetele detectate ca spam/notificare automată")
@@ -808,6 +884,7 @@ def main():
         blob = subj + " " + first
 
         last_cust = " ".join(first.split())[:400]   # mesajul CURENT al clientului (la care răspundem); implicit = primul
+        photo_blk = ""   # conținutul descris al pozelor trimise de client (umplut mai jos dacă există atașamente + --photos)
         if (t.get("comment_count") or 1) <= 1 and is_public:
             tr = "- [CLIENT] " + last_cust
         else:
@@ -825,8 +902,15 @@ def main():
                 if is_client:
                     last_cust = txt[:400]   # reține ULTIMUL mesaj al clientului din fir
             tr = "\n".join(lines) or ("- [CLIENT] " + last_cust)
+            if a.photos:   # VEDE pozele clientului (descarcă + descrie) → conținutul intră în context
+                try:
+                    photo_blk = describe_photos(msgs, subj + " " + first)
+                except Exception as _pe:
+                    print("  ⚠️ vedere poze eșuată (#%s): %s" % (no, str(_pe)[:60]), file=sys.stderr)
         # marchează explicit ULTIMUL mesaj al clientului — la EL răspundem; restul firului = doar context
         tr = tr + "\n>>> ULTIMUL MESAJ AL CLIENTULUI (răspunde la ACESTA; restul firului = context): " + last_cust
+        if photo_blk:   # pozele văzute → în transcript (le folosesc atât triajul cât și draftul)
+            tr = tr + "\n" + photo_blk
         if a.skip_tagged and AI_TAG and AI_TAG in cur_tags:   # deja draftat (cron/reluare) → sări, fără dublu
             print("  [%d/%d] #%s · deja %s → sărit." % (i, len(picked), no, AI_TAG)); continue
         # pe comentarii publice: atașează textul POSTĂRII/reclamei la care comentează clientul (clientul o vede → și noi trebuie),
@@ -986,7 +1070,7 @@ def main():
             draft, engine = "(eroare LLM: %s)" % e, "—"
 
         # POST-FILTRU ANTI-HALUCINARE: dacă NU avem datele comenzii dar draftul afirmă lookup/status/preț/dimensiune → corectează
-        if not is_esc and not draft.startswith("(eroare") and not has_order_data(od_ctx) and HALLU.search(draft):
+        if not is_esc and not draft.startswith("(eroare") and not has_order_data(od_ctx) and not photo_blk and HALLU.search(draft):
             corr = ctx + ("\n\n⛔ Răspunsul tău anterior CONȚINEA INFORMAȚIE INVENTATĂ (lookup/„am verificat/nu am găsit”, status comandă, preț, dimensiune sau telefon pe care NU le ai în context). "
                           "Rescrie complet, FĂRĂ să inventezi NIMIC și FĂRĂ să spui că ai căutat/găsit/verificat ceva. "
                           "Cere clientului numărul comenzii SAU un număr de telefon (pt orice ține de o comandă), sau, la întrebări de produs, spune onest că revii cu detaliile exacte / poate verifica pe site. Scrie DOAR răspunsul.")
@@ -1008,6 +1092,8 @@ def main():
         flag = ("⛳%s " % level if is_esc else "") + ("🔧" if cmd else "") + cmoji
         print("  [%d/%d] #%s · %s · %s · %s · sent=%s/%s %s" % (i, len(picked), no, store_name, plat_label, cat, sent_lab, sent_int, flag))
         print("  client: %s | comenzi: %d | a mai scris: %s" % (name or "?", len(orders), elsewhere))
+        if photo_blk:
+            print("  📷 %d poză(e) văzută(e) → folosite în draft" % photo_blk.count("\n  ["))
         print("  problemă: %s" % (idn.get("problem") or " ".join((first or subj).split())[:80]))
         if proposal_line:
             for ln in proposal_line.splitlines(): print("  " + ln)
