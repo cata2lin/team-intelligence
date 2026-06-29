@@ -119,10 +119,19 @@ def add_badges(s: Store, bg: str, apply: bool, force: bool):
         print(f"  would add anpc_badges section (bg={bg}); order would be {d['order']}")
 
 
-def clean_text_links(s: Store, apply: bool):
+def clean_text_links(s: Store, apply: bool, force: bool = False):
     """Remove ANPC / SOL TEXT items from every menu that has them, preserving
     all other items faithfully (resourceId carried over so menuUpdate doesn't
-    fail with 'Subject can't be blank' on SHOP_POLICY/PAGE items)."""
+    fail with 'Subject can't be blank' on SHOP_POLICY/PAGE items).
+
+    GUARD: refuses to strip the text links if the store has NO icon badges yet —
+    otherwise the store is left with ZERO ANPC reference in the footer (the
+    mistake that wiped ROSSI/NOC originals before icons existed). Pass --force to
+    override."""
+    if not already_has_badges(s) and not force:
+        print("  REFUSED: no ANPC icon badges found — removing the text links would leave "
+              "the footer with NO ANPC reference. Run `add` first, or pass --force.")
+        return
     data = s.gql("{menus(first:30){nodes{id handle title items{id title type url resourceId}}}}")
     drop = lambda t: bool(t) and (
         t.strip().upper() in ("ANPC", "SOL", "SAL")
@@ -150,19 +159,64 @@ def clean_text_links(s: Store, apply: bool):
             print("    " + ("OK" if not ue else f"ERR {ue}"))
 
 
+def add_gdpr_link(s: Store, apply: bool):
+    """Surface a legal-links column (Termeni / Politica / Livrare / Ștergere date)
+    in a Dawn footer. KEY LESSON: a Dawn footer menu renders ONLY if a `link_list`
+    BLOCK in the footer section references it — the menu *existing* is not enough
+    (that's why the GDPR link was invisible on Reduceri Bune / Covoria even though
+    the 'footer' menu had it). So this (1) rebuilds the 'footer' menu with the
+    legal links as HTTP items (full URLs, no resourceId hassle) and (2) adds a
+    `link_list` block to footer-group.json. Dawn-style themes only."""
+    dom = s.public
+    items = [
+        {"title": "Termeni și condiții", "type": "HTTP", "url": f"https://{dom}/policies/terms-of-service"},
+        {"title": "Politica de confidențialitate", "type": "HTTP", "url": f"https://{dom}/policies/privacy-policy"},
+        {"title": "Livrare și retur", "type": "HTTP", "url": f"https://{dom}/policies/refund-policy"},
+        {"title": "Ștergere date (GDPR)", "type": "HTTP", "url": f"https://{dom}/pages/stergere-date"},
+    ]
+    fm = next((m for m in s.gql("{menus(first:30){nodes{id handle}}}")["menus"]["nodes"]
+               if m["handle"] == "footer"), None)
+    if not fm:
+        print("  no 'footer' menu — create one in admin, then re-run.")
+        return
+    try:
+        d = json.loads(s.asset_get("sections/footer-group.json"))
+    except Exception:
+        print("  no footer-group.json — not a Dawn-style footer; add the link via the page builder.")
+        return
+    foot = d["sections"].get("footer") or next(iter(d["sections"].values()))
+    has_block = any(b.get("type") == "link_list" and b.get("settings", {}).get("menu") == "footer"
+                    for b in foot.get("blocks", {}).values())
+    if apply:
+        s.gql("mutation($id:ID!,$t:String!,$h:String!,$i:[MenuItemUpdateInput!]!)"
+              "{menuUpdate(id:$id,title:$t,handle:$h,items:$i){userErrors{message}}}",
+              {"id": fm["id"], "t": "footer", "h": "footer", "i": items})
+        if not has_block:
+            foot.setdefault("blocks", {})["link_list_legal"] = {
+                "type": "link_list", "settings": {"heading": "Informații", "menu": "footer"}}
+            bo = foot.setdefault("block_order", [])
+            bo.insert(1 if len(bo) > 1 else len(bo), "link_list_legal")
+            s.asset_put("sections/footer-group.json", json.dumps(d, ensure_ascii=False, indent=2))
+        print("  footer menu = legal links (incl. Ștergere date) + link_list block rendered")
+    else:
+        print(f"  would set footer menu (4 legal links) + {'add' if not has_block else 'reuse'} link_list block")
+
+
 ap = argparse.ArgumentParser()
-ap.add_argument("action", choices=["add", "clean-text"])
+ap.add_argument("action", choices=["add", "clean-text", "gdpr-link"])
 ap.add_argument("--store", required=True, help="stores.csv prefix or *.myshopify.com domain")
 ap.add_argument("--bg", help="footer background hex for the badge band (e.g. '#332f2e'); read it live first")
 ap.add_argument("--apply", action="store_true")
 ap.add_argument("--force", action="store_true", help="add badges even if some already exist")
 A = ap.parse_args()
 
-s = Store.from_csv(A.store) if A.store.isupper() and "." not in A.store else Store(A.store)
+s = Store(A.store) if "." in A.store else Store.from_csv(A.store)
 print(f"{A.store} -> {s.public}")
 if A.action == "add":
     if not A.bg:
         sys.exit("add needs --bg <hex> (read the footer's real bg colour in a browser first)")
     add_badges(s, A.bg, A.apply, A.force)
+elif A.action == "gdpr-link":
+    add_gdpr_link(s, A.apply)
 else:
-    clean_text_links(s, A.apply)
+    clean_text_links(s, A.apply, A.force)

@@ -288,3 +288,35 @@ the Terms policy via `compliance.py`; the *visible footer icons* are this separa
 - **NEVER add badges without checking for existing ones first** (the duplicate-icons trap that
   burned us across Gento/Grandia/Belasil). `footer_badges.py add` is idempotent and refuses a
   second set unless `--force`.
+
+## Interpreting seo_audit.py — false signals that waste effort (2026-06)
+The audit reads Shopify API fields + a urllib live fetch. Three results LIE; verify before acting:
+
+- **"0/N product meta / SEO title FAIL" ≠ thin content.** Deals/value stores (MagDeal,
+  Reduceri Bune, Ofertele, Casa Ofertelor, Apreciat, Covoria, Nocturna…) build unique copy into
+  the product PAGE — page-builder landing pages (GemPages/PageFly) or theme metafield blocks —
+  while the Shopify `seo.description`/`descriptionHtml` API field stays EMPTY. Live bodies are
+  200–860 words with real headings. **Do NOT generate/overwrite product descriptions off the
+  API signal — you'd destroy the landing pages.** `seo_audit.py` now prints rendered body word
+  count; >350 words = leave it alone. Confirm with a browser before any bulk description job.
+- **`<title>=''` + every LIVE check FAIL = FETCH BLOCKED, not a broken page.** Cloudflare on the
+  deals storefronts 403s the urllib fetcher (even with a Chrome UA). Googlebot is NOT blocked.
+  Re-check those stores in a browser (chrome-devtools) — the pages render fine. `seo_audit.py`
+  now flags this explicitly.
+- **API `seo.title = 0/N` is usually a NON-issue.** Shopify doesn't store `seo.title` when it
+  equals the product title (it uses the default, which renders correctly). The live `<title>` is
+  the truth — only act if the live `<title>` is actually wrong/empty/brand-doubled.
+
+## Dawn footer: a menu renders ONLY via a `link_list` BLOCK
+Adding items to the `footer` menu (e.g. "Ștergere date (GDPR)") does NOTHING visible unless the
+footer SECTION has a `link_list` block whose `settings.menu` points at that handle. The menu
+existing is not enough (this hid the GDPR link on Reduceri Bune + Covoria). `footer_badges.py
+gdpr-link` builds the menu AND adds the block. `show_policy:true` only lists the shop POLICIES
+(Terms/Privacy/Refund) — never custom pages like /pages/stergere-date.
+
+## Verify footer/visual changes with PIXELS + a hard refresh — and tell the user to refresh
+Confirming a footer change via DOM `querySelector` returning found:1 is NOT proof the user sees
+it: (a) chrome-devtools screenshots can be stale frames after lazy reflow — PIL-sample the PNG;
+(b) the user's browser serves a CACHED footer (Shopify section cache + edge), so a change you can
+see may look "missing" to them for minutes — say "hard-refresh / Ctrl-Shift-R". Don't claim a
+footer change is live off DOM alone; screenshot it, and account for their cache.
