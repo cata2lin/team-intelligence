@@ -3,27 +3,43 @@
 # dependencies = []
 # ///
 """
-cs_photo.py — VEDE pozele clientului dintr-un tichet Richpanel.
+cs_photo.py — modulul CANONIC de „vedere" a pozelor pentru un tichet Richpanel.
+Folosit ca CLI ȘI importat de alte scripturi (ex. cs-draft-reply/cs_auto_draft.py) ca să vadă pozele.
 
-MCP-ul Richpanel taie bytes-ii imaginilor inline, DAR dă URL-ul atașamentului
-(bucket public S3 `richpanel-data`). Scriptul scoate URL-urile din get_conversation,
-descarcă imaginile și le DESCRIE cu un model vizual (gpt-4o-mini): produs defect/spart?
-dovadă de livrare (AWB/SMS/curier)? etichetă? captură de ecran? — util la retur/reclamație.
+Vede DOUĂ tipuri de poze, ambele pentru CONTEXT:
+  (a) poza pe care o LASĂ CLIENTUL (atașament în mesaj) — defect/dovadă livrare/etichetă/screenshot;
+      MCP-ul taie bytes-ii inline dar dă URL-ul (bucket public S3 richpanel-data) → descarcă + descrie vizual.
+  (b) poza RECLAMEI/POSTĂRII pe care comentează clientul (tichete FB/IG comment) — ce PRODUS e în reclamă;
+      fără token de pagină: HTTP GET cu UA `facebookexternalhit/1.1` → og:image → descarcă + descrie vizual.
 
-  uv run cs_photo.py --conv 277664
-  uv run cs_photo.py --conv 274972 --json
-  uv run cs_photo.py --conv 277664 --save ./poze      # salvează imaginile local
-  uv run cs_photo.py --conv 274972 --no-describe       # doar descarcă/listează (fără LLM)
+REGISTRU: fiecare postare descrisă o dată se SALVEAZĂ (post_id → produs/magazin/poză) într-un SQLite;
+când apare un comentariu pe o postare NOUĂ, se completează; pe una știută, se refolosește (fără re-cost).
 
-Necesită: RICHPANEL_MCP_TOKEN (KB/env) pt atașamente, OPENAI_API_KEY pt descriere.
+CLI:
+  uv run cs_photo.py --conv 277664                 # poze client + (dacă e comentariu) reclama
+  uv run cs_photo.py --conv 277744 --json
+  uv run cs_photo.py --conv 277664 --save ./poze
+  uv run cs_photo.py --conv 274972 --no-describe
+  uv run cs_photo.py --registry-list               # ce postări avem salvate
+  uv run cs_photo.py --registry-build --scan 200    # populează registrul din comentariile recente (incremental)
+
+Necesită: RICHPANEL_MCP_TOKEN (atașamente + listă), OPENAI_API_KEY (descriere vizuală).
+Registru: env FB_POST_DB (default lângă script); pune-l pe o cale partajată (NAS) pt registru de echipă.
 NU scrie nimic în Richpanel (read-only).
 """
-import os, json, base64, urllib.request, urllib.parse, subprocess, argparse
+import os, json, base64, sqlite3, datetime, re, time, urllib.request, urllib.parse, urllib.error, subprocess, argparse, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
 MCP_URL = "https://mcp.richpanel.com/mcp"
 IMG_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic")
+COMMENT_CHANNELS = ("facebook_feed_comment", "instagram_comment", "facebook_comment", "instagram_feed_comment")
+FB_CRAWLER_UA = "facebookexternalhit/1.1"
+FB_POST_DB = os.environ.get("FB_POST_DB") or os.path.join(HERE, "fb_post_registry.sqlite")
+
+
+def _now():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def enc_url(u):
@@ -63,89 +79,317 @@ class MCP:
             return {"_text": txt}
 
 
-SYS = ("Ești asistent CS ARONA. Descrie pe SCURT (1-2 fraze, factual, în română) ce arată poza trimisă de client într-un tichet: "
-       "produs defect/spart/deteriorat (zi exact ce e rupt/lipsă), dovadă de livrare (AWB, SMS/email curier, ce status), etichetă/colet, "
-       "captură de ecran (ce text/aplicație). Dacă e relevant pentru o reclamație (defect/retur/livrare), spune clar ce DOVEDEȘTE.")
+# ───────────────────────── VEDERE VIZUALĂ (model multimodal) ─────────────────────────
+SYS_CLIENT = ("Ești asistent CS ARONA. Descrie pe SCURT (1-2 fraze, factual, în română) ce arată poza trimisă de client într-un tichet: "
+              "produs defect/spart/deteriorat (zi exact ce e rupt/lipsă), dovadă de livrare (AWB, SMS/email curier, ce status), etichetă/colet, "
+              "captură de ecran (ce text/aplicație). Dacă e relevant pentru o reclamație (defect/retur/livrare), spune clar ce DOVEDEȘTE.")
+SYS_AD = ("Ești asistent CS ARONA. Aceasta e POZA RECLAMEI/POSTĂRII pe care comentează un client. Descrie pe SCURT (1 frază, în română) "
+          "ce PRODUS se promovează: ce e (categorie + obiect concret), caracteristici vizibile, și orice ofertă/preț scris în imagine. "
+          "Fără speculații — doar ce se vede. Scopul: să știm la ce produs se referă comentariul.")
 
 
-def describe(img_bytes, ctype, ctx):
-    ok = secret("OPENAI_API_KEY")
-    if not ok:
-        return "(fără OPENAI_API_KEY — nu pot descrie)"
+def _post_json(url, body, headers, tries=4):
+    """POST JSON cu retry+backoff pe 429/5xx + timeout/URLError (rate-limit LLM)."""
+    data = json.dumps(body).encode()
+    delay = 2
+    for k in range(tries):
+        try:
+            return json.loads(urllib.request.urlopen(urllib.request.Request(url, data=data, headers=headers), timeout=90).read())
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 502, 503, 504) and k < tries - 1:
+                time.sleep(delay); delay *= 2; continue
+            raise
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            if k < tries - 1:
+                time.sleep(delay); delay *= 2; continue
+            raise
+
+
+def vision(img_bytes, ctype, ctx, system=SYS_CLIENT):
     b64 = base64.b64encode(img_bytes).decode()
-    body = {"model": os.environ.get("VISION_MODEL", "gpt-4o-mini"), "temperature": 0, "messages": [
-        {"role": "system", "content": SYS},
-        {"role": "user", "content": [
-            {"type": "text", "text": "Context tichet: " + (ctx or "—")},
-            {"type": "image_url", "image_url": {"url": "data:%s;base64,%s" % (ctype or "image/jpeg", b64)}}]}]}
-    try:
-        req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=json.dumps(body).encode(),
-                                     headers={"Authorization": "Bearer " + ok, "content-type": "application/json"})
-        return json.loads(urllib.request.urlopen(req, timeout=90).read())["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        return "(eroare descriere: %s)" % e
+    ok = secret("OPENAI_API_KEY")
+    if ok:
+        body = {"model": os.environ.get("VISION_MODEL", "gpt-4o-mini"), "temperature": 0, "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": [
+                {"type": "text", "text": "Context: " + (ctx or "—")},
+                {"type": "image_url", "image_url": {"url": "data:%s;base64,%s" % (ctype or "image/jpeg", b64)}}]}]}
+        try:
+            return _post_json("https://api.openai.com/v1/chat/completions", body,
+                              {"Authorization": "Bearer " + ok, "content-type": "application/json"})["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            return "(eroare descriere: %s)" % str(e)[:80]
+    ak = secret("ANTHROPIC_API_KEY")
+    if ak:
+        body = {"model": os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"), "max_tokens": 300, "system": system,
+                "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": "Context: " + (ctx or "—")},
+                    {"type": "image", "source": {"type": "base64", "media_type": ctype, "data": b64}}]}]}
+        try:
+            return _post_json("https://api.anthropic.com/v1/messages", body,
+                              {"x-api-key": ak, "anthropic-version": "2023-06-01", "content-type": "application/json"})["content"][0]["text"].strip()
+        except Exception as e:
+            return "(eroare descriere: %s)" % str(e)[:80]
+    return "(fără cheie LLM — nu pot descrie)"
+
+
+# ───────────────────────── (a) POZELE CLIENTULUI (atașamente) ─────────────────────────
+def client_photos(msgs, ctx, max_imgs=4, min_bytes=12000, include_agent=False, save_dir=None, describe_imgs=True, conv=""):
+    """Pozele trimise de client (sau agent dacă include_agent). Dedup pe nume + skip imagini mici (logo/semnătură).
+    Întoarce listă de dict: {who,name,url,bytes?,saved?,desc?,error?}."""
+    items, seen = [], set()
+    for m in msgs:
+        who = "AGENT" if m.get("author_is_workspace_agent") else ("AI" if m.get("is_ai") else "CLIENT")
+        for at in (m.get("attachments") or []):
+            u = at.get("url") or at.get("href") or at.get("downloadUrl") or ""
+            base = u.lower().split("?")[0]
+            if not u or not base.endswith(IMG_EXT):
+                continue
+            key = base.split("/")[-1]
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append({"who": who, "url": u, "name": urllib.parse.unquote(u.split("/")[-1].split("?")[0])})
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+    out, n_described = [], 0
+    for at in items:
+        try:
+            data = urllib.request.urlopen(enc_url(at["url"]), timeout=60).read()
+        except Exception as e:
+            at["error"] = "download: %s" % str(e)[:80]
+            out.append(at)
+            continue
+        at["bytes"] = len(data)
+        if save_dir:
+            p = os.path.join(save_dir, "%s_%s" % (conv or "img", at["name"]))
+            open(p, "wb").write(data)
+            at["saved"] = p
+        if describe_imgs and (include_agent or at["who"] == "CLIENT") and at["bytes"] >= min_bytes and n_described < max_imgs:
+            ext = (os.path.splitext(at["name"])[1] or ".jpg").lower()
+            ctype = {".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}.get(ext, "image/jpeg")
+            at["desc"] = vision(data, ctype, ctx, SYS_CLIENT)
+            n_described += 1
+        out.append(at)
+    return out
+
+
+def client_photos_block(msgs, ctx, **kw):
+    """Bloc text pt context (sau '') — pozele clientului, descrise."""
+    descr = [o for o in client_photos(msgs, ctx, **kw) if o.get("desc")]
+    if not descr:
+        return ""
+    lines = ["  [%d] %s" % (i + 1, o["desc"]) for i, o in enumerate(descr)]
+    return ("POZE TRIMISE DE CLIENT (conținutul REAL al imaginilor — le-am VĂZUT; folosește-le ca dovadă, NU intră sub anti-halucinare; "
+            "NU cere altă poză dacă clientul a trimis deja):\n" + "\n".join(lines))
+
+
+# ───────────────────────── (b) RECLAMA/POSTAREA de la comentariu ─────────────────────────
+def extract_fb_post(ticket):
+    """(page_id_candidates, post_id) dintr-un tichet FB/IG comment. Structura id = {page}_{post}_{post}_{comment} → post=segs[-2]."""
+    cid = str(ticket.get("id") or "")
+    segs = cid.split("_")
+    if len(segs) < 2:
+        return [], ""
+    post_id = segs[-2]
+    to = ticket.get("to") or {}
+    page_to = (to.get("id") if isinstance(to, dict) else "") or ""
+    cands = [c for c in (page_to, segs[0]) if c]
+    # dedup păstrând ordinea
+    pages = list(dict.fromkeys(cands))
+    return pages, post_id
+
+
+def fb_post_og(page_ids, post_id):
+    """og:image/og:title/og:description ale postării, fără token (UA crawler). Întoarce {} dacă nu merge."""
+    if not post_id:
+        return {}
+    for page in page_ids or [""]:
+        url = ("https://www.facebook.com/%s/posts/%s/" % (page, post_id)) if page else ("https://www.facebook.com/%s/" % post_id)
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": FB_CRAWLER_UA})
+            html = urllib.request.urlopen(req, timeout=25).read().decode("utf-8", "replace")
+        except Exception:
+            continue
+
+        def og(prop):
+            m = re.search(r'og:%s"\s+content="([^"]*)"' % prop, html)
+            return (m.group(1).replace("&amp;", "&").strip() if m else "")
+        img, title = og("image"), og("title")
+        if img:
+            return {"url": url, "image": img, "title": title, "desc": og("description"), "page_id": page}
+    return {}
+
+
+# ── registru SQLite (post_id → ce e) ──
+def _reg():
+    c = sqlite3.connect(FB_POST_DB, timeout=20)
+    c.execute("""CREATE TABLE IF NOT EXISTS posts(
+        post_id TEXT PRIMARY KEY, page_id TEXT, store TEXT, product TEXT,
+        og_image TEXT, post_url TEXT, first_seen TEXT, last_seen TEXT, seen_count INTEGER DEFAULT 1)""")
+    return c
+
+
+def reg_get(post_id):
+    c = _reg()
+    r = c.execute("SELECT post_id,page_id,store,product,og_image,post_url,seen_count FROM posts WHERE post_id=?", (post_id,)).fetchone()
+    c.close()
+    if not r:
+        return None
+    keys = ("post_id", "page_id", "store", "product", "og_image", "post_url", "seen_count")
+    return dict(zip(keys, r))
+
+
+def reg_put(rec):
+    c = _reg()
+    now = _now()
+    c.execute("""INSERT INTO posts(post_id,page_id,store,product,og_image,post_url,first_seen,last_seen,seen_count)
+        VALUES(?,?,?,?,?,?,?,?,1)
+        ON CONFLICT(post_id) DO UPDATE SET last_seen=excluded.last_seen, seen_count=seen_count+1,
+            store=COALESCE(NULLIF(excluded.store,''),store),
+            product=COALESCE(NULLIF(excluded.product,''),product),
+            og_image=COALESCE(NULLIF(excluded.og_image,''),og_image),
+            post_url=COALESCE(NULLIF(excluded.post_url,''),post_url)""",
+              (rec["post_id"], rec.get("page_id", ""), rec.get("store", ""), rec.get("product", ""),
+               rec.get("og_image", ""), rec.get("post_url", ""), now, now))
+    c.commit()
+    c.close()
+
+
+def reg_list():
+    c = _reg()
+    rows = c.execute("SELECT post_id,store,product,seen_count,last_seen FROM posts ORDER BY last_seen DESC").fetchall()
+    c.close()
+    return rows
+
+
+def ad_for_ticket(ticket, describe_ad=True, use_cache=True):
+    """Rezolvă RECLAMA pe care comentează clientul (doar tichete FB/IG comment).
+    Întoarce {post_id,page_id,store,product,image,url,cached} sau None. Folosește + completează registrul."""
+    if (ticket.get("channel") or "") not in COMMENT_CHANNELS:
+        return None
+    pages, post_id = extract_fb_post(ticket)
+    if not post_id:
+        return None
+    if use_cache:
+        cached = reg_get(post_id)
+        if cached and cached.get("product"):
+            reg_put({"post_id": post_id})  # bump last_seen/seen_count
+            return {"post_id": post_id, "page_id": cached.get("page_id"), "store": cached.get("store"),
+                    "product": cached.get("product"), "image": cached.get("og_image"), "url": cached.get("post_url"), "cached": True}
+    og = fb_post_og(pages, post_id)
+    if not og.get("image"):
+        return {"post_id": post_id, "page_id": (pages or [""])[0], "store": "", "product": "", "image": "", "url": "", "cached": False, "error": "postare negăsită (fără og:image)"}
+    product = ""
+    if describe_ad:
+        try:
+            data = urllib.request.urlopen(enc_url(og["image"]), timeout=45).read()
+            product = vision(data, "image/jpeg", "Reclama de la: " + (og.get("title") or ""), SYS_AD)
+        except Exception as e:
+            product = "(eroare descriere reclamă: %s)" % str(e)[:60]
+    good = bool(product) and not product.startswith("(eroare") and not product.startswith("(fără")
+    # salvăm întotdeauna og_image/store/url; produsul DOAR dacă descrierea a reușit (altfel se reîncearcă next run)
+    reg_put({"post_id": post_id, "page_id": og.get("page_id") or (pages or [""])[0], "store": og.get("title", ""),
+             "product": product if good else "", "og_image": og.get("image", ""), "post_url": og.get("url", "")})
+    res = {"post_id": post_id, "page_id": og.get("page_id") or (pages or [""])[0], "store": og.get("title", ""),
+           "product": product if good else "", "image": og.get("image", ""), "url": og.get("url", ""), "cached": False}
+    if not good:
+        res["error"] = product or "fără descriere"
+    return res
+
+
+def ad_block(ticket, describe_ad=True):
+    """Bloc text pt context (sau '') — reclama pe care comentează clientul."""
+    ad = ad_for_ticket(ticket, describe_ad=describe_ad)
+    if not ad or not ad.get("product"):
+        return ""
+    return ("RECLAMA/POSTAREA pe care comentează clientul (folosește-o ca să identifici PRODUSUL și să răspunzi la obiect): %s%s" % (
+        ad["product"], (" [magazin: %s]" % ad["store"]) if ad.get("store") else ""))
+
+
+# ───────────────────────── CLI ─────────────────────────
+def _get_ticket(mcp, conv):
+    key = "id" if not str(conv).isdigit() else "conversation_number"
+    cv = mcp.call("get_conversation", {key: str(conv), "mode": "audit", "max_messages": 30, "max_message_chars": 300})
+    tk = cv.get("ticket") or {}
+    msgs = (cv.get("messages_page") or {}).get("messages") or cv.get("messages") or []
+    return tk, msgs
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--conv", required=True, help="nr conversație Richpanel (sau id)")
-    ap.add_argument("--save", default=None, help="director unde să salveze imaginile")
+    ap.add_argument("--conv", default=None, help="nr conversație Richpanel (sau id)")
+    ap.add_argument("--save", default=None, help="director unde să salveze imaginile clientului")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--no-describe", action="store_true", help="doar descarcă/listează, fără descriere LLM")
-    ap.add_argument("--all", action="store_true", help="descrie și pozele trimise de AGENT (implicit doar ale clientului)")
+    ap.add_argument("--all", action="store_true", help="descrie și pozele trimise de AGENT")
+    ap.add_argument("--no-ad", action="store_true", help="nu rezolva reclama de la comentariu")
+    ap.add_argument("--no-cache", action="store_true", help="ignoră registrul, re-descrie reclama")
+    ap.add_argument("--registry-list", action="store_true", help="afișează postările salvate în registru")
+    ap.add_argument("--registry-build", action="store_true", help="populează registrul din comentariile recente (incremental)")
+    ap.add_argument("--channel", default="facebook_feed_comment", help="canal pt --registry-build")
+    ap.add_argument("--scan", type=int, default=200, help="câte comentarii recente să scaneze la --registry-build")
     a = ap.parse_args()
 
+    if a.registry_list:
+        rows = reg_list()
+        print("📚 Registru postări (%s) — %d înregistrări\n" % (FB_POST_DB, len(rows)))
+        for pid, store, product, n, last in rows:
+            print("  • %s [%s ×%s] %s" % (pid, store or "?", n, (product or "")[:90]))
+        return
+
     mcp = MCP(secret("RICHPANEL_MCP_TOKEN"))
-    key = "id" if not str(a.conv).isdigit() else "conversation_number"
-    cv = mcp.call("get_conversation", {key: str(a.conv), "mode": "audit", "max_messages": 30, "max_message_chars": 300})
-    tk = cv.get("ticket") or {}
+
+    if a.registry_build:
+        seen, new, reused = set(), 0, 0
+        res = mcp.call("list_conversations", {"channel": a.channel, "limit": a.scan, "status": "OPEN"})
+        tickets = res.get("tickets") or res.get("conversations") or []
+        print("🔄 Scanez %d comentarii (%s) → completez registrul…\n" % (len(tickets), a.channel))
+        for t in tickets:
+            _, post_id = extract_fb_post(t)
+            if not post_id or post_id in seen:
+                continue
+            seen.add(post_id)
+            cached = reg_get(post_id)
+            if cached and cached.get("product"):
+                reused += 1
+                continue
+            ad = ad_for_ticket(t, describe_ad=not a.no_describe, use_cache=False)
+            if ad and ad.get("product"):
+                new += 1
+                print("  + %s [%s] %s" % (post_id, ad.get("store") or "?", (ad["product"] or "")[:80]))
+            else:
+                print("  ⚠️ %s — %s" % (post_id, (ad or {}).get("error", "nedescris")))
+            if not a.no_describe:
+                time.sleep(0.4)   # anti-burst rate-limit LLM
+        print("\n✓ postări noi: %d | deja știute: %d | total unice scanate: %d" % (new, reused, len(seen)))
+        return
+
+    if not a.conv:
+        ap.error("dă --conv N, sau --registry-list / --registry-build")
+
+    tk, msgs = _get_ticket(mcp, a.conv)
     ctx = " ".join(((tk.get("subject") or "") + " " + (tk.get("first_message") or "")).split())[:300]
-    msgs = (cv.get("messages_page") or {}).get("messages") or cv.get("messages") or []
-
-    atts = []
-    seen = set()
-    for m in msgs:
-        who = "AGENT" if m.get("author_is_workspace_agent") else ("AI" if m.get("is_ai") else "CLIENT")
-        for at in (m.get("attachments") or []):
-            url = at.get("url") or at.get("href") or at.get("downloadUrl") or ""
-            base = url.lower().split("?")[0]
-            if not url or not base.endswith(IMG_EXT):
-                continue
-            key = base.split("/")[-1]   # dedup pe nume fișier (același atașament se repetă în thread)
-            if key in seen:
-                continue
-            seen.add(key)
-            atts.append({"idx": m.get("index"), "who": who, "url": url,
-                         "name": urllib.parse.unquote(url.split("/")[-1].split("?")[0])})
-
-    if a.save:
-        os.makedirs(a.save, exist_ok=True)
-    out = []
-    for i, at in enumerate(atts):
-        try:
-            data = urllib.request.urlopen(enc_url(at["url"]), timeout=60).read()
-        except Exception as e:
-            at["error"] = "download: %s" % e
-            out.append(at)
-            continue
-        at["bytes"] = len(data)
-        ext = (os.path.splitext(at["name"])[1] or ".jpg").lower()
-        ctype = "image/png" if ext == ".png" else "image/jpeg"
-        if a.save:
-            p = os.path.join(a.save, "%s_%d%s" % (a.conv, i, ext))
-            open(p, "wb").write(data)
-            at["saved"] = p
-        if not a.no_describe and (a.all or at["who"] == "CLIENT"):
-            at["desc"] = describe(data, ctype, ctx)
-        out.append(at)
+    photos = client_photos(msgs, ctx, include_agent=a.all, save_dir=a.save,
+                           describe_imgs=not a.no_describe, conv=str(a.conv))
+    ad = None if a.no_ad else ad_for_ticket(tk, describe_ad=not a.no_describe, use_cache=not a.no_cache)
 
     if a.json:
-        print(json.dumps({"conv": a.conv, "subject": ctx, "photos": out}, ensure_ascii=False, indent=1))
+        print(json.dumps({"conv": a.conv, "subject": ctx, "channel": tk.get("channel"),
+                          "client_photos": photos, "ad": ad}, ensure_ascii=False, indent=1))
         return
-    print("📷 Tichet #%s — %s" % (a.conv, ctx[:80]))
-    cli = sum(1 for o in atts if o["who"] == "CLIENT")
-    print("   %d imagine(i) atașată(e) (%d de la client).\n" % (len(atts), cli))
-    for i, o in enumerate(out, 1):
+
+    print("📷 Tichet #%s [%s] — %s" % (a.conv, tk.get("channel") or "?", ctx[:70]))
+    cli = sum(1 for o in photos if o["who"] == "CLIENT")
+    print("   %d imagine(i) atașată(e) (%d de la client)." % (len(photos), cli))
+    if ad:
+        if ad.get("product"):
+            tag = "din registru" if ad.get("cached") else "NOU → salvat în registru"
+            print("   📢 RECLAMA comentată (%s) [%s]: %s" % (tag, ad.get("store") or "?", ad["product"]))
+        elif ad.get("error"):
+            print("   📢 reclama: %s" % ad["error"])
+    print()
+    for i, o in enumerate(photos, 1):
         size = ("%d KB" % (o["bytes"] // 1024)) if o.get("bytes") else o.get("error", "")
         print("  [%d] %s · %s · %s" % (i, o.get("who"), o.get("name"), size))
         if o.get("saved"):
