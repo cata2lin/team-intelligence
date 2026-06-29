@@ -64,7 +64,13 @@ uv run cs_auto_draft.py --channel email --create-draft --lean --no-comments \
 - **`--sleep`** — pauză între tichete (rate-safety).
 - **Plafon real = rate-limit-ul OpenAI (TPM) + Richpanel (~4 req/sec)** → un singur worker secvențial, ~0.15-0.5 drafturi/sec. Paralelismul agresiv produce 429 (OpenAI → „(eroare LLM)" prins de gardă; Richpanel → backoff). `DRAFT_MODEL=gpt-4o-mini` are TPM mult mai mare.
 - **Reziliență**: retry+backoff pe 429/5xx **și** timeout/URLError (LLM + MCP); **gardă**: NU salvează draft dacă LLM a eșuat (`(eroare LLM`/gol).
-- **Cron (VPS)**: `/root/Scripturi/cs_backlog.sh` (sursează cheile din `.env`) rulat la 3h (`0 9-21/3`), `flock`-guarded; loops pe email+DM, comentarii excluse. Secretele pe VPS = `/root/Scripturi/.env` (root-600), nu KB (cron-ul n-are env KB).
+- **Cron (VPS)**: `/root/Scripturi/cs_backlog.sh` (sursează cheile din `.env`) rulat la 3h (`0 9-21/3`), `flock`-guarded; loops pe email+DM, comentarii excluse. Secretele pe VPS = `/root/Scripturi/.env` (root-600), nu KB (cron-ul n-are env KB). **Deploy**: pune `cs_auto_draft.py` ȘI `cs_photo.py` în `/root/Scripturi/` (același folder = `import cs_photo` merge). `dependencies=["pg8000"]` (altfel grounding+catalog pică tăcut local).
+
+## Hardening filtrare + escaladare (analiză 40 email + 15 cmt, iun-2026)
+- **Spam gating DETERMINIST** (robust indiferent de model — gpt-4o-mini ratează spam ce gpt-4o prinde): `NON_CUSTOMER_SENDER_RE` (curier dpd/sameday/econt + app omegatheme/consentik) + `JUDGEME_NOTIF_RE` (subiect „left a N star review") + `SAAS_NOISE_SUBJ_RE` (rapoarte/mention social) + `BOUNCE_RE` (mailer-daemon) + `_padded_noise` (corp majoritar caractere invizibile) → EXCLUS înainte de draft, fără să depindă de LLM.
+- **Gate anti-SUPRA-escaladare** (`_real_escalation`): reclamații obișnuite (parfum spart, WISMO simplu) NU mai escaladează doar pe flag-ul LLM; escaladează DOAR la semnal REAL (ANPC/juridic via `ESCAL`, furie/„țeapă" via `ANGER_RE`, sau >70% MAJUSCULE).
+- **Comentarii**: răspuns DIRECT la întrebări simple (preț/ofertă/„cum comand"/„dă-mi numărul") — nu deflecta în privat; privatul doar pt date personale.
+- **Preț din catalog**: pe comentarii deals, `cs_photo.ad_block` aduce prețul/stocul real (catalog metrics) → draftul răspunde la „ce preț?"; exceptat de la anti-halucinare (`_ad_has_catalog`).
 
 ## 📷 Poze (`--photos`, implicit PORNIT) — prin modulul canonic `gigi:cs-photo`
 Flow-ul **REFERENȚIAZĂ** `cs-photo` (`import cs_photo`) ca să „vadă" pozele — nu duplică logica.
