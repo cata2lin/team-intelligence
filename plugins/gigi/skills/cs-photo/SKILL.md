@@ -25,6 +25,12 @@ Copy-ul se păstrează mereu în registru + se trimite în context (textul ofert
 Așa știm la ce se referă „Ce preț are?/Dimensiunile?/Sunt turcești?" — **esențial la magazinele deals**
 (Casa Ofertelor, Grandia, Magdeal…), unde reclama poate fi orice produs.
 
+**PREȚ din CATALOG** — după ce identifică produsul din reclamă, `catalog_match(brand, text)` îl leagă de
+catalogul real (metrics `products`+`variants`) → **preț + stoc REALE** în `ad_block`. Ex: comentariu
+„prețul toaletei portabile?" pe Ofertele Zilei → draftul răspunde „169 lei (stoc 279)". Keyword-match pe titlu
+(scor = nr. cuvinte potrivite); `_brand_from_title` normalizează og:title→brand. Necesită `DATABASE_URL_METRICS`.
+(În `cs-draft-reply`, prețul din catalog e exceptat de la anti-halucinare — e dată reală.)
+
 **SKIP pe magazinele MONO-PRODUS** — produsul e cunoscut din brand → nu mai rezolvăm reclama (**zero LLM**).
 Default `MONO_PRODUCT_BRANDS` = Esteban, GT/George Talent, Nubra, Belasil, Lab Noir (parfumuri + Belasil), suprascris
 prin env `AD_SKIP_BRANDS`. Skip-ul e **politică** (se aplică și pe rândurile deja cache-uite, nu doar economie).
