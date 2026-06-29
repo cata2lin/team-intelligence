@@ -24,3 +24,6 @@ Tool-uri **standalone** (rulabile, au `__main__`) din aplicația Scripturi de pe
 Module importate de FastAPI (fără `__main__`): `serial_refuser.py`, `shipment.py`, `validation_service.py`,
 + rutele/modelele app-ului + `test_*.py` (scratch). Astea NU se urcă (vezi engine-ul de profit în
 `gigi/skills/metrics-cache/engine/` — singura excepție de „cod de app" versionat, fiindcă e P&L-ul canonic).
+
+## gads_upload_conversions.py — server-side Enhanced Conversions (Data Manager API)
+Trimite conversii server-side la Google Ads din comenzile AWBprint (email hash SHA-256), via `datamanager.googleapis.com/v1/events:ingest` (ConversionUploadService e deprecat pt integrări noi). Auth: `DATAMANAGER_REFRESH_TOKEN` + `YOUTUBE_OAUTH_CLIENT_ID/SECRET` (scope `datamanager`). Mod `delivered` (venit real) / `placed`. Idempotent (SQLite), dry-run by default, `--validate-only`. OMITE `--login-customer` dacă ai acces direct pe operating account. Cron VPS: `40 */3 * * *` pe Grandia (conv observation-only 7666059809). Vezi memoria [[grandia-takeover-google]].
