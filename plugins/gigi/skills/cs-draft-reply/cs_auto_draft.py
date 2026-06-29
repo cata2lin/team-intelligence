@@ -35,6 +35,14 @@ import os, re, sys, json, base64, subprocess, urllib.request, urllib.parse, urll
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
+
+# cs-photo = modulul CANONIC de „vedere" a pozelor (poza CLIENTULUI + poza RECLAMEI de la comentariu, cu registru).
+# Acest flow îl REFERENȚIAZĂ. Fallback pe logica locală (describe_photos) dacă nu e pe path (ex. VPS înainte de deploy).
+try:
+    sys.path.insert(0, os.path.join(HERE, "..", "cs-photo"))
+    import cs_photo as _csp
+except Exception:
+    _csp = None
 CI = os.path.join(HERE, "..", "customer-identity", "customer_identity.py")
 CSA = os.path.join(HERE, "..", "cs-actions", "scripts", "cs_actions.py")
 QUEUE = os.path.join(HERE, ".auto_draft_proposals.json")
@@ -902,9 +910,9 @@ def main():
                 if is_client:
                     last_cust = txt[:400]   # reține ULTIMUL mesaj al clientului din fir
             tr = "\n".join(lines) or ("- [CLIENT] " + last_cust)
-            if a.photos:   # VEDE pozele clientului (descarcă + descrie) → conținutul intră în context
+            if a.photos:   # VEDE pozele clientului prin cs-photo (modul canonic) → conținutul intră în context; fallback local
                 try:
-                    photo_blk = describe_photos(msgs, subj + " " + first)
+                    photo_blk = _csp.client_photos_block(msgs, subj + " " + first) if _csp else describe_photos(msgs, subj + " " + first)
                 except Exception as _pe:
                     print("  ⚠️ vedere poze eșuată (#%s): %s" % (no, str(_pe)[:60]), file=sys.stderr)
         # marchează explicit ULTIMUL mesaj al clientului — la EL răspundem; restul firului = doar context
@@ -919,8 +927,20 @@ def main():
             _pg = ((t.get("to") or {}).get("id") if isinstance(t.get("to"), dict) else "") or ""
             _segs = str(cid).split("_")
             _post_txt = fb_post_text(_segs[1], _pg) if (len(_segs) >= 2 and _pg) else ""
+            # poza RECLAMEI pe care comentează clientul — prin cs-photo (og:image, FĂRĂ token de pagină; cache în registru)
+            _ad_blk = ""
+            if a.photos and _csp:
+                try:
+                    _ad_blk = _csp.ad_block(t)
+                except Exception:
+                    _ad_blk = ""
+            _pre = []
+            if _ad_blk:
+                _pre.append(_ad_blk)
             if _post_txt:
-                tr = "POSTAREA/RECLAMA la care comentează clientul (folosește-o ca să identifici PRODUSUL și să răspunzi la obiect): " + _post_txt + "\n" + tr
+                _pre.append("POSTAREA/RECLAMA la care comentează clientul (text): " + _post_txt)
+            if _pre:   # identifică PRODUSUL din reclamă → răspunde la obiect (nu mai întreba „ce produs")
+                tr = "\n".join(_pre) + "\n" + tr
 
         sent_lab, sent_int = sentiment(blob + " " + tr)
         store_name = PAGE_STORE.get(((t.get("to") or {}).get("id") if isinstance(t.get("to"), dict) else None) or "") or "magazinul nostru"
