@@ -379,6 +379,62 @@ def customer_ident(conv_no):
         return {}
 
 
+def norm_phone(p):
+    d = "".join(ch for ch in str(p or "") if ch.isdigit())
+    return d[-9:] if len(d) >= 9 else ""
+
+PROFIT_DB = os.environ.get("PROFIT_DB", "/root/Scripturi/data/profitability.db")
+def lookup_orders(email, phone, order_names=()):
+    """GROUNDING self-contained (pt VPS, fără SSH/uv): comenzile clientului din DB metrics (pg8000, după email/telefon/nr-comandă)
+    + status livrare/AWB/curier din profitability.db (sqlite local). Întoarce [] dacă nu merge (fail-safe)."""
+    try:
+        import pg8000.dbapi, sqlite3
+    except Exception:
+        return []
+    url = secret("DATABASE_URL_METRICS")
+    if not url or not (email or phone or order_names):
+        return []
+    byname = {}
+    try:
+        u = urllib.parse.urlparse(url)
+        conn = pg8000.dbapi.connect(ssl_context=True, user=urllib.parse.unquote(u.username or ""),
+                                    password=urllib.parse.unquote(u.password or ""), host=u.hostname,
+                                    port=u.port or 5432, database=(u.path or "/").lstrip("/"))
+        cur = conn.cursor()
+        cols = 'name,"totalPrice","financialStatus","shopifyCreatedAt"'
+        rows = []
+        if email:
+            cur.execute('SELECT %s FROM orders WHERE lower(email)=lower(%%s) ORDER BY "shopifyCreatedAt" DESC LIMIT 12' % cols, (email,))
+            rows += cur.fetchall()
+        ph = norm_phone(phone)
+        if ph:
+            cur.execute('SELECT %s FROM orders WHERE phone LIKE %%s OR "shippingPhone" LIKE %%s ORDER BY "shopifyCreatedAt" DESC LIMIT 12' % cols, ("%" + ph, "%" + ph))
+            rows += cur.fetchall()
+        ons = [o for o in dict.fromkeys(order_names) if o]
+        if ons:   # și după numărul de comandă menționat în mesaj (crucial pt WISMO)
+            cur.execute('SELECT %s FROM orders WHERE name IN (%s)' % (cols, ",".join(["%s"] * len(ons))), ons)
+            rows += cur.fetchall()
+        conn.close()
+        for r in rows:
+            byname[r[0]] = {"o": r[0], "total": float(r[1] or 0), "fin": r[2], "date": str(r[3])[:10],
+                            "brand": store_prefix(r[0]) or "?", "deliv": "?", "awb": "", "courier": "", "skus": ""}
+    except Exception:
+        return list(byname.values())
+    names = list(byname.keys())
+    if names and os.path.exists(PROFIT_DB):
+        try:
+            c = sqlite3.connect(PROFIT_DB)
+            q = "SELECT order_name,status_category,skus,awb,courier_key FROM profit_orders WHERE order_name IN (%s)" % ",".join("?" * len(names))
+            for r in c.execute(q, names):
+                o = byname.get(r[0])
+                if o:
+                    o["deliv"] = r[1] or "?"; o["skus"] = r[2] or ""; o["awb"] = r[3] or ""; o["courier"] = r[4] or ""
+            c.close()
+        except Exception:
+            pass
+    return list(byname.values())
+
+
 _TAG_CACHE = {}
 AI_TAG = "ai-draft"   # tag-ul pus pe tichetele tratate de AI; suprascris de --tag (ex. ai-live la rulări live)
 def tag_id(mcp, name):
@@ -659,6 +715,7 @@ def main():
     ap.add_argument("--scan", type=int, default=150)
     ap.add_argument("--sleep", type=float, default=0.2, help="pauză (s) între tichete — crește pt rate-safety pe loturi mari (ex. 0.5)")
     ap.add_argument("--lean", action="store_true", help="proces REDUS pt volum mare: fără 360/SSH (comenzi), fără rutare escaladare (priority/notă) — doar transcript → draft → create_draft. Mult mai rapid + mai puține scrieri Richpanel.")
+    ap.add_argument("--ground", action="store_true", help="GROUNDING self-contained (pt VPS/cron): caută comenzile clientului DIRECT din DB metrics + profitability.db (fără SSH/uv) → draftul are status/AWB real. Mai lent ca lean, dar fără halucinări de comandă.")
     ap.add_argument("--skip-tagged", action="store_true", help="sare tichetele care AU deja tag-ul AI (--tag) — pt cron/reluare: draftează DOAR tichetele noi, fără dubluri")
     ap.add_argument("--no-comments", action="store_true", help="exclude complet canalele de comentarii (facebook_feed_comment/instagram_comment) — nu le draftează (ex. pt cron: comentariile rămân pt CS)")
     ap.add_argument("--apply-send", action="store_true", help="⚠️ LIVE: TRIMITE răspunsul la client (send_message) + închide tichetul, în loc de draft — DOAR pe ne-escaladate + ne-comentariu (escaladările/comentariile rămân draft, le ia un om). Customer-facing, IREVERSIBIL. Necesită --create-draft.")
@@ -774,9 +831,16 @@ def main():
 
         orders, other = [], []
         elsewhere = "necunoscut (fără email/telefon real — pe comentarii publice nu se poate lega)"
-        if a.lean:
+        if a.ground and (email or phone or ORDER_RE.search(blob + " " + last_cust)):
+            # GROUNDING self-contained (VPS/cron): comenzi reale din DB metrics + status/AWB din profitability.db
+            _onames = ["".join(m.group(0).split()).replace("-", "").upper() for m in ORDER_RE.finditer(blob + " " + last_cust)]
+            orders = lookup_orders(email, phone, _onames)
+            if (store_name == "magazinul nostru") and orders:
+                store_name = orders[0].get("brand") or store_name
+            elsewhere = ("grounded — %d comenzi găsite în DB" % len(orders)) if orders else "grounded — nicio comandă găsită în DB"
+        elif a.lean:
             elsewhere = "(lean — fără context 360)"
-        if (not a.lean) and (email or phone):
+        elif (not a.lean) and (email or phone):
             ci = customer_ident(no)
             orders = ci.get("orders", []) or []
             if (store_name == "magazinul nostru") and orders:
