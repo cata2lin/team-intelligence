@@ -139,6 +139,19 @@ RULES = [
 ]
 ESCAL = re.compile(r"anpc|protectia consumator|dau in judecat|instanta|avocat|denunt|reclamatie|chargeback|politi[ae]", re.I)
 ACTION_CATS = {"modificare_comanda", "anulare", "schimb_swap", "problema_produs", "refuz_livrare"}
+# post-filtru ANTI-HALUCINARE: tipare de FABRICARE (lookup/status/preț/dimensiune inventate) când NU avem datele în context
+HALLU = re.compile(
+    r"am verificat|am c[ăa]utat|nu am g[ăa]sit|n-?am g[ăa]sit|nu (am )?identificat|am identificat comanda|"
+    r"nu exist[ăa] (nicio|o) comand|comanda (dumneavoastr[ăa]|nr|#)?\s*[A-Z]{2,5}\d+ (este|a fost|nu)|"
+    r"este în procesare|a fost predat|nu a fost predat[ăa]|urmeaz[ăa] s[ăa] fie preluat|"
+    r"livrare[a]? (se face |va fi |în )?\b\d+\s?(-\s?\d+\s?)?zile|în \d+ zile lucr|"
+    r"\b\d{1,3}\s?x\s?\d{1,3}\b|\b\d{2,3}\s?cm\b|"
+    r"\b\d{2,4}\s*(de\s+)?(lei|ron)\b",   # orice preț concret (N lei) — în lean nu avem prețuri → inventat
+    re.I)
+def has_order_data(od_ctx):
+    """True dacă în context CHIAR avem comenzi (nu lean / nu redactat)."""
+    s = (od_ctx or "")
+    return bool(s) and "nicio comandă" not in s and "ascunse" not in s and "lean" not in s.lower()
 def categorize_hint(blob, channel=None):
     t = deacc(blob)
     for cat, pat in RULES:
@@ -163,8 +176,20 @@ def sentiment(text):
     inten = "puternic" if (score >= 3 or excl >= 2 or caps > 20) else ("mediu" if score >= 1 else "slab")
     return lab, inten
 
+_SECRET_CACHE = {}
 def secret(k):
-    return os.environ.get(k) or subprocess.run(["uv", "run", KB, "secret-get", k], capture_output=True, text=True).stdout.strip()
+    # env mai întâi (cron/VPS exportă cheile din .env); altfel KB via uv — dar NU crăpa dacă uv lipsește (cron PATH minimal)
+    v = os.environ.get(k)
+    if v:
+        return v
+    if k in _SECRET_CACHE:
+        return _SECRET_CACHE[k]
+    try:
+        v = subprocess.run(["uv", "run", KB, "secret-get", k], capture_output=True, text=True, timeout=30).stdout.strip()
+    except Exception:
+        v = ""   # uv negăsit / KB inaccesibil → gol, NU excepție (altfel llm() iese „(eroare LLM ...'uv')")
+    _SECRET_CACHE[k] = v
+    return v
 
 class MCP:
     def __init__(self, token):
@@ -269,10 +294,17 @@ ACȚIUNE: action!="none" DOAR dacă e cerere clară de modificare adresă/telefo
 
 # ---- generarea DRAFTULUI ----
 SYSTEM = """Ești agent Customer Service ARONA. Scrii ca un agent REAL (Cristina/Diana/Irina/Martina/Alexandra) — cald, politicos, natural, cu diacritice, fără limbaj robotic.
+⛔ ANTI-HALUCINARE — REGULA #1, MAI PRESUS DE ORICE: NU ai făcut niciun lookup live. Folosește DOAR informația care apare EXPLICIT în context (secțiunea COMENZILE CLIENTULUI / AWB / PRODUS / TELEFON_COMANDĂ). Dacă o informație NU e în context, NU o INVENTA și NU pretinde că o știi/ai verificat-o. Concret, INTERZIS:
+  • să spui „am verificat / am căutat / am găsit / NU am găsit comanda / nu există nicio comandă" — NU cauți tu, nu ai cum să știi;
+  • să afirmi un STATUS de comandă/livrare („e în procesare / a fost predată / nu a fost predată / urmează preluarea"), un AWB, o dată sau un termen de livrare în zile — dacă nu e în context;
+  • să INVENTEZI specificații de produs: dimensiuni (cm), preț (lei), culoare, material, disponibilitate/stoc — dacă nu sunt în context;
+  • să INVENTEZI un număr de telefon — folosește DOAR `TELEFON_COMANDĂ` dacă apare în context; altfel NU da niciun număr;
+  • să confirmi capabilități nesigure (ex. livrare internațională) fără bază.
+CE FACI ÎN SCHIMB când NU ai datele: cere-i POLITICOS clientului ce-ți lipsește — **numărul comenzii SAU un număr de telefon** (pt orice ține de o comandă: status/anulare/retur/modificare) — sau spune ONEST „verificăm și revenim cât mai curând", FĂRĂ să inventezi. La întrebări de produs (preț/dimensiuni/stoc) fără date: îndrumă spre site sau spune că revii cu detaliile exacte — NU inventa cifre.
 RĂSPUNZI LA ULTIMUL MESAJ AL CLIENTULUI (marcat „>>> ULTIMUL MESAJ AL CLIENTULUI" în conversație); restul firului = context. Dacă ultimul mesaj e mulțumire / „a ajuns" / feedback pozitiv (ex. „Foarte bune, mulțumesc!") → răspunde CALD la el (te bucuri că i-au plăcut, mulțumești), NU relua întrebarea veche, NU cere AWB/nr comandă/telefon și NU trata ca WISMO.
 REGISTRU (important): FORMAL, la PLURAL, pe TOATE canalele (email, DM, chat, comentariu) — în română „dumneavoastră/vă/-ți" (NICIODATĂ „tu/ție/te/-i"); în alte limbi registrul politicos echivalent. Așa scriu agenții ARONA reali („Vă rugăm", „Vă informăm", „Vă mulțumim").
 PROCEDURI:
-- LIVRARE/WISMO: răspunde DIRECT, dar NU INVENTA. DOAR dacă în context ai AWB+curier confirmat → dă statusul real + linkul corect DUPĂ curier (DPD https://tracking.dpd.ro?shipmentNumber=<AWB>; Sameday https://www.sameday.ro/#awb=<AWB>; Packeta https://tracker.packeta.com/ro/?id=<AWB>; Econt https://www.econt.com/en/services/track-shipment/<AWB>) + scuze dacă e întârziat. Dacă NU ai AWB/status confirmat în context → NU afirma statusul comenzii (NU spune „e în procesare / urmează să fie preluată"), NU promite un termen ferm în zile și NU promite tracking ca sigur — ar fi o halucinație care duce la refuz/reclamație. Spune ONEST că verifici stadiul comenzii împreună cu curierul și revii cu detaliile de livrare + tracking cât mai curând. Nu cere date pe care le ai deja; cere nume+nr comandă DOAR dacă nu poți identifica comanda.
+- LIVRARE/WISMO: răspunde DIRECT, dar NU INVENTA. DOAR dacă în context ai AWB+curier confirmat → dă statusul real + linkul corect DUPĂ curier (DPD https://tracking.dpd.ro?shipmentNumber=<AWB>; Sameday https://www.sameday.ro/#awb=<AWB>; Packeta https://tracker.packeta.com/ro/?id=<AWB>; Econt https://www.econt.com/en/services/track-shipment/<AWB>) + scuze dacă e întârziat. Dacă NU GĂSEȘTI comanda în context (nicio comandă / fără AWB) → NU pretinde că ai găsit-o sau că o cauți tu acum, NU afirma statusul (NU spune „e în procesare / urmează să fie preluată / verific eu") și NU promite termen/tracking. În schimb, cere-i clientului POLITICOS **numărul comenzii SAU un număr de telefon** ca să putem identifica și verifica comanda (ex: „Ca să verific exact comanda dumneavoastră, îmi puteți spune numărul comenzii sau un număr de telefon asociat? Revin imediat cu statusul."). Nu cere date pe care le ai deja în context.
 - RETUR: ARONA e COD și NU încurajează returul → întreabă motivul + oferă alternativă; insistă și e eligibil → formular https://bi.grandia.ro/returns?order=<nr>&email=<email> + „Suma vă va fi returnată în maximum 14 zile de la ajungerea coletului." Parfum/igienă DESIGILAT → refuz politicos.
 - PRODUS SPART (parfum): NU refund → RETRIMITERE GRATUITĂ + parfum CADOU. DEFECT/LIPSĂ (casă): cere poză; pe stoc → retrimitere/schimb; altfel retur+refund.
 - PRE-VÂNZARE / INTENȚIE DE CUMPĂRARE („vreau și eu", „dacă sunt bune", „cum comand", „îl iau"): răspuns CALD și entuziast care CONFIRMĂ și ÎNCURAJEAZĂ comanda — spune CUM comandă (direct de pe site SAU sunând la `TELEFON_COMANDĂ` dacă apare în context); NU deflecta seac cu „dacă aveți întrebări scrieți-ne". RECENZIE/COMPLIMENT: mulțumește scurt și cald.
@@ -629,6 +661,7 @@ def main():
     ap.add_argument("--lean", action="store_true", help="proces REDUS pt volum mare: fără 360/SSH (comenzi), fără rutare escaladare (priority/notă) — doar transcript → draft → create_draft. Mult mai rapid + mai puține scrieri Richpanel.")
     ap.add_argument("--skip-tagged", action="store_true", help="sare tichetele care AU deja tag-ul AI (--tag) — pt cron/reluare: draftează DOAR tichetele noi, fără dubluri")
     ap.add_argument("--no-comments", action="store_true", help="exclude complet canalele de comentarii (facebook_feed_comment/instagram_comment) — nu le draftează (ex. pt cron: comentariile rămân pt CS)")
+    ap.add_argument("--apply-send", action="store_true", help="⚠️ LIVE: TRIMITE răspunsul la client (send_message) + închide tichetul, în loc de draft — DOAR pe ne-escaladate + ne-comentariu (escaladările/comentariile rămân draft, le ia un om). Customer-facing, IREVERSIBIL. Necesită --create-draft.")
     ap.add_argument("--json", action="store_true", help="emite drafturile structurat (audit/integrare) — JSON pe ultima linie după marcajul @@JSON@@")
     ap.add_argument("--close-spam", action="store_true", help="închide (CLOSED) + tag 'spam' tichetele detectate ca spam/notificare automată")
     ap.add_argument("--tag", default="ai-draft", help="tag-ul pus pe tichetele tratate de AI (ex. --tag ai-live pt o rulare live)")
@@ -871,6 +904,24 @@ def main():
         except Exception as e:
             draft, engine = "(eroare LLM: %s)" % e, "—"
 
+        # POST-FILTRU ANTI-HALUCINARE: dacă NU avem datele comenzii dar draftul afirmă lookup/status/preț/dimensiune → corectează
+        if not is_esc and not draft.startswith("(eroare") and not has_order_data(od_ctx) and HALLU.search(draft):
+            corr = ctx + ("\n\n⛔ Răspunsul tău anterior CONȚINEA INFORMAȚIE INVENTATĂ (lookup/„am verificat/nu am găsit”, status comandă, preț, dimensiune sau telefon pe care NU le ai în context). "
+                          "Rescrie complet, FĂRĂ să inventezi NIMIC și FĂRĂ să spui că ai căutat/găsit/verificat ceva. "
+                          "Cere clientului numărul comenzii SAU un număr de telefon (pt orice ține de o comandă), sau, la întrebări de produs, spune onest că revii cu detaliile exacte / poate verifica pe site. Scrie DOAR răspunsul.")
+            try:
+                d2, _ = llm(SYSTEM, corr)
+                if d2 and not HALLU.search(d2):
+                    draft, engine = d2.strip(), engine + "+corectat"
+            except Exception:
+                pass
+            if HALLU.search(draft):   # tot fabrică → șablon SIGUR, onest (pe categorie)
+                if cat in ("presale_intrebare", "comanda_noua"):
+                    draft = "Bună ziua! Vă mulțumim pentru interes. Vă revin cu detaliile exacte cât mai curând; între timp puteți vedea informațiile actualizate și pe site. Vă mulțumim!"
+                else:
+                    draft = "Bună ziua! Ca să verific exact comanda dumneavoastră, îmi puteți spune numărul comenzii sau un număr de telefon asociat? Revin imediat cu detaliile. Vă mulțumesc!"
+                engine = "șablon-sigur"
+
         print("\n" + "─" * 92)
         cmoji = "🙈" if (hide_obj or {}).get("mode") == "hide" else ""
         flag = ("⛳%s " % level if is_esc else "") + ("🔧" if cmd else "") + cmoji
@@ -909,6 +960,17 @@ def main():
             elif draft.strip().startswith("(eroare LLM") or len(draft.strip()) < 5:
                 # GARDĂ: nu salva gunoi în Richpanel (LLM picat / draft gol) — sare tichetul
                 print("  ⛔ draft invalid (eroare LLM / gol) → NU salvez (sar tichetul).")
+            elif a.apply_send and not is_esc and not is_public:
+                # LIVE: trimite răspunsul la client + închide tichetul. NUMAI ne-escaladat + ne-comentariu
+                # (escaladările + comentariile rămân DRAFT, le ia un om). Garda de mai sus a exclus deja draft invalid.
+                res = mcp.call("send_message", {"conversation_id": cid, "body": draft.strip()})
+                ok = not (isinstance(res, dict) and res.get("_error"))
+                if ok:
+                    add_tags(mcp, cid, [t for t in (AI_TAG, "ai-sent") if t])
+                    mcp.call("update_conversation_status", {"conversation_id": cid, "status": "CLOSED"})
+                    print("  📤 TRIMIS LIVE la client + tichet ÎNCHIS.")
+                else:
+                    print("  ⚠️ send_message EȘUAT → NU închid, NU marchez: %s" % res)
             else:
                 res = mcp.call("create_draft", {"conversation_id": cid, "body": draft.strip()})
                 ok = not (isinstance(res, dict) and res.get("_error"))
