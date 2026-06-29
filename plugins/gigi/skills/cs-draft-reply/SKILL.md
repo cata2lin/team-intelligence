@@ -66,10 +66,20 @@ uv run cs_auto_draft.py --channel email --create-draft --lean --no-comments \
 - **Reziliență**: retry+backoff pe 429/5xx **și** timeout/URLError (LLM + MCP); **gardă**: NU salvează draft dacă LLM a eșuat (`(eroare LLM`/gol).
 - **Cron (VPS)**: `/root/Scripturi/cs_backlog.sh` (sursează cheile din `.env`) rulat la 3h (`0 9-21/3`), `flock`-guarded; loops pe email+DM, comentarii excluse. Secretele pe VPS = `/root/Scripturi/.env` (root-600), nu KB (cron-ul n-are env KB).
 
-## 📷 Poze client (`--photos`, implicit PORNIT)
-Draftul **VEDE conținutul pozelor** atașate de client. MCP-ul taie bytes-ii imaginilor, dar dă URL-ul
-(bucket public S3 `richpanel-data`) → flow-ul le descarcă + le descrie cu un model vizual și injectează
-conținutul în context (atât în triaj cât și în draft). Astfel:
+## 📷 Poze (`--photos`, implicit PORNIT) — prin modulul canonic `gigi:cs-photo`
+Flow-ul **REFERENȚIAZĂ** `cs-photo` (`import cs_photo`) ca să „vadă" pozele — nu duplică logica.
+Vede **DOUĂ** poze, ambele injectate în context (triaj + draft):
+- **(a) poza CLIENTULUI** (atașament): defect/spart, dovadă livrare (AWB/SMS), etichetă, screenshot;
+- **(b) poza RECLAMEI** pe care comentează clientul (tichete FB/IG comment): ce PRODUS e în reclamă —
+  prin `og:image` (UA crawler, FĂRĂ token de pagină), cu **registru** (post_id→produs) ca să nu re-descrie.
+  Ex: la „De ce nu dați dimensiunile?" pe Casa Ofertelor, draftul știe că e o **bancă de hol cu depozitare**.
+  > Fallback: dacă `cs_photo` nu e pe path (ex. VPS înainte de deploy), `_csp=None` → pozele clientului merg
+  > pe logica locală (`describe_photos`), iar reclama e dezactivată (fără crash). Pe VPS: pune `cs_photo.py`
+  > lângă `cs_auto_draft.py` (același folder = importabil) ca să se activeze și reclama.
+
+Despre poza clientului:
+MCP-ul taie bytes-ii imaginilor, dar dă URL-ul (bucket public S3 `richpanel-data`) → se descarcă + se descrie
+cu un model vizual. Astfel:
 - **retur/defect** → draftul confirmă defectul văzut în poză și tratează cazul (parfum spart → retrimitere+cadou; obiect casă defect → retrimitere/schimb/refund), **fără să mai ceară altă poză**;
 - **dispută livrare** → ține cont de dovada din poză (SMS/email curier, AWB, „colet blocat la depozit");
 - pozele = **dovadă reală** → EXCEPTATE de la filtrul anti-halucinare (le-am văzut efectiv).
