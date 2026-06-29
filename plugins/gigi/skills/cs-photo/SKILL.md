@@ -15,10 +15,16 @@ defect/spart (ce e rupt/lipsă), dovadă de livrare (AWB/SMS/email curier), etic
 
 ### (b) Poza RECLAMEI/POSTĂRII pe care comentează clientul (tichete FB/IG comment)
 Calea Graph cu token de pagină e moartă pe majoritatea paginilor (n-avem acces). Ocolire **fără token**:
-HTTP GET pe URL-ul postării cu UA `facebookexternalhit/1.1` → Facebook servește `og:image` + `og:title` →
-descarcă poza → o **descrie** (ce PRODUS se promovează). Așa știm la ce se referă „Ce preț are?/Dimensiunile?/
-Sunt turcești?" — **esențial la magazinele deals** (Casa Ofertelor, Grandia, Magdeal…), unde reclama poate fi
-orice produs. La parfumuri (GT/Esteban/Nubra) produsul e mereu parfum → valoare mai mică, dar e cache-uit (ieftin).
+HTTP GET pe URL-ul postării cu UA `facebookexternalhit/1.1` → Facebook servește `og:image` + `og:title` +
+**COPY-ul postării** (în slug-ul `og:url` / `<title>`). Apoi:
+1. **din POZĂ** — descarcă `og:image` → o descrie (ce PRODUS se promovează), cu copy-ul ca context;
+2. **FALLBACK din COPY** — dacă nu reușește din poză (429, video fără frame clar, fără poză), identifică produsul
+   DOAR din textul reclamei (`text_product`), ex. „cumperi 2 primești 1 gratis miros persistent" → parfumuri;
+3. dacă ambele neclare → nu inventează (nu salvează produs → se reîncearcă).
+Copy-ul se păstrează mereu în registru + se trimite în context (textul ofertei). Câmpul `source` = `poză`|`copy`.
+Așa știm la ce se referă „Ce preț are?/Dimensiunile?/Sunt turcești?" — **esențial la magazinele deals**
+(Casa Ofertelor, Grandia, Magdeal…), unde reclama poate fi orice produs. La parfumuri (GT/Esteban/Nubra)
+produsul e mereu parfum → valoare mai mică, dar e cache-uit (ieftin).
 
 ### REGISTRU (post_id → ce e), completat incremental
 Fiecare postare descrisă o dată se **salvează** într-un SQLite (`FB_POST_DB`, default lângă script). Când apare
