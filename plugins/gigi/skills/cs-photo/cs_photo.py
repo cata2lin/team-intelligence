@@ -27,7 +27,7 @@ Necesită: RICHPANEL_MCP_TOKEN (atașamente + listă), OPENAI_API_KEY (descriere
 Registru: env FB_POST_DB (default lângă script); pune-l pe o cale partajată (NAS) pt registru de echipă.
 NU scrie nimic în Richpanel (read-only).
 """
-import os, json, base64, sqlite3, datetime, re, time, urllib.request, urllib.parse, urllib.error, subprocess, argparse, sys
+import os, json, base64, sqlite3, datetime, re, time, unicodedata, urllib.request, urllib.parse, urllib.error, subprocess, argparse, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
@@ -36,6 +36,24 @@ IMG_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic")
 COMMENT_CHANNELS = ("facebook_feed_comment", "instagram_comment", "facebook_comment", "instagram_feed_comment")
 FB_CRAWLER_UA = "facebookexternalhit/1.1"
 FB_POST_DB = os.environ.get("FB_POST_DB") or os.path.join(HERE, "fb_post_registry.sqlite")
+
+# Magazine MONO-PRODUS: produsul e CUNOSCUT din brand (parfumuri etc.) → NU mai rezolvăm reclama (zero LLM).
+# Rezolvarea reclamei contează la DEALS (Grandia/Casa Ofertelor/Magdeal…), unde reclama poate fi orice produs.
+# Configurabil prin env AD_SKIP_BRANDS (listă separată prin virgulă, suprascrie default-ul).
+# NB: Gento NU e aici — vinde genți unde diferă culorile/modelele → reclama (poza) chiar ajută → keep.
+MONO_PRODUCT_BRANDS = [b.strip() for b in os.environ.get(
+    "AD_SKIP_BRANDS",
+    "esteban,george talent,gt parfumuri,nubra,belasil,lab noir,labnoir").split(",") if b.strip()]
+
+
+def _deacc(s):
+    return "".join(c for c in unicodedata.normalize("NFKD", s or "") if not unicodedata.combining(c)).lower()
+
+
+def is_mono_product(name):
+    """True dacă numele magazinului/paginii e un brand mono-produs (skip rezolvare reclamă)."""
+    n = _deacc(name)
+    return any(b and _deacc(b) in n for b in MONO_PRODUCT_BRANDS)
 
 
 def _now():
@@ -316,16 +334,29 @@ def reg_list():
     return rows
 
 
-def ad_for_ticket(ticket, describe_ad=True, use_cache=True):
+def _skip_res(post_id, page_id, store, image="", url="", copy="", cached=False):
+    return {"post_id": post_id, "page_id": page_id, "store": store, "product": "", "image": image, "url": url,
+            "copy": copy, "source": "skip", "skipped": True, "cached": cached,
+            "note": "magazin mono-produs (produs cunoscut din brand) — reclama sărită"}
+
+
+def ad_for_ticket(ticket, describe_ad=True, use_cache=True, store_hint="", skip_mono=True):
     """Rezolvă RECLAMA pe care comentează clientul (doar tichete FB/IG comment).
-    Întoarce {post_id,page_id,store,product,image,url,cached} sau None. Folosește + completează registrul."""
+    Întoarce {post_id,page_id,store,product,image,url,copy,source,cached} sau None. Folosește + completează registrul.
+    skip_mono: sare magazinele MONO-PRODUS (parfumuri etc.) — produsul e cunoscut din brand → zero LLM (vezi MONO_PRODUCT_BRANDS)."""
     if (ticket.get("channel") or "") not in COMMENT_CHANNELS:
         return None
     pages, post_id = extract_fb_post(ticket)
     if not post_id:
         return None
+    # SKIP mono-produs din hint (dacă apelantul știe magazinul) — zero HTTP, zero LLM
+    if skip_mono and store_hint and is_mono_product(store_hint):
+        return _skip_res(post_id, (pages or [""])[0], store_hint)
     if use_cache:
         cached = reg_get(post_id)
+        if cached and (cached.get("source") == "skip" or (skip_mono and is_mono_product(cached.get("store")))):
+            return _skip_res(post_id, cached.get("page_id"), cached.get("store"),
+                             cached.get("og_image"), cached.get("post_url"), cached.get("post_copy"), cached=True)
         if cached and cached.get("product"):
             reg_put({"post_id": post_id})  # bump last_seen/seen_count
             return {"post_id": post_id, "page_id": cached.get("page_id"), "store": cached.get("store"),
@@ -336,6 +367,12 @@ def ad_for_ticket(ticket, describe_ad=True, use_cache=True):
     if not og.get("image") and not copy:
         return {"post_id": post_id, "page_id": (pages or [""])[0], "store": "", "product": "", "image": "", "url": "",
                 "copy": "", "cached": False, "error": "postare negăsită (fără og:image/copy)"}
+    pg = og.get("page_id") or (pages or [""])[0]
+    # SKIP mono-produs din og:title (după fetch, dacă n-am avut hint) — zero LLM; salvăm markerul ca să nu re-fetch
+    if skip_mono and is_mono_product(og.get("title", "")):
+        reg_put({"post_id": post_id, "page_id": pg, "store": og.get("title", ""), "product": "",
+                 "post_copy": copy, "source": "skip", "og_image": og.get("image", ""), "post_url": og.get("url", "")})
+        return _skip_res(post_id, pg, og.get("title", ""), og.get("image", ""), og.get("url", ""), copy)
     product, source = "", ""
     if describe_ad and og.get("image"):   # 1) încearcă din POZĂ (cu copy-ul ca context)
         try:
@@ -350,7 +387,6 @@ def ad_for_ticket(ticket, describe_ad=True, use_cache=True):
         p2 = text_product(copy, og.get("title", ""))
         if p2 and "(produs neclar" not in p2:
             product, source, good = p2, "copy", True
-    pg = og.get("page_id") or (pages or [""])[0]
     # salvăm întotdeauna og_image/store/copy/url; produsul+sursa DOAR dacă am reușit (altfel se reîncearcă next run)
     reg_put({"post_id": post_id, "page_id": pg, "store": og.get("title", ""), "product": product if good else "",
              "post_copy": copy, "source": source if good else "", "og_image": og.get("image", ""), "post_url": og.get("url", "")})
@@ -361,10 +397,10 @@ def ad_for_ticket(ticket, describe_ad=True, use_cache=True):
     return res
 
 
-def ad_block(ticket, describe_ad=True):
-    """Bloc text pt context (sau '') — reclama pe care comentează clientul."""
-    ad = ad_for_ticket(ticket, describe_ad=describe_ad)
-    if not ad or not ad.get("product"):
+def ad_block(ticket, describe_ad=True, store_hint=""):
+    """Bloc text pt context (sau '') — reclama pe care comentează clientul. '' și pe magazinele mono-produs (sărite)."""
+    ad = ad_for_ticket(ticket, describe_ad=describe_ad, store_hint=store_hint)
+    if not ad or ad.get("skipped") or not ad.get("product"):
         return ""
     extra = (" | Text reclamă: %s" % ad["copy"]) if ad.get("copy") else ""
     return ("RECLAMA/POSTAREA pe care comentează clientul (folosește-o ca să identifici PRODUSUL și să răspunzi la obiect): %s%s%s" % (
@@ -447,7 +483,9 @@ def main():
     cli = sum(1 for o in photos if o["who"] == "CLIENT")
     print("   %d imagine(i) atașată(e) (%d de la client)." % (len(photos), cli))
     if ad:
-        if ad.get("product"):
+        if ad.get("skipped"):
+            print("   📢 RECLAMA: sărită — magazin mono-produs [%s] (produs cunoscut din brand, zero LLM)" % (ad.get("store") or "?"))
+        elif ad.get("product"):
             tag = "din registru" if ad.get("cached") else "NOU → salvat"
             src = (" via %s" % ad.get("source")) if ad.get("source") else ""
             print("   📢 RECLAMA comentată (%s%s) [%s]: %s" % (tag, src, ad.get("store") or "?", ad["product"]))
