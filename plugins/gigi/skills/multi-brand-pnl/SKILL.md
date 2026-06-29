@@ -11,7 +11,8 @@ description: All-in P&L for ANY or ALL of the 16+ Arona brands (Esteban, GT, Nub
 > 🛑 **NU LUA CIFRELE DE BUN PE FEREASTRĂ RECENTĂ — engine-ul MINTE de 2 ori** (dovedit iun-2026, vezi [[profit-data-sources-truth]]):
 > 1. **SUB-numără LIVRATELE ~1.6×** (Esteban 1-15 iun: engine 5.713 vs **AWBprint 10.079 real**) → venit sub-numărat → profit FALS-negativ. Pe COD livrarea se așază în zile-săptămâni. **Verifică livratele reale cu `gigi:fulfillment-analytics` (AWBprint).**
 > 2. **MARKETINGUL poate fi greșit** (`cache.daily_ad_spend_ron` Meta `source=awbprint` umflat per-brand: **Grandia 230k warehouse vs 51k LIVE = 4,5×** → −198k FALS, real ≈ −19k). **Verifică spend-ul LIVE: `gigi:meta-ads`/`tiktok-ads`/`google-ads-mcc`.**
-> Pe fereastră recentă acest tool dă DOAR un semnal grosier. Pentru VERDICT pe bani: livrate→AWBprint, spend→platform API, COGS→Shopify costPerItem.
+> Pe fereastră recentă acest tool dă DOAR un semnal grosier. Pentru VERDICT pe bani: **livrate→AWBprint** (`fulfillment-analytics`), **spend→platform API** (meta/tiktok/google live), **COGS→Shopify costPerItem**, **transport→`profit_core.parcel_transport` CASCADĂ** (NU suma brută AWBprint — `transport_cost` are doar ~64% acoperire pe fereastră recentă → suma brută under-numără).
+> ⚠️ **Verifică și freshness-ul AWBprint** înainte de cifra finală: `transport_cost` populat parțial + status-uri vechi (>7 zile) încă „in-transit" (curierul n-a re-scanat) = livrate ușor sub-numărate. Vezi [[awbprint-status-unreliable]].
 
 P&L "all-in" pentru oricare sau toate brandurile Arona.
 
