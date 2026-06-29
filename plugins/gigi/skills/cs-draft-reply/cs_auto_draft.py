@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["pg8000"]
 # ///
 """
 cs_auto_draft.py — FLOW de auto-DRAFT + triaj/escaladare + acțiuni propuse, pe coada Richpanel.
@@ -31,7 +31,7 @@ Pentru fiecare tichet OPEN care AȘTEAPTĂ RĂSPUNS DE LA NOI (ultimul mesaj e d
 
 LLM: ANTHROPIC_API_KEY (Claude) dacă există în KB, altfel OPENAI_API_KEY. Model: env DRAFT_MODEL.
 """
-import os, re, sys, json, base64, subprocess, urllib.request, urllib.parse, urllib.error, argparse, time
+import os, re, sys, json, base64, unicodedata, subprocess, urllib.request, urllib.parse, urllib.error, argparse, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
@@ -71,6 +71,43 @@ ORDER_PFX = {"EST": "Esteban", "GT": "George Talent", "NUB": "Nubra", "GEN": "Ge
              "COV": "Covoria", "APR": "Apreciat", "ROSSI": "Rossi Nails"}
 ORDER_RE = re.compile(r"\b(EST|GT|NUB|GRAND|GRAN|MAG|OFER|RED|BONBG|BON|CZ|PL|BELA|GEN|CARP|COV|APR|ROSSI)[ -]?(\d{4,7})\b", re.I)
 AWB_RE = re.compile(r"\b\d{10,16}\b")   # număr de AWB menționat în mesaj (curier) — pt căutare în profit_orders
+# Expeditori care NU sunt CLIENȚI (curier/finanțe/sistem) → NU draftăm răspuns de client; se exclud (ca spam).
+# Ex: backline-tichet@dpd.ro (confirmare automată), alina.cenuse@dpd.ro („Acord de compensare COD"). Clienții nu scriu de pe @dpd.ro.
+NON_CUSTOMER_SENDER_RE = re.compile(
+    r"@(dpd\.[a-z]{2,3}|sameday\.ro|econt\.(com|bg)|packeta\.(com|ro)|cargus\.ro|fancourier\.ro|posta-romana\.ro|gls-group\.[a-z]+|nemo-express\.ro"   # curieri
+    r"|([a-z0-9-]+\.)?omegatheme\.com|consentik\.com|mailchimp(app)?\.com|klaviyomail\.com|sendgrid\.net)\b",   # app-uri Shopify / notificări automate (rapoarte) — niciodată clienți
+    re.I)
+# Notificări automate judge.me (recenzii) — subiect „... left a N star review" (NU și replica clientului „Re: ⭐ ... cum ți s-a părut")
+JUDGEME_NOTIF_RE = re.compile(r"left (a|the following) \d+ star review", re.I)
+# Subiecte-template de rapoarte/notificări SaaS/social — niciodată mesaje reale de client, indiferent de model LLM
+SAAS_NOISE_SUBJ_RE = re.compile(
+    r"weekly .*(report|performance)|performance report is ready|where to optimize next|track what.?s working"
+    r"|consent banner performed|cookie banner|how your .* performed|your .* (report|summary) is ready"
+    r"|mentioned you on|liked your|started following|new follower|tagged you|răspunde pe (tiktok|instagram|facebook)", re.I)
+# Bounce / eșec livrare email (mailer-daemon) — NU e client
+BOUNCE_RE = re.compile(
+    r"address not found|wasn.?t delivered|delivery status notification|undelivered mail|mail delivery (failed|subsystem)"
+    r"|delivery has failed|message (couldn.?t|could not) be delivered|returned to sender|nu a putut fi livrat", re.I)
+
+
+def _padded_noise(s):
+    """Mesaj format majoritar din caractere invizibile/padding (newslettere/notificări SaaS) — nu e text real de client."""
+    if not s or len(s) < 60:
+        return False
+    junk = sum(1 for c in s if c.isspace() or c in "͏​‌‍­⁠﻿" or unicodedata.category(c) == "Cf")
+    return junk / len(s) > 0.55
+
+
+ANGER_RE = re.compile(r"!!!|\b(escroc|hoti|hotie|hotilor|teap[ăa]|tepui|inselat|inselaciune|bataie de joc|rusine|jignit|inadmisibil|nesimti|incompeten|scandalos|dezgustator)\b", re.I)
+
+
+def _real_escalation(text):
+    """Semnal REAL de escaladare: ANPC/juridic (ESCAL) SAU furie explicită (insulte/„țeapă") SAU mesaj majoritar MAJUSCULE."""
+    dt = deacc(text or "")
+    if ESCAL.search(dt) or ANGER_RE.search(dt):
+        return True
+    letters = [c for c in (text or "") if c.isalpha()]
+    return len(letters) >= 12 and sum(1 for c in letters if c.isupper()) / len(letters) > 0.7
 # brand -> limba pieței (semnal SIGUR de limbă, mai fiabil decât detecția LLM pe comentarii scurte)
 STORE_LANG = {"Bonhaus CZ": "cz", "Bonhaus PL": "pl", "Bonhaus BG": "bg"}
 # brand (store_name) -> telefon comenzi (luat de pe site-urile publice; fetch-brand-phones)
@@ -367,7 +404,7 @@ Citește mesajul clientului + comenzile + istoricul și IDENTIFICĂ exact proble
  "spam":true|false,
  "confidence":0.0-1.0,"missing":["ce date lipsesc"]}
 SPAM (pe ORICE canal — email, DM FB/IG, comentariu): true dacă mesajul NU necesită răspuns CS — notificări automate (Meta/Facebook business, judge.me „left a review”, newsletter, reset parolă, „do not reply”, out-of-office, confirmări automate), boți, mesaje promoționale nesolicitate / spam evident. Aceste tichete se EXCLUD (nu primesc draft).
-ESCALADARE: URGENT = ANPC/juridic/amenințare (avocat, instanță, dau în judecată, denunț), chargeback, refund PROMIS dar neefectuat, client foarte agresiv. HIGH = reclamație serioasă (produs/livrare) cu client clar SUPĂRAT, SAU client care a scris REPETAT despre ACEEAȘI problemă nerezolvată și e frustrat. Altfel none. ATENȚIE: o simplă întrebare de status (WISMO) politicoasă NU se escaladează — chiar dacă clientul are nr. comandă, multe comenzi sau istoric de tichete (volumul/„a mai scris de N ori" în istoric NU e, singur, motiv de escaladare). Se rezolvă direct. COMENTARII PUBLICE (FB/IG): nemulțumire de produs / „nu funcționează" / „păcălit" / „țeapă" / „mic"/„prost" FĂRĂ ANPC/juridic/amenințare → NU escalada; primește răspuns public scurt + invitație în privat. Escaladează un comentariu public DOAR la semnale URGENT (ANPC/juridic/amenințare/refund promis).
+ESCALADARE: URGENT = ANPC/juridic/amenințare (avocat, instanță, dau în judecată, denunț), chargeback, refund PROMIS dar neefectuat, client foarte agresiv. HIGH = reclamație serioasă (produs/livrare) cu client clar SUPĂRAT, SAU client care a scris REPETAT despre ACEEAȘI problemă nerezolvată și e frustrat. Altfel none. ATENȚIE: o reclamație de produs OBIȘNUITĂ (nu funcționează bine, nu e ca în reclamă, defect minor, întrebare de calitate, „cârpa e proastă", SAU **parfum/produs spart/deteriorat la livrare** — se rezolvă prin retrimitere gratuită, procedură standard) FĂRĂ furie explicită (jigniri, MAJUSCULE agresive, amenințări) și FĂRĂ ANPC/juridic = `problema_produs`/`schimb_swap` rezolvată DIRECT, NU HIGH. Escaladează un produs spart DOAR dacă clientul e explicit furios/amenință, e a DOUA oară pe ACEEAȘI comandă, sau invocă ANPC. „Client clar SUPĂRAT" = furie/jigniri/amenințări explicite, nu simpla nemulțumire. NU presupune „produs greșit" dacă clientul se plânge doar că produsul nu performează cum aștepta — ăla e `problema_produs`, nu „a primit alt produs". ATENȚIE: o simplă întrebare de status (WISMO) politicoasă NU se escaladează — chiar dacă clientul are nr. comandă, multe comenzi sau istoric de tichete (volumul/„a mai scris de N ori" în istoric NU e, singur, motiv de escaladare). Se rezolvă direct. COMENTARII PUBLICE (FB/IG): nemulțumire de produs / „nu funcționează" / „păcălit" / „țeapă" / „mic"/„prost" FĂRĂ ANPC/juridic/amenințare → NU escalada; primește răspuns public scurt + invitație în privat. Escaladează un comentariu public DOAR la semnale URGENT (ANPC/juridic/amenințare/refund promis).
 COMMENT_ACTION (doar comentarii PUBLICE FB/IG; pe celelalte canale = "none"). NU trimitem mesaje private (DM) — răspundem PUBLIC, scurt; dacă e nevoie de rezolvare, INVITĂM clientul să ne scrie în privat sau să sune:
   • "hide" = DOAR spam/troll/abuz/vulgaritate/ofense/reclamă străină (de ascuns de pe postare).
   • "public" = orice comentariu care merită un răspuns public scurt — laudă/recenzie (mulțumire caldă), întrebare presale (preț/stoc/disponibilitate/„mai aveți?"), reclamație ușoară. La întrebare/reclamație → invită clientul să ne scrie în privat (inbox) sau să ne SUNE la numărul magazinului.
@@ -390,12 +427,13 @@ REGISTRU (important): FORMAL, la PLURAL, pe TOATE canalele (email, DM, chat, com
 PROCEDURI:
 - LIVRARE/WISMO: răspunde DIRECT, dar NU INVENTA. DOAR dacă în context ai AWB+curier confirmat → dă statusul real + linkul corect DUPĂ curier (DPD https://tracking.dpd.ro?shipmentNumber=<AWB>; Sameday https://www.sameday.ro/#awb=<AWB>; Packeta https://tracker.packeta.com/ro/?id=<AWB>; Econt https://www.econt.com/en/services/track-shipment/<AWB>) + scuze dacă e întârziat. Dacă NU GĂSEȘTI comanda în context (nicio comandă / fără AWB) → NU pretinde că ai găsit-o sau că o cauți tu acum, NU afirma statusul (NU spune „e în procesare / urmează să fie preluată / verific eu") și NU promite termen/tracking. În schimb, cere-i clientului POLITICOS **numărul comenzii SAU un număr de telefon** ca să putem identifica și verifica comanda (ex: „Ca să verific exact comanda dumneavoastră, îmi puteți spune numărul comenzii sau un număr de telefon asociat? Revin imediat cu statusul."). Nu cere date pe care le ai deja în context.
 - RETUR: ARONA e COD și NU încurajează returul → întreabă motivul + oferă alternativă; insistă și e eligibil → formular https://bi.grandia.ro/returns?order=<nr>&email=<email> + „Suma vă va fi returnată în maximum 14 zile de la ajungerea coletului." Parfum/igienă DESIGILAT → refuz politicos.
-- PRODUS SPART (parfum): NU refund → RETRIMITERE GRATUITĂ + parfum CADOU. DEFECT/LIPSĂ (casă): cere poză; pe stoc → retrimitere/schimb; altfel retur+refund.
+- PRODUS SPART (parfum): NU refund → RETRIMITERE GRATUITĂ + parfum CADOU. DEFECT/LIPSĂ (casă): cere poză (DACĂ nu e deja descrisă în „POZE TRIMISE DE CLIENT"); pe stoc → retrimitere/schimb; altfel retur+refund. ⚠️ Dacă NU ai comanda identificată în context (COMENZILE CLIENTULUI = nicio comandă), exprimă empatia + că rezolvăm prin retrimitere, DAR cere-i clientului **numărul comenzii SAU un telefon** ca să putem face retrimiterea — NU spune „trimitem acum un parfum nou" ca și cum ar fi deja aranjat, fiindcă fără comandă nu putem executa.
 - PRE-VÂNZARE / INTENȚIE DE CUMPĂRARE („vreau și eu", „dacă sunt bune", „cum comand", „îl iau"): răspuns CALD și entuziast care CONFIRMĂ și ÎNCURAJEAZĂ comanda — spune CUM comandă (direct de pe site SAU sunând la `TELEFON_COMANDĂ` dacă apare în context); NU deflecta seac cu „dacă aveți întrebări scrieți-ne". RECENZIE/COMPLIMENT: mulțumește scurt și cald.
 - DESCRIE PRODUSUL POTRIVIT CATEGORIEI (NU generic): parfumuri (Esteban/GT/Nubra/Gento) → miros/arome inspirate din branduri cunoscute/persistență/preț accesibil — NU „aspect plăcut" (e parfum, nu obiect); genți/încălțări → piele ecologică/aspect frumos; casă/covoare (Grandia/Carpetto/Covoria) → calitate/utilitate. Evită lauda generică „produse de calitate bună și aspect plăcut" care nu se potrivește categoriei.
 - COMANDĂ / „vreau să comand": recomandă clientului să SUNE pentru a plasa comanda, la numărul magazinului — dacă apare în context ca `TELEFON_COMANDĂ`, dă-l explicit („ne puteți suna la <număr> pentru comandă"); altfel îndrumă-l să comande de pe site / să lase un număr ca să-l sunăm.
 PRODUSE — ONESTITATE: multe produse ARONA sunt REPLICI/imitații, NU originale. Parfumurile sunt INSPIRATE din branduri cunoscute (la o fracțiune din preț), nu sunt parfumurile originale. Genți/accesorii „din piele" sunt de regulă PIELE ECOLOGICĂ / imitație, nu piele naturală. La întrebări de tip „e original?", „e piele adevărată?" → răspunde ONEST și pozitiv: spune sincer că e imitație/piele ecologică/parfum inspirat — NU pretinde că e original sau piele naturală, dar valorifică (calitate bună, aspect frumos, preț accesibil).
 COMENTARII PUBLICE (FB/IG) — CALD, NU robotic, SCURT (1-2 fraze), cu 1-2 emoji potrivite (😊❤️🙏🔥🌸): răspunde la SPIRITUL comentariului. REGULĂ CS FERMĂ pt TOATE răspunsurile la comentarii: NU începe cu „Bună ziua!" / „Bună!" / „Salut" / niciun salut de deschidere — intră DIRECT în mesaj (ex. „Ne pare rău că...", „Mă bucur că...", „Da, sunt foarte apreciate..."). Salut + semnătură DOAR pe email, niciodată pe comentarii. SARCASM/IRONIE: dacă un comentariu pare neutru/pozitiv dar e de fapt un REPROȘ (ex. „au persistat 4 ore 😅" la un parfum dat ca 12h, „merge perfect... 🙄", emoji 😅😂🙄 + critică) → NU răspunde ca la o laudă („Ne bucurăm..."); recunoaște cu TACT nemulțumirea (la parfumuri: persistența variază după tipul pielii, cantitate, zona de aplicare, familia olfactivă), FĂRĂ justificări defensive, și oferă ajutor / invită în privat. Laudă / „subscriu" / tag de prieten / entuziasm → mulțumire caldă + entuziasm, FĂRĂ să împingi inutil „scrieți-ne în privat". Întrebare reală / nemulțumire → răspuns scurt la obiect, apoi INVITĂ CLIENTUL să ne scrie în privat (inbox/Messenger/DM) SAU să ne SUNE la `TELEFON_COMANDĂ` (dacă apare în context, dă numărul explicit). NU spune „v-am scris în privat" / „ți-am trimis detalii" — NOI nu trimitem DM; clientul ne contactează. La o întrebare SIMPLĂ (preț, dimensiune, disponibilitate) NU împinge automat „în privat": dacă ai informația, dă-o pe loc în comentariu; dacă NU o ai (nu știi produsul exact), întreabă SCURT chiar în comentariu la ce produs se referă, sau invită-l să sune/comande — „scrieți-ne în privat" doar când chiar e nevoie de date personale. Dacă în context apare „POSTAREA/RECLAMA la care comentează", folosește-o ca să identifici PRODUSUL și răspunde la obiect (NU mai întreba „ce produs", clientul comentează exact la acel produs). Dacă reclamă un canal care nu merge (ex. „sun de zile și nu răspunde nimeni"), recunoaște problema și asigură-l că revenim noi, nu-l trimite înapoi la același canal. Evită formula seacă „Vă mulțumim pentru comentariu! Dacă aveți nevoie… scrieți-ne în privat".
+⚠️ NU deflecta în privat o întrebare PUBLICĂ simplă la care SE POATE răspunde: „câte bucăți/bidoane la X lei?" → spune oferta (din POSTAREA/RECLAMA, dacă apare); „ce preț are?" → dacă prețul e în reclamă/îl știi, dă-l, altfel îndrumă scurt spre site/produsul din reclamă; „dați-mi numărul de telefon (ca să comand)" → DĂ numărul `TELEFON_COMANDĂ` direct (NU „e pe site"); „cum comand?" → spune concret (de pe site SAU sunând la `TELEFON_COMANDĂ`). „Scrieți-ne în privat" se folosește DOAR când e nevoie de date personale (o comandă anume, o problemă pe cont), NU la întrebări generale de produs/ofertă/preț.
 REGULA DE ACȚIUNE: dacă în context apare `ACTIUNE_APLICATA: …` → confirmă acțiunea ca FĂCUTĂ. Dacă NU → nu spune niciodată că ai modificat/anulat ceva; confirmă că ai PRELUAT solicitarea sau cere datele lipsă. NU inventa.
 CALIBRARE SENTIMENT: negativ → scuze sincere + asumare + soluție; pozitiv → cald; neutru → la obiect.
 SALUT PE NUME: pe canale PRIVATE (email/DM/chat) folosește doar PRENUMELE dacă e curat; dacă numele pare concatenat/neformatat (prenume+nume lipite, fără spațiu, majusculă în interior — ex. „GheorghesiGerda") sau incert → adresare neutră. Pe COMENTARII PUBLICE (FB/IG) NU folosi numele clientului (nici prenume, nici nume de familie — ex. „doamnă Nechita") — e expunere de date personale într-un spațiu public; adresează-te neutru („Bună ziua").
@@ -923,6 +961,7 @@ def main():
             print("  [%d/%d] #%s · deja %s → sărit." % (i, len(picked), no, AI_TAG)); continue
         # pe comentarii publice: atașează textul POSTĂRII/reclamei la care comentează clientul (clientul o vede → și noi trebuie),
         # dacă avem token de pagină pt brandul respectiv (altfel '' → fallback la a întreba ce produs)
+        _ad_has_catalog = False   # reclama a adus preț/stoc REAL din catalog → exceptat de la anti-halucinare
         if is_public:
             _pg = ((t.get("to") or {}).get("id") if isinstance(t.get("to"), dict) else "") or ""
             _segs = str(cid).split("_")
@@ -934,6 +973,7 @@ def main():
                     _ad_blk = _csp.ad_block(t)
                 except Exception:
                     _ad_blk = ""
+            _ad_has_catalog = "PRODUS în CATALOG" in (_ad_blk or "")
             _pre = []
             if _ad_blk:
                 _pre.append(_ad_blk)
@@ -950,7 +990,7 @@ def main():
 
         orders, other = [], []
         elsewhere = "necunoscut (fără email/telefon real — pe comentarii publice nu se poate lega)"
-        _gtxt = blob + " " + last_cust
+        _gtxt = subj + " " + tr   # caută comanda/AWB în SUBIECT + TOT firul (inclusiv citate), nu doar ultimul mesaj
         if a.ground and (email or phone or ORDER_RE.search(_gtxt) or AWB_RE.search(_gtxt)):
             # GROUNDING self-contained (VPS/cron): comenzi reale din DB metrics + status/AWB din profitability.db (nume, nr-comandă, AWB)
             _onames = ["".join(m.group(0).split()).replace("-", "").upper() for m in ORDER_RE.finditer(_gtxt)]
@@ -996,12 +1036,22 @@ def main():
             print("  ⚠️ triaj LLM eșuat (#%s) → fallback pe regex/euristici: %s" % (no, str(e)[:80]), file=sys.stderr)
         cat = idn.get("category") if (isinstance(idn.get("category"), str) and idn.get("category")) else "altele"
 
-        # ---- SPAM / notificare automată → EXCLUS din draft (pe ORICE canal); opțional închide+arhivează ----
-        if bool(idn.get("spam")) or cat == "spam_automat":
+        # ---- EXCLUS din draft: spam/automat (LLM) SAU expeditor non-client (curier/app) SAU notificare judge.me (subiect) ----
+        _non_customer = bool(NON_CUSTOMER_SENDER_RE.search(email or ""))
+        _judgeme = bool(JUDGEME_NOTIF_RE.search(subj or ""))   # „... left a N star review" = notificare auto (NU replica „Re: ⭐...")
+        _saas = bool(SAAS_NOISE_SUBJ_RE.search(subj or ""))     # subiect-template raport/notificare SaaS/social
+        _bounce = bool(BOUNCE_RE.search(subj or "")) or bool(BOUNCE_RE.search(first or ""))   # bounce mailer-daemon
+        _padded = _padded_noise(first)   # corp majoritar padding invizibil (newsletter/notificare)
+        if bool(idn.get("spam")) or cat == "spam_automat" or _non_customer or _judgeme or _saas or _bounce or _padded:
             n_spam += 1
             print("\n" + "─" * 92)
-            print("  [%d/%d] #%s · %s · %s · 🚫 SPAM/automat → EXCLUS (fără draft)" % (i, len(picked), no, store_name, channel))
-            print("  motiv: %s" % (idn.get("problem") or " ".join((first or subj).split())[:70]))
+            _tagn = ("EXPEDITOR NON-CLIENT (curier/app)" if _non_customer else
+                     "NOTIFICARE judge.me (recenzie)" if _judgeme else
+                     "RAPORT/NOTIFICARE SaaS/social" if _saas else
+                     "BOUNCE email (mailer-daemon)" if _bounce else
+                     "ZGOMOT (padding invizibil)" if _padded else "SPAM/automat")
+            print("  [%d/%d] #%s · %s · %s · 🚫 %s → EXCLUS (fără draft)" % (i, len(picked), no, store_name, channel, _tagn))
+            print("  motiv: %s" % (("expeditor non-client: %s" % email) if _non_customer else ("notificare recenzie judge.me" if _judgeme else (idn.get("problem") or " ".join((first or subj).split())[:70]))))
             if a.close_spam and cid:
                 add_tags(mcp, cid, ["spam"])
                 res = mcp.call("update_conversation_status", {"conversation_id": cid, "status": "CLOSED"})
@@ -1013,8 +1063,14 @@ def main():
             continue
 
         # escaladare: identificată de LLM SAU semnale dure
-        is_esc = bool(idn.get("escalate")) or str(idn.get("severity")).upper() in ("HIGH", "URGENT") or bool(ESCAL.search(deacc(blob)))
-        level = "URGENT" if (str(idn.get("severity")).upper() == "URGENT" or ESCAL.search(deacc(blob))) else "HIGH"
+        # GATE determinist anti-SUPRA-escaladare: gpt-4o-mini escaladează aproape orice reclamație/WISMO.
+        # Pe categorii OBIȘNUITE escaladăm DOAR cu semnal REAL (ANPC/juridic/furie/CAPS); altfel = rezolvare directă.
+        _real_esc = _real_escalation(blob + " " + tr)
+        _llm_esc = bool(idn.get("escalate")) or str(idn.get("severity")).upper() in ("HIGH", "URGENT")
+        _ord_cat = cat in ("problema_produs", "livrare_wismo", "retur", "schimb_swap", "plata_factura",
+                           "modificare_comanda", "anulare", "comanda_noua", "presale_intrebare", "recenzie_feedback", "altele")
+        is_esc = _real_esc or (_llm_esc and not _ord_cat)
+        level = "URGENT" if (_real_esc and (ESCAL.search(deacc(blob + " " + tr)) or str(idn.get("severity")).upper() == "URGENT")) else "HIGH"
 
         # ---- comanda țintă (reconciliată) ----
         target, order_name, ambiguous, why_amb = resolve_target_order(blob + " " + tr, orders)
@@ -1090,7 +1146,7 @@ def main():
             draft, engine = "(eroare LLM: %s)" % e, "—"
 
         # POST-FILTRU ANTI-HALUCINARE: dacă NU avem datele comenzii dar draftul afirmă lookup/status/preț/dimensiune → corectează
-        if not is_esc and not draft.startswith("(eroare") and not has_order_data(od_ctx) and not photo_blk and HALLU.search(draft):
+        if not is_esc and not draft.startswith("(eroare") and not has_order_data(od_ctx) and not photo_blk and not _ad_has_catalog and HALLU.search(draft):
             corr = ctx + ("\n\n⛔ Răspunsul tău anterior CONȚINEA INFORMAȚIE INVENTATĂ (lookup/„am verificat/nu am găsit”, status comandă, preț, dimensiune sau telefon pe care NU le ai în context). "
                           "Rescrie complet, FĂRĂ să inventezi NIMIC și FĂRĂ să spui că ai căutat/găsit/verificat ceva. "
                           "Cere clientului numărul comenzii SAU un număr de telefon (pt orice ține de o comandă), sau, la întrebări de produs, spune onest că revii cu detaliile exacte / poate verifica pe site. Scrie DOAR răspunsul.")
@@ -1126,6 +1182,7 @@ def main():
                           "store": store_name, "cat": cat, "escalate": is_esc}
         rows.append({"no": no, "store": store_name, "channel": channel, "cat": cat, "escalate": is_esc,
                      "language": lang, "cust_msg": (last_cust or first or subj or "")[:240],
+                     "subject": subj[:120], "orders": (od[:280] if not is_public else ""),   # context grounding (audit: distinge comandă reală de inventată)
                      "comment_action": (hide_obj or {}).get("mode"), "draft": draft.strip()})
         if cmd or hide_obj:
             print("  → aprobă:  uv run cs_auto_draft.py --approve %s%s" % (no, " --agent <Nume>" if cmd else ""))
@@ -1144,8 +1201,8 @@ def main():
             # la hide NU salvăm draft — comentariul se ascunde la --approve
             if (hide_obj or {}).get("mode") == "hide":
                 print("  (hide → fără draft; se ascunde la --approve)")
-            elif draft.strip().startswith("(eroare LLM") or len(draft.strip()) < 5:
-                # GARDĂ: nu salva gunoi în Richpanel (LLM picat / draft gol) — sare tichetul
+            elif draft.strip().startswith("(eroare") or "(eroare LLM" in draft or len(draft.strip()) < 5:
+                # GARDĂ: nu salva gunoi în Richpanel (LLM picat 429/5xx / draft gol) — sare tichetul (se reia next run)
                 print("  ⛔ draft invalid (eroare LLM / gol) → NU salvez (sar tichetul).")
             elif a.apply_send and not is_esc and not is_public:
                 # LIVE: trimite răspunsul la client + închide tichetul. NUMAI ne-escaladat + ne-comentariu
