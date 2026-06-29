@@ -18,9 +18,9 @@
 ## PROFITABILITATE — pipeline CANONIC (citește asta înainte de orice calcul de profit)
 > ⚠️ **DATELE: cache-urile derivate MINT per-brand — la verdict pe BANI confirmă la SURSĂ** (dovedit iun-2026, vezi [[profit-data-sources-truth]]):
 > - **LIVRATE / venit livrat** → **AWBprint** (`gigi:fulfillment-analytics`). Engine-ul/`multi_brand_pnl --range` SUB-numără livratele pe fereastră recentă (~1.6×: Esteban 5.713 engine vs 10.079 real) → profit FALS-negativ. NU judeca luna curentă la mijloc pe „livrate" din engine.
-> - **SPEND ads** → **LIVE platform API** (`gigi:meta-ads`/`tiktok-ads`/`google-ads-mcc`). `cache.daily_ad_spend_ron` Meta (`source=awbprint`) e umflat per-brand (**Grandia 4,5×: 230k warehouse vs 51k live** → −198k FALS, real ≈ −19k). Google+TikTok din cache s-au confirmat corecte; Esteban Meta corect. **Verifică Meta LIVE înainte să tai buget.** Acoperire token FB: pe toate mai puțin PAT „Ce Pat Ai".
-> - **COGS** → Shopify `variants.costPerItem` (engine poate subestima: Grandia 37% asumat vs 41,7% real).
-> - Regula de aur: 3× în iun-2026 cache-ul a mințit; SINGURUL adevăr = AWBprint (livrare) + platform API (spend) + Shopify (COGS).
+> - **SPEND Meta/TikTok per brand** → `cache.daily_ad_spend_ron` (warehouse) e **CORECT** — aplică Mapping-ul (cont/token din sheet „CPA și financiar", tab Mapping). ⚠️ **NU re-deriva din spend BRUT pe cont** (Graph API): conturile-s PARTAJATE (contul „Esteban 3" = OFERTELE, nu Esteban!) → suma pe cont ≠ atribuirea pe brand. Excepții reale de reparat: **Grandia Meta umflat ~4,5×** (230k wh vs 51k mapat — pipeline `source=awbprint` supra-atribuie) + **Belasil TikTok token-GOL** înghite Esteban (split, suma neschimbată). Verificare = `meta-ads`/`tiktok-ads` sau aplică Mapping-ul, NU spend brut pe cont.
+> - **COGS** → Shopify `variants.costPerItem` (SKU în `line_items→inventory_item→>'sku'`; engine sub-numără: 37% vs real 46%).
+> - Regula de aur: **livrare→AWBprint, COGS→Shopify, transport→cascadă profit_core, spend→warehouse (aplică Mapping-ul, NU spend brut pe cont)**. Portofoliu iun 1-15 = **+513k** (engine −201k = greșit din sub-numărare livrate + Grandia over).
 
 **Regula unică**: `Contribuție = Venit − COGS − Transport − Marketing`, **ex-TVA** pe venit/COGS/transport (TVA deductibil), marketing NET, **doar comenzi LIVRATE**. Logica e într-un singur loc:
 
