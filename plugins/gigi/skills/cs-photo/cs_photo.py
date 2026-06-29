@@ -200,8 +200,23 @@ def extract_fb_post(ticket):
     return pages, post_id
 
 
+def _extract_copy(html):
+    """COPY-ul (textul) postării fără token: din slug-ul og:url (FB pune începutul mesajului acolo), fallback <title>."""
+    m = re.search(r'og:url"\s+content="([^"]*)"', html)
+    if m:
+        mm = re.search(r'/posts/(.+?)/\d+/?$', m.group(1))
+        if mm:
+            slug = " ".join(urllib.parse.unquote(mm.group(1)).strip().lstrip("-").replace("-", " ").split())
+            if len(slug) >= 8:
+                return slug[:220]
+    m = re.search(r'<title[^>]*>([^<]+)</title>', html)
+    if m:
+        return " ".join(m.group(1).split())[:220]
+    return ""
+
+
 def fb_post_og(page_ids, post_id):
-    """og:image/og:title/og:description ale postării, fără token (UA crawler). Întoarce {} dacă nu merge."""
+    """og:image/og:title + COPY-ul postării, fără token (UA crawler). Întoarce {} dacă nu merge."""
     if not post_id:
         return {}
     for page in page_ids or [""]:
@@ -215,50 +230,88 @@ def fb_post_og(page_ids, post_id):
         def og(prop):
             m = re.search(r'og:%s"\s+content="([^"]*)"' % prop, html)
             return (m.group(1).replace("&amp;", "&").strip() if m else "")
-        img, title = og("image"), og("title")
-        if img:
-            return {"url": url, "image": img, "title": title, "desc": og("description"), "page_id": page}
+        img, title, copy = og("image"), og("title"), _extract_copy(html)
+        if img or copy:
+            return {"url": url, "image": img, "title": title, "desc": og("description"), "copy": copy, "page_id": page}
     return {}
+
+
+SYS_COPY = ("Ești asistent CS ARONA. Din TEXTUL (copy-ul) unei reclame, spune în 1 frază scurtă (română) ce PRODUS se promovează "
+            "(obiect concret + categorie) și orice ofertă/preț menționat. Doar din text — nu inventa. "
+            "Dacă textul nu spune clar produsul, scrie: (produs neclar din copy).")
+
+
+def text_product(copy, store=""):
+    """Identifică produsul DOAR din copy-ul (textul) reclamei — fallback când nu reușim din poză."""
+    if not copy:
+        return ""
+    msg = "Magazin: %s. Copy reclamă: %s" % (store or "?", copy)
+    ok = secret("OPENAI_API_KEY")
+    if ok:
+        body = {"model": os.environ.get("TEXT_MODEL", "gpt-4o-mini"), "temperature": 0,
+                "messages": [{"role": "system", "content": SYS_COPY}, {"role": "user", "content": msg}]}
+        try:
+            return _post_json("https://api.openai.com/v1/chat/completions", body,
+                              {"Authorization": "Bearer " + ok, "content-type": "application/json"})["choices"][0]["message"]["content"].strip()
+        except Exception:
+            return ""
+    ak = secret("ANTHROPIC_API_KEY")
+    if ak:
+        body = {"model": os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"), "max_tokens": 150, "system": SYS_COPY,
+                "messages": [{"role": "user", "content": msg}]}
+        try:
+            return _post_json("https://api.anthropic.com/v1/messages", body,
+                              {"x-api-key": ak, "anthropic-version": "2023-06-01", "content-type": "application/json"})["content"][0]["text"].strip()
+        except Exception:
+            return ""
+    return ""
 
 
 # ── registru SQLite (post_id → ce e) ──
 def _reg():
     c = sqlite3.connect(FB_POST_DB, timeout=20)
     c.execute("""CREATE TABLE IF NOT EXISTS posts(
-        post_id TEXT PRIMARY KEY, page_id TEXT, store TEXT, product TEXT,
+        post_id TEXT PRIMARY KEY, page_id TEXT, store TEXT, product TEXT, post_copy TEXT, source TEXT,
         og_image TEXT, post_url TEXT, first_seen TEXT, last_seen TEXT, seen_count INTEGER DEFAULT 1)""")
+    for col in ("post_copy TEXT", "source TEXT"):   # migrare DB-uri vechi
+        try:
+            c.execute("ALTER TABLE posts ADD COLUMN " + col)
+        except sqlite3.OperationalError:
+            pass
     return c
 
 
 def reg_get(post_id):
     c = _reg()
-    r = c.execute("SELECT post_id,page_id,store,product,og_image,post_url,seen_count FROM posts WHERE post_id=?", (post_id,)).fetchone()
+    r = c.execute("SELECT post_id,page_id,store,product,post_copy,source,og_image,post_url,seen_count FROM posts WHERE post_id=?", (post_id,)).fetchone()
     c.close()
     if not r:
         return None
-    keys = ("post_id", "page_id", "store", "product", "og_image", "post_url", "seen_count")
+    keys = ("post_id", "page_id", "store", "product", "post_copy", "source", "og_image", "post_url", "seen_count")
     return dict(zip(keys, r))
 
 
 def reg_put(rec):
     c = _reg()
     now = _now()
-    c.execute("""INSERT INTO posts(post_id,page_id,store,product,og_image,post_url,first_seen,last_seen,seen_count)
-        VALUES(?,?,?,?,?,?,?,?,1)
+    c.execute("""INSERT INTO posts(post_id,page_id,store,product,post_copy,source,og_image,post_url,first_seen,last_seen,seen_count)
+        VALUES(?,?,?,?,?,?,?,?,?,?,1)
         ON CONFLICT(post_id) DO UPDATE SET last_seen=excluded.last_seen, seen_count=seen_count+1,
             store=COALESCE(NULLIF(excluded.store,''),store),
             product=COALESCE(NULLIF(excluded.product,''),product),
+            post_copy=COALESCE(NULLIF(excluded.post_copy,''),post_copy),
+            source=COALESCE(NULLIF(excluded.source,''),source),
             og_image=COALESCE(NULLIF(excluded.og_image,''),og_image),
             post_url=COALESCE(NULLIF(excluded.post_url,''),post_url)""",
               (rec["post_id"], rec.get("page_id", ""), rec.get("store", ""), rec.get("product", ""),
-               rec.get("og_image", ""), rec.get("post_url", ""), now, now))
+               rec.get("post_copy", ""), rec.get("source", ""), rec.get("og_image", ""), rec.get("post_url", ""), now, now))
     c.commit()
     c.close()
 
 
 def reg_list():
     c = _reg()
-    rows = c.execute("SELECT post_id,store,product,seen_count,last_seen FROM posts ORDER BY last_seen DESC").fetchall()
+    rows = c.execute("SELECT post_id,store,product,source,seen_count,last_seen FROM posts ORDER BY last_seen DESC").fetchall()
     c.close()
     return rows
 
@@ -276,23 +329,33 @@ def ad_for_ticket(ticket, describe_ad=True, use_cache=True):
         if cached and cached.get("product"):
             reg_put({"post_id": post_id})  # bump last_seen/seen_count
             return {"post_id": post_id, "page_id": cached.get("page_id"), "store": cached.get("store"),
-                    "product": cached.get("product"), "image": cached.get("og_image"), "url": cached.get("post_url"), "cached": True}
+                    "product": cached.get("product"), "image": cached.get("og_image"), "url": cached.get("post_url"),
+                    "copy": cached.get("post_copy"), "source": cached.get("source"), "cached": True}
     og = fb_post_og(pages, post_id)
-    if not og.get("image"):
-        return {"post_id": post_id, "page_id": (pages or [""])[0], "store": "", "product": "", "image": "", "url": "", "cached": False, "error": "postare negăsită (fără og:image)"}
-    product = ""
-    if describe_ad:
+    copy = og.get("copy", "")
+    if not og.get("image") and not copy:
+        return {"post_id": post_id, "page_id": (pages or [""])[0], "store": "", "product": "", "image": "", "url": "",
+                "copy": "", "cached": False, "error": "postare negăsită (fără og:image/copy)"}
+    product, source = "", ""
+    if describe_ad and og.get("image"):   # 1) încearcă din POZĂ (cu copy-ul ca context)
         try:
             data = urllib.request.urlopen(enc_url(og["image"]), timeout=45).read()
-            product = vision(data, "image/jpeg", "Reclama de la: " + (og.get("title") or ""), SYS_AD)
+            vctx = ("Reclama [%s]. Copy: %s" % (og.get("title", ""), copy))[:400]
+            product = vision(data, "image/jpeg", vctx, SYS_AD)
+            source = "poză"
         except Exception as e:
             product = "(eroare descriere reclamă: %s)" % str(e)[:60]
-    good = bool(product) and not product.startswith("(eroare") and not product.startswith("(fără")
-    # salvăm întotdeauna og_image/store/url; produsul DOAR dacă descrierea a reușit (altfel se reîncearcă next run)
-    reg_put({"post_id": post_id, "page_id": og.get("page_id") or (pages or [""])[0], "store": og.get("title", ""),
-             "product": product if good else "", "og_image": og.get("image", ""), "post_url": og.get("url", "")})
-    res = {"post_id": post_id, "page_id": og.get("page_id") or (pages or [""])[0], "store": og.get("title", ""),
-           "product": product if good else "", "image": og.get("image", ""), "url": og.get("url", ""), "cached": False}
+    good = bool(product) and not product.startswith("(eroare") and not product.startswith("(fără") and "(produs neclar" not in product
+    if not good and describe_ad and copy:   # 2) FALLBACK: din COPY-ul (textul) postării
+        p2 = text_product(copy, og.get("title", ""))
+        if p2 and "(produs neclar" not in p2:
+            product, source, good = p2, "copy", True
+    pg = og.get("page_id") or (pages or [""])[0]
+    # salvăm întotdeauna og_image/store/copy/url; produsul+sursa DOAR dacă am reușit (altfel se reîncearcă next run)
+    reg_put({"post_id": post_id, "page_id": pg, "store": og.get("title", ""), "product": product if good else "",
+             "post_copy": copy, "source": source if good else "", "og_image": og.get("image", ""), "post_url": og.get("url", "")})
+    res = {"post_id": post_id, "page_id": pg, "store": og.get("title", ""), "product": product if good else "",
+           "image": og.get("image", ""), "url": og.get("url", ""), "copy": copy, "source": source if good else "", "cached": False}
     if not good:
         res["error"] = product or "fără descriere"
     return res
@@ -303,8 +366,9 @@ def ad_block(ticket, describe_ad=True):
     ad = ad_for_ticket(ticket, describe_ad=describe_ad)
     if not ad or not ad.get("product"):
         return ""
-    return ("RECLAMA/POSTAREA pe care comentează clientul (folosește-o ca să identifici PRODUSUL și să răspunzi la obiect): %s%s" % (
-        ad["product"], (" [magazin: %s]" % ad["store"]) if ad.get("store") else ""))
+    extra = (" | Text reclamă: %s" % ad["copy"]) if ad.get("copy") else ""
+    return ("RECLAMA/POSTAREA pe care comentează clientul (folosește-o ca să identifici PRODUSUL și să răspunzi la obiect): %s%s%s" % (
+        ad["product"], (" [magazin: %s]" % ad["store"]) if ad.get("store") else "", extra))
 
 
 # ───────────────────────── CLI ─────────────────────────
@@ -334,8 +398,8 @@ def main():
     if a.registry_list:
         rows = reg_list()
         print("📚 Registru postări (%s) — %d înregistrări\n" % (FB_POST_DB, len(rows)))
-        for pid, store, product, n, last in rows:
-            print("  • %s [%s ×%s] %s" % (pid, store or "?", n, (product or "")[:90]))
+        for pid, store, product, source, n, last in rows:
+            print("  • %s [%s ×%s%s] %s" % (pid, store or "?", n, ("/" + source if source else ""), (product or "")[:90]))
         return
 
     mcp = MCP(secret("RICHPANEL_MCP_TOKEN"))
@@ -384,8 +448,11 @@ def main():
     print("   %d imagine(i) atașată(e) (%d de la client)." % (len(photos), cli))
     if ad:
         if ad.get("product"):
-            tag = "din registru" if ad.get("cached") else "NOU → salvat în registru"
-            print("   📢 RECLAMA comentată (%s) [%s]: %s" % (tag, ad.get("store") or "?", ad["product"]))
+            tag = "din registru" if ad.get("cached") else "NOU → salvat"
+            src = (" via %s" % ad.get("source")) if ad.get("source") else ""
+            print("   📢 RECLAMA comentată (%s%s) [%s]: %s" % (tag, src, ad.get("store") or "?", ad["product"]))
+            if ad.get("copy"):
+                print("      text reclamă: %s" % ad["copy"][:120])
         elif ad.get("error"):
             print("   📢 reclama: %s" % ad["error"])
     print()
