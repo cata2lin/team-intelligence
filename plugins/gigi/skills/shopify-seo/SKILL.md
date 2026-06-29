@@ -108,6 +108,10 @@ with AI hero images · homepage SEO text block.
 Deep detail, exact patterns, and copy templates: **`reference/playbook.md`**.
 The traps that waste hours: **`reference/pitfalls.md`**.
 Drop-in Liquid / JSON-LD: **`reference/snippets.md`**.
+**Blog articles + images** (gap test, per-store image standard, banner generation with our
+real product via `gigi:image-gen --ref`, Shopify Files upload, banner-in-body + featured,
+article SEO via `global.title_tag`/`description_tag` metafields, the `from_csv` write token
+for non-ARONA stores): **`reference/blog-articles.md`**.
 
 ## Crawl-based internal-link audit — `linkgraph.py`
 The Admin-API audit above sees pages in isolation; this sees the **link graph**. BFS-crawls from the homepage (seeded with the full sitemap incl. Shopify's `?from=&to=` sub-sitemaps), builds the internal link graph, computes internal **PageRank**, click-depth and inbound counts, and flags **orphan** (0 inbound), **under-linked** (<3), and **too-deep** (>3 clicks) pages. Pure stdlib + requests/bs4, no keys.

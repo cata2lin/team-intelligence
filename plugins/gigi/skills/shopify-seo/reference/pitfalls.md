@@ -320,3 +320,34 @@ it: (a) chrome-devtools screenshots can be stale frames after lazy reflow — PI
 (b) the user's browser serves a CACHED footer (Shopify section cache + edge), so a change you can
 see may look "missing" to them for minutes — say "hard-refresh / Ctrl-Shift-R". Don't claim a
 footer change is live off DOM alone; screenshot it, and account for their cache.
+
+## Blog articles: `Article.seo` doesn't exist — SEO meta lives in metafields
+Querying `articles{nodes{seo{title description}}}` throws `Field 'seo' doesn't exist on
+type 'Article'`. Article SEO = metafields **`global.title_tag`** + **`global.description_tag`**
+(single_line_text_field). Read them as `metafield(namespace:"global",key:"…"){value}`; write
+via `metafieldsSet`. (Products/collections DO have `seo{}` — articles don't.)
+
+## Non-ARONA store content is READ-ONLY on the SHOPIFY app token → use `from_csv`
+Grandia (and other non-ARONA shops) auth via the `SHOPIFY` app `client_credentials` token,
+which is **read-only on content**: `articleUpdate`/`articleCreate`/`metafieldsSet` return the
+mutation field as **`null`** with **no userError** (silent). For writes use the per-store
+`shpat_` token: **`Store.from_csv("GRAN")`** (row from `SHOPIFY_STORES_CSV`). Recognize the
+trap: a mutation result that is `null` (not `{userErrors:[…]}`) = wrong/read-only token, not a
+query error.
+
+## AI banner images: ref the real product, and watch for hallucinated text
+For blog banners (`gigi:image-gen` `hero.py`), **always `--ref` the store's real product photo**
+so it shows OUR product (the actual bottle/shed/etc.), not an invented one — Gemini preserves the
+referenced subject. BUT if the ref product carries branding, Gemini can stamp **gibberish text**
+on it (a Grandia balance bike rendered "BABY BO PABS"). Mitigate with "no text, no logos" in the
+scene, or regenerate **without `--ref`**. **Always Read (eyeball) every generated PNG before it
+goes on a live site.** Full flow + Files-upload + embed in `reference/blog-articles.md`.
+
+## A blog article needs banner-in-body AND featured image (hero alone looks bare)
+New articles created with only a product-photo hero look empty next to existing ones (which have
+a 16:9 banner at the top of the body + a featured thumbnail). Set BOTH in one `articleUpdate`:
+`article:{ body:"<!-- hero-banner --><div…><img…></div>"+body, image:{url,altText} }`. Some themes
+(Esteban) don't render the featured image on the single-article page — only the body banner shows
+there — but featured IS the blog-listing thumbnail, so set both. Right after upload the `<img>`
+may render **broken for a few seconds** (CDN propagation) though the file URL already returns 200 —
+re-check before concluding it failed. See `reference/blog-articles.md` §4.
