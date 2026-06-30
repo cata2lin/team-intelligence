@@ -105,6 +105,8 @@ def guess_courier(awb: str) -> str:
         return "sameday"
     if a.startswith("10"):   # 1 + cifra 0   -> Econt
         return "econt"
+    if a.isdigit() and a.startswith("9") and len(a) == 8:   # 9xxxxxxx (8 cifre) -> Dragon Star (DSC, doar Grandia)
+        return "dragonstar"
     return "necunoscut"
 
 
@@ -114,6 +116,7 @@ _COURIER_ALIASES = {
     "sameday": "sameday", "sd": "sameday",
     "econt": "econt",
     "packeta": "packeta", "zasilkovna": "packeta",
+    "dragonstar": "dragonstar", "dragon": "dragonstar", "dsc": "dragonstar", "dragon-star": "dragonstar",
 }
 
 
@@ -141,7 +144,7 @@ _NOT_DELIVERED = [
 _GENERATED = [
     "awb generat", "shipment data received", "shipment registered",
     "order received", "registered", "awb creat", "data received",
-    "informatii primite",
+    "informatii primite", "generat",   # Dragon Star: status brut „Generat" = AWB făcut, încă nepreluat
 ]
 
 
@@ -323,6 +326,22 @@ async def track_packeta(client, awb, creds) -> str:
         return "Eroare API Packeta"
 
 
+async def track_dragonstar(client, awb, creds=None) -> str:
+    """Dragon Star Curier (DSC) — status randat server-side în pagina publică de tracking, FĂRĂ credentiale.
+    Doar Grandia (connector xConnector 24257). AWBprint NU sincronizează DSC, deci asta e singura sursă de status real."""
+    try:
+        r = await client.get("https://dragonstarcurier.ro/tracking-awb",
+                             params={"awb": str(awb).strip()},
+                             headers={"User-Agent": "Mozilla/5.0"},
+                             follow_redirects=True, timeout=20.0)
+        if r.status_code != 200:
+            return f"Eroare HTTP Dragon Star {r.status_code}"
+        m = re.search(r'>Status</div>\s*<div[^>]*>([^<]+)</div>', r.text or "")
+        return html.unescape(m.group(1).strip()) if m else "AWB negasit la Dragon Star"
+    except Exception:
+        return "Eroare Dragon Star"
+
+
 async def track_all(items, creds):
     """items: listă de dict {awb, courier_key}. Întoarce {awb: status_raw}."""
     dpd_creds = creds.get("dpd_creds") or {}
@@ -331,7 +350,7 @@ async def track_all(items, creds):
     pk_creds = creds.get("packeta_creds") or {}
 
     dpd_groups = defaultdict(list)
-    sd, ec, pk, unknown = [], [], [], []
+    sd, ec, pk, ds, unknown = [], [], [], [], []
     for it in items:
         ck = it["courier_key"]
         a = it["awb"]
@@ -343,6 +362,8 @@ async def track_all(items, creds):
             ec.append(a)
         elif ck == "packeta":
             pk.append(a)
+        elif ck == "dragonstar":
+            ds.append(a)
         else:
             unknown.append(a)
 
@@ -367,6 +388,8 @@ async def track_all(items, creds):
             tasks.append(_one(a, track_econt, ec_creds))
         for a in pk:
             tasks.append(_one(a, track_packeta, pk_creds))
+        for a in ds:
+            tasks.append(_one(a, track_dragonstar, None))   # Dragon Star: fără credentiale (tracking public)
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
