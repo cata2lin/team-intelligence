@@ -2702,9 +2702,15 @@ def cmd_print_batch(a):
             w.append(fp)
         with open(merged, "wb") as f:
             w.write(f)
+        w.close()
+        for fp in pdfs:   # PDF-urile individuale (AWB cu AWB) = doar intermediare → le șterg; rămâne DOAR batch-ul grupat (≤250 comenzi/fișier)
+            try:
+                os.remove(fp)
+            except Exception:
+                pass
     except Exception as e:
         merged = None
-        print("  (merge PDF indisponibil: %s — fișiere individuale în %s)" % (str(e)[:50], outdir))
+        print("  (merge PDF indisponibil: %s — păstrez fișierele individuale în %s)" % (str(e)[:50], outdir))
     logp = os.path.join(outdir, "batch_%s.csv" % ts)
     with open(logp, "w", newline="", encoding="utf-8") as f:
         wr = csv.writer(f)
