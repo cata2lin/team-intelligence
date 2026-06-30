@@ -2663,7 +2663,7 @@ def cmd_print_batch(a):
     if not pending:
         print("  Nimic de printat."); return
     ts = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    outdir = os.path.join(os.path.expanduser(getattr(a, "out", None) or "."), "print-batch")
+    outdir = os.path.join(os.path.expanduser(getattr(a, "out", None) or "~/Downloads"), "print-batch")   # implicit în Downloads (ușor de găsit la print); override cu --out
     os.makedirs(outdir, exist_ok=True)
     import time as _time
     pdfs, log_rows, failed = [], [], []
@@ -2763,7 +2763,7 @@ def main():
     # print-batch (PRINT depozit: descarcă etichete nedescărcate, grupate pe produs/cantitate/dată, deschide print):
     ap.add_argument("--from", dest="from_date", help="print-batch/orders: data de început (yyyy-MM-dd sau DD/MM/YYYY).")
     ap.add_argument("--to", dest="to_date", help="print-batch/orders: data de sfârșit (yyyy-MM-dd sau DD/MM/YYYY).")
-    ap.add_argument("--out", help="print-batch: folderul unde salvez PDF-urile + log (default: ./print-batch).")
+    ap.add_argument("--out", help="print-batch: folderul unde salvez PDF-urile + log (default: ~/Downloads/print-batch).")
     ap.add_argument("--no-print", action="store_true", dest="no_print", help="print-batch: NU deschide dialogul de print (doar salvează/merge).")
     ap.add_argument("--test", action="store_true", help="print-batch: TEST pe etichete DEJA descărcate (downloaded=true) — zero impact pe coada reală.")
     ap.add_argument("--printed", action="store_true", help="print-batch: RE-PRINT pe etichete DEJA printate (downloaded=true) — re-printare reală a unor AWB-uri deja descărcate.")
