@@ -135,9 +135,14 @@ def refresh_overrides(months=None):
 
 
 def grandia_overrides():
-    """Grandia is NOT in 'Raport Zilnic 2' -> pull its marketing (FB+Google) from its
-    own Postgres (authoritative source) and write the GRAN override. Best-effort:
-    any failure is swallowed so the sheet sync still completes."""
+    """Grandia is NOT in 'Raport Zilnic 2' -> pull its marketing from its own Postgres
+    (fbads_daily_ad_totals + gads_daily_product_spend) for HISTORY, then HYBRID top-up the
+    CURRENT month from the metrics WAREHOUSE (fresh Meta+TikTok+Google).
+    Why: the agency (SkilledPPC) fed Grandia's own DB tables; that feed died at takeover
+    (~24-iun-2026) + never included TikTok. Since we now run Grandia and the warehouse has
+    all 3 channels live, current-month override = max(DB, warehouse) — never understates,
+    adds the missing TikTok, self-heals if the DB feed stays dead. Best-effort: any failure
+    is swallowed so the sheet sync still completes."""
     url = None
     try:
         for line in open(BASE + "/.env", encoding="utf-8"):
@@ -167,6 +172,46 @@ def grandia_overrides():
             for m, s in cur.fetchall():
                 agg[m] = agg.get(m, 0.0) + float(s)
         conn.close()
+        # --- HYBRID: top up the CURRENT month from the metrics warehouse (fresh, +TikTok) ---
+        try:
+            cur_month = datetime.now().strftime("%Y-%m")
+            murl = None
+            for line in open(BASE + "/.env", encoding="utf-8"):
+                line = line.strip()
+                if line.startswith("DATABASE_URL_METRICS="):
+                    murl = line.split("=", 1)[1].strip().strip('"').strip("'"); break
+            if murl:
+                mu = urllib.parse.urlparse(murl)
+                mkw = dict(user=urllib.parse.unquote(mu.username or ""), password=urllib.parse.unquote(mu.password or ""),
+                           host=mu.hostname, port=mu.port or 5432, database=(mu.path or "/").lstrip("/"))
+                try:
+                    mconn = pg8000.dbapi.connect(ssl_context=True, **mkw)
+                except Exception:
+                    mconn = pg8000.dbapi.connect(**mkw)
+                mcur = mconn.cursor()
+                mcur.execute(
+                    'SELECT COALESCE(SUM(s),0) FROM ('
+                    '  SELECT SUM(i."spendRon") s FROM meta_ad_insights_daily i'
+                    '    JOIN meta_ad_accounts a ON a.id=i."adAccountId"'
+                    '    WHERE a."metaAccountId"=\'act_1733723547182468\' AND to_char(i.date,\'YYYY-MM\')=%s'
+                    '  UNION ALL'
+                    '  SELECT SUM(i."spendRon") FROM tiktok_ad_insights_daily i'
+                    '    JOIN tiktok_ad_accounts a ON a.id=i."adAccountId"'
+                    '    WHERE a."tikTokAccountId"=\'7538854926504558610\' AND to_char(i.date,\'YYYY-MM\')=%s'
+                    '  UNION ALL'
+                    '  SELECT SUM(g."costRon") FROM google_ads_insights_daily g'
+                    '    JOIN google_ads_customer_accounts c ON c.id=g."customerAccountId"'
+                    '    WHERE c."customerId"=\'9069610821\' AND to_char(g.date,\'YYYY-MM\')=%s'
+                    ') x', (cur_month, cur_month, cur_month))
+                wh = float(mcur.fetchone()[0] or 0)
+                mconn.close()
+                if wh > 0:
+                    before = agg.get(cur_month, 0.0)
+                    agg[cur_month] = max(before, wh)
+                    print("grandia warehouse top-up %s: DB %.0f -> max(warehouse %.0f) = %.0f" % (
+                        cur_month, before, wh, agg[cur_month]))
+        except Exception as e:
+            print("grandia warehouse top-up skipped:", type(e).__name__, e)
         pf = sqlite3.connect(PF_DB); n = 0
         for m, amt in agg.items():
             pf.execute("INSERT OR REPLACE INTO profit_marketing_override (month,prefix,amount) VALUES (?,?,?)",
