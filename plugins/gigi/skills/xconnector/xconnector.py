@@ -2622,8 +2622,9 @@ def cmd_print_batch(a):
     pending.sort(key=lambda r: (r[0],) + order_group_key(r[1], olines, a) + (r[1] or "",))
     total_pending = len(pending)
     lim = a.limit if getattr(a, "limit", None) else 250   # MAX 250 AWB/batch (default) — restul, la rularea următoare
-    pending = pending[:lim]
-    remaining = total_pending - len(pending)
+    skip = max(0, getattr(a, "offset", 0) or 0)           # paginare: sare primele `skip` (pt re-print în batch-uri succesive — re-printul NU scoate din coadă)
+    pending = pending[skip:skip + lim]
+    remaining = total_pending - skip - len(pending)
     lbl = {k: v for k, v in flt.items() if k not in ("sort", "sortDir")}
     print("═" * 60)
     if test:
@@ -2632,7 +2633,9 @@ def cmd_print_batch(a):
         print("  🔁 RE-PRINT — etichete DEJA printate (downloaded=true). Le re-descarc pt re-printare.")
     print("  PRINT BATCH — %d etichete %s%s · %s→%s%s%s · grupat MAGAZIN→SKU→CANTITATE"
           % (len(pending), "DEJA descărcate (test)" if test else ("DEJA printate (re-print)" if reprint else "nedescărcate"),
-             (" din %d (rest %d → rulează iar)" % (total_pending, remaining)) if remaining else "", dfrom, dto,
+             ((" [%d–%d] din %d%s" % (skip + 1, skip + len(pending), total_pending,
+               (" · rest %d → --offset %d" % (remaining, skip + len(pending))) if remaining else "")) if (skip or remaining) else ""),
+             dfrom, dto,
              (" · magazine: " + ",".join(wants)) if wants else " · toate magazinele",
              (" · " + json.dumps(lbl)) if lbl else ""))
     if olines:   # rezumat grupat exact ca în PDF: magazin → SKU × cantitate → câte etichete
@@ -2767,6 +2770,7 @@ def main():
     ap.add_argument("--by-sku", action="store_true", dest="by_sku", help="print-batch: NU printează — arată coada GRUPATĂ pe SKU (câte etichete/SKU), cele mai multe primele, ca să alegi ce produs printezi.")
     ap.add_argument("--sku-prefix", dest="sku_prefix", help="print-batch: păstrează DOAR comenzile care au un SKU pe prefixul dat (ex `HA` = toate comenzile cu produse HA-*).")
     ap.add_argument("--limit", type=int, help="print-batch: max AWB-uri/batch (implicit 250). Restul rămâne pt rularea următoare.")
+    ap.add_argument("--offset", type=int, default=0, help="print-batch: sare primele N etichete (paginare batch-cu-batch la RE-PRINT, ex --offset 250 = batch 2). În producție (downloaded=false) nu e nevoie — fiecare batch iese din coadă.")
     ap.add_argument("--printer", help="print-batch (Windows+SumatraPDF): printează DIRECT pe imprimanta dată, fără dialog (batch rapid).")
     a = ap.parse_args()
     if a.cmd in ("awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
