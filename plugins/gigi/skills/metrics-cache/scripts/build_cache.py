@@ -327,11 +327,25 @@ CREATE INDEX IF NOT EXISTS product_ad_spend_sku_idx   ON cache.product_ad_spend(
 # Google per-SKU, in-DB (metrics): productItemId → variant → sku, aggregated.
 PRODUCT_AD_SPEND_GOOGLE = """
 INSERT INTO cache.product_ad_spend (date, brand_id, sku, product_title, platform, spend_ron, source)
-SELECT g.date, v."brandId", v.sku, MAX(g."productTitle"), 'google', ROUND(SUM(g."costRon"),2), 'google_product_insights'
-FROM google_ads_product_insights_daily g
-JOIN variants v ON v."shopifyNumericId" = (regexp_match(g."productItemId", '_(\\d+)$'))[1]::bigint
-WHERE g."productItemId" ~ '_\\d+$' AND v.sku IS NOT NULL AND v.sku<>'' AND g."costRon" IS NOT NULL
-GROUP BY g.date, v."brandId", v.sku
+SELECT s.date, s.brand_id, s.sku, s.product_title, 'google', s.spend_ron, 'google_product_insights'
+FROM (
+  -- grain = PK (date, sku); un sku poate exista sub mai multe brand-uri (skus generice deals: 'set-5-m', '31'…)
+  -- → însumează spend-ul pe sku și atribuie brandul cu cel mai mare spend (determinist), altfel PK (date,sku,platform)
+  -- ar primi 2 rânduri în acelaşi INSERT → CardinalityViolation.
+  SELECT g.date, v.sku,
+         (array_agg(v."brandId"    ORDER BY g."costRon" DESC NULLS LAST))[1] AS brand_id,
+         (array_agg(g."productTitle" ORDER BY g."costRon" DESC NULLS LAST))[1] AS product_title,
+         ROUND(SUM(g."costRon"), 2) AS spend_ron
+  FROM google_ads_product_insights_daily g
+  JOIN variants v ON v."shopifyNumericId" = (regexp_match(g."productItemId", '_(\\d+)$'))[1]::bigint
+  WHERE g."productItemId" ~ '_\\d+$' AND v.sku IS NOT NULL AND v.sku<>'' AND g."costRon" IS NOT NULL
+  GROUP BY g.date, v.sku
+) s
+ON CONFLICT (date, sku, platform) DO UPDATE SET
+  spend_ron = EXCLUDED.spend_ron,
+  brand_id = COALESCE(EXCLUDED.brand_id, cache.product_ad_spend.brand_id),
+  product_title = EXCLUDED.product_title,
+  source = EXCLUDED.source
 """
 
 def run_product_ad_spend(apply):
