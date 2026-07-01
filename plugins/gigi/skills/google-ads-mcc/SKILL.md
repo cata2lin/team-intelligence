@@ -119,8 +119,14 @@ uv run gads.py set-tcpa      --customer C --campaign ID --cpa 30               #
 uv run gads.py set-status    --customer C --campaign ID --status PAUSED|ENABLED
 uv run gads.py add-negatives --customer C --campaign ID --terms "a,b,c" --match PHRASE
 uv run gads.py add-keywords  --customer C --adgroup AGID --terms "a,b,c" --match PHRASE
+uv run gads.py add-shared-negative --customer C --shared-set SSID --text "grandia" --match PHRASE
 ```
 > **CPA ⇄ ROAS:** target ROAS = AOV / target_CPA. (AOV = conv_value ÷ conversions.) e.g. AOV 142, CPA 30 → tROAS 4.7.
+> **Negative pe SHARED list vs pe campanie:** `add-negatives` adaugă negativul pe UNA campanie (campaignCriteria).
+> `add-shared-negative` adaugă negativul într-o **listă partajată** (`sharedSet`, endpoint `sharedCriteria:mutate`) →
+> lovește TOATE campaniile care folosesc lista dintr-o mișcare (**inclusiv Shopping + PMax**, unde negativele
+> pe campanie nu se pot pune direct). După `--apply` re-verifică singur (query pe `shared_criterion`) + printează resourceName.
+> Găsești id-ul listei cu: `report --customer C --query "SELECT shared_set.id, shared_set.name, shared_set.type FROM shared_set"`.
 
 ## 3. Create a Search campaign (atomic)
 Pattern: one `googleAds:mutate` with **temporary resource names** (negative ids) creating budget →
