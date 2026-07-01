@@ -1049,6 +1049,64 @@ def cmd_connectors(a):
                                                     "activ" if c.get("active") else "INACTIV"))
 
 
+def awbprint_recent_dup(order_number, window_hours=24):
+    """Gardă DUPLICAT independentă de tag: întoarce numărul unei comenzi ANTERIOARE (≤window_hours) a ACELUIAȘI
+    client, pe același magazin, cu ACELAȘI set de produse (SKU), care are DEJA AWB (fulfilled_at) și NU e anulată
+    → `order_number` e un duplicat scăpat de tag-uire. None dacă nu găsește / lipsă DB. Sursă AWBprint (Frisbo)."""
+    try:
+        import pg8000.native
+        from urllib.parse import urlparse, unquote
+    except Exception:
+        return None
+    url = os.environ.get("DATABASE_URL_AWBPRINT") or ""
+    if not url:
+        try:
+            url = subprocess.run(["uv", "run", KB, "secret-get", "DATABASE_URL_AWBPRINT"],
+                                 capture_output=True, text=True, timeout=40).stdout.strip()
+        except Exception:
+            url = ""
+    if not url.startswith("postgres"):
+        return None
+    def _skus(lij):
+        try:
+            s = {((it.get("inventory_item") or {}).get("sku") or "").strip() for it in json.loads(lij) if it}
+            return frozenset(x for x in s if x)
+        except Exception:
+            return frozenset()
+    u = urlparse(url); con = None
+    try:
+        con = pg8000.native.Connection(user=unquote(u.username or ""), password=unquote(u.password or ""),
+                                       host=u.hostname, port=u.port or 5432, database=u.path.lstrip("/"), ssl_context=True)
+        r = con.run("select store_uid, customer_email, customer_name, frisbo_created_at, line_items::text "
+                    "from orders where order_number = :n order by id desc limit 1", n=order_number)
+        if not r or not r[0][3]:
+            return None
+        suid, em, nm, created, li = r[0]
+        my = _skus(li)
+        if not my:
+            return None
+        cand = con.run(
+            "select order_number, line_items::text from orders "
+            "where store_uid = :s and order_number <> :n and fulfilled_at is not null "
+            "and coalesce(aggregated_status,'') <> 'cancelled' "
+            "and frisbo_created_at between :t::timestamp - interval '%d hours' and :t::timestamp "
+            "and ( (:e <> '' and lower(customer_email) = lower(:e)) or (:e = '' and lower(customer_name) = lower(:nm)) ) "
+            "order by frisbo_created_at desc" % int(window_hours),
+            s=suid, n=order_number, t=created, e=(em or ""), nm=(nm or ""))
+        for onum, li2 in cand:
+            if _skus(li2) == my:
+                return onum
+        return None
+    except Exception:
+        return None
+    finally:
+        if con is not None:
+            try:
+                con.close()
+            except Exception:
+                pass
+
+
 def cmd_awb_make(a, _resolved=None):
     sh, xc, o = _resolved or resolve_order(a.order, a, a.days)
     if not o:
@@ -1065,6 +1123,12 @@ def cmd_awb_make(a, _resolved=None):
     if st and not getattr(a, "force", False):  # cadou UGC/influencer → NU fac AWB (flux separat); --force dacă chiar vrei
         if any(tg in shopify_order_tags(a.order, {st.get("prefix", ""): st}) for tg in INFLUENCER_TAGS):
             print("  ⛔ %s are tag `influencer` (cadou UGC) → NU fac AWB. Folosește --force dacă chiar vrei." % a.order)
+            return
+    if not getattr(a, "force", False):  # GARDĂ DUPLICAT: comandă anterioară ≤24h, același client + aceleași produse, cu AWB → probabil duplicat scăpat de tag
+        dup_of = awbprint_recent_dup(a.order)
+        if dup_of:
+            print("  ⛔ %s pare DUPLICAT al %s (același client + aceleași produse, <24h, iar %s are DEJA AWB) → NU fac AWB." % (a.order, dup_of, dup_of))
+            print("     Dacă e comandă reală (nu duplicat), rulează cu --force. Altfel anuleaz-o (order-cancel).")
             return
     if not getattr(a, "connector", None):  # rutare per-produs (Grandia → Dragon Star) doar dacă nu s-a forțat connectorul
         con = route_connector(sh, st, a.order, cons, con)
@@ -1492,7 +1556,7 @@ def cmd_fulfill(a):
         intl = sh["shopDomain"] in HERE_COUNTRY
         hkey = here_key() if intl else None
         ready = fixable = hard = had_awb = noxc = made = fixed = failed = team_n = infl = 0
-        dup_keep = dup_cancel = dup_shipped = dup_unknown = 0
+        dup_keep = dup_cancel = dup_shipped = dup_unknown = dup_untag = 0
         for name, created, fin, tags, cust, source in unf:
             c = parse_iso(created)
             if not c or (now - c).total_seconds() / 60.0 <= max_age:
@@ -1525,6 +1589,15 @@ def cmd_fulfill(a):
                 if newest is None:
                     dup_unknown += 1; continue  # fără client → nu pot verifica → NU expediez, NU anulez
                 dup_keep += 1  # e cea mai nouă (de păstrat) → cade prin la logica de AWB
+            else:
+                # NETAG-UIT + non-CS → gardă duplicat INDEPENDENTĂ de tag (cazul BELA34579: tag-ul „duplicata" n-a apucat
+                # înainte de AWB). Dacă același client are o comandă ANTERIOARĂ ≤24h cu ACELEAȘI produse care are DEJA AWB
+                # → NU fac AWB; îl las la CS (nu anulez automat — poate fi comandă reală).
+                dup_of = awbprint_recent_dup(name)
+                if dup_of:
+                    dup_untag += 1
+                    print("    ⚠️ %s = DUPLICAT netag-uit al %s (același client + aceleași produse <24h, %s are AWB) → NU fac AWB (la CS)" % (name, dup_of, dup_of))
+                    continue
             if intl:
                 # extern (CZ/PL/BG): validatorul RO dă fals WRONG → validez cu HERE Geocoding
                 ad = xc.by_id(o.get("orderId")).get("shippingAddress") or {}
@@ -1558,8 +1631,8 @@ def cmd_fulfill(a):
                 ok, _, _ = _create_label(xc, body)  # retry scurt pe throttle DPD (rafală)
                 made += 1 if ok else 0
                 failed += 0 if ok else 1
-        print("  %s — unfulfilled >%dmin: AWB %d gata + %d corectabile + %d grele→CS  ·  DUP: %d păstrate, %d de-anulat, %d plecate(protejate), %d fără-client  ·  CS/draft (AWB fără dedup): %d · influencer-skip: %d  (aveau AWB %d, fără xc %d)"
-              % (sh["shopDomain"], max_age, ready, fixable, hard, dup_keep, dup_cancel, dup_shipped, dup_unknown, team_n, infl, had_awb, noxc))
+        print("  %s — unfulfilled >%dmin: AWB %d gata + %d corectabile + %d grele→CS  ·  DUP: %d păstrate, %d de-anulat, %d plecate(protejate), %d fără-client, %d netag-uite→CS  ·  CS/draft (AWB fără dedup): %d · influencer-skip: %d  (aveau AWB %d, fără xc %d)"
+              % (sh["shopDomain"], max_age, ready, fixable, hard, dup_keep, dup_cancel, dup_shipped, dup_unknown, dup_untag, team_n, infl, had_awb, noxc))
         if a.apply:
             print("  → APLICAT: AWB %d (din care %d după corecție) · duplicate anulate %d · eșuate %d" % (made, fixed, dup_cancel, failed))
         else:
