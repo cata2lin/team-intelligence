@@ -156,7 +156,7 @@ def main():
     ss=sub.add_parser("set-status", help="enable/pause a campaign (dry-run unless --apply)")
     ss.add_argument("--customer", required=True); ss.add_argument("--campaign", required=True)
     ss.add_argument("--status", required=True, choices=["ENABLED","PAUSED"]); ss.add_argument("--apply", action="store_true"); ss.add_argument("--mcc")
-    st=sub.add_parser("set-troas", help="set target ROAS on a Max-conv-value campaign (dry-run unless --apply)")
+    st=sub.add_parser("set-troas", help="set target ROAS on a Max-conv-value (PMax) OR TARGET_ROAS (Shopping) campaign (dry-run unless --apply)")
     st.add_argument("--customer", required=True); st.add_argument("--campaign", required=True)
     st.add_argument("--roas", type=float, required=True, help="multiplier, e.g. 4.8 = 480%%"); st.add_argument("--apply", action="store_true"); st.add_argument("--mcc")
     sc=sub.add_parser("set-tcpa", help="switch to Max conversions + target CPA (dry-run unless --apply)")
@@ -205,10 +205,22 @@ def main():
     elif args.cmd=="set-troas":
         c=get_connection(args.mcc)
         res_name=f"customers/{_digits(args.customer)}/campaigns/{_digits(args.campaign)}"
-        ops=[{"updateMask":"maximizeConversionValue.targetRoas","update":{"resourceName":res_name,"maximizeConversionValue":{"targetRoas":args.roas}}}]
+        # read the campaign's bidding strategy first — tROAS lives on a DIFFERENT field
+        # depending on it: PMax/Max-conv-value → maximizeConversionValue.targetRoas,
+        # standalone TARGET_ROAS (typ. Shopping) → targetRoas.targetRoas.
+        rows=search(c,args.customer,f"SELECT campaign.id, campaign.name, campaign.bidding_strategy_type FROM campaign WHERE campaign.id={_digits(args.campaign)}")
+        if not rows: sys.exit("campaign not found")
+        strat=_get(rows[0],"campaign.biddingStrategyType"); cname=_get(rows[0],"campaign.name")
+        if strat=="MAXIMIZE_CONVERSION_VALUE":
+            ops=[{"updateMask":"maximizeConversionValue.targetRoas","update":{"resourceName":res_name,"maximizeConversionValue":{"targetRoas":args.roas}}}]
+        elif strat=="TARGET_ROAS":
+            ops=[{"updateMask":"targetRoas.targetRoas","update":{"resourceName":res_name,"targetRoas":{"targetRoas":args.roas}}}]
+        else:
+            sys.exit(f"campania „{cname}\" e pe strategia {strat}, set-troas nu se aplică "
+                     "(doar MAXIMIZE_CONVERSION_VALUE sau TARGET_ROAS)")
         out=mutate(c,args.customer,"campaigns",ops,args.apply)
         print(("APLICAT" if args.apply else "DRY-RUN — adaugă --apply ca să execuți"))
-        print(f"  tROAS={args.roas} ({int(args.roas*100)}%) pe {res_name}"); print(json.dumps(out,ensure_ascii=False)[:300])
+        print(f"  tROAS={args.roas} ({int(args.roas*100)}%) pe {res_name} [{strat}]"); print(json.dumps(out,ensure_ascii=False)[:300])
     elif args.cmd=="set-tcpa":
         c=get_connection(args.mcc)
         res_name=f"customers/{_digits(args.customer)}/campaigns/{_digits(args.campaign)}"

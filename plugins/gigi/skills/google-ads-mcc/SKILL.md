@@ -114,7 +114,7 @@ uv run kw_ideas.py --customer 9069610821 --url https://grandia.ro/collections/mo
 Treat a write to a live ad account like a destructive DB write: dry-run, confirm with the user, then `--apply`.
 ```bash
 uv run gads.py set-budget    --customer C --campaign ID --daily 200            # RON/day
-uv run gads.py set-troas     --customer C --campaign ID --roas 4.7             # 470% (Max-conv-value campaigns)
+uv run gads.py set-troas     --customer C --campaign ID --roas 4.7             # 470% (auto-detects Max-conv-value/PMax vs standalone TARGET_ROAS/Shopping)
 uv run gads.py set-tcpa      --customer C --campaign ID --cpa 30               # switches to Max conversions + tCPA
 uv run gads.py set-status    --customer C --campaign ID --status PAUSED|ENABLED
 uv run gads.py add-negatives --customer C --campaign ID --terms "a,b,c" --match PHRASE
