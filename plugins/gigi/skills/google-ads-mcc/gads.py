@@ -171,6 +171,12 @@ def main():
     ak.add_argument("--customer", required=True); ak.add_argument("--adgroup", required=True)
     ak.add_argument("--terms", required=True, help="comma-separated"); ak.add_argument("--match", default="PHRASE", choices=["EXACT","PHRASE","BROAD"])
     ak.add_argument("--apply", action="store_true"); ak.add_argument("--mcc")
+    sn=sub.add_parser("add-shared-negative", help="add a negative keyword to a SHARED negative-keyword list "
+                      "(sharedSet) — covers Shopping + PMax + all campaigns using the list, dry-run unless --apply")
+    sn.add_argument("--customer", required=True); sn.add_argument("--shared-set", required=True, help="sharedSet id")
+    sn.add_argument("--text", required=True, help="the negative keyword text")
+    sn.add_argument("--match", default="PHRASE", choices=["EXACT","PHRASE","BROAD"])
+    sn.add_argument("--apply", action="store_true"); sn.add_argument("--mcc")
     args=ap.parse_args()
 
     if args.cmd=="report":
@@ -246,6 +252,26 @@ def main():
         print(("APLICAT" if args.apply else "DRY-RUN — adaugă --apply ca să execuți"))
         print(f"  {len(terms)} keywords ({args.match}) -> {ag}")
         print(json.dumps(out,ensure_ascii=False)[:300])
+    elif args.cmd=="add-shared-negative":
+        c=get_connection(args.mcc)
+        cid=_digits(args.customer); sset=_digits(args.shared_set)
+        res_set=f"customers/{cid}/sharedSets/{sset}"
+        ops=[{"create":{"sharedSet":res_set,"keyword":{"text":args.text,"matchType":args.match}}}]
+        out=mutate(c,args.customer,"sharedCriteria",ops,args.apply)
+        print(("APLICAT" if args.apply else "DRY-RUN — adaugă --apply ca să execuți"))
+        print(f"  negativ „{args.text}\" ({args.match}) -> sharedSet {sset}")
+        print(json.dumps(out,ensure_ascii=False)[:400])
+        if args.apply:
+            # re-verify: confirm the keyword is now in the shared set
+            chk=search(c,cid,"SELECT shared_criterion.resource_name, shared_criterion.keyword.text,"
+                " shared_criterion.keyword.match_type, shared_criterion.type"
+                f" FROM shared_criterion WHERE shared_set.id={sset}"
+                " AND shared_criterion.type='KEYWORD'")
+            hit=[r for r in chk if _get(r,"sharedCriterion.keyword.text")==args.text]
+            print(f"  RE-VERIFICARE: {len(chk)} criterii în set; „{args.text}\" prezent: {'DA' if hit else 'NU'}")
+            for r in hit:
+                print(f"    {_get(r,'sharedCriterion.resourceName')} "
+                      f"[{_get(r,'sharedCriterion.keyword.matchType')}]")
 
 if __name__=="__main__":
     main()
