@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["google-api-python-client>=2.100","google-auth>=2.23","google-genai>=0.3","requests>=2.31"]
+# dependencies = ["google-api-python-client>=2.100","google-auth>=2.23","google-genai>=0.3","requests>=2.31","psycopg2-binary>=2.9"]
 # ///
 """Source reels for a brand from its Google Drive CREATIVE folder, Gemini-vet them
 (perfume/on-brand, quality, no burned foreign text), caption them, upload to Blob,
@@ -18,6 +18,8 @@ QDIR = os.path.dirname(os.path.abspath(__file__))
 SP_DIR = "/Users/gheorghebeschea/Downloads/Scripturi/team-intelligence/plugins/gigi/skills/social-post"
 sys.path.insert(0, SP_DIR)
 import social_post as sp  # blob_upload
+sys.path.insert(0, QDIR)
+import vetting_store as vs  # DB cache + full library
 KB = "/Users/gheorghebeschea/Downloads/Scripturi/team-intelligence/plugins/core/scripts/kb.py"
 CRE = "1pjDE3spDnpRuLUtTUzNUPx9XRyPA_gBP"
 
@@ -132,6 +134,15 @@ def main():
         n_ok=0
         for c in cands:
             if n_ok>=per: break
+            ref=c["id"]
+            cache=vs.cached(ref)              # already scanned+understood? reuse, no Gemini/upload
+            if cache is not None:
+                ok=cache.get("ok_de_postat") and cache.get("pe_brand")
+                print(f"   {'✅' if ok else '❌'} {c['name'][:32]} (cache)",flush=True)
+                if ok and cache.get("blob_url") and c["name"] not in existing:
+                    kept.append({"url":cache["blob_url"],"caption":cache.get("_caption_full") or (cache.get("caption","")+("\n\n"+" ".join(cache.get("hashtags",[])) if cache.get("hashtags") else "")).strip(),
+                                 "dur":c["dur"],"src":c["name"],"posted":False,"posted_at":None}); n_ok+=1
+                continue
             try: download(c["id"], tmp)
             except Exception as e: print(f"   dl fail {c['name']}: {str(e)[:80]}",flush=True); continue
             v=vet(tmp, brand)
@@ -140,13 +151,14 @@ def main():
             # text is fine for edited CREATIVE reels — do NOT reject on text_ars here.
             ok = v.get("ok_de_postat") and v.get("pe_brand")
             print(f"   {'✅' if ok else '❌'} {c['name'][:32]} {c['dur']}s cal={v.get('calitate')} text_ars={v.get('text_ars')} ok_post={v.get('ok_de_postat')}",flush=True)
-            if not ok: continue
-            url=sp.blob_upload(tmp)
-            cap=v.get("caption","").strip()
-            tags=" ".join(v.get("hashtags",[]))
-            kept.append({"url":url,"caption":(cap+("\n\n"+tags if tags else "")).strip(),
-                         "dur":c["dur"],"src":c["name"],"posted":False,"posted_at":None})
-            n_ok+=1
+            blob=sp.blob_upload(tmp) if ok else None
+            if ok:
+                cap=v.get("caption","").strip(); tags=" ".join(v.get("hashtags",[]))
+                full=(cap+("\n\n"+tags if tags else "")).strip()
+                v["_caption_full"]=full
+                kept.append({"url":blob,"caption":full,"dur":c["dur"],"src":c["name"],"posted":False,"posted_at":None})
+                n_ok+=1
+            vs.save(ref, brand, c["name"], c["dur"], v, blob, "ok" if ok else "rejected")  # save EVERY scan
         if brand not in q["rotation"]: q["rotation"].append(brand)
         print(f"[{brand}] adaugat {n_ok} reels in coada.",flush=True)
     json.dump(q, open(f"{QDIR}/queue.json","w"), ensure_ascii=False, indent=1)
