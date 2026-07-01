@@ -65,11 +65,31 @@ def next_unposted(reels, brand=None):
 
 NETWORKS = "tiktok,instagram,facebook,youtube"  # everything via Metricool
 
-def post(brand, reel, apply):
-    """Publish this reel to ALL connected networks via Metricool (one post)."""
+def load_recipe():
+    rp = os.path.join(QDIR, "recipe.json")
+    if os.path.exists(rp):
+        return json.load(open(rp))
+    return {"hours": [13, 15, 18, 20], "slots": {"default": 1}}
+
+def today_schedule(now):
+    """Recipe-aware slots: good hours, more on Sat/Fri. Rolls to tomorrow if today's hours passed.
+    Returns list of 'YYYY-MM-DDTHH:MM:00'."""
+    rec = load_recipe()
+    hours = rec.get("hours", [13, 15, 18, 20])
+    upcoming = [h for h in hours if h > now.hour]
+    base, picked_hours = (now, upcoming) if upcoming else (now + datetime.timedelta(days=1), hours)
+    wd = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][base.weekday()]
+    n = rec.get("slots", {}).get(wd, rec.get("slots", {}).get("default", 1))
+    picked = picked_hours[:n]
+    return [base.replace(hour=h, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M:00") for h in picked]
+
+def post(brand, reel, apply, when=None):
+    """Publish this reel to ALL connected networks via Metricool (one post), scheduled at `when`."""
     label = MC_LABELS.get(brand, brand)
     cmd = ["uv", "run", "mc_post.py", "post", "--brand", label,
            "--network", NETWORKS, "--media", reel["url"], "--text", reel["caption"]]
+    if when:
+        cmd += ["--when", when]
     cmd.append("--publish" if apply else "--dry")  # dry = print only, no Metricool write
     p = subprocess.run(cmd, cwd=QDIR, capture_output=True, text=True)
     out = (p.stdout or "") + (p.stderr or "")
@@ -82,7 +102,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--brand", help="post only this brand (no rotation change)")
-    ap.add_argument("--limit", type=int, default=1, help="how many brands to post this run (round-robin)")
+    ap.add_argument("--limit", type=int, default=0, help="#brands this run; 0 = recipe-driven (more on Sat/Fri)")
     ap.add_argument("--no-tiktok", dest="tiktok", action="store_false", help="skip TikTok (Metricool)")
     a = ap.parse_args()
 
@@ -110,10 +130,13 @@ def main():
                 reg_add(a.brand, reel.get("src"), reel["url"], ["fb", "ig"] + (["tiktok"] if a.tiktok else []))
             elif a.apply:
                 logline(f"      ⚠️ {a.brand}: EȘUAT — nu marchez")
-    else:  # round-robin: walk from rot_idx, post next brands that have runway
+    else:  # round-robin: walk from rot_idx, post next brands at recipe-driven slots
+        slots = today_schedule(datetime.datetime.now())
+        target = a.limit if a.limit > 0 else len(slots)
+        logline(f"  rețetă: {len(slots)} slot(uri) azi @ {', '.join(s[11:16] for s in slots)} → {target} branduri")
         order = [(rot_idx + k) % len(rotation) for k in range(len(rotation))]
         for i in order:
-            if posted_now >= a.limit:
+            if posted_now >= target:
                 break
             b = rotation[i]
             if last.get(b) == td:
@@ -121,8 +144,9 @@ def main():
             reel = next_unposted(brands.get(b, []), b)
             if not reel:
                 continue
-            logline(f"  {b}: post {reel.get('dur')}s {reel['src'][:40]}")
-            ok, tail = post(b, reel, a.apply)
+            when = slots[posted_now % len(slots)] if slots else None
+            logline(f"  {b}: post {reel.get('dur')}s @ {when[11:16] if when else 'now'} {reel['src'][:32]}")
+            ok, tail = post(b, reel, a.apply, when)
             for t in tail.splitlines(): logline(f"      {t}")
             if a.apply and ok:
                 reel["posted"] = True; reel["posted_at"] = td; last[b] = td; posted_now += 1
