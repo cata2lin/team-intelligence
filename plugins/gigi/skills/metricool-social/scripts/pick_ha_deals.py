@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["google-api-python-client>=2.100","google-auth>=2.23","google-genai>=0.3","requests>=2.31"]
+# dependencies = ["google-api-python-client>=2.100","google-auth>=2.23","google-genai>=0.3","requests>=2.31","psycopg2-binary>=2.9"]
 # ///
 """HA deals pipeline: for each deals store, find HA-#### SKUs that are ACTIVE + IN STOCK
 in Shopify (user rule: verify in store every time), match to the HA Drive library's
@@ -19,6 +19,7 @@ import requests
 QDIR=os.path.dirname(os.path.abspath(__file__))
 SP_DIR="/Users/gheorghebeschea/Downloads/Scripturi/team-intelligence/plugins/gigi/skills/social-post"
 sys.path.insert(0,SP_DIR); import social_post as sp
+sys.path.insert(0,QDIR); import vetting_store as vs
 KB="/Users/gheorghebeschea/Downloads/Scripturi/team-intelligence/plugins/core/scripts/kb.py"
 HA_FOLDERS=["1CdUfqKisb22urOr8seDxik4wvEAXJQLw","1z8kFoaV6NFcuR-THt_S5jqVGpcuauuvR"]
 
@@ -122,18 +123,28 @@ def main():
             if n>=per: break
             for v in reels_in(hamap[sku])[:2]:
                 if n>=per: break
-                name=f"{sku}/{v['name']}"
+                name=f"{sku}/{v['name']}"; ref=v["id"]
                 if name in existing or name in posted_srcs: continue
+                cache=vs.cached(ref)                       # already scanned+understood?
+                if cache is not None:
+                    if cache.get("ok_de_postat") and cache.get("blob_url"):
+                        full=cache.get("_caption_full") or (cache.get("caption","")+("\n\n"+" ".join(cache.get("hashtags",[])) if cache.get("hashtags") else "")).strip()
+                        kept.append({"url":cache["blob_url"],"caption":full,"dur":None,"src":name,"sku":sku,"posted":False,"posted_at":None})
+                        print(f"   ✅ {name[:34]} (cache)",flush=True); n+=1
+                    else: print(f"   ❌ {name[:34]} (cache)",flush=True)
+                    continue
                 try: download(v["id"],tmp)
                 except Exception as e: print(f"   dl fail {name}:{str(e)[:60]}"); continue
                 an=vet(tmp)
-                if not an or not an.get("ok_de_postat"):
-                    print(f"   ❌ {name[:34]}"); continue
-                url=sp.blob_upload(tmp)
-                cap=an.get("caption","").strip(); tags=" ".join(an.get("hashtags",[]))
-                kept.append({"url":url,"caption":(cap+("\n\n"+tags if tags else "")).strip(),
-                             "dur":None,"src":name,"sku":sku,"posted":False,"posted_at":None})
-                print(f"   ✅ {name[:34]}  (SKU {sku} pe stoc)",flush=True); n+=1
+                if not an: continue
+                ok=an.get("ok_de_postat"); blob=sp.blob_upload(tmp) if ok else None
+                if ok:
+                    cap=an.get("caption","").strip(); tags=" ".join(an.get("hashtags",[]))
+                    full=(cap+("\n\n"+tags if tags else "")).strip(); an["_caption_full"]=full
+                    kept.append({"url":blob,"caption":full,"dur":None,"src":name,"sku":sku,"posted":False,"posted_at":None})
+                    print(f"   ✅ {name[:34]}  (SKU {sku} pe stoc)",flush=True); n+=1
+                else: print(f"   ❌ {name[:34]}",flush=True)
+                vs.save(ref, brand, name, None, an, blob, "ok" if ok else "rejected")  # save EVERY scan
         if brand not in q["rotation"]: q["rotation"].append(brand)
         print(f"[{brand}] adaugat {n} reels",flush=True)
     json.dump(q,open(f"{QDIR}/queue.json","w"),ensure_ascii=False,indent=1)
