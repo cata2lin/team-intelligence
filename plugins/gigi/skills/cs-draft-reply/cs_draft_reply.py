@@ -15,11 +15,12 @@ draftul în Richpanel (agentul îl verifică/editează/trimite manual). Fără f
 
 LLM: folosește ANTHROPIC_API_KEY (Claude) dacă există în KB, altfel OPENAI_API_KEY. Model: env DRAFT_MODEL.
 """
-import os, sys, json, subprocess, urllib.request, argparse
+import os, sys, json, re, subprocess, urllib.request, argparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
 CI = os.path.join(HERE, "..", "customer-identity", "customer_identity.py")
+TI = os.path.join(HERE, "cs_ticket_index.py")   # index similaritate tichete rezolvate
 MCP_URL = "https://mcp.richpanel.com/mcp"
 
 PLAYBOOK = """Ești agent Customer Service la ARONA (magazine Shopify cu plată ramburs: Esteban, George Talent, Nubra, Gento — parfumuri; Grandia, Carpetto, Covoria — casă/mobilă; Bonhaus RO/CZ/PL/BG; Belasil; Reduceri bune, Ofertele Zilei, Magdeal etc.).
@@ -79,7 +80,7 @@ def llm(system, user):
     try:
         ak = secret("ANTHROPIC_API_KEY")
         if ak:
-            body = {"model": os.environ.get("DRAFT_MODEL", "claude-3-5-sonnet-20241022"), "max_tokens": 1000,
+            body = {"model": os.environ.get("DRAFT_MODEL", "claude-sonnet-4-6"), "max_tokens": 1000,
                     "system": system, "messages": [{"role": "user", "content": user}]}
             req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=json.dumps(body).encode(),
                                          headers={"x-api-key": ak, "anthropic-version": "2023-06-01", "content-type": "application/json"})
@@ -111,10 +112,55 @@ def transcript(conv):
     return "\n".join(out)
 
 
+_QUOTE = re.compile(r"(Yahoo Mail:|Sent from|Trimis de pe|\bOn .{0,40}wrote:|"
+                    r"(lun|mar|mie|joi|vin|sâm|sam|dum)\.,? \d)", re.I)
+# text auto-completat de Richpanel (bot/form) — NU e replica agentului
+_BOILER = ("Veți fi anunțați", "Simțiți-vă liber", "Oferă echipei", "formularul de contact", "Vom reveni")
+
+
+def agent_reply(conv):
+    """Textul răspunsului AGENTULUI REAL (author_is_workspace_agent), fără citat de email / boilerplate bot/AI."""
+    msgs = conv.get("messages") or (conv.get("messages_page") or {}).get("messages") or []
+    reps = []
+    for m in msgs:
+        if m.get("is_private") or m.get("is_ai") or not m.get("author_is_workspace_agent"):
+            continue
+        t = " ".join((m.get("text") or "").split())
+        t = _QUOTE.split(t)[0].strip()                  # taie thread-ul citat
+        if len(t) < 15 or any(b in t for b in _BOILER):
+            continue
+        reps.append(t)
+    return " ".join(reps)[:600]
+
+
+def similar_precedent(tok, query, n, api):
+    """Aduce top-N tichete REZOLVATE similare + replica agentului real, ca precedent pt draft. '' dacă nimic."""
+    if n <= 0 or not query.strip():
+        return ""
+    try:
+        cmd = ["uv", "run", TI, "similar", query, "--k", str(n), "--json"] + (["--api"] if api else [])
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=180).stdout
+        hits = json.loads(out[out.index("["):]) if "[" in out else []
+    except Exception:
+        return ""
+    blocks = []
+    for h in hits:
+        try:
+            conv = mcp("get_conversation", {"conversation_number": h["no"], "mode": "audit", "max_messages": 30}, tok)
+            rep = agent_reply(conv)
+        except Exception:
+            rep = ""
+        if rep:
+            blocks.append("• [%s] Client: %s\n  Agentul a rezolvat: %s" % (h.get("category", "?"), h["subject"][:120], rep))
+    return "\n".join(blocks)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--conv", required=True, help="nr conversație Richpanel")
     ap.add_argument("--create-draft", action="store_true", help="salvează draftul în Richpanel (NU trimite)")
+    ap.add_argument("--similar", type=int, default=3, help="câte tichete rezolvate similare să aducă drept precedent (0=off)")
+    ap.add_argument("--similar-api", action="store_true", help="embeddings API (calitate mai bună) pt similaritate")
     a = ap.parse_args()
     tok = secret("RICHPANEL_MCP_TOKEN")
 
@@ -140,9 +186,15 @@ def main():
         for o in orders[:8]) or "  (nicio comandă găsită — posibil pre-vânzare / client nou)"
     store = orders[0]["brand"] if orders else (cust.get("emails", [""])[0].split("@")[-1].split(".")[0].title() if cust.get("emails") else "magazinul nostru")
 
-    user = ("Magazin: %s\nCanal: %s\n\nCONVERSAȚIA (ultimele mesaje):\n%s\n\nDATELE CLIENTULUI:\n%s\n\n"
+    # precedent: cum a rezolvat echipa tichete similare reale (grounding din istoric)
+    query = ((tk.get("subject") or "") + " " + tr[:200]).strip()
+    prec = similar_precedent(tok, query, a.similar, a.similar_api)
+    prec_block = ("\n\nPRECEDENT — cum a rezolvat ECHIPA tichete similare reale (ghid de ton + conținut; "
+                  "NU copia AWB/nume/date din ele, folosește DOAR datele clientului curent):\n%s" % prec) if prec else ""
+
+    user = ("Magazin: %s\nCanal: %s\n\nCONVERSAȚIA (ultimele mesaje):\n%s\n\nDATELE CLIENTULUI:\n%s%s\n\n"
             "Scrie DOAR textul răspunsului-draft către client, în limba lui, respectând procedurile."
-            % (store, tk.get("channel", "?"), tr, od))
+            % (store, tk.get("channel", "?"), tr, od, prec_block))
 
     draft, engine = llm(PLAYBOOK, user)
     print("═" * 70)

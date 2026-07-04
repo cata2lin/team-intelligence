@@ -9,19 +9,35 @@ description: Generates a ready-to-review DRAFT reply for a Richpanel ticket usin
 
 ## Cum rulezi
 ```bash
-uv run cs_draft_reply.py --conv 265761                 # afișează draftul propus
+uv run cs_draft_reply.py --conv 265761                 # afișează draftul propus (cu precedent din tichete similare)
 uv run cs_draft_reply.py --conv 265761 --create-draft  # + îl salvează ca DRAFT în Richpanel (NU trimite)
+uv run cs_draft_reply.py --conv 265761 --similar 0      # fără precedent (doar playbook + date client)
+uv run cs_draft_reply.py --conv 265761 --similar-api    # precedent cu embeddings API (ranking mai bun)
 ```
 
 ## Ce face
 1. `get_conversation` → citește mesajele clientului.
 2. `gigi:customer-identity --conv` → comenzile lui + livrabilitate + **AWB** + produse.
-3. LLM cu playbook-ul CS ARONA (proceduri reale per categorie) + datele clientului → **draft în limba clientului**, cu link de tracking/formular real, ton politicos, semnătură.
-4. Opțional, salvează draftul în Richpanel (`create_draft`).
+3. **PRECEDENT (nou)** — `cs_ticket_index.py` găsește **semantic** top-N tichete REZOLVATE similare și aduce **replica agentului REAL** din fiecare (via MCP), ca ghid de ton + conținut. Vezi mai jos.
+4. LLM cu playbook-ul CS ARONA (proceduri reale per categorie) + datele clientului + precedentul → **draft în limba clientului**, cu link de tracking/formular real, ton politicos, semnătură.
+5. Opțional, salvează draftul în Richpanel (`create_draft`).
+
+## Precedent din tichete rezolvate (`cs_ticket_index.py`)
+Ancorează draftul în **cum a rezolvat echipa cazuri REALE similare** (retrieval semantic), nu doar în playbook.
+Reutilizează embeddings-urile din `gigi:semantic-search` (fastembed local pe CPU, sau `--api`).
+```bash
+# o dată (și după ce se adună tichete noi) — construiește indexul de subiecte de tichete rezolvate:
+uv run cs_ticket_index.py build --limit 8000 --days 180        # local (CPU); sau --api pt calitate
+uv run cs_ticket_index.py similar "vreau sa returnez produsul" --k 5   # test standalone
+```
+- Indexăm **doar `subject`** (întrebarea) al tichetelor CLOSED cu agent real, din `data/richpanel_tickets.db`
+  (export `gigi:richpanel-export`). Replica agentului **NU** e în DB → se aduce LIVE prin MCP doar pt top-K.
+- `agent_reply()` extrage doar mesajele **`author_is_workspace_agent`**, taie thread-ul de email citat + boilerplate-ul Richpanel (auto-form).
+- `--similar N` (default **3**, `0`=off) în `cs_draft_reply.py`. Dacă indexul lipsește → se sare elegant (draftul merge fără precedent).
 
 ## LLM
-- `ANTHROPIC_API_KEY` (Claude) dacă există în KB, altfel `OPENAI_API_KEY`. Model: env `DRAFT_MODEL` (default `gpt-4o-mini`).
-- Instruit să **NU inventeze** AWB/date/prețuri — folosește doar datele primite; dacă lipsesc, cere-le politicos.
+- `ANTHROPIC_API_KEY` (Claude) dacă există în KB, altfel `OPENAI_API_KEY`. Model: env `DRAFT_MODEL` (default **`claude-sonnet-4-6`**; vechiul `claude-3-5-sonnet-20241022` a fost RETRAS → 404).
+- Instruit să **NU inventeze** AWB/date/prețuri — folosește doar datele primite; iar din precedent ia DOAR tonul/conținutul, NU AWB/nume/date.
 
 ## Exemplu real (conv #265761)
 Client întreabă de ridicare personală → draftul refuză politicos, citează comanda reală EST182490 (status Netrimis) + linkul de tracking DPD cu AWB-ul real. Tot draft, neтrimis.
