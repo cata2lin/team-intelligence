@@ -295,8 +295,11 @@ def _llm_http(url, body, headers):
 def llm(system, user, js=False):
     ak = secret("ANTHROPIC_API_KEY")
     if ak:
+        # PROMPT CACHING: system-ul e IDENTIC la toate tichetele → cache_control ephemeral îl taxează la 0.1× după primul apel (5 min TTL).
+        # NB prag minim de cache: Haiku 4.5 = 4096 tok, Sonnet 4.6 = 2048 tok. SYSTEM~2.6k / IDENTIFY~1.3k → se cache-uiește pe SONNET (SYSTEM), NU pe Haiku (sub prag). Inofensiv (nicio taxă în plus dacă nu prinde).
         body = {"model": os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"), "max_tokens": 900,
-                "system": system, "messages": [{"role": "user", "content": user}]}
+                "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+                "messages": [{"role": "user", "content": user}]}
         r = _llm_http("https://api.anthropic.com/v1/messages", body,
                       {"x-api-key": ak, "anthropic-version": "2023-06-01", "content-type": "application/json"})
         return r["content"][0]["text"], "claude"
@@ -854,6 +857,7 @@ def main():
     ap.add_argument("--ground", action="store_true", help="GROUNDING self-contained (pt VPS/cron): caută comenzile clientului DIRECT din DB metrics + profitability.db (fără SSH/uv) → draftul are status/AWB real. Mai lent ca lean, dar fără halucinări de comandă.")
     ap.add_argument("--skip-tagged", action="store_true", help="sare tichetele care AU deja tag-ul AI (--tag) — pt cron/reluare: draftează DOAR tichetele noi, fără dubluri")
     ap.add_argument("--no-comments", action="store_true", help="exclude complet canalele de comentarii (facebook_feed_comment/instagram_comment) — nu le draftează (ex. pt cron: comentariile rămân pt CS)")
+    ap.add_argument("--fast-triage", action="store_true", help="EFICIENȚĂ: sare apelul LLM de TRIAJ când categoria regex e sigură (non-'altele') → ~1 apel LLM/tichet în loc de 2. Gărzile de spam + escaladare rămân deterministe. Pierde doar extracția fină LLM (acțiuni/adresă) care oricum cere --approve.")
     ap.add_argument("--photos", action=argparse.BooleanOptionalAction, default=True, help="VEDE pozele atașate de client (descarcă + descrie vizual) → draftul ține cont de conținut (defect/dovadă livrare). --no-photos dezactivează. Costă o cerere vizuală DOAR pe tichetele cu poze (rare).")
     ap.add_argument("--apply-send", action="store_true", help="⚠️ LIVE: TRIMITE răspunsul la client (send_message) + închide tichetul, în loc de draft — DOAR pe ne-escaladate + ne-comentariu (escaladările/comentariile rămân draft, le ia un om). Customer-facing, IREVERSIBIL. Necesită --create-draft.")
     ap.add_argument("--json", action="store_true", help="emite drafturile structurat (audit/integrare) — JSON pe ultima linie după marcajul @@JSON@@")
@@ -1026,14 +1030,18 @@ def main():
                "product": "", "spam": False, "confidence": 0.0, "missing": []}
         ident_user = ("PLATFORMĂ: %s\nMESAJ CLIENT:\n%s\n\nCOMENZILE LUI:\n%s\n\nA MAI SCRIS PE: %s | nr alte tichete: %d\nSENTIMENT euristic: %s/%s\nHINT categorie: %s" % (
             plat_label, tr, od, elsewhere, len(other), sent_lab, sent_int, idn["category"]))
-        try:
-            raw, _ = llm(IDENTIFY_SYS, ident_user, js=True)
-            got = json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
-            idn.update({k: got.get(k, idn.get(k)) for k in idn})
-            for k in ("new_address", "new_city", "new_zip", "new_phone", "items"):
-                idn[k] = got.get(k, "")
-        except Exception as e:
-            print("  ⚠️ triaj LLM eșuat (#%s) → fallback pe regex/euristici: %s" % (no, str(e)[:80]), file=sys.stderr)
+        _hint = idn["category"]
+        if a.fast_triage and _hint and _hint not in ("altele", "spam_automat"):
+            pass   # EFICIENȚĂ: triaj LLM SĂRIT — categorie regex sigură; gărzile spam + escaladare (deterministe) rămân active mai jos
+        else:
+            try:
+                raw, _ = llm(IDENTIFY_SYS, ident_user, js=True)
+                got = json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
+                idn.update({k: got.get(k, idn.get(k)) for k in idn})
+                for k in ("new_address", "new_city", "new_zip", "new_phone", "items"):
+                    idn[k] = got.get(k, "")
+            except Exception as e:
+                print("  ⚠️ triaj LLM eșuat (#%s) → fallback pe regex/euristici: %s" % (no, str(e)[:80]), file=sys.stderr)
         cat = idn.get("category") if (isinstance(idn.get("category"), str) and idn.get("category")) else "altele"
 
         # ---- EXCLUS din draft: spam/automat (LLM) SAU expeditor non-client (curier/app) SAU notificare judge.me (subiect) ----
