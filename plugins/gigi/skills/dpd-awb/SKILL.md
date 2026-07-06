@@ -1,6 +1,6 @@
 ---
 name: dpd-awb
-description: Creează un AWB DPD între DOUĂ adrese ORICARE (expeditor + destinatar liberi), NElegat de o comandă Shopify — pt ridicare de la un terț, retururi, expedieri one-off. Direct prin API-ul DPD (api.dpd.ro) pe contul ARONA. Rezolvă adresele (oraș+stradă din nomenclatorul DPD), calculează prețul, creează AWB-ul și descarcă eticheta PDF. ȘI trimite COMANDĂ DE RIDICARE (pickup) pt un AWB DEJA creat direct prin DPD (`dpd_pickup.py --awb`), luând adresa expeditorului DIN AWB (nu se ghicește). Dry-run by default; creează real doar cu --apply. Use pt „fă-mi un AWB DPD de la X la Y", „AWB de ridicare de la <furnizor/instituție>", „trimite un colet de la adresa A la adresa B", „AWB one-off / retur cu DPD", „fă comandă de ridicare / pickup DPD pt AWB-ul <nr>", „cheamă curierul DPD pt AWB". NU e pt comenzi Shopify (alea → gigi:xconnector awb-make, care face pickup AUTOMAT) și NU e doar tracking (ăla → gigi:awb-track).
+description: Creează un AWB DPD între DOUĂ adrese ORICARE (expeditor + destinatar liberi), NElegat de o comandă Shopify — pt ridicare de la un terț, retururi, expedieri one-off. Direct prin API-ul DPD (api.dpd.ro) pe contul ARONA. Rezolvă adresele (oraș+stradă din nomenclatorul DPD), calculează prețul, creează AWB-ul și descarcă eticheta PDF. ȘI trimite COMANDĂ DE RIDICARE (pickup) pt un AWB DEJA creat direct prin DPD (`dpd_pickup.py --awb`), luând adresa expeditorului DIN AWB (nu se ghicește). ȘI identifică ADRESA (expeditor+destinatar), coletele, serviciul și prețul DUPĂ un AWB (`dpd_info.py --awb`). Dry-run by default; creează real doar cu --apply. Use pt „fă-mi un AWB DPD de la X la Y", „AWB de ridicare de la <furnizor/instituție>", „trimite un colet de la adresa A la adresa B", „AWB one-off / retur cu DPD", „fă comandă de ridicare / pickup DPD pt AWB-ul <nr>", „cheamă curierul DPD pt AWB", „ce adresă are AWB-ul <nr> / a cui e AWB-ul", „identifică adresa după AWB". NU e pt comenzi Shopify (alea → gigi:xconnector awb-make, care face pickup AUTOMAT) și NU e doar tracking (ăla → gigi:awb-track).
 ---
 
 # AWB DPD cu expeditor + destinatar liberi
@@ -12,6 +12,7 @@ Creează un AWB DPD între orice două adrese, prin API-ul DPD direct (`api.dpd.
 - **Doar urmărire** AWB → `gigi:awb-track`.
 - **Expeditor/destinatar arbitrari** (ridicare de la un terț, retur, one-off) → **`dpd_awb.py`** (mai jos).
 - **Comandă de RIDICARE (pickup) pt un AWB DEJA creat direct prin DPD** → **`dpd_pickup.py`** (secțiunea de mai jos).
+- **Identifică ADRESA (expeditor + destinatar) după un AWB** → **`dpd_info.py --awb`** (read-only, secțiunea de mai jos).
 
 ## Comandă de ridicare (pickup) pt un AWB deja creat — `dpd_pickup.py`
 ⚠️ **Necesară DOAR pentru AWB-urile făcute DIRECT prin DPD** (ex. cu `dpd_awb.py` sau API direct). Comenzile Shopify prin **`gigi:xconnector` primesc pickup AUTOMAT** → pentru alea NU rula asta.
@@ -25,6 +26,15 @@ uv run scripts/dpd_pickup.py --awb 81317718793 --apply
 Flag-uri: `--account dpd-ro|dpd-jg|dpd-px` · `--ready-in MIN` (disponibil de la now+MIN, def 30 — DPD cere ora STRICT în viitor) · `--end HH:MM` (ultima oră de vizită, def 18:00; DPD o poate scurta la cut-off-ul zonei).
 
 **Cum ia adresa (NU o ghicește):** citește expeditorul REAL din AWB via `POST /shipment/info` (`shipmentIds`), apoi trimite `POST /pickup` cu `pickupScope=EXPLICIT_SHIPMENT_ID_LIST` + `explicitShipmentIdList=[<awb>]` → curierul ridică de la expeditorul din AWB. Plata rămâne cum e pe AWB (ex. contul ARONA third-party). Răspuns: `orders[].id` (order de ridicare) + `pickupPeriodFrom/To`.
+
+## Identifică adresa după AWB — `dpd_info.py`
+Dat un AWB, întoarce **expeditorul + destinatarul** (nume, adresă completă, telefon, PF/firmă), coletele (nr/greutate/pachet/conținut), serviciul, plătitorul, prețul și ref. Read-only (`POST /shipment/info`), nu scrie nimic. Ăsta e „creierul" din spatele pickup-ului (de acolo ia adresa de ridicare).
+
+```bash
+uv run scripts/dpd_info.py --awb 81317718793          # afișează expeditor + destinatar + colete/serviciu/preț
+uv run scripts/dpd_info.py --awb "8 131 771 879 3"    # spațiile se ignoră
+uv run scripts/dpd_info.py --awb 81317718793 --json   # răspunsul brut /shipment/info (pt scripting)
+```
 
 ## Cum rulezi
 ```bash
