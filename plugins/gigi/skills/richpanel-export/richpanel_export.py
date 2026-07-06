@@ -16,7 +16,9 @@ timpi) + CATEGORISIRE pe reguli + magazin + nr comandă. Resumabil (merge pe zil
 import os, sys, json, re, time, sqlite3, argparse, subprocess, urllib.request, datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DB_DEFAULT = "/Users/gheorghebeschea/Downloads/Scripturi/data/richpanel_tickets.db"
+# Respectă RICHPANEL_DB (setat de pipeline pe VPS) — altfel folosea o cale hardcodată de Mac și
+# pe VPS scria într-o bază orfană (bug 13-iun → baza reală înghețată). Fallback = calea de dev local.
+DB_DEFAULT = os.environ.get("RICHPANEL_DB") or "/Users/gheorghebeschea/Downloads/Scripturi/data/richpanel_tickets.db"
 MCP_URL = "https://mcp.richpanel.com/mcp"
 
 STORE_BY_EMAIL = {
@@ -190,10 +192,13 @@ def upsert(db, tickets):
 def pull(db, mcp, dfrom, dto, quiet=False):
     day = datetime.date.fromisoformat(dfrom)
     end = datetime.date.fromisoformat(dto)
+    today = datetime.date.today()
     while day <= end:
         ds = day.isoformat()
         de = (day + datetime.timedelta(days=1)).isoformat()  # endDate este EXCLUSIV
-        if db.execute("SELECT 1 FROM pull_log WHERE day=?", (ds,)).fetchone():
+        # sări doar zilele VECHI deja trase (backfill); ultimele 2 zile se RE-TRAG mereu — altfel un pull
+        # matinal cu 0 tichete îngheață ziua curentă. upsert = INSERT OR REPLACE pe id, deci re-tragerea e sigură.
+        if (today - day).days > 2 and db.execute("SELECT 1 FROM pull_log WHERE day=?", (ds,)).fetchone():
             day += datetime.timedelta(days=1); continue
         try:
             total = 0
