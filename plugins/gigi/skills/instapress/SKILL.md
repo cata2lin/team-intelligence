@@ -48,6 +48,17 @@ Flags: `--niche`, `--type` (SEO/HOMEPAGE, default SEO), `--dofollow`, `--min-dr`
 3. **Urcă articolul** logat pe app.instapress.ro → Marketplace → site → tip articol (`SEO`) → upload (min 500 cuvinte, unic, cu imagine principală 16:9 ≥900px, fără preț/telefon în imagine).
 4. Primești linkul → se publică (instant pe site-urile `instant`, altele cu aprobare în N zile).
 
+### Gotchas la publicare (empiric — proof Esteban→agerpres, iul 2026)
+Urcarea se face în browser (Alpine.js + Summernote + jQuery 3.6). Câmpurile se setează via `evaluate_script` cu **dispatch `input`+`change`** (altfel Alpine nu vede valoarea):
+- **Câmpuri:** `pageURL` = ținta backlink-ului (ex `https://esteban.ro`) · `pageTitle` · `pageSlug` (id `pageSlugID`) · `categoryID` = **după textul opțiunii** (agerpres acceptă Lifestyle/Entertaiment/News/Beauty…) · conținut = `jQuery('#pageContentID').summernote('code', html)` + setează și textarea `#pageContentID`.
+- **Conținut = HTML pe `<p>`** (nu markdown). Convertește articolul în paragrafe `<p>…</p>`; trece prin **base64 → `atob` + `TextDecoder`** la injectare, ca să nu strici diacriticele.
+- **Imagine: JPG obligatoriu, ≥1000px lat, ≤8MB, ~16:9.** Convertește PNG→JPG (`sips -s format jpeg`). Urcă prin `upload_file` pe zona de drop → populează hidden `pageImage` (`…/providers/tempo/images/<slug>.jpg`). ⚠️ `upload_file` **cere fișierul în workspace root** (copiază-l acolo întâi).
+- **⚠️ `imageSource` e OBLIGATORIU chiar dacă ai urcat fișierul.** Drop-ul setează `pageImage` dar NU `imageSource` → eroare „Sursa imaginii este obligatorie!". Fix: pune în `imageSource` **exact URL-ul din `pageImage`**.
+- **⚠️ Filtru de cuvinte „adult".** Conținutul e scanat; cuvinte ca **senzual, unisex (conține „sex"), sex, gol/goală, erotic** marchează articolul „adult" → publisherii non-adult (agerpres) blochează cu „Editorul nu acceptă următoarele tipuri de articole pentru adulți:" (lista apare goală, dar TOT blochează). **Pre-scanează și rescrie** înainte de upload (senzual→învăluitor, unisex→„pentru oricine", gol/goală→„liber/neamenajat").
+- **⚠️ Schimbarea de rețea în sesiune → blocaj „New IP".** `ajax/publisher.php` întoarce **HTTP 200 dar cu HTML-ul paginii de Login** („Dashboard is Locked or New IP") → spinnerul „Se încarcă…" rămâne agățat, JS crapă (Sentry), **nu se debitează nimic**. Articolul rămâne **draft** (`?id=<n>`, datele persistă). Fix: reload → parola în caseta de deblocare → revii pe draft → retrimite. Parola = fișierul local `~/Downloads/credentials/instapress.txt` (NU cea din KB, care e greșită).
+- **Snapshot uriaș:** `take_snapshot` pe pagina asta depășește limita de tokeni → salvează cu `filePath` în workspace root și `grep` uid-urile (Trimite/Previzualizare/zonă upload).
+- **Ordine sigură:** **Previzualizare** (nu costă, verifici vizual imagine+titlu+text) → **Trimite la Publicare** (costă). Validarea eșuată NU debitează, deci poți itera în siguranță.
+
 > ⚠️ **Brand-safety (parfumuri):** conținutul care merge la presă **NU** numește branduri de lux (dupe/clonă) — riscul de trademark/counterfeit care a suspendat Esteban pe Google. Framing pe profiluri/comportament (studii cu date reale), nu pe „clona de X". Rulează `gigi:ai-scrub` pe articol înainte de urcare.
 
 ## Refresh catalog (când vrei prețuri/site-uri la zi)
