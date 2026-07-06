@@ -9,6 +9,8 @@ argument-hint: "--store <grandia|esteban|belasil> | --all"
 
 Surfaces the products Google has **disapproved or made ineligible** for Shopping/PMax, grouped by reason — the silent leak that throttles PMax (we run Google Ads in-house; Grandia leans on PMax).
 
+> 🛠️ **Suspendare account-level MISREPRESENTATION** (tot feed-ul dezaprobat, `policy_enforcement_account_disapproval`) → cum o scoți ADITIV (identitate/pagini/business-info via Merchant API + scoate produsele flagate DOAR din feed, fără să atingi conversia pe magazine social-first) → playbook: **`reference/misrepresentation-fix.md`** (dovedit pe Ofertele + Bonhaus PL). Business-info se scrie prin Merchant API cu OAuth-ul acestui skill (scope `content`).
+
 ```bash
 uv run merchant_feed.py --store grandia      # status counts + disapproved products + reasons
 uv run merchant_feed.py --all                # all connected stores
