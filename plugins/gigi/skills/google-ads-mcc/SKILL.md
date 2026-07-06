@@ -11,6 +11,8 @@ under the MCC** — you only need the child account's **customer ID**.
 
 > **MCC (login-customer-id): `7467110480`** (NOVOS DIGITAL SRL)
 
+> 🚀 **Lansare Google Ads pe un magazin NOU** (cont + link MCC + conversie COD/native + Brand+PMax + cablare „CPA și financiar") → playbook end-to-end + gotcha-uri: **`reference/store-launch-playbook.md`** (dovedit pe Bonhaus PL / Gento / Carpetto / CZ).
+
 ## Connected accounts (verified live)
 | Brand | Customer ID |
 |---|---|
