@@ -1,6 +1,6 @@
 ---
 name: shopify-app-patterns
-description: Battle-tested architectural patterns for production Shopify apps. Covers multi-tenancy (workspace-level billing across N shops), OAuth + reinstall idempotency, webhook handling (HMAC, dedup via X-Shopify-Webhook-Id, raw-event storage + worker normalization, GDPR cascades), sync engines (self-push suppression for write-back loops, compare-and-set inventory writes, distributed locks per resource, fulfillment-service location exclusion), rate limiting (cost-based throttling, circuit breakers, per-shop quotas), BullMQ + Redis topology (queue isolation, plan-tier priority, dirty-flush debounce), and Shopify Billing API integration including comp/redeem-code overrides. Use when designing or debugging any non-trivial Shopify app — especially multi-shop, sync-engines, write-back-causing webhooks, or anything where correctness under concurrency matters.
+description: Battle-tested architectural patterns for production Shopify apps. Covers multi-tenancy (workspace-level billing across N shops), OAuth + reinstall idempotency, webhook handling (HMAC, dedup via X-Shopify-Webhook-Id, raw-event storage + worker normalization, GDPR cascades), sync engines (self-push suppression for write-back loops, compare-and-set inventory writes, distributed locks per resource, fulfillment-service location exclusion), rate limiting (cost-based throttling, circuit breakers, per-shop quotas), BullMQ + Redis topology (queue isolation, plan-tier priority, dirty-flush debounce), and Shopify Billing API integration including comp/redeem-code overrides. ALSO covers the embedded FRONTEND + deploy/verify loop (React Router 7 framework-mode routing via routes.ts, iframe no-store caching so deploys actually show up, why tsc/build green doesn't mean the UI works, the React #31 onClick-passes-the-event crash, full-width vs your own maxWidth wrapper, and cost-guard model tiering for LLM features). Use when designing or debugging any non-trivial Shopify app — especially multi-shop, sync-engines, write-back-causing webhooks, correctness under concurrency, OR embedded-UI issues like "my deploy doesn't show up", a route 404s, the editor crashes, or a page isn't full-width.
 ---
 
 # Shopify App Architectural Patterns
@@ -28,6 +28,7 @@ Patterns that survived production for a multi-store inventory sync app. Each is 
 | Shopify Billing API integration: tiered plans, downgrades, comp/redeem codes, workspace billing | [`billing.md`](billing.md) | Designing or modifying billing flow, supporting free tiers without going through Shopify Billing |
 | Rate limiting + circuit breaker + cost-based throttling | [`rate-limiting.md`](rate-limiting.md) | Hot-path mutations, large imports, bulk operations, anywhere Shopify might throttle |
 | BullMQ + Redis topology, PM2 process layout, dirty-flush debounce | [`workers.md`](workers.md) | Designing the worker layer, isolating queues, scheduling background work, plan-tier prioritization |
+| Embedded FRONTEND + deploy/verify loop: framework-mode routing (`routes.ts`), iframe `no-store` cache, `tsc` doesn't check routes, React #31 onClick crash, full-width vs `maxWidth`, cost-guard model tiering | [`embedded-frontend.md`](embedded-frontend.md) | Building/debugging the embedded UI (React Router 7 + Polaris + App Bridge), "my deploy doesn't show up", a route 404s, the editor crashes, a page isn't full-width, or an LLM feature's credit/cost logic |
 
 ## The 10 patterns every Shopify app should use
 
@@ -152,3 +153,7 @@ See [`workers.md`](workers.md) for full topology.
 - **No self-push suppression** — infinite loop the first time you write to Shopify.
 - **Blocking on Shopify API in webhook handlers** — webhooks have a 5s ACK timeout; do parsing inline, push real work to a queue.
 - **Storing customer PII you don't need** — escalates you from Level 0 to Level 2 protected customer data.
+- **Trusting `tsc`/`build` green as "the UI works"** — route/component `.tsx` aren't type-checked; verify VISUALLY after deploy. See [`embedded-frontend.md`](embedded-frontend.md).
+- **A new route file that isn't in `routes.ts`** — framework mode is explicit config, not filesystem routing → hard 404. See [`embedded-frontend.md`](embedded-frontend.md).
+- **No `Cache-Control: no-store` on the embedded HTML doc** — the iframe caches stale HTML; deploys "don't show up" and deleted chunks 404. See [`embedded-frontend.md`](embedded-frontend.md).
+- **`onClick={handler}` for a handler that takes args** — React passes the SyntheticEvent → render crash (#31). Wrap: `onClick={() => handler()}`. See [`embedded-frontend.md`](embedded-frontend.md).
