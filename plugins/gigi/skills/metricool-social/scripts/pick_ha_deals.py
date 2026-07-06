@@ -119,7 +119,9 @@ def main():
         kept=q["brands"].setdefault(brand,[])
         existing={r.get("src") for r in kept}
         tmp=f"/tmp/_ha_{brand.replace(' ','_')}.mp4"; n=0
-        for sku in sorted(avail):
+        av=sorted(avail)
+        off=(list(STORE).index(brand)*per*3)%len(av) if (brand in STORE and av) else 0
+        for sku in av[off:]+av[:off]:  # offset per magazin → SKU-uri diverse intre deals (nu acelasi tocator)
             if n>=per: break
             for v in reels_in(hamap[sku])[:2]:
                 if n>=per: break
