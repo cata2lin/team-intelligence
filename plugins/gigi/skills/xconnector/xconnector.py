@@ -102,6 +102,25 @@ def load_shops():
     return []
 
 
+def load_blocklist():
+    """Blocklist de CLIENȚI serial-refuseri/fraudă: {shopDomain: [customerGID, ...]} din KB
+    (`XCONNECTOR_CUSTOMER_BLOCKLIST`, override cu env). `fulfill` NU face AWB pt aceștia și le anulează
+    comanda (ca duplicat). Cheia = customer GID (stabil per magazin, non-PII — singurul identificator
+    pe care cronul îl poate citi LIVE; magazinele-s pe plan Basic → email/telefon = PII blocat). Vezi
+    memoria [[serial-refuser-blocklist]]. Gol/eroare → {} (fail-open: nu blochează nimic din greșeală)."""
+    raw = os.environ.get("XCONNECTOR_CUSTOMER_BLOCKLIST")
+    if not raw:
+        raw, ok = _kb_secret("XCONNECTOR_CUSTOMER_BLOCKLIST")
+        if not ok:
+            return {}
+    try:
+        d = json.loads(raw) if raw else {}
+        # normalizează la {shopDomain: set(gids)}, ignoră chei de meta (_note etc.)
+        return {k: set(v) for k, v in d.items() if isinstance(v, list)}
+    except Exception:
+        return {}
+
+
 def http(method, url, headers, body=None, timeout=45):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
@@ -1540,6 +1559,7 @@ def cmd_fulfill(a):
     dfrom = (now - datetime.timedelta(days=a.days)).date().isoformat()
     toks_dom = {t["shopDomain"]: t for t in load_shopify_tokens()}
     since7 = (now - datetime.timedelta(days=7)).date().isoformat()
+    blocklist = load_blocklist()  # {shopDomain: {customerGID}} — serial-refuseri/fraudă (nu se expediază, se anulează)
     for sh in load_shops():
         if skip_shop(sh, a):
             continue
@@ -1556,7 +1576,8 @@ def cmd_fulfill(a):
         intl = sh["shopDomain"] in HERE_COUNTRY
         hkey = here_key() if intl else None
         ready = fixable = hard = had_awb = noxc = made = fixed = failed = team_n = infl = 0
-        dup_keep = dup_cancel = dup_shipped = dup_unknown = dup_untag = 0
+        dup_keep = dup_cancel = dup_shipped = dup_unknown = dup_untag = blocked = 0
+        shop_block = blocklist.get(sh["shopDomain"], set())
         for name, created, fin, tags, cust, source in unf:
             c = parse_iso(created)
             if not c or (now - c).total_seconds() / 60.0 <= max_age:
@@ -1564,6 +1585,12 @@ def cmd_fulfill(a):
             o = xmap.get(name)
             if not o:
                 noxc += 1; continue
+            # BLOCKLIST client (serial-refuser/fraudă din KB): NU expediez + anulez (ca duplicat vechi). ÎNAINTE
+            # de has_awb, ca să anulez inclusiv o comandă căreia Flow-ul i-a apucat un AWB (dacă nu a plecat).
+            if cust and cust in shop_block:
+                res = cancel_duplicate(sh, xc, o, st, name, a.apply)
+                print("    ⛔ %s = BLOCKLIST (client %s) → %s (NU se expediază)" % (name, cust, res))
+                blocked += 1; continue
             if has_awb(o):
                 had_awb += 1; continue
             # CADOU UGC/INFLUENCER (tag `influencer`) → NU se expediază prin cron (flux separat). Skip ÎNAINTE
@@ -1631,8 +1658,8 @@ def cmd_fulfill(a):
                 ok, _, _ = _create_label(xc, body)  # retry scurt pe throttle DPD (rafală)
                 made += 1 if ok else 0
                 failed += 0 if ok else 1
-        print("  %s — unfulfilled >%dmin: AWB %d gata + %d corectabile + %d grele→CS  ·  DUP: %d păstrate, %d de-anulat, %d plecate(protejate), %d fără-client, %d netag-uite→CS  ·  CS/draft (AWB fără dedup): %d · influencer-skip: %d  (aveau AWB %d, fără xc %d)"
-              % (sh["shopDomain"], max_age, ready, fixable, hard, dup_keep, dup_cancel, dup_shipped, dup_unknown, dup_untag, team_n, infl, had_awb, noxc))
+        print("  %s — unfulfilled >%dmin: AWB %d gata + %d corectabile + %d grele→CS  ·  DUP: %d păstrate, %d de-anulat, %d plecate(protejate), %d fără-client, %d netag-uite→CS  ·  CS/draft (AWB fără dedup): %d · influencer-skip: %d · blocklist: %d  (aveau AWB %d, fără xc %d)"
+              % (sh["shopDomain"], max_age, ready, fixable, hard, dup_keep, dup_cancel, dup_shipped, dup_unknown, dup_untag, team_n, infl, blocked, had_awb, noxc))
         if a.apply:
             print("  → APLICAT: AWB %d (din care %d după corecție) · duplicate anulate %d · eșuate %d" % (made, fixed, dup_cancel, failed))
         else:
