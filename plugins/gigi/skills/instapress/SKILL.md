@@ -1,6 +1,6 @@
 ---
 name: instapress
-description: "Distribuție de advertoriale / comunicate de presă prin InstaPress (app.instapress.ro) pe contul ARONA — 2461 site-uri media RO, 2456 DOFOLLOW (autoritate reală de ranking, nu nofollow ca advertorialele clasice). Catalog scrapuit pe NAS+KB (domeniu, DR/DA/trafic/TrustFlow, tipuri articole + prețuri). Găsește pe ce site-uri publici (nișă/preț/DR/dofollow) + fluxul de publicare. Use when: instapress, advertorial, comunicat de presa, press release, distributie presa, backlink dofollow platit, PR link building RO, pe ce site publicam, adevarul/antena3/libertatea advertorial."
+description: "Distribuție de advertoriale / comunicate de presă prin InstaPress (app.instapress.ro) pe contul ARONA — 2461 site-uri media RO, 2456 DOFOLLOW (autoritate reală de ranking). Catalog scrapuit pe NAS+KB (domeniu, DR/DA/trafic/TrustFlow, tipuri articole + prețuri). Găsește pe ce site-uri publici (nișă/preț/DR/dofollow) + fluxul de publicare. Use when: instapress, advertorial, comunicat de presa, press release, distributie presa, backlink dofollow platit, PR link building RO, pe ce site publicam, adevarul/antena3/libertatea advertorial."
 user-invocable: true
 argument-hint: "[--niche Frumus] [--dofollow] [--max-price 300] [--min-dr 40]"
 license: MIT
@@ -14,7 +14,7 @@ metadata:
 
 **InstaPress** (`app.instapress.ro`) = platformă RO de distribuție de advertoriale/comunicate pe **2.461 site-uri** media (Adevărul, Antena3, Libertatea, HotNews, ZF, Agerpres, Digi24…). Publici un articol pe site-ul ales → primești linkul instant.
 
-> 🔑 **Insight cheie: 2.456 din 2.461 sunt `dofollow`.** Deci — spre deosebire de advertorialele „native advertising" clasice (Limitless = toate nofollow, [[grandia-seo-limitless]]) — **InstaPress transmite autoritate REALĂ de ranking**, nu doar reach. E canalul off-site cel mai bun raport preț/valoare pe RO. Vezi strategia [[offsite-seo-strategy]].
+> 🔑 **Insight cheie: 2.456 din 2.461 sunt `dofollow`** → **InstaPress transmite autoritate REALĂ de ranking**, nu doar reach. E canalul off-site cu cel mai bun raport preț/valoare pe RO. (⚠️ Corecție 7-iul: advertorialele agenției Limitless pe Grandia s-au dovedit **tot dofollow**, nu nofollow cum notasem — vezi [[offsite-seo-strategy]]. Avantajul InstaPress față de ele = **cost + volum + control + diversitate de site-uri/anchor**, nu 6 plasări clusterizate pe o categorie.) Vezi strategia [[offsite-seo-strategy]] și [[grandia-seo-limitless]].
 
 ## Contul ARONA (shared, pt toate brandurile)
 - Cont **Advertiser** pe firma **ARONA SRL**. Login **fără CAPTCHA**; înregistrarea are Cloudflare Turnstile (blochează automatul → se face manual în browser).
