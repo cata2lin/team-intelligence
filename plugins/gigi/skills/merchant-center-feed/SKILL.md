@@ -1,7 +1,7 @@
 ---
 name: merchant-center-feed
 description: Google Merchant Center feed health — which products are DISAPPROVED / not eligible (and why, per reason code) AND which are ELIGIBLE_LIMITED (eligible but reach-reduced — e.g. pending initial policy review on a new account, or missing GTIN) with their reasons. Disapproved/limited products = lost Shopping/PMax impressions and sales, critical for stores that lean on PMax (Grandia) and for new launches (Carpetto/Gento). Read-only, via the new Merchant API; --store accepts a raw merchant ID. Use for "feed health", "disapproved products", "why isn't this product showing in Shopping", "produsele sunt approved?", "pending review", "Merchant Center issues", "produse dezaprobate", "feed Google Shopping", "PMax feed".
-argument-hint: "--store <grandia|esteban|belasil> | --all"
+argument-hint: "--store <grandia|esteban|belasil> | --all | --account-issues <merchant> | --set-business-info <merchant> [--name .. --cs-uri ..] [--apply]"
 ---
 
 # merchant-center-feed — Google Shopping/PMax feed health
@@ -15,6 +15,10 @@ Surfaces the products Google has **disapproved or made ineligible** for Shopping
 uv run merchant_feed.py --store grandia      # status counts + disapproved products + reasons
 uv run merchant_feed.py --all                # all connected stores
 ```
+
+## Account-level issues & business info (Misrepresentation toolkit)
+- **`--account-issues <merchant>`** — print the ACCOUNT-LEVEL issues (title, severity, detail, impacted destinations, docs link) via Merchant API `accounts/v1 …/issues`. This is the **Misrepresentation / account-suspension detector**. Read-only. Ex: `uv run merchant_feed.py --account-issues 5813605780`.
+- **`--set-business-info <merchant>`** — write `accountName` + `businessInfo.address` + `customerService` (email/uri) via Merchant API PATCH (updateMask). Sub-args: `--name --street --city --region --postal --country` (default RO) `--cs-email --cs-uri`. **Dry-run by default** (reads current, prints before→after); write only with `--apply`. ⚠️ Does NOT set `businessInfo.phone` (output-only) or `businessIdentity` (RO country-gated) — both skipped with a note. Ex: `uv run merchant_feed.py --set-business-info 5813605780 --name "ARONA SRL" --cs-uri https://ofertelezilei.ro/pages/contact` (add `--apply` to write). Uses this skill's OAuth (scope `content` = read+write).
 
 ## Connected stores & auth
 Merchant Center accounts: **Grandia `5677157050`, Esteban `5676783307`, Belasil `5582663665`** (GCP project registered with each). Uses the **new Merchant API** (`merchantapi.googleapis.com/reports/v1`, `product_view`) with a **human OAuth token** in KB (`MERCHANT_OAUTH_REFRESH_TOKEN` + `YOUTUBE_OAUTH_CLIENT_ID/SECRET`) — the service account can't self-register the project, so a human (gheorghe@) registered it once. Add a store by registering its account + adding it to `ACCOUNTS`.

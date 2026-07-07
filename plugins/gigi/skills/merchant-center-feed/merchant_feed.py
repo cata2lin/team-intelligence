@@ -14,6 +14,8 @@ the SA can't self-register the GCP project, so a human registered it once.
 Usage:
     uv run merchant_feed.py --store grandia        # status + disapproved products + reasons
     uv run merchant_feed.py --all
+    uv run merchant_feed.py --account-issues 5813605780        # ACCOUNT-level issues (Misrepresentation / suspension detector), read-only
+    uv run merchant_feed.py --set-business-info 5813605780 --name "ARONA SRL" --cs-uri https://ofertelezilei.ro/pages/contact   # dry-run; add --apply to write
 
 Lecții feed (iun 2026, lansări CZ + Casa Ofertelor):
 - `product_view` query CERE `product_view.id` în SELECT (altfel 400 "expected to have id").
@@ -103,17 +105,139 @@ def run(store, tok):
         print(f"    [{off}] {title} — {', '.join(reasons[:3])}")
     if len(disapproved) > 25: print(f"    … +{len(disapproved)-25} more")
 
+_SEV = {"CRITICAL": "🛑 CRITICAL", "ERROR": "🛑 CRITICAL", "SUGGESTION": "💡 SUGGESTION",
+        "INFO": "ℹ️ INFO", "": "•"}
+
+def account_issues(store, tok):
+    """ACCOUNT-LEVEL issues (Misrepresentation / suspension detector). Read-only.
+    Merchant API accounts/v1 issues.list: GET accounts/{A}/issues?languageCode=en"""
+    acct = ACCOUNTS.get(store.lower(), store)
+    H = {"Authorization": f"Bearer {tok}"}
+    r = requests.get(f"https://merchantapi.googleapis.com/accounts/v1/accounts/{acct}/issues?languageCode=en", headers=H, timeout=60)
+    if r.status_code != 200: sys.exit(f"Merchant API {r.status_code}: {r.text[:300]}")
+    issues = r.json().get("accountIssues", [])
+    print(f"\n{'='*70}\nAccount-level issues — {store} ({acct})\n{'='*70}")
+    if not issues:
+        print("  ✅ no account-level issues (account healthy)")
+        return
+    for it in issues:
+        title = it.get("title") or "(untitled)"
+        sev = (it.get("severity") or "").upper()
+        detail = it.get("detail") or ""
+        # impacted destinations (Shopping ads / Free listings / …)
+        dests = []
+        for imp in it.get("impactedDestinations", []):
+            reg = imp.get("regionCode") or imp.get("reportingContext") or ""
+            for ic in imp.get("impacts", []):
+                d = ic.get("reportingContext") or reg or "?"
+                if d not in dests: dests.append(d)
+        if not dests:
+            for imp in it.get("impactedDestinations", []):
+                d = imp.get("reportingContext") or imp.get("regionCode") or "?"
+                if d not in dests: dests.append(d)
+        doc = it.get("documentationUri") or ""
+        head = f"⚠️ {title} ({_SEV.get(sev, sev or '•')})"
+        print(f"\n  {head}")
+        if detail: print(f"    {detail}")
+        if dests: print(f"    → impacted: {', '.join(dests)}")
+        if doc: print(f"    docs: {doc}")
+    print(f"\n  (Misrepresentation / 'website needs improvement' = account disapproval — request review DOAR din UI Merchant Center; API accounts_v1 are doar issues.list.)")
+
+def _get_biz(tok, acct):
+    """Read current account (accountName) + businessInfo (address, customerService)."""
+    H = {"Authorization": f"Bearer {tok}"}
+    ra = requests.get(f"https://merchantapi.googleapis.com/accounts/v1/accounts/{acct}", headers=H, timeout=30)
+    rb = requests.get(f"https://merchantapi.googleapis.com/accounts/v1/accounts/{acct}/businessInfo", headers=H, timeout=30)
+    acc = ra.json() if ra.status_code == 200 else {"_err": f"{ra.status_code}: {ra.text[:120]}"}
+    biz = rb.json() if rb.status_code == 200 else {"_err": f"{rb.status_code}: {rb.text[:120]}"}
+    return acc, biz
+
+def _fmt_addr(addr):
+    if not addr: return "(none)"
+    return " | ".join(str(x) for x in [
+        ", ".join(addr.get("addressLines", [])), addr.get("locality"), addr.get("administrativeArea"),
+        addr.get("postalCode"), addr.get("regionCode")] if x)
+
+def set_business_info(store, tok, args):
+    """Write businessInfo (accountName + address + customerService). Dry-run by default.
+    ⚠️ businessInfo.phone is OUTPUT-ONLY and businessIdentity is RO-country-gated — both skipped."""
+    acct = ACCOUNTS.get(store.lower(), store)
+    acc_cur, biz_cur = _get_biz(tok, acct)
+    cur_name = acc_cur.get("accountName") or "(none)"
+    cur_addr = (biz_cur.get("address") or {})
+    cur_cs = (biz_cur.get("customerService") or {})
+
+    # --- build the desired new values (only overwrite what was passed) ---
+    new_name = args.name if args.name else cur_name
+    new_addr = dict(cur_addr)
+    if args.street:  new_addr["addressLines"] = [args.street]
+    if args.city:    new_addr["locality"] = args.city
+    if args.region:  new_addr["administrativeArea"] = args.region
+    if args.postal:  new_addr["postalCode"] = args.postal
+    if args.country: new_addr["regionCode"] = args.country
+    elif not new_addr.get("regionCode"): new_addr["regionCode"] = "RO"
+    new_cs = dict(cur_cs)
+    if args.cs_email: new_cs["email"] = args.cs_email
+    if args.cs_uri:   new_cs["uri"] = args.cs_uri
+
+    changes_name = args.name is not None
+    addr_touched = any([args.street, args.city, args.region, args.postal, args.country])
+    cs_touched = any([args.cs_email, args.cs_uri])
+
+    print(f"\n{'='*70}\nSet business info — {store} ({acct}){'  [DRY-RUN]' if not args.apply else '  [APPLY]'}\n{'='*70}")
+    print(f"  accountName:   {cur_name!r}  →  {new_name!r}")
+    print(f"  address:       {_fmt_addr(cur_addr)}")
+    print(f"            →    {_fmt_addr(new_addr)}")
+    print(f"  cs email:      {(cur_cs.get('email') or '(none)')!r}  →  {(new_cs.get('email') or '(none)')!r}")
+    print(f"  cs uri:        {(cur_cs.get('uri') or '(none)')!r}  →  {(new_cs.get('uri') or '(none)')!r}")
+    print(f"  ⏭️  skipped (not writable here): businessInfo.phone (OUTPUT-ONLY), businessIdentity (RO country-gated)")
+
+    if not (changes_name or addr_touched or cs_touched):
+        print("  (nothing to change — pass --name/--street/--city/--region/--postal/--cs-email/--cs-uri)")
+        return
+    if not args.apply:
+        print("\n  DRY-RUN — nothing written. Re-run with --apply to save.")
+        return
+
+    H = {"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}
+    # 1) accountName via PATCH accounts/{A}?updateMask=accountName
+    if changes_name:
+        r1 = requests.patch(f"https://merchantapi.googleapis.com/accounts/v1/accounts/{acct}?updateMask=accountName",
+                            headers=H, json={"accountName": new_name}, timeout=30)
+        ok = r1.status_code == 200
+        print(f"\n  PATCH accountName [{r1.status_code}] {'✅' if ok else '❌ ' + r1.text[:200]}")
+    # 2) businessInfo via PATCH accounts/{A}/businessInfo?updateMask=address,customerService
+    masks = []; body = {}
+    if addr_touched: masks.append("address"); body["address"] = new_addr
+    if cs_touched:   masks.append("customerService"); body["customerService"] = new_cs
+    if masks:
+        r2 = requests.patch(f"https://merchantapi.googleapis.com/accounts/v1/accounts/{acct}/businessInfo?updateMask={','.join(masks)}",
+                            headers=H, json=body, timeout=30)
+        ok = r2.status_code == 200
+        print(f"  PATCH businessInfo ({','.join(masks)}) [{r2.status_code}] {'✅' if ok else '❌ ' + r2.text[:300]}")
+
 def main():
-    ap = argparse.ArgumentParser(description="Merchant Center feed health.")
+    ap = argparse.ArgumentParser(description="Merchant Center feed health + account issues + business info.")
     ap.add_argument("--store"); ap.add_argument("--all", action="store_true")
+    ap.add_argument("--account-issues", metavar="MERCHANT", help="print ACCOUNT-level issues (Misrepresentation/suspension detector). Read-only.")
+    ap.add_argument("--set-business-info", metavar="MERCHANT", help="write accountName + businessInfo.address + customerService. Dry-run unless --apply.")
+    ap.add_argument("--name"); ap.add_argument("--street"); ap.add_argument("--city")
+    ap.add_argument("--region"); ap.add_argument("--postal")
+    ap.add_argument("--country", help="ISO region code for businessInfo.address.regionCode (default RO when address is set)")
+    ap.add_argument("--cs-email", dest="cs_email"); ap.add_argument("--cs-uri", dest="cs_uri")
+    ap.add_argument("--apply", action="store_true", help="actually write (--set-business-info); off = dry-run")
     a = ap.parse_args()
     tok = _token()
-    if a.all:
+    if a.account_issues:
+        account_issues(a.account_issues, tok)
+    elif a.set_business_info:
+        set_business_info(a.set_business_info, tok, a)
+    elif a.all:
         for s in ACCOUNTS: run(s, tok)
     elif a.store:
         run(a.store, tok)
     else:
-        sys.exit("--store <grandia|esteban|belasil> or --all")
+        sys.exit("--store <grandia|esteban|belasil> | --all | --account-issues <merchant> | --set-business-info <merchant> ...")
 
 if __name__ == "__main__":
     main()
