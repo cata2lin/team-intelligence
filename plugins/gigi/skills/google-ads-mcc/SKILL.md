@@ -121,6 +121,7 @@ uv run gads.py set-tcpa      --customer C --campaign ID --cpa 30               #
 uv run gads.py set-status    --customer C --campaign ID --status PAUSED|ENABLED
 uv run gads.py add-negatives --customer C --campaign ID --terms "a,b,c" --match PHRASE
 uv run gads.py add-keywords  --customer C --adgroup AGID --terms "a,b,c" --match PHRASE
+uv run gads.py set-keyword-status --customer C --campaign ID --text "kw" --match BROAD --status PAUSED   # pauză/enable pe un keyword (sau --resource customers/X/adGroupCriteria/AG~CRIT). --text fără --match prinde toate variantele de match.
 uv run gads.py add-shared-negative --customer C --shared-set SSID --text "grandia" --match PHRASE
 ```
 > **CPA ⇄ ROAS:** target ROAS = AOV / target_CPA. (AOV = conv_value ÷ conversions.) e.g. AOV 142, CPA 30 → tROAS 4.7.
