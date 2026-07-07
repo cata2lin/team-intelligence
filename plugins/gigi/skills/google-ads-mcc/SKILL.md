@@ -123,6 +123,9 @@ uv run gads.py add-negatives --customer C --campaign ID --terms "a,b,c" --match 
 uv run gads.py add-keywords  --customer C --adgroup AGID --terms "a,b,c" --match PHRASE
 uv run gads.py set-keyword-status --customer C --campaign ID --text "kw" --match BROAD --status PAUSED   # pauză/enable pe un keyword (sau --resource customers/X/adGroupCriteria/AG~CRIT). --text fără --match prinde toate variantele de match.
 uv run gads.py add-shared-negative --customer C --shared-set SSID --text "grandia" --match PHRASE
+uv run gads.py link-account  --client CID                                        # invită un client sub MCC (manager-link PENDING; el acceptă în Admin → Access & security → Managers)
+uv run gads.py create-search --customer C --name "Brand" --budget 20 --geo 2616 --lang 1030 --keywords "a,b" --headlines "H1|H2|H3" --descriptions "D1|D2" --final-url https://x.ro   # Search PAUSED, atomic (buget+campanie+geo/lang+adgroup+kw+RSA)
+uv run gads.py create-pmax   --customer C --name "PMax" --budget 30 --merchant MCID --geo 2642 --final-url https://x.ro   # Shopping-led PMax PAUSED, skeleton (fără assets — adaugă creative apoi enable)
 ```
 > **CPA ⇄ ROAS:** target ROAS = AOV / target_CPA. (AOV = conv_value ÷ conversions.) e.g. AOV 142, CPA 30 → tROAS 4.7.
 > **Negative pe SHARED list vs pe campanie:** `add-negatives` adaugă negativul pe UNA campanie (campaignCriteria).
@@ -139,7 +142,7 @@ Template: **`build_belasil_nonbrand.py`** (adapt CID, names, keywords, RSAs). Ru
 **Gotchas (cost real time):**
 - Campaign create **requires** `containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING"`.
 - Ad text: **no `~` or stray symbols** → `policyFindingError: SYMBOLS` (PROHIBITED). Keep headlines ≤30, descriptions ≤90.
-- Geo Romania = `geoTargetConstants/2642`; language RO = `languageConstants/1038`, EN = `1000`.
+- Geo Romania = `geoTargetConstants/2642`; language RO = `languageConstants/1032` (🔴 **NU `1038` = Catalană!** bug istoric), EN = `1000`, PL = `1030`, CZ = `1021`.
 - Search-only network: `targetGoogleSearch:true, targetSearchNetwork:false, targetContentNetwork:false`.
 - Create **PAUSED** so a human reviews before enabling (or enable via `set-status`).
 

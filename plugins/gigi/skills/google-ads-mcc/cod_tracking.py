@@ -72,6 +72,14 @@ def resolve_public_url(search):
             p = urlsplit(urls[0]); return f"{p.scheme}://{p.netloc}"
     return None
 
+def _ga4_json(url, headers, timeout=30):
+    """GET + parse JSON robust: nu crapă cu 'Expecting value' pe un răspuns non-JSON (401/HTML/gol)."""
+    r = requests.get(url, headers=headers, timeout=timeout)
+    try:
+        return r.json()
+    except ValueError:
+        raise RuntimeError(f"HTTP {r.status_code} non-JSON: {(r.text or '').strip()[:120]}")
+
 def ga4_measurement_id(hint):
     try:
         from google.oauth2 import service_account
@@ -84,18 +92,19 @@ def ga4_measurement_id(hint):
         if cred is None:
             cred = service_account.Credentials.from_service_account_info(json.loads(_kb("GA4_SA_JSON")), scopes=["https://www.googleapis.com/auth/analytics.readonly"])
         cred.refresh(gar.Request()); AH={"Authorization":f"Bearer {cred.token}"}
-        asum = requests.get("https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200", headers=AH, timeout=30).json()
+        asum = _ga4_json("https://analyticsadmin.googleapis.com/v1beta/accountSummaries?pageSize=200", AH)
         prop=None
         for a in asum.get("accountSummaries", []):
             for p in a.get("propertySummaries", []):
                 if hint.lower() in p.get("displayName","").lower(): prop=p["property"]
-        if not prop: return "(property GA4 negăsit pt hint '%s')" % hint
-        ds = requests.get(f"https://analyticsadmin.googleapis.com/v1beta/{prop}/dataStreams", headers=AH, timeout=30).json()
+        if not prop:
+            return f"(GA4 auto-resolve eșuat pt '{hint}' — property negăsit; dă direct --ga4 G-XXXX)"
+        ds = _ga4_json(f"https://analyticsadmin.googleapis.com/v1beta/{prop}/dataStreams", AH)
         for s in ds.get("dataStreams", []):
             if s.get("webStreamData",{}).get("measurementId"): return s["webStreamData"]["measurementId"]
-        return "(stream web fără measurementId)"
+        return f"(GA4 auto-resolve eșuat pt '{hint}' — stream web fără measurementId; dă direct --ga4 G-XXXX)"
     except Exception as e:
-        return f"(GA4 err: {str(e)[:80]})"
+        return f"(GA4 auto-resolve eșuat pt '{hint}' — {str(e)[:80]}; dă direct --ga4 G-XXXX)"
 
 def main():
     ap = argparse.ArgumentParser()
@@ -154,7 +163,12 @@ def main():
         g=x["customerConversionGoal"]
         if g.get("origin")=="WEBSITE" and not g.get("biddable") and a.apply:
             mut("customerConversionGoals",[{"update":{"resourceName":g["resourceName"],"biddable":True},"updateMask":"biddable"}]); print("→ PURCHASE/WEBSITE setat biddable")
-    mid = ga4_measurement_id(a.ga4) if a.ga4 else "(dă --ga4 <hint>)"
+    if not a.ga4:
+        mid = "(dă --ga4 <hint>)"
+    elif re.match(r"^G-[A-Za-z0-9]+$", a.ga4.strip()):
+        mid = a.ga4.strip()                          # deja un measurement id → folosește-l direct
+    else:
+        mid = ga4_measurement_id(a.ga4)              # hint → rezolvă (robust, nu crapă la eroare)
     print("\n══════════ DE PUS ÎN COD FORM (Releasit/EasySell → Conversion tracking) ══════════")
     print(f"  Google Ads Conversion ID:  AW-{aw}")
     print(f"  Purchase Label:            {label or '(rulează cu --apply / verifică tag_snippets)'}")
