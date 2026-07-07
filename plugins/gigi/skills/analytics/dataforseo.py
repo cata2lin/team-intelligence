@@ -94,6 +94,25 @@ def cmd_backlinks(args):
     print(f"  referring IPs:     {s.get('referring_ips', 0):,}")
     print(f"  rank (0-1000):     {s.get('rank', 0)}")
     print(f"  broken backlinks:  {s.get('broken_backlinks', 0):,}")
+    if not getattr(args, "list", False):
+        return
+    # --list: fiecare backlink cu status dofollow/nofollow (source page + anchor + target)
+    res = _post("/v3/backlinks/backlinks/live",
+                [{"target": args.domain, "limit": args.limit, "mode": "as_is",
+                  "include_subdomains": True, "backlinks_status_type": "all",
+                  "order_by": ["first_seen,desc"]}])
+    items = (res[0].get("items") or []) if res else []
+    df = sum(1 for it in items if it.get("dofollow"))
+    nf = len(items) - df
+    print(f"\nBacklinks list — {len(items)} shown  ({df} dofollow / {nf} nofollow)")
+    for i, it in enumerate(items, 1):
+        tag = "DOFOLLOW" if it.get("dofollow") else "nofollow"
+        print(f"  [{i:>2}] {tag:<9} {it.get('domain_from','')}")
+        print(f"       page  : {it.get('url_from','')}")
+        print(f"       anchor: {(it.get('anchor') or '').strip()[:70]}")
+        print(f"       -> {it.get('url_to','')}   (seen {str(it.get('first_seen',''))[:10]})")
+    # NOTA: `dofollow` = ce a crawlat DataForSEO. Pt verdict pe bani, confirma `rel`
+    # REAL in HTML-ul live al paginii (unele advertoriale servesc alt HTML botilor).
 
 def main():
     ap = argparse.ArgumentParser(description="DataForSEO — SERP / competitor keywords / backlinks (paid).")
@@ -103,8 +122,11 @@ def main():
     sp.add_argument("--keyword", required=True); sp.add_argument("--depth", type=int, default=20); sp.set_defaults(fn=cmd_serp)
     kw = sub.add_parser("keywords", help="keywords a domain ranks for (mine competitors)")
     kw.add_argument("--domain", required=True); kw.add_argument("--limit", type=int, default=40); kw.set_defaults(fn=cmd_keywords)
-    bl = sub.add_parser("backlinks", help="backlinks + referring domains summary")
-    bl.add_argument("--domain", required=True); bl.set_defaults(fn=cmd_backlinks)
+    bl = sub.add_parser("backlinks", help="backlinks + referring domains summary (+ --list = per-link dofollow/nofollow)")
+    bl.add_argument("--domain", required=True)
+    bl.add_argument("--list", action="store_true", help="list each backlink with dofollow/nofollow, source page, anchor, target")
+    bl.add_argument("--limit", type=int, default=100, help="max backlinks in --list")
+    bl.set_defaults(fn=cmd_backlinks)
     args = ap.parse_args(); args.fn(args)
 
 if __name__ == "__main__":

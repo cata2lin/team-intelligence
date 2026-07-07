@@ -121,11 +121,13 @@ export DATAFORSEO_PASSWORD="$(uv run "$KB" secret-get DATAFORSEO_PASSWORD)"
 uv run dataforseo.py serp      --keyword "parfumuri barbati"   # who ranks top in Google RO (+ flags our stores)
 uv run dataforseo.py keywords  --domain notino.ro --limit 40   # what a competitor ranks for (keyword mining / gap)
 uv run dataforseo.py backlinks --domain esteban.ro             # backlinks + referring domains summary
+uv run dataforseo.py backlinks --domain grandia.ro --list      # + fiecare backlink: dofollow/nofollow, pagina-sursa, anchor, tinta
 uv run dataforseo.py balance                                   # account balance
 ```
 ⚠️ **Account state & access tiers (Jun 2026):**
 - ✅ **Available now** (small balance): `serp` (live Google RO SERP) and `keywords` (competitor ranked-keywords). These cover the SERP + competitor gaps. ~$0.0035 per SERP query.
-- ⛔ **Gated behind a balance top-up:** `backlinks` needs **≥ $100** balance; AI/LLM-mentions needs **≥ $200** (not yet topped up). Until then: use the **free proxies** — `authority.py` (Open PageRank) for authority instead of backlinks, and `gigi:shopify-geo` for AEO citability instead of LLM-mention tracking.
+- ✅ **`backlinks` MERGE pay-as-you-go** (nota veche „gated ≥ $100" e GREȘITĂ — corectat 7-iul): `summary/live` + `backlinks/live` (`--list`) rulează cu balanță mică; fiecare apel `backlinks/live` costă câțiva cenți (endpoint mai scump decât serp/keywords). ⚠️ Balanța se golește repede — verifică cu `balance` înainte (a ajuns −0.02 după câteva apeluri); un top-up de câțiva $ ajunge. AI/LLM-mentions rămâne netestat.
+- **⚠️ Verdict follow/nofollow pe bani = confirmă `rel` REAL în HTML-ul live**, nu doar flag-ul `dofollow` din DataForSEO (poate fi vechi; unele advertoriale servesc alt HTML boților). Ex 7-iul: cele 6 advertoriale Limitless pe Grandia = flag dofollow ȘI `rel` real dofollow (fetch pagină + regex pe `<a …grandia…>`), contrazicând nota veche „nofollow".
 - Run **monthly via cron + cache results in metrics** to pay per query, not per look.
 
 ## Validation note (Jun 2026)
