@@ -177,6 +177,14 @@ def main():
     sn.add_argument("--text", required=True, help="the negative keyword text")
     sn.add_argument("--match", default="PHRASE", choices=["EXACT","PHRASE","BROAD"])
     sn.add_argument("--apply", action="store_true"); sn.add_argument("--mcc")
+    kw=sub.add_parser("set-keyword-status", help="enable/pause a keyword (ad group criterion) — by --resource OR --campaign+--text (dry-run unless --apply)")
+    kw.add_argument("--customer", required=True)
+    kw.add_argument("--resource", help="adGroupCriteria resourceName (customers/X/adGroupCriteria/AG~CRIT)")
+    kw.add_argument("--campaign", help="campaign id — with --text, looks the keyword up in it")
+    kw.add_argument("--text", help="keyword text to find (used with --campaign)")
+    kw.add_argument("--match", choices=["EXACT","PHRASE","BROAD"], help="optional: restrict --text lookup to this match type")
+    kw.add_argument("--status", required=True, choices=["ENABLED","PAUSED"])
+    kw.add_argument("--apply", action="store_true"); kw.add_argument("--mcc")
     args=ap.parse_args()
 
     if args.cmd=="report":
@@ -272,6 +280,27 @@ def main():
             for r in hit:
                 print(f"    {_get(r,'sharedCriterion.resourceName')} "
                       f"[{_get(r,'sharedCriterion.keyword.matchType')}]")
+    elif args.cmd=="set-keyword-status":
+        c=get_connection(args.mcc)
+        if args.resource:
+            resources=[args.resource]
+        elif args.campaign and args.text:
+            q=("SELECT ad_group_criterion.resource_name, ad_group_criterion.keyword.text,"
+               " ad_group_criterion.keyword.match_type FROM ad_group_criterion"
+               f" WHERE campaign.id={_digits(args.campaign)} AND ad_group_criterion.type='KEYWORD'"
+               f" AND ad_group_criterion.keyword.text='{args.text}'")
+            if args.match: q+=f" AND ad_group_criterion.keyword.match_type='{args.match}'"
+            rows=search(c,args.customer,q)
+            resources=[_get(r,"adGroupCriterion.resourceName") for r in rows]
+            if not resources: sys.exit(f"niciun keyword „{args.text}\" (match {args.match or 'orice'}) în campania {args.campaign}")
+        else:
+            sys.exit("dă --resource SAU --campaign + --text")
+        ops=[{"updateMask":"status","update":{"resourceName":r,"status":args.status}} for r in resources]
+        out=mutate(c,args.customer,"adGroupCriteria",ops,args.apply)
+        print(("APLICAT" if args.apply else "DRY-RUN — adaugă --apply ca să execuți"))
+        print(f"  status={args.status} pe {len(resources)} keyword(s):")
+        for r in resources: print(f"    {r}")
+        print(json.dumps(out,ensure_ascii=False)[:400])
 
 if __name__=="__main__":
     main()
