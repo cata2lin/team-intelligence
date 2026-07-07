@@ -227,6 +227,7 @@ de N min** (Flow a avut timp și n-a făcut AWB):
 - **EXTERNE (CZ/PL/BG)**: validare **HERE Geocoding** (≥0.9) în loc de validatorul RO → AWB (DPD Romania); sub prag → CS. (vezi secțiunea EXTERNE)
 - **parcelCount AUTO** din metafield per comandă (vezi „Nr. de colete") — Grandia/Belasil/Carpetto pot fi 2-4 colete, parfumurile 1.
 - **tag `influencer`** (cadou UGC, 100% discount, flux separat) → **NU se face AWB** (skip ÎNAINTE de logica draft/team, fiindcă multe sunt draft orders). La fel `awb-make` manual îl refuză (cu `--force` se poate forța).
+- **BLOCKLIST client** (serial-refuseri/fraudă) → **NU se face AWB + se ANULEAZĂ comanda** (ca duplicat: reason OTHER, restock, protecție livrare — nu anulez ce a plecat). Cheia = **customer GID per magazin** din KB `XCONNECTOR_CUSTOMER_BLOCKLIST` (JSON `{shopDomain:[gid,...]}`, editabil fără redeploy). De ce GID și NU email/telefon: magazinele-s pe plan **Basic → PII (email/telefon) e BLOCAT** pt app-token; customer GID e non-PII + stabil per magazin. Adaugi un client: ia-i GID-ul (`orders(query:"name:X"){...customer{id}}`) pe fiecare magazin unde comandă și pune-l în secret. Vezi [[serial-refuser-blocklist]].
 - **tag de duplicat** (`duplicata`/`duplicata3`/`duplicat4`) → regula Flow-urilor: **păstrează cea mai NOUĂ** comandă a clientului
   (7 zile) → îi fac AWB; **cele VECHI** → le **anulez** (reason OTHER, fără refund/restock/notify, **protecție livrare**: nu anulez
   ce a plecat). **CS-placed / draft order** (tag agent CS sau `sourceName=shopify_draft_order`) → **NU se dedup-ează, dar PRIMESC AWB**.
