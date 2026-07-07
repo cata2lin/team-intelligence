@@ -185,6 +185,30 @@ def main():
     kw.add_argument("--match", choices=["EXACT","PHRASE","BROAD"], help="optional: restrict --text lookup to this match type")
     kw.add_argument("--status", required=True, choices=["ENABLED","PAUSED"])
     kw.add_argument("--apply", action="store_true"); kw.add_argument("--mcc")
+    la=sub.add_parser("link-account", help="send an MCC manager-link invitation (PENDING) to a client account (dry-run unless --apply)")
+    la.add_argument("--client", required=True, help="client customer id to invite under the MCC")
+    la.add_argument("--apply", action="store_true"); la.add_argument("--mcc")
+    cs=sub.add_parser("create-search", help="create a PAUSED Search campaign atomically (budget+campaign+geo/lang+adGroup+keywords+RSA) (dry-run unless --apply)")
+    cs.add_argument("--customer", required=True)
+    cs.add_argument("--name", required=True, help="campaign name")
+    cs.add_argument("--budget", required=True, type=float, help="daily budget, account currency")
+    cs.add_argument("--geo", required=True, help="geoTargetConstant id, e.g. 2616 Poland / 2642 Romania")
+    cs.add_argument("--lang", required=True, help="languageConstant id, e.g. 1030 Polish / 1032 Romanian")
+    cs.add_argument("--keywords", required=True, help="comma-separated")
+    cs.add_argument("--match", default="PHRASE", choices=["EXACT","PHRASE","BROAD"])
+    cs.add_argument("--headlines", required=True, help="|-separated, each <=30 chars")
+    cs.add_argument("--descriptions", required=True, help="|-separated, each <=90 chars")
+    cs.add_argument("--final-url", required=True, dest="final_url")
+    cs.add_argument("--apply", action="store_true"); cs.add_argument("--mcc")
+    cp=sub.add_parser("create-pmax", help="create a PAUSED Shopping-led Performance Max campaign (budget+campaign+merchantId+assetGroup+listingGroup root) (dry-run unless --apply)")
+    cp.add_argument("--customer", required=True)
+    cp.add_argument("--name", required=True, help="campaign name")
+    cp.add_argument("--budget", required=True, type=float, help="daily budget, account currency")
+    cp.add_argument("--merchant", required=True, help="Merchant Center id (shoppingSetting.merchantId)")
+    cp.add_argument("--geo", required=True, help="geoTargetConstant id, e.g. 2642 Romania")
+    cp.add_argument("--asset-group", dest="asset_group", help="asset group name (default: --name)")
+    cp.add_argument("--final-url", required=True, dest="final_url")
+    cp.add_argument("--apply", action="store_true"); cp.add_argument("--mcc")
     args=ap.parse_args()
 
     if args.cmd=="report":
@@ -301,6 +325,100 @@ def main():
         print(f"  status={args.status} pe {len(resources)} keyword(s):")
         for r in resources: print(f"    {r}")
         print(json.dumps(out,ensure_ascii=False)[:400])
+    elif args.cmd=="link-account":
+        c=get_connection(args.mcc); tok=access_token(c)
+        mcc=_digits(c["mcc"]); cid=_digits(args.client)
+        # customerClientLinks:mutate takes a SINGLE `operation` (not an operations[] array)
+        url=f"https://googleads.googleapis.com/{API}/customers/{mcc}/customerClientLinks:mutate"
+        body={"operation":{"create":{"clientCustomer":f"customers/{cid}","status":"PENDING"}},"validateOnly":(not args.apply)}
+        r=requests.post(url, headers=_headers(c,tok), json=body, timeout=40)
+        if r.status_code!=200:
+            txt=r.text
+            if "ALREADY_MANAGED" in txt:
+                print(f"DEJA LEGAT — client {cid} e deja sub MCC {mcc} (ALREADY_MANAGED). Nimic de trimis.")
+                return
+            sys.exit(f"Google Ads API {r.status_code}: {txt[:900]}")
+        print(("APLICAT" if args.apply else "DRY-RUN (validateOnly) — adaugă --apply ca să trimiți invitația"))
+        print(f"  invitație manager-link (PENDING) MCC {mcc} -> client {cid}")
+        print(json.dumps(r.json(),ensure_ascii=False)[:400])
+        print("  clientul acceptă în Admin → Access & security → Managers (NOVOS DIGITAL 746-711-0480)")
+    elif args.cmd=="create-search":
+        c=get_connection(args.mcc); tok=access_token(c)
+        cid=_digits(args.customer)
+        rn=lambda n: f"customers/{cid}/{n}"
+        kws=[k.strip() for k in args.keywords.split(",") if k.strip()]
+        heads=[h.strip() for h in args.headlines.split("|") if h.strip()]
+        descs=[d.strip() for d in args.descriptions.split("|") if d.strip()]
+        # atomic build with temp resource names (negative ids): budget -> campaign ->
+        # geo + language criteria -> ad group -> keyword criteria -> RSA ad.
+        ops=[
+         {"campaignBudgetOperation":{"create":{"resourceName":rn("campaignBudgets/-1"),
+            "amountMicros":str(int(round(args.budget*1e6))),"deliveryMethod":"STANDARD","explicitlyShared":False}}},
+         {"campaignOperation":{"create":{"resourceName":rn("campaigns/-2"),"name":args.name,"status":"PAUSED",
+            "advertisingChannelType":"SEARCH","campaignBudget":rn("campaignBudgets/-1"),"maximizeConversions":{},
+            "containsEuPoliticalAdvertising":"DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
+            "networkSettings":{"targetGoogleSearch":True,"targetSearchNetwork":False,
+                "targetContentNetwork":False,"targetPartnerSearchNetwork":False}}}},
+         {"campaignCriterionOperation":{"create":{"campaign":rn("campaigns/-2"),
+            "location":{"geoTargetConstant":f"geoTargetConstants/{_digits(args.geo)}"}}}},
+         {"campaignCriterionOperation":{"create":{"campaign":rn("campaigns/-2"),
+            "language":{"languageConstant":f"languageConstants/{_digits(args.lang)}"}}}},
+         {"adGroupOperation":{"create":{"resourceName":rn("adGroups/-3"),"name":args.name,
+            "campaign":rn("campaigns/-2"),"status":"ENABLED","type":"SEARCH_STANDARD"}}},
+        ]
+        for kw in kws:
+            ops.append({"adGroupCriterionOperation":{"create":{"adGroup":rn("adGroups/-3"),
+                "status":"ENABLED","keyword":{"text":kw,"matchType":args.match}}}})
+        # NOTE: businessName is NOT a valid field on responsiveSearchAd — do not add it.
+        ops.append({"adGroupAdOperation":{"create":{"adGroup":rn("adGroups/-3"),"status":"ENABLED",
+            "ad":{"finalUrls":[args.final_url],
+                  "responsiveSearchAd":{"headlines":[{"text":h} for h in heads],
+                                        "descriptions":[{"text":d} for d in descs]}}}}})
+        url=f"https://googleads.googleapis.com/{API}/customers/{cid}/googleAds:mutate"
+        body={"mutateOperations":ops,"validateOnly":(not args.apply)}
+        r=requests.post(url, headers=_headers(c,tok), json=body, timeout=90)
+        if r.status_code!=200: sys.exit(f"Google Ads API {r.status_code}: {r.text[:900]}")
+        print(("APLICAT" if args.apply else "DRY-RUN (validateOnly) — adaugă --apply ca să creezi campania"))
+        print(f"  Search campaign „{args.name}\" (PAUSED) pe {cid} | buget {args.budget}/zi | geo {args.geo} lang {args.lang}")
+        print(f"  {len(kws)} keyword(s) ({args.match}) | {len(heads)} headlines | {len(descs)} descriptions")
+        for x in r.json().get("mutateOperationResponses",[]):
+            for k,v in x.items():
+                rres=v.get("resourceName","")
+                if rres.endswith(f"campaigns/-2") or "/campaigns/" in rres and "Budget" not in k: print(f"  CAMPAIGN: {rres}")
+                if "/adGroups/" in rres and "Criteri" not in k and "Ad" not in k: print(f"  AD GROUP: {rres}")
+    elif args.cmd=="create-pmax":
+        c=get_connection(args.mcc); tok=access_token(c)
+        cid=_digits(args.customer)
+        rn=lambda n: f"customers/{cid}/{n}"
+        ag_name=args.asset_group or args.name
+        # Shopping-led PMax skeleton (assets/creative added afterwards in UI or via API):
+        # budget -> campaign(merchantId) -> geo criterion -> asset group -> listing group root UNIT_INCLUDED.
+        ops=[
+         {"campaignBudgetOperation":{"create":{"resourceName":rn("campaignBudgets/-1"),
+            "amountMicros":str(int(round(args.budget*1e6))),"deliveryMethod":"STANDARD","explicitlyShared":False}}},
+         {"campaignOperation":{"create":{"resourceName":rn("campaigns/-2"),"name":args.name,"status":"PAUSED",
+            "advertisingChannelType":"PERFORMANCE_MAX","campaignBudget":rn("campaignBudgets/-1"),
+            "maximizeConversionValue":{},"shoppingSetting":{"merchantId":_digits(args.merchant)},
+            "containsEuPoliticalAdvertising":"DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING","urlExpansionOptOut":False}}},
+         {"campaignCriterionOperation":{"create":{"campaign":rn("campaigns/-2"),
+            "location":{"geoTargetConstant":f"geoTargetConstants/{_digits(args.geo)}"}}}},
+         {"assetGroupOperation":{"create":{"resourceName":rn("assetGroups/-3"),"name":ag_name,
+            "campaign":rn("campaigns/-2"),"finalUrls":[args.final_url],"status":"ENABLED"}}},
+         {"assetGroupListingGroupFilterOperation":{"create":{"assetGroup":rn("assetGroups/-3"),
+            "type":"UNIT_INCLUDED","listingSource":"SHOPPING"}}},
+        ]
+        url=f"https://googleads.googleapis.com/{API}/customers/{cid}/googleAds:mutate"
+        body={"mutateOperations":ops,"validateOnly":(not args.apply)}
+        r=requests.post(url, headers=_headers(c,tok), json=body, timeout=90)
+        if r.status_code!=200: sys.exit(f"Google Ads API {r.status_code}: {r.text[:900]}")
+        print(("APLICAT" if args.apply else "DRY-RUN (validateOnly) — adaugă --apply ca să creezi campania"))
+        print(f"  PMax „{args.name}\" (PAUSED) pe {cid} | buget {args.budget}/zi | MC {args.merchant} | geo {args.geo}")
+        print("  ⚠️ skeleton fără assets — adaugă creative/imagini/text pe asset group înainte de enable")
+        for x in r.json().get("mutateOperationResponses",[]):
+            for k,v in x.items():
+                rres=v.get("resourceName","")
+                if "/campaigns/" in rres and "Budget" not in k and "Criteri" not in k: print(f"  CAMPAIGN: {rres}")
+                if "/assetGroups/" in rres and "ListingGroup" not in k: print(f"  ASSET GROUP: {rres}")
 
 if __name__=="__main__":
     main()
