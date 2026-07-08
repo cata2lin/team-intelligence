@@ -301,3 +301,8 @@ Pașii repetabili pentru a lansa un brand pe Google Ads de la zero. Template scr
 - **gigi:ads-attribution** — sănătatea modelului de atribuire cross-platform (AdAttributionKit iOS view-through, deduplicare).
 - **gigi:ads-creative** + **gigi:ad-copy** + **gigi:ad-banners** — framework-uri de creative/RSA. **gigi:ads-budget** + **gigi:budget-simulator** — alocare + forecast.
 - **gigi:gads-audit** — sweep multi-cont (limbă/conversii/COD/capped/drainere). **real_roas_unified.py** (aici) — ROAS real per canal vs breakeven.
+
+
+## Portofoliu + populare PMax asset-group prin API (adăugate iul-2026)
+- **`gads_portfolio.py`** — performanță pe TOATE conturile MCC dintr-o rulare (spend/conv/CPA/ROAS 30z + trend 7z) vs target CPA per magazin. Scoate rapid winners-ii SUB-SCALAȚI (CPA < target + budget-lost mare → urcă buget cu `set-budget`) și conturile peste target. `uv run gads_portfolio.py`.
+- **`pmax_assets.py`** — populează asset group-ul unui PMax creat cu `create-pmax` (care lasă SKELETON fără assets) + îl ENABLE. ⚠️ **GOTCHA Brand Guidelines**: `create-pmax` creează campania cu `brand_guidelines_enabled=TRUE` care e **IMMUTABLE** → business name + logo TREBUIE legate ca **`campaignAssets`** (nivel campanie), nu `assetGroupAssets`, altfel `BRAND_ASSETS_NOT_LINKED_AT_CAMPAIGN_LEVEL`. Restul (headlines/long/desc/marketing+square img) = `assetGroupAssets`. Asset-urile se creează în **2 pași** (create toate → link), NU atomic (validarea dă false `NOT_ENOUGH_*`). Imagini = bytes inline base64. API v21. Ref: bonhaus-pl-google-launch.
