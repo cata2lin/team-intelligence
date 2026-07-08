@@ -42,6 +42,7 @@ PAGE_STORE = {
     "434151126459295": "Bonhaus CZ", "651700798017858": "Casa Ofertelor", "582681401604162": "Ofertele Zilei",
     "1678573069021466": "Orasul Verde", "522811567592063": "Gento", "621560724373069": "Carpetto",
     "680369271815957": "Bonhaus BG", "421367954403103": "Apreciat", "1805415543098993": "Rossi Nails",
+    "61586834387211": "Lab Noir",
 }
 WINDOW_DAYS = 120  # comanda relevantă tichetului: în jurul datei tichetului (±N zile)
 
