@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["google-api-python-client>=2.0", "google-auth>=2.0"]
+# dependencies = ["google-api-python-client>=2.0", "google-auth>=2.0", "psycopg2-binary>=2.9"]
 # ///
 """
 mapping_audit.py — auditează tab-ul „Mapping" (sheet „CPA și financiar") pentru bug-uri de
@@ -18,6 +18,10 @@ campanie DISTINCT și ne-gol (col „Campanie"). Token gol pe cont partajat = bu
           campanii pe cont dar Mapping-ul nu-i revendică contul → banii cad printre degete / în alt
           brand). Golul care lipsea din auditul token-gol: contul e „curat" (tokenuri distincte) dar
           tot pierde bani. NECESITĂ doar GA4_SA_JSON (nu DB).
+  --currency: verifică dacă flag-ul ×curs (incTik, PER-BRAND) se potrivește cu moneda REALĂ
+          (PER-CONT, din DB tiktok_ad_accounts) a fiecărui cont. Bug tipic: brand incTik=DA (pt un cont
+          USD) care capturează ȘI de pe un cont RON → RON umflat ×curs (Bonhaus RO/Nocturna Europa);
+          sau cont USD la brand incTik=gol → USD sub-numărat. NECESITĂ DATABASE_URL_METRICS + GA4_SA_JSON.
   --live: pentru brandurile cu token GOL, rulează raportul TikTok live și cuantifică spend-ul
           campaniilor cu tag-ul ALTUI brand (phantom confirmat, în RON). NECESITĂ DATABASE_URL_METRICS.
 
@@ -25,7 +29,8 @@ Usage:
   export GA4_SA_JSON="$(uv run <kb.py> secret-get GA4_SA_JSON)"
   uv run mapping_audit.py                            # audit static (token gol/duplicat)
   uv run mapping_audit.py --uncaptured [--days 60]   # + spend NECAPTURAT pe conturi partajate
-  export DATABASE_URL_METRICS=...; uv run mapping_audit.py --live   # + phantom token-gol (DB)
+  export DATABASE_URL_METRICS=...; uv run mapping_audit.py --currency   # + nepotriviri de monedă (DB)
+  export DATABASE_URL_METRICS=...; uv run mapping_audit.py --live       # + phantom token-gol (DB)
 """
 import json, os, re, subprocess, sys
 from pathlib import Path
@@ -227,9 +232,74 @@ def audit_uncaptured(brands, days=60):
     if not acc_unc and not dbl_by:
         print("\n  ✓ 100% capturat, 0 necapturat, 0 dublu — atribuire completă și fără suprapuneri.")
 
+def _read_curs_config():
+    """Din Curs valutar: incTik per brand (col E) + conturi TikTok marcate RON (rânduri
+    `TikTok: <cont> | RON` = col A prefix „TikTok:", col B monedă)."""
+    raw = os.environ.get("GA4_SA_JSON") or _kb("GA4_SA_JSON")
+    creds = Credentials.from_service_account_info(json.loads(raw), scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"])
+    api = build("sheets", "v4", credentials=creds).spreadsheets()
+    rows = api.values().get(spreadsheetId=SS, range="'Curs valutar'!A:F").execute().get("values", [])
+    incTik, ron_cfg = {}, set()
+    for r in rows:
+        a = (str(r[0]).strip() if r and r[0] else "")
+        if not a:
+            continue
+        m = re.match(r'^tiktok\s*:\s*(.+)$', a, re.I)
+        if m:
+            if len(r) > 1 and str(r[1]).strip().upper() == "RON":
+                ron_cfg.add(_tok(m.group(1)))
+            continue
+        if len(r) > 4 and str(r[4]).strip().upper() == "DA":
+            incTik[a] = True
+    return incTik, ron_cfg
+
+def audit_currency(brands):
+    """Verifică dacă flag-ul ×curs (incTik, PER-BRAND din Curs valutar) se potrivește cu moneda
+    REALĂ (PER-CONT, din DB `tiktok_ad_accounts`) a fiecărui cont TikTok pe care-l capturează brandul.
+    Bug tipic (Bonhaus RO): brand incTik=DA (corect pt contul lui USD) dar capturează ȘI de pe un cont
+    RON (Nocturna Europa) → partea RON umflată ×curs. Sau invers: cont USD la brand incTik=gol → USD
+    SUB-numărat. NECESITĂ DATABASE_URL_METRICS + GA4_SA_JSON."""
+    dsn = os.environ.get("DATABASE_URL_METRICS") or _kb("DATABASE_URL_METRICS")
+    if not dsn:
+        print("\n(--currency necesită DATABASE_URL_METRICS pt moneda conturilor)"); return
+    try:
+        import psycopg2
+    except ImportError:
+        print("\n(--currency: psycopg2 indisponibil)"); return
+    conn = psycopg2.connect(dsn.split("?")[0]); cur = conn.cursor()
+    cur.execute("SELECT name, currency FROM tiktok_ad_accounts")
+    accc = {_tok(n): (c or "").upper() for n, c in cur.fetchall()}
+    conn.close()
+    incTik, ron_cfg = _read_curs_config()
+    print("\n══ AUDIT MONEDĂ TikTok — flag ×curs (incTik) vs moneda REALĂ a contului (DB) ══")
+    print(f"  conturi marcate RON în Curs valutar (nu se ×curs): {sorted(ron_cfg) or '(niciunul)'}")
+    issues = []
+    for b in brands:
+        it = incTik.get(b["brand"], False)
+        for acc in b["tt"]:
+            an = _tok(acc)
+            curr = accc.get(an)
+            if not curr:
+                continue  # cont necunoscut în DB → nu-l putem verifica
+            marked_ron = an in ron_cfg
+            if curr == "USD":
+                if not (it and not marked_ron):
+                    why = "brand incTik=GOL → USD SUB-numărat (÷curs lipsă)" if not it else "cont USD marcat RON greșit"
+                    issues.append((b["brand"], acc, curr, it, why))
+            elif it and not marked_ron:      # cont RON (sau alt non-USD) + ×curs
+                issues.append((b["brand"], acc, curr, it, "incTik=DA + NEmarcat RON → UMFLAT ×curs"))
+    if not issues:
+        print("  ✅ fiecare cont e tratat corect (USD→×curs, RON→fără curs). Nicio nepotrivire de monedă.")
+    else:
+        for brand, acc, curr, it, why in issues:
+            print(f"  🔴 {brand:16} cont '{acc}' ({curr}, brand incTik={'DA' if it else 'gol'}) — {why}")
+        print("\n  Fix: marchează conturile RON în Curs valutar (rând `TikTok: <cont> | RON`) → ×curs")
+        print("       se aplică DOAR conturilor non-RON, chiar dacă brandul are incTik=DA. Vezi SKILL.md.")
+
 def main():
     live = "--live" in sys.argv
     unc = "--uncaptured" in sys.argv
+    curr = "--currency" in sys.argv
     days = 60
     for i, a in enumerate(sys.argv):
         if a == "--days" and i + 1 < len(sys.argv):
@@ -239,12 +309,14 @@ def main():
     flags = audit_static(brands)
     if unc:
         audit_uncaptured(brands, days)
+    if curr:
+        audit_currency(brands)
     if live and flags:
         audit_live(flags, brands)
     elif flags and not live:
         print("\n  → rulează cu --live ca să cuantific spend-ul fantomă (token gol) din API.")
     if not unc:
-        print("  → rulează cu --uncaptured ca să prind spend-ul NECAPTURAT pe conturile partajate.")
+        print("  → rulează cu --uncaptured (necapturat/dublu) sau --currency (nepotriviri de monedă).")
 
 if __name__ == "__main__":
     main()
