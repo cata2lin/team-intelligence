@@ -13,13 +13,19 @@ Regula: un cont TikTok partajat e sigur DOAR dacă fiecare brand care-l revendic
 campanie DISTINCT și ne-gol (col „Campanie"). Token gol pe cont partajat = bug.
 
   static (implicit): citește Mapping o dată, listează conturile partajate + flag-urile.
-  --live: pentru brandurile flag-uite, rulează raportul TikTok live și cuantifică spend-ul
-          campaniilor cu tag-ul ALTUI brand (phantom confirmat, în RON).
+  --uncaptured: citește fila-sursă 'Tiktok Ads' și pentru fiecare cont partajat împarte spend-ul
+          pe BRAND-TOKEN real (din numele campaniei) → prinde spend-ul NECAPTURAT (un brand rulează
+          campanii pe cont dar Mapping-ul nu-i revendică contul → banii cad printre degete / în alt
+          brand). Golul care lipsea din auditul token-gol: contul e „curat" (tokenuri distincte) dar
+          tot pierde bani. NECESITĂ doar GA4_SA_JSON (nu DB).
+  --live: pentru brandurile cu token GOL, rulează raportul TikTok live și cuantifică spend-ul
+          campaniilor cu tag-ul ALTUI brand (phantom confirmat, în RON). NECESITĂ DATABASE_URL_METRICS.
 
 Usage:
   export GA4_SA_JSON="$(uv run <kb.py> secret-get GA4_SA_JSON)"
-  uv run mapping_audit.py                 # audit static
-  export DATABASE_URL_METRICS=...; uv run mapping_audit.py --live   # + cuantificare live
+  uv run mapping_audit.py                            # audit static (token gol/duplicat)
+  uv run mapping_audit.py --uncaptured [--days 60]   # + spend NECAPTURAT pe conturi partajate
+  export DATABASE_URL_METRICS=...; uv run mapping_audit.py --live   # + phantom token-gol (DB)
 """
 import json, os, re, subprocess, sys
 from pathlib import Path
@@ -119,14 +125,126 @@ def audit_live(flags, brands):
         else:
             print(f"  🟢 {brand}: nicio campanie cu tag străin (poate deja reparat).")
 
+def _serial_to_date(v):
+    import datetime
+    try:
+        return datetime.date(1899, 12, 30) + datetime.timedelta(days=int(float(v)))
+    except Exception:
+        return None
+
+def audit_uncaptured(brands, days=60):
+    """Reconciliere TikTok pe TOATE conturile: citește 'Tiktok Ads' (A date · B cont · C campanie ·
+    D spend) și aplică fiecărei campanii EXACT regula de atribuire din raport (col C = cont revendicat;
+    col G = filtru: cont în G → token-gated, cont în C dar nu în G → capture-all; col G gol → token pe
+    toate). Clasifică: capturat de exact 1 brand / NECAPTURAT (0 branduri = bani pierduți din raport) /
+    DUBLU (>1 brand = dublă-numărare). Modelarea capture-all (col G) e esențială."""
+    import datetime, socket
+    socket.setdefaulttimeout(240)
+    raw = os.environ.get("GA4_SA_JSON") or _kb("GA4_SA_JSON")
+    creds = Credentials.from_service_account_info(json.loads(raw), scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"])
+    api = build("sheets", "v4", credentials=creds).spreadsheets()
+    rows = None
+    for attempt in range(6):
+        try:
+            rows = api.values().get(spreadsheetId=SS, range="'Tiktok Ads'!A:D",
+                                    valueRenderOption="UNFORMATTED_VALUE").execute().get("values", [])
+            break
+        except Exception as e:
+            if attempt == 5:
+                print(f"\n(--uncaptured: nu am putut citi fila 'Tiktok Ads': {e})"); return
+            import time; time.sleep(3 * (attempt + 1))
+    import datetime as _dt
+    # reguli per brand: C (conturi norm), token (norm), G (conturi norm din col „Cont multiplu")
+    rules = []
+    for b in brands:
+        C = {_tok(x) for x in b["tt"]}
+        if not C:
+            continue
+        G = {_tok(x) for x in _split(b.get("multi", ""))}
+        rules.append((b["brand"], C, _tok(b["token"]), G))
+    def captors(acc, camp):
+        """care branduri capturează campania — EXACT regula formulei din raport (col C + col G).
+        cont în C obligatoriu; col G ne-gol: cont în G = token-gated, cont în C dar NU în G =
+        capture-all; col G gol = token pe toate. (Capture-all e cheia — fără el, campaniile fără
+        token pe un cont capture-all par fals 'neatribuibile'.)"""
+        A = _tok(acc); N = _tok(camp); out = []
+        for name, C, tok, G in rules:
+            if A not in C:
+                continue
+            if G:
+                if A in G:
+                    if (not tok) or (tok in N):
+                        out.append(name)
+                else:
+                    out.append(name)          # cont în C dar nu în G → capture-all
+            else:
+                if (not tok) or (tok in N):
+                    out.append(name)
+        return out
+    # fereastra = ultimele `days` zile față de max data din sursă
+    maxd = None
+    for r in rows[1:]:
+        d = _serial_to_date(r[0]) if r else None
+        if d and (maxd is None or d > maxd):
+            maxd = d
+    cut = maxd - _dt.timedelta(days=days) if maxd else None
+    tot = cap = unc = dbl = 0.0
+    unc_by = defaultdict(float); dbl_by = defaultdict(float); acc_unc = defaultdict(float)
+    for r in rows[1:]:
+        if len(r) < 4:
+            continue
+        d = _serial_to_date(r[0])
+        if cut and (not d or d < cut):
+            continue
+        sp = float(r[3]) if isinstance(r[3], (int, float)) else 0.0
+        if sp <= 0:
+            continue
+        tot += sp
+        cs = captors(r[1], r[2])
+        if len(cs) == 0:
+            unc += sp; unc_by[(str(r[1]), str(r[2])[:50])] += sp; acc_unc[str(r[1])] += sp
+        elif len(cs) == 1:
+            cap += sp
+        else:
+            dbl += sp; dbl_by[(str(r[1]), tuple(sorted(cs)))] += sp
+    pct = lambda x: (x / tot * 100 if tot else 0)
+    print(f"\n══ RECONCILIERE TikTok (ultimele {days}z) · total {tot:,.0f} RON ══")
+    print(f"  🟢 capturat exact 1 brand : {cap:>12,.0f}  ({pct(cap):.1f}%)")
+    print(f"  🔴 NECAPTURAT (0 branduri): {unc:>12,.0f}  ({pct(unc):.1f}%)")
+    print(f"  🟠 DUBLU (>1 brand)       : {dbl:>12,.0f}  ({pct(dbl):.1f}%)")
+    if acc_unc:
+        print("\n  🔴 NECAPTURAT — campanii pe care NICIUN brand nu le prinde:")
+        for a, v in sorted(acc_unc.items(), key=lambda x: -x[1]):
+            if v > 50:
+                print(f"     {v:>10,.0f}  cont '{a}'")
+        for (a, c), v in sorted(unc_by.items(), key=lambda x: -x[1])[:10]:
+            if v > 50:
+                print(f"        {v:>8,.0f}  [{a}] {c}")
+    if dbl_by:
+        print("\n  🟠 DUBLU-capturate (același spend la 2+ branduri → dublă-numărare):")
+        for (a, cs), v in sorted(dbl_by.items(), key=lambda x: -x[1])[:10]:
+            print(f"     {v:>10,.0f}  cont '{a}' → {', '.join(cs)}")
+    if not acc_unc and not dbl_by:
+        print("\n  ✓ 100% capturat, 0 necapturat, 0 dublu — atribuire completă și fără suprapuneri.")
+
 def main():
     live = "--live" in sys.argv
+    unc = "--uncaptured" in sys.argv
+    days = 60
+    for i, a in enumerate(sys.argv):
+        if a == "--days" and i + 1 < len(sys.argv):
+            try: days = int(sys.argv[i + 1])
+            except ValueError: pass
     brands = load_mapping()
     flags = audit_static(brands)
+    if unc:
+        audit_uncaptured(brands, days)
     if live and flags:
         audit_live(flags, brands)
     elif flags and not live:
-        print("\n  → rulează cu --live ca să cuantific spend-ul fantomă din API.")
+        print("\n  → rulează cu --live ca să cuantific spend-ul fantomă (token gol) din API.")
+    if not unc:
+        print("  → rulează cu --uncaptured ca să prind spend-ul NECAPTURAT pe conturile partajate.")
 
 if __name__ == "__main__":
     main()

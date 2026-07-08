@@ -16,6 +16,8 @@ KB=~/.claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py
 export GA4_SA_JSON="$(uv run "$KB" secret-get GA4_SA_JSON)"
 uv run scripts/mapping_audit.py                                  # audit static (o citire Mapping)
 
+uv run scripts/mapping_audit.py --uncaptured [--days 60]         # reconciliere COMPLETĂ (necapturat + dublu)
+
 export DATABASE_URL_METRICS="$(uv run "$KB" secret-get DATABASE_URL_METRICS)"
 uv run scripts/mapping_audit.py --live                           # + cuantifică spend-ul fantomă din API
 ```
@@ -23,7 +25,14 @@ uv run scripts/mapping_audit.py --live                           # + cuantifică
 ## Ce dă
 - **static**: lista conturilor TikTok partajate + brandurile care le revendică + token-ul fiecăruia.
   Flag: 🔴 token GOL (înghite tot), 🟠 token DUPLICAT (nu se separă), 🟢 curat.
-- **--live**: pentru brandurile 🔴, rulează `tiktok.py report <brand> --level campaign` și scoate
+- **--uncaptured**: **reconciliere completă** — aplică fiecărei campanii din `Tiktok Ads` (ultimele
+  N zile) EXACT regula raportului (col C revendicat + col G: `cont în G` = token-gated, `cont în C dar
+  nu în G` = **capture-all**, `col G gol` = token pe toate) și clasifică spend-ul: **🟢 capturat de exact
+  1 brand · 🔴 NECAPTURAT (0 branduri = bani pierduți din raport) · 🟠 DUBLU (>1 brand = dublă-numărare)**,
+  cu detaliu pe cont/campanie. ⚠️ Modelarea **capture-all (col G)** e esențială — fără ea, campaniile fără
+  token pe un cont capture-all apar FALS ca „neatribuibile". Răspunde la „se împarte bine spend-ul pe
+  conturile multiple / mai e ceva ce ne scapă". Cere doar `GA4_SA_JSON`.
+- **--live**: pentru brandurile 🔴 (token gol), rulează `tiktok.py report <brand> --level campaign` și scoate
   campaniile al căror nume conține tag-ul ALTUI brand, cu spend-ul (RON/14z) = phantom confirmat.
 
 ## Context (de ce există)
