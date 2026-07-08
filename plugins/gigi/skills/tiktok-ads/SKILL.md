@@ -64,9 +64,16 @@ TikTok has no server-side validate-only, so dry-run just **shows current vs inte
 uv run tiktok.py pause    belasil <campaign_id>                 # DISABLE the campaign
 uv run tiktok.py activate belasil <campaign_id>                 # ENABLE
 uv run tiktok.py budget   belasil <campaign_id> --daily 300     # set campaign budget (account currency)
+uv run tiktok.py rename   belasil <campaign_id> --name "…"      # rename a campaign
 #   ...add --apply to actually execute
 ```
 The tool **auto-finds the owning advertiser + token** for the campaign id. `list` first to get ids.
+
+**`rename`** is the fix for **untagged campaigns on a shared advertiser**: a shared account's campaign
+that lacks the owning brand's token in its name won't be captured cleanly (it only rides the col-G
+`capture-all`). Rename it to include the token (e.g. add `ESTEBAN`) so the report attributes it explicitly.
+Uses `/campaign/update/`, and **auto-falls back to `/campaign/spc/update/` for Smart Performance
+Campaigns** (SPC — the ones that return code `40002` on the normal endpoint).
 
 ## Guardrails
 - **Writes are DRY-RUN by default**; require `--apply` AND user confirmation before changing a live campaign (real spend; some brands do 800+ orders/day).

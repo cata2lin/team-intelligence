@@ -295,6 +295,23 @@ def cmd_budget(a):
     j=tk_post("/campaign/update/", ac["tok"], {"advertiser_id":ac["adv"],"campaign_id":a.id,"budget":float(a.daily)})
     print("APLICAT → budget", a.daily, "|", "OK" if j.get("code")==0 else f"{j.get('code')} {j.get('message','')[:200]}")
 
+def cmd_rename(a):
+    """Redenumește o campanie (campaign/update campaign_name). Util pt a pune un TOKEN de brand
+    în nume pe un cont partajat, ca atribuirea din raport să o prindă curat (fără capture-all)."""
+    ac,info=find_owner(a.brand, a.id)
+    if not ac: sys.exit(f"campania {a.id} nu e în conturile '{a.brand}'")
+    old=info.get('campaign_name'); new=a.name
+    print(f"campanie {a.id}: '{old}' → '{new}' · cont {ac['nm']}")
+    if old==new: print("(nume identic, nimic de făcut)"); return
+    if not a.apply: print("DRY-RUN → aș redenumi (adaugă --apply)"); return
+    body={"advertiser_id":ac["adv"],"campaign_id":a.id,"campaign_name":new}
+    j=tk_post("/campaign/update/", ac["tok"], body)
+    # Smart Performance Campaigns (SPC) folosesc alt endpoint (cod 40002)
+    if j.get("code")==40002 and "spc" in str(j.get("message","")).lower():
+        print("  (Smart Performance Campaign → campaign/spc/update/)")
+        j=tk_post("/campaign/spc/update/", ac["tok"], body)
+    print("APLICAT → rename |", "OK" if j.get("code")==0 else f"{j.get('code')} {j.get('message','')[:200]}")
+
 def main():
     ap=argparse.ArgumentParser(description="TikTok Ads performance + gated mutations (creds from metrics DB)")
     sub=ap.add_subparsers(dest="cmd", required=True)
@@ -306,9 +323,10 @@ def main():
     for nm in ("pause","activate"):
         s=sub.add_parser(nm); s.add_argument("brand"); s.add_argument("id",help="campaign id"); s.add_argument("--apply",action="store_true")
     s=sub.add_parser("budget"); s.add_argument("brand"); s.add_argument("id",help="campaign id"); s.add_argument("--daily",required=True); s.add_argument("--apply",action="store_true")
+    s=sub.add_parser("rename"); s.add_argument("brand"); s.add_argument("id",help="campaign id"); s.add_argument("--name",required=True,help="numele nou complet"); s.add_argument("--apply",action="store_true")
     a=ap.parse_args()
     {"accounts":cmd_accounts,"report":cmd_report,"trend":cmd_trend,"list":cmd_list,"products":cmd_products,
-     "pause":cmd_pause,"activate":cmd_activate,"budget":cmd_budget}[a.cmd](a)
+     "pause":cmd_pause,"activate":cmd_activate,"budget":cmd_budget,"rename":cmd_rename}[a.cmd](a)
 
 if __name__=="__main__":
     main()
