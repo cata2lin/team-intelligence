@@ -32,6 +32,13 @@ uv run scripts/mapping_audit.py --live                           # + cuantifică
   cu detaliu pe cont/campanie. ⚠️ Modelarea **capture-all (col G)** e esențială — fără ea, campaniile fără
   token pe un cont capture-all apar FALS ca „neatribuibile". Răspunde la „se împarte bine spend-ul pe
   conturile multiple / mai e ceva ce ne scapă". Cere doar `GA4_SA_JSON`.
+- **--currency**: verifică dacă flag-ul **×curs** (`incTik`, PER-BRAND din „Curs valutar") se potrivește cu
+  moneda **REALĂ** (PER-CONT, din DB `tiktok_ad_accounts`) a fiecărui cont TikTok capturat. Bug tipic
+  (Bonhaus RO, iul-2026): brand `incTik=DA` (corect pt contul lui USD „Casa ofertelor") care capturează ȘI de
+  pe un cont **RON** (Nocturna Europa) → partea RON umflată ×4,58 (561 RON→2576). Sau invers: cont USD la brand
+  `incTik=gol` → USD sub-numărat. Fix = marchează conturile RON în „Curs valutar" cu rând `TikTok: <cont> | RON`
+  (formula ×curs doar conturile non-RON). NECESITĂ `DATABASE_URL_METRICS` + `GA4_SA_JSON`. ⚠️ Din 40 conturi
+  TikTok, ~30 sunt RON și 10 USD — moneda e per-cont, nu per-brand.
 - **--live**: pentru brandurile 🔴 (token gol), rulează `tiktok.py report <brand> --level campaign` și scoate
   campaniile al căror nume conține tag-ul ALTUI brand, cu spend-ul (RON/14z) = phantom confirmat.
 
