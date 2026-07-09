@@ -1,5 +1,5 @@
 ---
-name: ha-cogs-update
+name: anne-cogs-automat
 description: Adaugare COGS automat pentru produse HA pe cele 4 magazine deals (ofertelezilei, reduceribune, casaofertelor/bonhaus, magdeal). Cauta TOM Real COGS + TOM Shipping Cost in spreadsheet-ul TOM, aplica formula (cogs+ship) x USD x 1.10 x 1.21 si seteaza costul pe Shopify. Foloseste cand vrei sa setezi sau actualizezi COGS pe produse HA, cand adaugi produse noi in catalog, cand vrei sa stii ce produse HA nu au COGS setat. Triggere: "seteaza cogs la HA", "adauga cost la produse", "lipseste cogs", "pune cogs automat", "calculeaza costul HA", "ce produse HA nu au cogs", "update cogs deals".
 argument-hint: "--skus HA-0001 HA-0002 ... [--apply] [--scan] [--usd 4.55]"
 ---
