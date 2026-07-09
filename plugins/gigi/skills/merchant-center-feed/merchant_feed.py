@@ -216,6 +216,36 @@ def set_business_info(store, tok, args):
         ok = r2.status_code == 200
         print(f"  PATCH businessInfo ({','.join(masks)}) [{r2.status_code}] {'✅' if ok else '❌ ' + r2.text[:300]}")
 
+def set_return_policy(store, tok, args):
+    """Create an online return policy for a Merchant Center account (Merchant API). Dry-run unless --apply.
+    Fixes the 'missing return policy / return cost' MC warning that limits/disapproves products.
+    Return cost via --return-fee (0 = free returns). Uses the same MERCHANT_OAUTH write token."""
+    acct = ACCOUNTS.get(store.lower(), store)
+    H = {"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}
+    rc = requests.get(f"https://merchantapi.googleapis.com/accounts/v1/accounts/{acct}/onlineReturnPolicies", headers=H, timeout=40)
+    cur = rc.json().get("onlineReturnPolicies", []) if rc.status_code == 200 else []
+    if not args.uri or not args.country or not args.currency:
+        sys.exit("--set-return-policy needs --country <CC> --currency <CUR> --uri <return-policy-page-url> (optional --days N --return-fee X --label L)")
+    fee = int(round(float(args.return_fee) * 1e6))
+    body = {
+        "label": args.label or f"{store}-returns",
+        "countries": [args.country.upper()],
+        "policy": {"type": "NUMBER_OF_DAYS_AFTER_DELIVERY", "days": str(args.days)},
+        "returnMethods": ["BY_MAIL"], "itemConditions": ["NEW", "USED"],
+        "returnShippingFee": {"type": "FIXED", "fixedFee": {"amountMicros": str(fee), "currencyCode": args.currency.upper()}},
+        "returnPolicyUri": args.uri, "processRefundDays": args.days,
+        "acceptExchange": True, "returnLabelSource": "IN_THE_PACKAGE",
+    }
+    print(f"\n{'='*70}\nSet return policy — {store} ({acct}){'  [DRY-RUN]' if not args.apply else '  [APPLY]'}\n{'='*70}")
+    print(f"  current policies: {len(cur)}  ({[p.get('countries') for p in cur]})")
+    print(f"  NEW: country={args.country.upper()} · {args.days} days · return-fee={args.return_fee} {args.currency.upper()} ({'FREE' if fee==0 else 'customer pays'}) · uri={args.uri}")
+    if not args.apply:
+        print("\n  DRY-RUN — nothing written. Re-run with --apply."); return
+    r = requests.post(f"https://merchantapi.googleapis.com/accounts/v1/accounts/{acct}/onlineReturnPolicies", headers=H, json=body, timeout=60)
+    ok = r.status_code == 200
+    print(f"\n  POST onlineReturnPolicy [{r.status_code}] {'✅ ' + r.json().get('name','') if ok else '❌ ' + r.text[:300]}")
+    if ok: print("  ℹ️  Apare în MC UI (Settings → Shipping and returns) în minute–ore (propagare).")
+
 def main():
     ap = argparse.ArgumentParser(description="Merchant Center feed health + account issues + business info.")
     ap.add_argument("--store"); ap.add_argument("--all", action="store_true")
@@ -225,13 +255,21 @@ def main():
     ap.add_argument("--region"); ap.add_argument("--postal")
     ap.add_argument("--country", help="ISO region code for businessInfo.address.regionCode (default RO when address is set)")
     ap.add_argument("--cs-email", dest="cs_email"); ap.add_argument("--cs-uri", dest="cs_uri")
-    ap.add_argument("--apply", action="store_true", help="actually write (--set-business-info); off = dry-run")
+    ap.add_argument("--set-return-policy", metavar="MERCHANT", help="create an online return policy (fixes missing return policy/cost). Needs --country --currency --uri. Dry-run unless --apply.")
+    ap.add_argument("--days", type=int, default=14, help="return window days (--set-return-policy; default 14)")
+    ap.add_argument("--return-fee", dest="return_fee", default="0", help="return shipping fee amount (--set-return-policy; 0 = free returns)")
+    ap.add_argument("--currency", help="currency for the return fee, e.g. CZK/RON/PLN")
+    ap.add_argument("--uri", help="URL of the store's return/refund policy page")
+    ap.add_argument("--label", help="return policy label (default <store>-returns)")
+    ap.add_argument("--apply", action="store_true", help="actually write (--set-business-info / --set-return-policy); off = dry-run")
     a = ap.parse_args()
     tok = _token()
     if a.account_issues:
         account_issues(a.account_issues, tok)
     elif a.set_business_info:
         set_business_info(a.set_business_info, tok, a)
+    elif a.set_return_policy:
+        set_return_policy(a.set_return_policy, tok, a)
     elif a.all:
         for s in ACCOUNTS: run(s, tok)
     elif a.store:
