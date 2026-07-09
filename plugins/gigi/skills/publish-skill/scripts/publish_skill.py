@@ -71,7 +71,7 @@ except (ValueError, IndexError):
 # description from SKILL.md frontmatter if not given
 desc = A.description
 if not desc:
-    fm = open(os.path.join(skill_path, "SKILL.md")).read()
+    fm = open(os.path.join(skill_path, "SKILL.md"), encoding="utf-8").read()
     m = re.search(r"^description:\s*(.+)$", fm, re.M)
     desc = (m.group(1).strip() if m else f"{name} skill")[:300]
 
