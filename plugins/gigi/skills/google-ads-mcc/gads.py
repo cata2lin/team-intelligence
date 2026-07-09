@@ -162,6 +162,9 @@ def main():
     sc=sub.add_parser("set-tcpa", help="switch to Max conversions + target CPA (dry-run unless --apply)")
     sc.add_argument("--customer", required=True); sc.add_argument("--campaign", required=True)
     sc.add_argument("--cpa", type=float, required=True, help="RON"); sc.add_argument("--apply", action="store_true"); sc.add_argument("--mcc")
+    smc=sub.add_parser("set-maxconv", help="switch a campaign to PLAIN Maximize Conversions (no target) — correct COLD-START bidding for a new campaign with no conversion history (value-bidding/tROAS starves & serves 0 impressions). Removes any tCPA. (dry-run unless --apply)")
+    smc.add_argument("--customer", required=True); smc.add_argument("--campaign", required=True)
+    smc.add_argument("--apply", action="store_true"); smc.add_argument("--mcc")
     ng=sub.add_parser("add-negatives", help="add campaign-level negative keywords (dry-run unless --apply)")
     ng.add_argument("--customer", required=True); ng.add_argument("--campaign", required=True)
     ng.add_argument("--terms", required=True, help="comma-separated negative terms")
@@ -208,6 +211,8 @@ def main():
     cp.add_argument("--geo", required=True, help="geoTargetConstant id, e.g. 2642 Romania")
     cp.add_argument("--asset-group", dest="asset_group", help="asset group name (default: --name)")
     cp.add_argument("--final-url", required=True, dest="final_url")
+    cp.add_argument("--bidding", choices=["maxconv","maxvalue"], default="maxconv",
+                    help="cold-start bidding strategy: maxconv=Maximize Conversions (DEFAULT — correct pt cont NOU fără istoric de conversii; value-bidding sufocă & servește 0 impresii la cold-start); maxvalue=Maximize Conversion Value (folosește DOAR dacă ai deja ≥15-30 conversii cu valoare)")
     cp.add_argument("--apply", action="store_true"); cp.add_argument("--mcc")
     args=ap.parse_args()
 
@@ -266,6 +271,15 @@ def main():
         out=mutate(c,args.customer,"campaigns",ops,args.apply)
         print(("APLICAT" if args.apply else "DRY-RUN — adaugă --apply ca să execuți"))
         print(f"  tCPA={args.cpa} RON pe {res_name}"); print(json.dumps(out,ensure_ascii=False)[:300])
+    elif args.cmd=="set-maxconv":
+        c=get_connection(args.mcc)
+        res_name=f"customers/{_digits(args.customer)}/campaigns/{_digits(args.campaign)}"
+        # PLAIN Maximize Conversions (no target). Mask MUST be the SUBFIELD
+        # (maximize_conversions.target_cpa_micros) — masking the message node → FIELD_HAS_SUBFIELDS error.
+        ops=[{"updateMask":"maximize_conversions.target_cpa_micros","update":{"resourceName":res_name,"maximizeConversions":{}}}]
+        out=mutate(c,args.customer,"campaigns",ops,args.apply)
+        print(("APLICAT" if args.apply else "DRY-RUN — adaugă --apply ca să execuți"))
+        print(f"  → MAXIMIZE_CONVERSIONS (fără target, cold-start) pe {res_name}"); print(json.dumps(out,ensure_ascii=False)[:300])
     elif args.cmd=="add-negatives":
         c=get_connection(args.mcc)
         res_camp=f"customers/{_digits(args.customer)}/campaigns/{_digits(args.campaign)}"
@@ -391,6 +405,8 @@ def main():
         cid=_digits(args.customer)
         rn=lambda n: f"customers/{cid}/{n}"
         ag_name=args.asset_group or args.name
+        # Cold-start bidding: default Maximize Conversions (value-bidding starves a new PMax w/ no conv history → 0 impr).
+        bid_field={"maximizeConversions":{}} if args.bidding=="maxconv" else {"maximizeConversionValue":{}}
         # Shopping-led PMax skeleton (assets/creative added afterwards in UI or via API):
         # budget -> campaign(merchantId) -> geo criterion -> asset group -> listing group root UNIT_INCLUDED.
         ops=[
@@ -398,7 +414,7 @@ def main():
             "amountMicros":str(int(round(args.budget*1e6))),"deliveryMethod":"STANDARD","explicitlyShared":False}}},
          {"campaignOperation":{"create":{"resourceName":rn("campaigns/-2"),"name":args.name,"status":"PAUSED",
             "advertisingChannelType":"PERFORMANCE_MAX","campaignBudget":rn("campaignBudgets/-1"),
-            "maximizeConversionValue":{},"shoppingSetting":{"merchantId":_digits(args.merchant)},
+            **bid_field,"shoppingSetting":{"merchantId":_digits(args.merchant)},
             "containsEuPoliticalAdvertising":"DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING","urlExpansionOptOut":False}}},
          {"campaignCriterionOperation":{"create":{"campaign":rn("campaigns/-2"),
             "location":{"geoTargetConstant":f"geoTargetConstants/{_digits(args.geo)}"}}}},
@@ -412,7 +428,8 @@ def main():
         r=requests.post(url, headers=_headers(c,tok), json=body, timeout=90)
         if r.status_code!=200: sys.exit(f"Google Ads API {r.status_code}: {r.text[:900]}")
         print(("APLICAT" if args.apply else "DRY-RUN (validateOnly) — adaugă --apply ca să creezi campania"))
-        print(f"  PMax „{args.name}\" (PAUSED) pe {cid} | buget {args.budget}/zi | MC {args.merchant} | geo {args.geo}")
+        _bidlbl="Maximize Conversions (cold-start)" if args.bidding=="maxconv" else "Maximize Conversion Value"
+        print(f"  PMax „{args.name}\" (PAUSED) pe {cid} | buget {args.budget}/zi | MC {args.merchant} | geo {args.geo} | bidding {_bidlbl}")
         print("  ⚠️ skeleton fără assets — adaugă creative/imagini/text pe asset group înainte de enable")
         for x in r.json().get("mutateOperationResponses",[]):
             for k,v in x.items():
