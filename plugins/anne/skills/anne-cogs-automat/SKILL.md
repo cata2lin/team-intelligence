@@ -1,7 +1,7 @@
 ---
 name: anne-cogs-automat
 description: Adaugare COGS automat pentru produse HA pe cele 4 magazine deals (ofertelezilei, reduceribune, casaofertelor/bonhaus, magdeal). Cauta TOM Real COGS + TOM Shipping Cost in spreadsheet-ul TOM, aplica formula (cogs+ship) x USD x 1.10 x 1.21 si seteaza costul pe Shopify. Foloseste cand vrei sa setezi sau actualizezi COGS pe produse HA, cand adaugi produse noi in catalog, cand vrei sa stii ce produse HA nu au COGS setat. Triggere: "seteaza cogs la HA", "adauga cost la produse", "lipseste cogs", "pune cogs automat", "calculeaza costul HA", "ce produse HA nu au cogs", "update cogs deals".
-argument-hint: "--skus HA-0001 HA-0002 ... [--apply] [--scan] [--usd 4.55]"
+argument-hint: "--skus HA-0001 HA-0002 ... [--stores OFER RED BON MAG] [--apply] [--scan] [--usd 4.55]"
 ---
 
 # ha-cogs-update — Adaugare COGS automat HA
@@ -44,6 +44,7 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/ha_cogs_update.py" --skus HA-0001 --usd 4.
 | Flag | Default | Descriere |
 |------|---------|-----------|
 | `--skus SKU [SKU ...]` | — | Lista de SKU-uri de procesat |
+| `--stores STORE [...]` | toate 4 | Magazine: OFER RED BON MAG (ex: --stores MAG BON) |
 | `--apply` | off | Aplica efectiv pe Shopify (fara = dry run) |
 | `--scan` | off | Gaseste toate HA-urile fara COGS inainte de a procesa |
 | `--usd FLOAT` | 4.55 | Cursul USD → RON folosit in formula |
