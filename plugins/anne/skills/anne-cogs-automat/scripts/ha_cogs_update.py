@@ -176,9 +176,9 @@ def scan_missing_cogs() -> list:
         print(f"  {store['prefix']}: scanat", flush=True)
     return sorted(missing_skus)
 
-def push_cogs(skus: list, sheet_id: str, usd: float, apply: bool):
+def push_cogs(skus: list, sheet_id: str, usd: float, apply: bool, stores: list):
     """Cauta in TOM, calculeaza si seteaza COGS pe Shopify."""
-    print(f"\n{'[DRY RUN] ' if not apply else ''}Procesez {len(skus)} SKU-uri\n")
+    print(f"\n{'[DRY RUN] ' if not apply else ''}Procesez {len(skus)} SKU-uri pe {[s['prefix'] for s in stores]}\n")
 
     print("Cautare in TOM spreadsheet...", flush=True)
     tom = lookup_tom(set(skus), sheet_id)
@@ -201,7 +201,7 @@ def push_cogs(skus: list, sheet_id: str, usd: float, apply: bool):
     for sku, (cogs, ship, _) in found.items():
         ron = str(round((cogs + ship) * usd * 1.10 * 1.21, 2))
         row = []
-        for store in STORES:
+        for store in stores:
             nodes = gql(store["domain"], store["token"], FIND_Q, {"sku": f"sku:{sku}"})["data"]["productVariants"]["nodes"]
             match = next((n for n in nodes if n["sku"] == sku), None)
             if not match:
@@ -229,16 +229,31 @@ def push_cogs(skus: list, sheet_id: str, usd: float, apply: bool):
     else:
         print(f"\nRuleaza cu --apply ca sa aplici pe Shopify.")
 
+ALL_PREFIXES = [s["prefix"] for s in STORES]
+
 def main():
-    parser = argparse.ArgumentParser(description="Adaugare COGS automat HA pe 4 magazine deals")
+    parser = argparse.ArgumentParser(description="Adaugare COGS automat HA pe magazine deals")
     parser.add_argument("--skus", nargs="+", metavar="SKU", help="SKU-uri de procesat (ex: HA-0001 HA-0002)")
     parser.add_argument("--apply", action="store_true", help="Aplica efectiv pe Shopify (default: dry run)")
     parser.add_argument("--scan", action="store_true", help="Gaseste toate HA-urile fara COGS inainte")
     parser.add_argument("--usd", type=float, default=4.55, help="Cursul USD→RON (default: 4.55)")
     parser.add_argument("--sheet", default=TOM_SPREADSHEET_ID, help="Spreadsheet ID alternativ")
+    parser.add_argument("--stores", nargs="+", metavar="STORE",
+                        help=f"Magazine pe care sa pui COGS (default: toate). Optiuni: {ALL_PREFIXES}")
     args = parser.parse_args()
 
     load_stores()
+
+    # Filtreaza magazinele daca s-a specificat --stores
+    if args.stores:
+        wanted = [p.upper() for p in args.stores]
+        active_stores = [s for s in STORES if s["prefix"] in wanted]
+        unknown = [p for p in wanted if p not in ALL_PREFIXES]
+        if unknown:
+            print(f"Magazine necunoscute: {unknown}. Disponibile: {ALL_PREFIXES}")
+            sys.exit(1)
+    else:
+        active_stores = STORES
 
     skus = list(args.skus) if args.skus else []
 
@@ -253,7 +268,7 @@ def main():
         parser.print_help()
         sys.exit(0)
 
-    push_cogs(skus, args.sheet, args.usd, args.apply)
+    push_cogs(skus, args.sheet, args.usd, args.apply, active_stores)
 
 if __name__ == "__main__":
     main()
