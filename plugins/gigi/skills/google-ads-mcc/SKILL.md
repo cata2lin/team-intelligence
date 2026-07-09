@@ -269,6 +269,40 @@ A PMax asset group needs a full set before it serves beyond Shopping. Build with
 
 **⚠️ Nuanțe:** „20% resetează learning" = consens practicieni (Google zice doar „orice schimbare de setare intră în learning") — plafon prudent, nu regulă oficială. Din **iun 2026 UI-ul a redenumit**: „Max conv + tCPA" → **„Target CPA"**, „Max conv value + tROAS" → **„Target ROAS"**.
 
+## 📚 Principii avansate + schimbări de platformă 2026 (research aprofundat, iul-2026)
+> Coroborat din 2 rapoarte deep-research (Gemini + ChatGPT) + research-ul nostru. Extinde rețeta pe etape de mai sus.
+
+**Arhitectura conversiilor (ÎNAINTE de bidding — poluarea semnalului = cauza #1 de learning eșuat):**
+- **Max 1-3 conversii PRIMARE/cont** (biddable), doar macro-venit (achiziție / lead validat). Micro-acțiunile (add-to-cart, begin-checkout, view-item, newsletter) = **SECUNDARE** (observare, ignorate de bidding). `fix_conversion_goals.py` face exact asta (PURCHASE-only biddable).
+- ⚠️ **Custom Goal gotcha**: bagi o acțiune secundară într-un Custom Goal → ea **REINTRĂ** în semnalul primar de bidding pt campaniile cu acel goal. Auditează goal-urile înainte de lansare.
+- **NU folosi evenimente GA4-importate ca primar** (întârzieri + atribuire diferită → subraportare); tag native Google Ads via GTM. Enhanced Conversions Web nu merge pe conversii doar-din-GA4.
+
+**📏 Regula 10× buget la cold-start:** buget zilnic ≥ **10× tCPA-ul țintă**, ca algoritmul să aibă spațiu de licitat. Buget meschin raportat la CPA = campanie stagnantă. (țintă CPA 20 → buget ≥ ~200/zi; dacă n-ai, țintește un produs/CPA mai ieftin.)
+
+**🔴 SCHIMBARE PLATFORMĂ „Bidding Target Optimization" (anunțat 15-iun-2026, AUTO de la 17-AUG-2026) — ne afectează direct:**
+- Până acum o campanie **„Limited by budget" + tCPA/tROAS SUPRA-performa** (ex. tCPA 50 livra la 30, licitând în jos ca să stoarcă volum din buget mic) — **exact trucul „tROAS ca gardă pe winneri budget-limited"** (vezi Optimization playbook + Grandia).
+- **După 17-aug** Google forțează optimizarea spre targetul EFECTIV → campania de la 30 urcă spre 50. **Deci trucul „target ca frână pe budget-limited" MOARE**; scalarea devine predictibilă (mărești buget pe target corect → cost stabil).
+- **DE FĂCUT înainte de aug** pe campaniile budget-limited cu target: „Bid Target Adjustment Tool" (iul-2026) → **Opțiunea A: aliniază targetul la performanța reală recentă** (ex. tCPA 50→30) ca să nu-ți urce costul peste noapte. (Sau: C=accepți creșterea, D=treci pe Max Conversions, E=mărești bugetul.) ⚠️ Verifică datele exacte în cont — sunt anunțuri viitoare.
+
+**Stair-stepping la STRÂNGEREA targetului:** NU seta targetul direct la nivelul dorit dacă e sub performanța istorică (→ sufocă, se retrage din licitații). Setează **+5-10% peste media recentă**, apoi coboară în trepte fine ~1 săpt/pas.
+
+**Structura Hagakure (Search):** consolidează — **1 URL / ad group**, broad match + Smart Bidding + RSA. Ține SEPARAT (campanie/ad group propriu) doar paginile cu **≥3.000 impresii/săpt (~12.000/lună)**; long-tail-ul → **DSA** (nu diluează bugetul). NU SKAG-uri (fragmentează datele → learning etern). Asset groups PMax = pe **temă produs / marjă**, NU pe audiență.
+
+**Ads Power Pairing (scalare orizontală):** Broad Match Search (Smart Bidding) + PMax rulate ÎMPREUNĂ — broad prinde cereri noi atipice, PMax prinde utilizatorii pe rețelele adiacente (YT/Gmail/Discover). + Customer Match (High-LTV) → lookalike / optimized targeting. Evită suprapunerea audiențelor (auto-canibalizare).
+
+**Hybrid PMax + Standard Shopping (e-commerce — relevant GRANDIA):** PMax favorizează bestsellerii și neglijează long-tail-ul („zombie products"). Prioritatea obligatorie PMax > Standard Shopping **a fost ELIMINATĂ (2025/26) → decide Ad Rank** → poți rula hibrid ca corecție chirurgicală:
+  - **Zombie Resurrection** — scoți SKU-urile invizibile din PMax → Shopping „Maximize Clicks" (cumperi densitate de date) → le readuci în PMax.
+  - **Brand Guardian** — excluzi brandul din PMax (nu mai umflă ROAS fals) → Shopping cu CPC controlat.
+  - **Margin Defender** — produse cu marjă mică scoase din PMax (AI caută ROAS brut, nu profit).
+  - **Clearance** — lichidare stoc → Shopping High-Priority + Manual CPC agresiv.
+  - Tranziție graduală (~20% stoc/pas + urci tROAS PMax ca să cedeze marginea).
+
+**POAS > ROAS (maturitate):** PMax vânează ROAS BRUT (repetă produse ieftine cu marjă mică). Migrează spre PROFIT: `custom_labels` de marjă în feed + Offline Conversion Import cu valori de profit + **New Customer Acquisition Value Mode** (bid mai mare pe clienți NOI vs listele de remarketing).
+
+**Conversion lag = nu judeca ferestre scurte:** costul se declară instant, conversiile vin la zile-săptămâni (COD/Shopping = și mai mult). Evaluează pe **30 zile** + coloana **„Conversion Value (By Time)"** (atribuie la momentul conversiei, nu al clickului). Evaluarea prematură = cauza #1 de oprire abuzivă a unui Smart Bidding sănătos (deja lecția noastră Grandia COD-lag).
+
+**Alte schimbări 2026:** call-only ads scoase din creare (feb-2026), opresc afișările (feb-2027) → RSA + call assets. Enhanced Conversions Web+Leads unificate (iun-2026) + migrare spre Data Manager API. Advanced Consent Mode > Basic (ping-uri anonime modelate recuperează conversii — prag ~1000 ev/zi).
+
 ## 6. Change history — track an agency / who changed what
 For accounts an **external agency** runs (e.g. Grandia = SkilledPPC, `matei@skilledppc.com`)
 or to audit any change, use **`change_history.py`** — reads the `change_event` resource and
