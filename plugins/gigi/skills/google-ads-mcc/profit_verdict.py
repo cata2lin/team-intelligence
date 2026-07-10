@@ -2,23 +2,32 @@
 # requires-python = ">=3.10"
 # dependencies = ["psycopg2-binary>=2.9","requests>=2.31"]
 # ///
-"""Profit-based SCALE/HOLD/CUT verdict per ENABLED campaign, across all MCC accounts.
+"""Profit-based SCALE/HOLD/CUT verdict per ENABLED campaign, across all MCC accounts,
++ for SCALE campaigns a real-time BUDGET-LIMITED check (spend TODAY vs current budget)
+so you know which are 🔥 raise-budget-NOW vs necapat (grow horizontally / wait).
 
-Judges by PROFIT (CPA vs real breakeven from breakeven.py, stored in brandref), NOT by a flat
-CPA target — so a PMax at CPA 30 with breakeven 61 is correctly SCALE, not "over target 20".
+Judges by PROFIT (CPA vs real breakeven from breakeven.py, stored in brandref), NOT a flat
+CPA target — a PMax at CPA 30 with breakeven 61 is correctly SCALE, not "over target 20".
 
 Zones (per brand, from brandref):
-  SCALE  CPA <= scale_cpa (= BE_CPA*0.7, keeps ~30% contribution)  → raise budget / loosen target
+  SCALE  CPA <= scale_cpa (= BE_CPA*0.7, keeps ~30% contribution)  → candidate to scale
   HOLD   scale_cpa < CPA <= breakeven_cpa                          → profitable but thin, optimize
   CUT    CPA > breakeven_cpa                                       → losing money, fix/pause
 
-⚠️ Google-reported ROAS is inflated ~1.5x (last-click + Shopping App) — the CPA gate is the
-robust one; the shown ROAS is Google-reported (divide by ~1.5 for real before vs breakeven_roas).
-Refresh the breakeven inputs with `gigi:fulfillment-analytics/breakeven.py --store all` then
-re-store into brandref. Read-only on Google Ads. Usage: `uv run profit_verdict.py [--days 30]`.
+🔑 SCALE ≠ raise-budget. A SCALE campaign only deserves MORE budget if it is BUDGET-LIMITED.
+   ⚠️ Check budget-limited on TODAY's spend vs the CURRENT budget — NOT a 7-day avg. After a
+   same-day budget raise the 7-day avg reflects the OLD budget and FALSELY reads "not capped"
+   (lesson, iul-2026). A budget raise takes 1-3 days to be USED → re-check daily, don't stack
+   same-day. Budget changes ≤20% don't reset learning; a SCALE campaign still capped on its
+   NEW budget deserves another ≤20% bump. If SCALE but NOT capped → grow horizontal (non-brand
+   keywords / new products / geos), budget won't be spent.
+
+⚠️ Google-reported ROAS is inflated ~1.5x — the CPA gate is robust; shown ROAS is Google's.
+Refresh breakeven: `gigi:fulfillment-analytics/breakeven.py --store all` → re-store in brandref.
+Read-only on Google Ads. Usage: `uv run profit_verdict.py [--days 30]`.
 """
-import os, re, sys, argparse, importlib.util, requests
-DAYS=int(next((a.split("=")[1] for a in sys.argv if a.startswith("--days=")), "30"))
+import os, re, sys, importlib.util, requests
+DAYS=30
 if "--days" in sys.argv:
     try: DAYS=int(sys.argv[sys.argv.index("--days")+1])
     except: pass
@@ -26,12 +35,10 @@ API="v21"
 HERE=os.path.dirname(os.path.abspath(__file__))
 spec=importlib.util.spec_from_file_location("brandref",os.path.join(HERE,"brandref.py"))
 br=importlib.util.module_from_spec(spec); spec.loader.exec_module(br)
-# brand-key (brandref) -> (google customer id, currency)
 ACCOUNTS=[("grandia","9069610821","RON"),("gt","5031005158","RON"),("nubra","7585902074","RON"),
  ("belasil","7566352958","RON"),("ofertele","4778636466","RON"),("gento","8148962111","RON"),
  ("carpetto","4069952156","RON"),("rossi","8287989891","RON"),("nocturna","2630158527","RON"),
  ("bonhaus_pl","6858257397","PLN"),("bonhaus_cz","3141935298","CZK")]
-# auth from metrics DB (same pattern as gads.py)
 import psycopg2, psycopg2.extras, subprocess
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 def _kb(k): return subprocess.run(["uv","run",os.path.join(HERE,"..","..","..","core","scripts","kb.py"),"secret-get",k],capture_output=True,text=True).stdout.strip() if not os.environ.get("DATABASE_URL_METRICS") else os.environ["DATABASE_URL_METRICS"]
@@ -47,27 +54,49 @@ H={"Authorization":f"Bearer {tok}","developer-token":c["dev"],"login-customer-id
 def q(cid,g):
     r=requests.post(f"https://googleads.googleapis.com/{API}/customers/{cid}/googleAds:search",headers=H,json={"query":g},timeout=60)
     return r.json().get("results",[]) if r.status_code==200 else []
-GAQL=("SELECT campaign.name,campaign.advertising_channel_type,metrics.cost_micros,metrics.conversions,"
- f"metrics.conversions_value FROM campaign WHERE campaign.status='ENABLED' AND metrics.cost_micros>0 "
- f"AND segments.date DURING LAST_{DAYS}_DAYS")
+GAQL=("SELECT campaign.id,campaign.name,campaign.advertising_channel_type,campaign_budget.amount_micros,"
+ "metrics.cost_micros,metrics.conversions,metrics.conversions_value FROM campaign "
+ f"WHERE campaign.status='ENABLED' AND metrics.cost_micros>0 AND segments.date DURING LAST_{DAYS}_DAYS")
+TODAY_Q=("SELECT campaign.id,metrics.cost_micros,metrics.search_budget_lost_impression_share "
+ "FROM campaign WHERE campaign.status='ENABLED' AND segments.date DURING TODAY")
 buckets={"SCALE":[],"HOLD":[],"CUT":[]}
 for brand,cid,cur in ACCOUNTS:
     ref=br.get(brand) or {}
-    be=ref.get("breakeven_cpa"); scale=ref.get("scale_cpa"); beroas=ref.get("breakeven_roas")
+    be=ref.get("breakeven_cpa"); scale=ref.get("scale_cpa")
     if not be: continue
-    for r in q(cid,GAQL):
-        cc=r["campaign"]; m=r["metrics"]; nm=cc["name"][:26]; ch=cc.get("advertisingChannelType","")[:4]
+    rows=q(cid,GAQL)
+    scale_ids=[]
+    parsed=[]
+    for r in rows:
+        cc=r["campaign"]; m=r["metrics"]
         cost=int(m.get("costMicros",0))/1e6; conv=float(m.get("conversions",0)); val=float(m.get("conversionsValue",0))
-        if conv<8: continue  # anti-noise
+        if conv<8: continue
         cpa=cost/conv; roas=val/cost if cost else 0
-        line=f"{brand}·{nm} [{ch}] CPA={cpa:.0f} ({cur}; BE {be}, scale {scale}) ROASg~{roas:.1f} conv{DAYS}={conv:.0f} cost={cost:.0f}"
         z="SCALE" if cpa<=scale else ("HOLD" if cpa<=be else "CUT")
-        buckets[z].append(line)
-LBL={"SCALE":"🟢 SCALE (CPA ≤ scale_cpa = profit sănătos → +buget/relaxează target)",
- "HOLD":"🟡 HOLD (scale_cpa < CPA ≤ breakeven = profit subțire → optimizează, nu scala)",
+        bud=int(r.get("campaignBudget",{}).get("amountMicros",0))/1e6
+        parsed.append((z,cc["id"],cc["name"][:26],cc.get("advertisingChannelType","")[:4],cpa,roas,conv,cost,bud))
+        if z=="SCALE": scale_ids.append(cc["id"])
+    # real-time budget-limited (TODAY) only where we have SCALE campaigns
+    today={}
+    if scale_ids:
+        for r in q(cid,TODAY_Q):
+            m=r["metrics"]; today[r["campaign"]["id"]]={"cost":int(m.get("costMicros",0))/1e6,
+                "blis":float(m["searchBudgetLostImpressionShare"]) if "searchBudgetLostImpressionShare" in m else None}
+    for z,cmpid,nm,ch,cpa,roas,conv,cost,bud in parsed:
+        base=f"{brand}·{nm} [{ch}] CPA={cpa:.0f} ({cur}; BE {be}, scale {scale}) ROASg~{roas:.1f} conv{DAYS}={conv:.0f}"
+        if z=="SCALE":
+            t=today.get(cmpid,{}); tc=t.get("cost",0); blis=t.get("blis")
+            util=tc/bud*100 if bud else 0
+            capped = util>=65 or (blis is not None and blis>3)
+            flag="🔥 RAISE (budget-limited AZI)" if capped else "→ necapat: orizontal / așteaptă"
+            b=f" lostBud={blis*100:.0f}%" if blis is not None else ""
+            base+=f" | bud={bud:.0f} azi={tc:.0f}({util:.0f}%){b} {flag}"
+        buckets[z].append(base)
+LBL={"SCALE":"🟢 SCALE (profit sănătos) — 🔥=budget-limited AZI (crește ≤20%) · necapat=orizontal",
+ "HOLD":"🟡 HOLD (profit subțire → optimizează, nu scala)",
  "CUT":"🔴 CUT/FIX (CPA > breakeven = pierde bani)"}
-print(f"=== VERDICT PE PROFIT — ultimele {DAYS} zile (CPA vs breakeven real din brandref) ===")
-print("   ⚠️ ROASg = Google-reported (~1.5× umflat); gate-ul robust = CPA vs breakeven.")
+print(f"=== VERDICT PE PROFIT + BUDGET-LIMITED (AZI) — CPA {DAYS}z vs breakeven brandref ===")
+print("   ⚠️ ROASg = Google-reported (~1.5× umflat); gate = CPA. AZI e zi PARȚIALĂ → util mare/lostBud>0 = capat.")
 for z in ["SCALE","HOLD","CUT"]:
     print(f"\n{LBL[z]} — {len(buckets[z])}")
     for x in buckets[z]: print("  "+x)
