@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["requests>=2.31"]
+# dependencies = ["requests>=2.31","psycopg2-binary>=2.9"]
 # ///
 """Metricool poster — schedule/publish a post to any connected network (TikTok, FB, IG...).
 
@@ -20,12 +20,26 @@ BASE = "https://app.metricool.com/api"
 BRANDS_CACHE = os.path.join(QDIR, "mc_brands.json")
 
 def token():
-    r = subprocess.run(["/bin/zsh", "-lc", f"uv run '{KB}' secret-get METRICOOL_API_TOKEN"],
-                       capture_output=True, text=True)
-    t = r.stdout.strip()
-    if not t:
-        sys.exit("no METRICOOL_API_TOKEN in KB")
-    return t
+    # 1) direct DB via KB_DATABASE_URL (portable: Mac + VPS). secrets.value is plaintext.
+    url = os.environ.get("KB_DATABASE_URL") or subprocess.run(
+        ["/bin/zsh", "-lc", "echo $KB_DATABASE_URL"], capture_output=True, text=True).stdout.strip()
+    if url:
+        try:
+            import psycopg2
+            with psycopg2.connect(url, connect_timeout=15) as c, c.cursor() as cur:
+                cur.execute("SELECT value FROM secrets WHERE key='METRICOOL_API_TOKEN'")
+                row = cur.fetchone()
+                if row and row[0]:
+                    return row[0].strip()
+        except Exception:
+            pass
+    # 2) fallback: kb.py (Mac path)
+    if os.path.exists(KB):
+        t = subprocess.run(["/bin/zsh", "-lc", f"uv run '{KB}' secret-get METRICOOL_API_TOKEN"],
+                           capture_output=True, text=True).stdout.strip()
+        if t:
+            return t
+    sys.exit("no METRICOOL_API_TOKEN (nici KB_DATABASE_URL, nici kb.py)")
 
 def H(tok):
     return {"X-Mc-Auth": tok, "Content-Type": "application/json"}
@@ -66,7 +80,9 @@ def post(a):
         return
     connected = connected or nets  # --force fallback
     text = a.text.replace("\n", " ").strip() if "tiktok" in connected else a.text  # TikTok API: no line breaks
-    when = a.when or (datetime.datetime.now() + datetime.timedelta(minutes=20)).strftime("%Y-%m-%dT%H:%M:00")
+    # real Bucharest wall-clock, independent of system TZ (VPS runs on Berlin = RO-1h)
+    from zoneinfo import ZoneInfo
+    when = a.when or (datetime.datetime.now(ZoneInfo("Europe/Bucharest")) + datetime.timedelta(minutes=20)).strftime("%Y-%m-%dT%H:%M:00")
     body = {
         "publicationDate": {"dateTime": when, "timezone": "Europe/Bucharest"},
         "text": text,
