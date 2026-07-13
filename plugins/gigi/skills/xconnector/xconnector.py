@@ -2546,10 +2546,138 @@ def date_window(a):
             datetime.date.today().isoformat())
 
 
+# ── Imprimantă „aleasă o dată, ținută minte" ────────────────────────────────
+# Config LOCAL pe mașină (imprimanta e specifică mașinii din depozit, NU în KB partajat).
+PRINTER_CFG = os.path.join(os.path.expanduser("~"), ".arona_printbatch.json")
+
+def _load_saved_printer():
+    try:
+        with open(PRINTER_CFG, encoding="utf-8") as f:
+            return (json.load(f) or {}).get("printer") or None
+    except Exception:
+        return None
+
+def _save_printer(name):
+    try:
+        with open(PRINTER_CFG, "w", encoding="utf-8") as f:
+            json.dump({"printer": name}, f)
+    except Exception:
+        pass
+
+def _list_printers():
+    """(names, default_name) pe platforma curentă. ([], None) dacă nu pot lista."""
+    try:
+        if os.name == "nt":
+            out = subprocess.run(["powershell", "-NoProfile", "-Command",
+                                  "Get-Printer | Select-Object -ExpandProperty Name"],
+                                 capture_output=True, text=True, timeout=25).stdout
+            names = [l.strip() for l in out.splitlines() if l.strip()]
+            dflt = subprocess.run(["powershell", "-NoProfile", "-Command",
+                                   "(Get-CimInstance Win32_Printer -Filter 'Default=True').Name"],
+                                  capture_output=True, text=True, timeout=25).stdout.strip()
+            return names, (dflt or None)
+        out = subprocess.run(["lpstat", "-p"], capture_output=True, text=True, timeout=25).stdout
+        names = [l.split()[1] for l in out.splitlines() if l.startswith("printer ")]
+        d = subprocess.run(["lpstat", "-d"], capture_output=True, text=True, timeout=25).stdout.strip()
+        return names, (d.split(":")[-1].strip() if ":" in d else None)
+    except Exception:
+        return [], None
+
+def _pick_printer_interactive():
+    """Listează imprimantele și lasă operatorul să aleagă UNA (o dată) → o salvează. None ⇒ cade pe dialog."""
+    if not sys.stdin.isatty():
+        return None
+    names, dflt = _list_printers()
+    if not names:
+        print("  ⚠️ N-am putut lista imprimantele — cade pe dialogul normal (Ctrl+P).")
+        return None
+    print("  🖨️  Alege imprimanta (o dată — o țin minte data viitoare):")
+    for i, n in enumerate(names, 1):
+        print("      %2d) %s%s" % (i, n, "   [default]" if n == dflt else ""))
+    print("       0) fără imprimantă fixă — deschide dialogul normal (Chrome/Ctrl+P)")
+    try:
+        raw = input("     Nr [%s]: " % ("Enter=default" if dflt else "1")).strip()
+    except (EOFError, KeyboardInterrupt):
+        return None
+    if raw == "0":
+        return None
+    if not raw:
+        chosen = dflt or names[0]
+    elif raw.isdigit() and 1 <= int(raw) <= len(names):
+        chosen = names[int(raw) - 1]
+    elif raw in names:
+        chosen = raw
+    else:
+        print("  ⚠️ Alegere invalidă — dialog normal."); return None
+    _save_printer(chosen)
+    print("  ✅ Reținut «%s» → data viitoare merge DIRECT în coadă (schimbi cu --choose-printer / --printer NAME)." % chosen)
+    return chosen
+
+def _resolve_printer(a):
+    """Ce imprimantă folosim: --print-dialog⇒None · --printer NAME (salvează) · --choose-printer (re-alege) ·
+    salvat (validat) · prima-oară te întreabă. None ⇒ comportament vechi (dialog/Chrome)."""
+    if getattr(a, "force_dialog", False):
+        return None
+    name = getattr(a, "printer", None)
+    if name:
+        _save_printer(name)      # alegerea explicită devine implicita de data viitoare
+        return name
+    if getattr(a, "choose_printer", False):
+        return _pick_printer_interactive()
+    saved = _load_saved_printer()
+    if saved:
+        names, _ = _list_printers()
+        if names and saved not in names:
+            print("  ⚠️ Imprimanta reținută «%s» nu mai există — alege din nou." % saved)
+            return _pick_printer_interactive()
+        return saved
+    return _pick_printer_interactive()
+
+def _silent_print(path, printer):
+    """Trimite PDF-ul DIRECT în coada imprimantei date (fără dialog). True = trimis.
+    Cascadă Windows (fără să obligăm la vreo instalare): SumatraPDF (silent, oricare imprimantă) →
+    verbul shell „printto" (Edge/Adobe, oricare) → verbul „print" (doar imprimanta DEFAULT, zero-install)."""
+    try:
+        import shutil
+        if os.name == "nt":
+            sumatra = next((p for p in (shutil.which("SumatraPDF"), shutil.which("SumatraPDF.exe"),
+                                        r"C:\Program Files\SumatraPDF\SumatraPDF.exe",
+                                        r"C:\Program Files (x86)\SumatraPDF\SumatraPDF.exe",
+                                        os.path.expandvars(r"%LOCALAPPDATA%\SumatraPDF\SumatraPDF.exe"))
+                            if p and os.path.exists(p)), None)
+            if sumatra:
+                subprocess.Popen([sumatra, "-print-to", printer, "-silent", path])
+                return True
+            try:                        # verbul shell „printto" (Edge/Adobe), Python 3.10+ acceptă argumente
+                os.startfile(path, "printto", '"%s"' % printer)
+                return True
+            except (TypeError, OSError):
+                pass
+            _, dflt = _list_printers()  # ultim fallback zero-install: dacă e chiar imprimanta DEFAULT → verbul „print"
+            if dflt and printer == dflt:
+                try:
+                    os.startfile(path, "print")
+                    return True
+                except Exception:
+                    return False
+            return False
+        if shutil.which("lp"):          # macOS/Linux CUPS
+            subprocess.run(["lp", "-d", printer, path], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        return False
+    except Exception:
+        return False
+
 def _print_dialog(path, printer=None):
-    """Deschide PDF-ul batch pt print, cross-platform. Depozitul e pe WINDOWS, printa în CHROME (ca xConnector).
-    Windows: SumatraPDF `-print-dialog`/`-print-to` dacă există → altfel deschide în CHROME (operatorul apasă Ctrl+P).
-    macOS: Preview + Cmd+P. Linux: xdg-open. `printer` (opțional, doar SumatraPDF) = printare DIRECTĂ fără dialog."""
+    """`printer` dat ⇒ trimite DIRECT în coadă (silent). Altfel deschide dialogul:
+    Windows: SumatraPDF `-print-dialog` dacă există → altfel CHROME (operatorul apasă Ctrl+P).
+    macOS: Preview + Cmd+P. Linux: xdg-open."""
+    if printer:
+        if _silent_print(path, printer):
+            print("  🖨️  → trimis DIRECT în coada imprimantei «%s»." % printer)
+            return
+        print("  ⚠️ N-am putut trimite direct pe «%s» (instalează SumatraPDF pt print silent) — deschid dialogul." % printer)
     if os.name == "nt":   # Windows (depozit)
         import shutil
         sumatra = next((p for p in (shutil.which("SumatraPDF"), shutil.which("SumatraPDF.exe"),
@@ -2557,12 +2685,8 @@ def _print_dialog(path, printer=None):
                                     os.path.expandvars(r"%LOCALAPPDATA%\SumatraPDF\SumatraPDF.exe"))
                         if p and os.path.exists(p)), None)
         if sumatra:
-            if printer:
-                subprocess.Popen([sumatra, "-print-to", printer, "-silent", path])
-                print("  → SumatraPDF: trimis DIRECT pe imprimanta %s." % printer)
-            else:
-                subprocess.Popen([sumatra, "-print-dialog", path])
-                print("  → SumatraPDF: dialog de print deschis.")
+            subprocess.Popen([sumatra, "-print-dialog", path])
+            print("  → SumatraPDF: dialog de print deschis.")
             return
         # Chrome (așa deschidea xConnector etichetele în depozit) → operatorul apasă Ctrl+P pt dialog
         chrome = next((p for p in (shutil.which("chrome"), shutil.which("chrome.exe"),
@@ -2875,15 +2999,21 @@ def cmd_print_batch(a):
             for nm, why in failed[:15]:
                 print("        ⚠️ %s — %s" % (nm, why))
     if not a.apply:
-        print("  → [DRY-RUN] atâtea sunt de printat%s. Adaugă --apply ca să descarci + deschizi dialogul de print."
+        print("  → [DRY-RUN] atâtea sunt de printat%s. Adaugă --apply ca să descarci + trimiți în coada imprimantei (prima oară o alegi, apoi o ține minte)."
               % (" (câte un PDF per bucket)" if len(buckets) > 1 else ""))
         if not test:
             print("  ⚠️ --apply MARCHEAZĂ etichetele `downloaded` (ies din coada de print) — DOAR când chiar printezi.")
         return
     if not targets:
         print("  Nimic de printat."); return
-    if not getattr(a, "no_print", False):
-        _print_dialog(targets[0], getattr(a, "printer", None))
+    if getattr(a, "no_print", False):
+        return
+    printer = _resolve_printer(a)      # alege o dată → reține; None ⇒ dialog normal
+    if printer:
+        for t in targets:              # silent ⇒ trimit TOATE batch-urile (mono+multi) direct în coadă
+            _print_dialog(t, printer)
+    else:
+        _print_dialog(targets[0], None)
         if len(targets) > 1:
             print("  ℹ️ %d batch-uri (mono+multi): am deschis primul; deschide-le pe rând pt print." % len(targets))
 
@@ -2938,7 +3068,9 @@ def main():
     ap.add_argument("--complexity-split", action="store_true", dest="complexity_split", help="print-batch: separă comenzile cu 1 PRODUS (mono) de cele cu MAI MULTE (multi) — PDF-uri + loguri separate (batch_<ts>_mono/_multi), ca la pick&pack.")
     ap.add_argument("--limit", type=int, help="print-batch: max AWB-uri/batch (implicit 250). Restul rămâne pt rularea următoare.")
     ap.add_argument("--offset", type=int, default=0, help="print-batch: sare primele N etichete (paginare batch-cu-batch la RE-PRINT, ex --offset 250 = batch 2). În producție (downloaded=false) nu e nevoie — fiecare batch iese din coadă.")
-    ap.add_argument("--printer", help="print-batch (Windows+SumatraPDF): printează DIRECT pe imprimanta dată, fără dialog (batch rapid).")
+    ap.add_argument("--printer", help="print-batch: trimite DIRECT în coada imprimantei date (fără dialog) + o REȚINE ca implicită. Fără el, prima oară te întreabă și ține minte alegerea.")
+    ap.add_argument("--choose-printer", action="store_true", dest="choose_printer", help="print-batch: re-alege imprimanta (listează + salvează din nou), chiar dacă e una reținută.")
+    ap.add_argument("--print-dialog", action="store_true", dest="force_dialog", help="print-batch: ignoră imprimanta reținută și deschide dialogul normal (Chrome/Ctrl+P) o singură dată.")
     a = ap.parse_args()
     if a.cmd in ("awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
                  "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc", "addr-set"):
