@@ -1,0 +1,14 @@
+/* ── Graph "glow" — knowledge-graph neon look ──
+   Enable: Settings → Appearance → CSS snippets → toggle "graph-glow" (setup_obsidian.py does this).
+   Dark radial background + saturation/brightness on the canvas so colored links "burn" like the
+   knowledge-graph renders. (Real per-node bloom = the New 3D Graph plugin; CSS can't glow one node.) */
+
+.workspace-leaf-content[data-type="graph"] .view-content,
+.workspace-leaf-content[data-type="localgraph"] .view-content {
+  background: radial-gradient(circle at 50% 42%, #0b1030 0%, #060814 55%, #01020a 100%) !important;
+}
+
+.workspace-leaf-content[data-type="graph"] canvas,
+.workspace-leaf-content[data-type="localgraph"] canvas {
+  filter: saturate(1.7) brightness(1.18) contrast(1.05);
+}

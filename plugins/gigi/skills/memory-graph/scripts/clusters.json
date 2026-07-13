@@ -1,0 +1,10 @@
+[
+  { "hub": "shopify-app-factory",          "match": "app|flowfill|blogsmith|pageforge|citeme|fleet|accessproof|pixelproof|reviewlift|pricesentry|faqgenie|rankforge|basketboost|productstudio|termforge|factory|screencast|crash-safe-llm" },
+  { "hub": "google-ads-launch-playbook",   "match": "google-ads|gads|google-launch|google-change|pmax|customer-match|takeover|gento-carpetto|esteban-google|bonhaus.*google|cz-rossi-google|nocturna-google" },
+  { "hub": "cs-map-and-windows-encoding",  "match": "^cs-|richpanel|xconnector|awb|dpd|dragon|serial-refuser|customer-identity|customer-service|parcel-count" },
+  { "hub": "profit-data-sources-truth",    "match": "profit|pnl|cpa|cache|marketing|breakeven|sku-ad|ha-vs|board-sheet|financiar|mapping-tiktok|meta-token|metrics-warehouse|raport-zilnic|orqestra" },
+  { "hub": "seo-audit-stores",             "match": "seo|blog|social|articles|organic|noindex|geo|aeo|clarity|metricool|instapress|ga4|fb-comment|fb-page|tiktok-comments|labnoir" },
+  { "hub": "ops-analytics-skills-batch",   "match": "analytics|skill|reorder|restock|sourcing|deliverability|fulfillment|product-|lifecycle|grandia-price|grandia-self|dropship|bestseller|image-gen|image-match|bags-po|gento-apreciat" },
+  { "hub": "cod-landing-playbook",         "match": "rossi|releaseit|surprise-perfume|esteban-perfume|cod-landing|mc-deals|ofertele-misrep|store-domain|shopify-preferences" },
+  { "hub": "scripturi-project-overview",   "match": "gmail|vds-deploy|no-db-reset|schedule-cloud|efficiency|second-brain|multi-instance|prisma-offline|apps-script|visual-feedback|verify-on-mobile|deep-research|academic-writing|email-send|video-editing|team-intelligence|kb-stale|cloudflare|youtube" }
+]
