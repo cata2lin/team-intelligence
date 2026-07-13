@@ -15,16 +15,10 @@ from googleapiclient.http import MediaIoBaseDownload
 from google import genai
 
 QDIR = os.path.dirname(os.path.abspath(__file__))
-SP_DIR = "/Users/gheorghebeschea/Downloads/Scripturi/team-intelligence/plugins/gigi/skills/social-post"
-sys.path.insert(0, SP_DIR)
-import social_post as sp  # blob_upload
 sys.path.insert(0, QDIR)
 import vetting_store as vs  # DB cache + full library
-KB = "/Users/gheorghebeschea/Downloads/Scripturi/team-intelligence/plugins/core/scripts/kb.py"
+from lib import secret, blob_upload  # portable: KB secret via DB + Vercel Blob (Mac + VPS)
 CRE = "1pjDE3spDnpRuLUtTUzNUPx9XRyPA_gBP"
-
-def secret(k):
-    return subprocess.run(["/bin/zsh","-lc",f"uv run '{KB}' secret-get {k}"],capture_output=True,text=True).stdout.strip()
 
 CTX = {
  "Nubra": "Nubra = parfumuri dama/barbati, positioning value-first: 'miros de lux la pret accesibil', 'cel mai mic pret garantat'. Voce prietenoasa, accesibila.",
@@ -151,7 +145,7 @@ def main():
             # text is fine for edited CREATIVE reels — do NOT reject on text_ars here.
             ok = v.get("ok_de_postat") and v.get("pe_brand")
             print(f"   {'✅' if ok else '❌'} {c['name'][:32]} {c['dur']}s cal={v.get('calitate')} text_ars={v.get('text_ars')} ok_post={v.get('ok_de_postat')}",flush=True)
-            blob=sp.blob_upload(tmp) if ok else None
+            blob=blob_upload(tmp) if ok else None
             if ok:
                 cap=v.get("caption","").strip(); tags=" ".join(v.get("hashtags",[]))
                 full=(cap+("\n\n"+tags if tags else "")).strip()

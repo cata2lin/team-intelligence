@@ -15,6 +15,8 @@ Usage:
   python social_queue_poster.py --limit 1 --apply         # cap #brands this run
 """
 import json, os, sys, subprocess, argparse, datetime
+from zoneinfo import ZoneInfo
+RO_TZ = ZoneInfo("Europe/Bucharest")  # slots/when in real RO wall-clock (VPS runs on Berlin)
 
 QDIR = os.path.dirname(os.path.abspath(__file__))
 QFILE = os.path.join(QDIR, "queue.json")
@@ -83,11 +85,9 @@ def today_schedule(now):
     picked = picked_hours[:n]
     return [base.replace(hour=h, minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M:00") for h in picked]
 
-def post(brand, reel, apply, when=None):
-    """Publish this reel to ALL connected networks via Metricool (one post), scheduled at `when`."""
-    label = MC_LABELS.get(brand, brand)
+def _mc(label, networks, reel, when, apply):
     cmd = ["uv", "run", "mc_post.py", "post", "--brand", label,
-           "--network", NETWORKS, "--media", reel["url"], "--text", reel["caption"]]
+           "--network", networks, "--media", reel["url"], "--text", reel["caption"]]
     if when:
         cmd += ["--when", when]
     cmd.append("--publish" if apply else "--dry")  # dry = print only, no Metricool write
@@ -96,6 +96,18 @@ def post(brand, reel, apply, when=None):
     ok = ("HTTP 200" in out) or ("[DRY]" in out and not apply)
     tail = "\n".join(l for l in out.splitlines()
                      if any(k in l for k in ("PUBLISH", "[DRY]", "HTTP", "⚠️", "negasit")))
+    return ok, tail
+
+def post(brand, reel, apply, when=None):
+    """Publish to ALL networks; if that fails, retry WITHOUT youtube (some reels fail YT Shorts
+    validation and would otherwise kill the whole post)."""
+    label = MC_LABELS.get(brand, brand)
+    ok, tail = _mc(label, NETWORKS, reel, when, apply)
+    if not ok and apply and "youtube" in NETWORKS:
+        nets = ",".join(n for n in NETWORKS.split(",") if n != "youtube")
+        ok2, tail2 = _mc(label, nets, reel, when, apply)
+        tail += "\n      ↻ retry fără youtube → " + ("OK" if ok2 else "tot EȘUAT")
+        ok = ok2
     return ok, tail
 
 def main():
@@ -131,7 +143,7 @@ def main():
             elif a.apply:
                 logline(f"      ⚠️ {a.brand}: EȘUAT — nu marchez")
     else:  # round-robin: walk from rot_idx, post next brands at recipe-driven slots
-        slots = today_schedule(datetime.datetime.now())
+        slots = today_schedule(datetime.datetime.now(RO_TZ))
         target = a.limit if a.limit > 0 else len(slots)
         logline(f"  rețetă: {len(slots)} slot(uri) azi @ {', '.join(s[11:16] for s in slots)} → {target} branduri")
         order = [(rot_idx + k) % len(rotation) for k in range(len(rotation))]

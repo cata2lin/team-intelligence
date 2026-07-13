@@ -17,13 +17,9 @@ from google import genai
 import requests
 
 QDIR=os.path.dirname(os.path.abspath(__file__))
-SP_DIR="/Users/gheorghebeschea/Downloads/Scripturi/team-intelligence/plugins/gigi/skills/social-post"
-sys.path.insert(0,SP_DIR); import social_post as sp
 sys.path.insert(0,QDIR); import vetting_store as vs
-KB="/Users/gheorghebeschea/Downloads/Scripturi/team-intelligence/plugins/core/scripts/kb.py"
+from lib import secret, blob_upload  # portable: KB secret via DB + Vercel Blob (Mac + VPS)
 HA_FOLDERS=["1CdUfqKisb22urOr8seDxik4wvEAXJQLw","1z8kFoaV6NFcuR-THt_S5jqVGpcuauuvR"]
-
-def secret(k): return subprocess.run(["/bin/zsh","-lc",f"uv run '{KB}' secret-get {k}"],capture_output=True,text=True).stdout.strip()
 
 # deals brand (Metricool label) -> Shopify prefix in SHOPIFY_STORES_CSV
 STORE={"Ofertele Zilei":"OFER","Magdeal":"MAG","Reduceri bune":"RED","Casa Ofertelor":"BON"}
@@ -139,7 +135,7 @@ def main():
                 except Exception as e: print(f"   dl fail {name}:{str(e)[:60]}"); continue
                 an=vet(tmp)
                 if not an: continue
-                ok=an.get("ok_de_postat"); blob=sp.blob_upload(tmp) if ok else None
+                ok=an.get("ok_de_postat"); blob=blob_upload(tmp) if ok else None
                 if ok:
                     cap=an.get("caption","").strip(); tags=" ".join(an.get("hashtags",[]))
                     full=(cap+("\n\n"+tags if tags else "")).strip(); an["_caption_full"]=full

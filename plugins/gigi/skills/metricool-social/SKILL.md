@@ -18,9 +18,34 @@ Everything organic goes through **Metricool** (one flat-rate account, already pa
 Instagram + Facebook + YouTube. Replaces the old Meta-app path. Content is sourced from Drive, vetted by
 Gemini, and deduped so refilling the queue never reposts.
 
-## Runtime location
-Live scripts + data run from **`~/Downloads/Scripturi/social-queue/`** (queue.json, posted_registry.json,
-mc_brands.json, poster.log). This skill folder holds the canonical copies of the code.
+## Runtime = FULL VPS (no Mac dependency)
+Everything runs on the **VPS `84.46.242.181` at `/root/social-queue/`** — poster AND pickers. There is NO
+NAS dependency (content = Google Drive, a cloud API reachable from the VPS), so nothing needs the Mac.
+- **Poster cron** (root crontab): `0 9 * * * /usr/bin/flock -n /tmp/social_poster.lock /root/social-queue/run.sh`
+  → **09:00 Berlin = 10:00 RO** (VPS is on Berlin = RO−1h, constant offset all year; Debian cron has no reliable CRON_TZ).
+- **`run.sh`** wrapper (the 3 gotchas that MUST be right, else it silently fails):
+  1. `export PATH=/root/.local/bin:$PATH` — else the poster's `subprocess.run(["uv","run","mc_post.py"...])`
+     dies with `FileNotFoundError: 'uv'` (cron's PATH lacks `/root/.local/bin`).
+  2. `set -a; source /root/.kb_env; set +a` — exports `KB_DATABASE_URL` to child processes (token fetch).
+  3. `export TZ=Europe/Bucharest` (belt; the scripts also use ZoneInfo, see below).
+- **`/root/.kb_env`** (chmod 600) holds `KB_DATABASE_URL` + `EMPLOYEE_HANDLE=gigi` (transferred from Mac; VPS had no KB).
+- **Deploy from Mac** with `vps.py` (paramiko, SSH pass from KB `PROFIT_SSH_HOST/USER/PASS`): `uv run vps.py put <local> <remote>` / `get` / `run "<cmd>"`.
+- **Mac launchd is DISABLED** (`~/Library/LaunchAgents/com.arona.social-poster.plist.disabled-moved-to-vps`) —
+  macOS TCC blocks scheduled jobs from `~/Downloads` (`operation not permitted: poster.log`), which is why it moved to VPS.
+
+## Portability + timezone gotchas (hard-won)
+- **`lib.py`** = portable `secret(key)` (direct `SELECT value FROM secrets` via `KB_DATABASE_URL`, plaintext) +
+  `blob_upload(path)` (Vercel Blob). Pickers + mc_post import this — NO hardcoded Mac `kb.py`/`social_post` paths.
+- **⚠️ TIMEZONE**: VPS clock = Berlin (RO−1h). `datetime.now()` labeled `Europe/Bucharest` = **1h in the past** →
+  Metricool 400 `"Given datetime cannot be in the past"` for near-future slots. FIX: mc_post + poster use
+  `datetime.now(ZoneInfo("Europe/Bucharest"))` for `when`/slots (independent of system TZ).
+- **Poster resilience**: if the all-4-networks post fails, it retries WITHOUT youtube (a reel YT-Shorts rejects
+  won't kill TikTok/IG/FB). Deals brands auto-skip youtube (not connected).
+
+## Refill the queue (on the VPS, no sync needed)
+`uv run vps.py run '... cd /root/social-queue; uv run pick_drive_brand.py "Nubra" "Esteban" --per 4'` — the
+picker appends straight to the VPS `queue.json`. (Mac refill still works via **pull → pick → push**: `vps.py get`
+queue.json → run picker locally → `vps.py put` back, so VPS posted-flags aren't clobbered.)
 
 ## Secrets (KB, never echo values)
 - `METRICOOL_API_TOKEN` — Metricool REST token (header `X-Mc-Auth`). userId ARONA = **3986721**.
