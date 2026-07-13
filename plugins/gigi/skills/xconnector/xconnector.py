@@ -2662,6 +2662,62 @@ def order_group_key(name, olines, a):
     return ((s or "~~~~~").upper(), q or 0)
 
 
+def _dl_merge_batch(pending, outdir, ts, suffix=""):
+    """Descarcă etichetele din `pending` (retry 3×), le îmbină într-un batch PDF (batch_<ts><suffix>.pdf) + log CSV,
+    șterge individualele după merge. Întoarce (merged_path|None, n_ok, failed_list, log_path)."""
+    import time as _time, csv, datetime as _dt
+    pdfs, log_rows, failed = [], [], []
+    for dom, nm, cid, trk, url, auth in pending:
+        b, err = None, None
+        for attempt in range(3):   # retry pe blip de rețea — NU pierdem tăcut eticheta unui client
+            try:
+                req = urllib.request.Request(url, headers=({"Authorization": auth} if auth else {}))
+                with urllib.request.urlopen(req, timeout=45) as r:
+                    data = r.read()
+                if data[:5] != b"%PDF-":
+                    err = "răspuns non-PDF"; break
+                b, err = data, None; break
+            except Exception as e:
+                err = str(e)[:80]
+                if attempt < 2:
+                    _time.sleep(1.5 * (attempt + 1))
+        if b is None:
+            failed.append((nm, err or "necunoscut")); continue
+        try:
+            fp = os.path.join(outdir, "%s_%s.pdf" % (nm, trk or "noawb"))
+            with open(fp, "wb") as f:
+                f.write(b)
+            if os.path.getsize(fp) < 100:
+                failed.append((nm, "fișier gol")); continue
+            pdfs.append(fp)
+            log_rows.append([_dt.datetime.now().isoformat(timespec="seconds"), dom, nm, trk, cid, fp])
+        except Exception as e:
+            failed.append((nm, str(e)[:80]))
+    merged = os.path.join(outdir, "batch_%s%s.pdf" % (ts, suffix))
+    try:
+        from pypdf import PdfWriter
+        w = PdfWriter()
+        for fp in pdfs:
+            w.append(fp)
+        with open(merged, "wb") as f:
+            w.write(f)
+        w.close()
+        for fp in pdfs:   # individualele (AWB cu AWB) = intermediare → rămâne DOAR batch-ul grupat
+            try:
+                os.remove(fp)
+            except Exception:
+                pass
+    except Exception as e:
+        merged = None
+        print("  (merge PDF indisponibil: %s — păstrez individualele în %s)" % (str(e)[:50], outdir))
+    logp = os.path.join(outdir, "batch_%s%s.csv" % (ts, suffix))
+    with open(logp, "w", newline="", encoding="utf-8") as f:
+        wr = csv.writer(f)
+        wr.writerow(["downloaded_at", "shop", "order", "awb", "connectorId", "file"])
+        wr.writerows(log_rows)
+    return merged, len(pdfs), failed, logp
+
+
 def cmd_print_batch(a):
     """Coadă de PRINT depozit: etichetele NEDESCĂRCATE (downloaded=false), GRUPATE pe produs (sort sku),
     filtrabile pe produs (--sku), cantitate (--total-items) și interval (--from/--to). Descarcă PDF-urile,
@@ -2720,112 +2776,79 @@ def cmd_print_batch(a):
     # ORDINEA în PDF = grupat pe MAGAZIN → SKU → CANTITATE (toate „1×HA-0001" împreună, apoi „2×HA-0001"…),
     # NU pe ordinea brută de la xConnector (care lasă cantitățile amestecate: 1×, 2×, 1×).
     pending.sort(key=lambda r: (r[0],) + order_group_key(r[1], olines, a) + (r[1] or "",))
-    total_pending = len(pending)
-    lim = a.limit if getattr(a, "limit", None) else 250   # MAX 250 AWB/batch (default) — restul, la rularea următoare
-    skip = max(0, getattr(a, "offset", 0) or 0)           # paginare: sare primele `skip` (pt re-print în batch-uri succesive — re-printul NU scoate din coadă)
-    pending = pending[skip:skip + lim]
-    remaining = total_pending - skip - len(pending)
-    lbl = {k: v for k, v in flt.items() if k not in ("sort", "sortDir")}
-    print("═" * 60)
-    if test:
-        print("  🧪 TEST — folosesc etichete DEJA descărcate (downloaded=true), NU ating coada reală de print.")
-    elif reprint:
-        print("  🔁 RE-PRINT — etichete DEJA printate (downloaded=true). Le re-descarc pt re-printare.")
-    print("  PRINT BATCH — %d etichete %s%s · %s→%s%s%s · grupat MAGAZIN→SKU→CANTITATE"
-          % (len(pending), "DEJA descărcate (test)" if test else ("DEJA printate (re-print)" if reprint else "nedescărcate"),
-             ((" [%d–%d] din %d%s" % (skip + 1, skip + len(pending), total_pending,
-               (" · rest %d → --offset %d" % (remaining, skip + len(pending))) if remaining else "")) if (skip or remaining) else ""),
-             dfrom, dto,
-             (" · magazine: " + ",".join(wants)) if wants else " · toate magazinele",
-             (" · " + json.dumps(lbl)) if lbl else ""))
-    if olines:   # rezumat grupat exact ca în PDF: magazin → SKU × cantitate → câte etichete
-        from collections import Counter
-        groups = Counter((r[0],) + order_group_key(r[1], olines, a) for r in pending)
-        last_dom, shown = None, 0
-        for (dom, sk, q), n in sorted(groups.items()):
-            if shown >= 60:
-                print("    … +%d grupuri" % (len(groups) - shown)); break
-            if dom != last_dom:
-                print("    ── %s" % dom); last_dom = dom; shown += 1
-            print("       %-16s ×%-3d  %d etichete" % (sk, q, n)); shown += 1
+    # complexity-split: separă comenzile cu 1 PRODUS (mono) de cele cu MAI MULTE (multi) — ca la pick&pack.
+    # „unități/comandă" = Σ cantitate pe toate liniile (din olines). Fără olines → nu pot împărți.
+    if getattr(a, "complexity_split", False) and olines:
+        def _units(nm):
+            return sum(q for _, q in olines.get(nm, [])) or 1
+        buckets = [("_mono", "1 PRODUS (mono)", [r for r in pending if _units(r[1]) == 1]),
+                   ("_multi", "MAI MULTE PRODUSE (multi)", [r for r in pending if _units(r[1]) > 1])]
+        buckets = [b for b in buckets if b[2]]
+        if not buckets:
+            print("  Nimic de printat."); return
     else:
-        for dom, nm, cid, trk, _, _ in pending[:60]:
-            print("    %-12s %-11s AWB %s" % (nm, dom, trk or "—"))
-        if len(pending) > 60:
-            print("    … +%d" % (len(pending) - 60))
-    if not a.apply:
-        print("  → [DRY-RUN] aș descărca %d PDF-uri (în ordinea de mai sus) + aș deschide dialogul de print." % len(pending))
-        if not test:
-            print("  ⚠️ --apply MARCHEAZĂ etichetele `downloaded` (ies din coada de print) — fă-o DOAR când chiar printezi.")
-        else:
-            print("  (test: --apply e SIGUR — etichetele sunt deja descărcate, nu se schimbă nimic în coadă.)")
-        return
-    if not pending:
-        print("  Nimic de printat."); return
+        buckets = [("", None, pending)]
+    lbl = {k: v for k, v in flt.items() if k not in ("sort", "sortDir")}
     ts = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
     outdir = os.path.join(os.path.expanduser(getattr(a, "out", None) or "~/Downloads"), "print-batch")   # implicit în Downloads (ușor de găsit la print); override cu --out
-    os.makedirs(outdir, exist_ok=True)
-    import time as _time
-    pdfs, log_rows, failed = [], [], []
-    for dom, nm, cid, trk, url, auth in pending:
-        b, err = None, None
-        for attempt in range(3):   # retry pe blip de rețea (IncompleteRead/timeout) — la print de depozit NU pierdem eticheta unui client tăcut
-            try:
-                req = urllib.request.Request(url, headers=({"Authorization": auth} if auth else {}))
-                with urllib.request.urlopen(req, timeout=45) as r:
-                    data = r.read()
-                if data[:5] != b"%PDF-":
-                    err = "răspuns non-PDF"; break   # nu e tranzitoriu — nu reîncerca
-                b, err = data, None
-                break
-            except Exception as e:
-                err = str(e)[:80]
-                if attempt < 2:
-                    _time.sleep(1.5 * (attempt + 1))   # 1.5s, 3s
-        if b is None:
-            failed.append((nm, err or "necunoscut")); continue
-        try:
-            fp = os.path.join(outdir, "%s_%s.pdf" % (nm, trk or "noawb"))
-            with open(fp, "wb") as f:
-                f.write(b)
-            if os.path.getsize(fp) < 100:
-                failed.append((nm, "fișier gol")); continue
-            pdfs.append(fp)
-            log_rows.append([datetime.datetime.now().isoformat(timespec="seconds"), dom, nm, trk, cid, fp])
-        except Exception as e:
-            failed.append((nm, str(e)[:80]))
-    merged = os.path.join(outdir, "batch_%s.pdf" % ts)
-    try:
-        from pypdf import PdfWriter
-        w = PdfWriter()
-        for fp in pdfs:
-            w.append(fp)
-        with open(merged, "wb") as f:
-            w.write(f)
-        w.close()
-        for fp in pdfs:   # PDF-urile individuale (AWB cu AWB) = doar intermediare → le șterg; rămâne DOAR batch-ul grupat (≤250 comenzi/fișier)
-            try:
-                os.remove(fp)
-            except Exception:
-                pass
-    except Exception as e:
-        merged = None
-        print("  (merge PDF indisponibil: %s — păstrez fișierele individuale în %s)" % (str(e)[:50], outdir))
-    logp = os.path.join(outdir, "batch_%s.csv" % ts)
-    with open(logp, "w", newline="", encoding="utf-8") as f:
-        wr = csv.writer(f)
-        wr.writerow(["downloaded_at", "shop", "order", "awb", "connectorId", "file"])
-        wr.writerows(log_rows)
-    print("  ✅ descărcate %d · eșuate %d · log %s" % (len(pdfs), len(failed), logp))
-    if merged:
-        print("  📄 batch: %s" % merged)
-    if failed:
-        print("  ⚠️ EȘUATE (NU s-au salvat — dacă s-au flip-uit pe server, recuperează manual din dashboard):")
-        for nm, why in failed[:25]:
-            print("      %s — %s" % (nm, why))
-    target = merged or (pdfs[0] if pdfs else None)
-    if target and not getattr(a, "no_print", False):
-        _print_dialog(target, getattr(a, "printer", None))
+    print("═" * 60)
+    if test:
+        print("  🧪 TEST — etichete DEJA descărcate (downloaded=true), NU ating coada reală de print.")
+    elif reprint:
+        print("  🔁 RE-PRINT — etichete DEJA printate (downloaded=true). Le re-descarc pt re-printare.")
+    if len(buckets) > 1:  # numărătoarea „câte-s de fiecare fel", vizibilă din start
+        print("  🔀 COMPLEXITY-SPLIT — %s (PDF-uri separate)"
+              % " · ".join("%s: %d comenzi" % (bl, len(bp)) for _, bl, bp in buckets))
+    targets = []
+    from collections import Counter
+    for suffix, blabel, bpending in buckets:
+        total_b = len(bpending)
+        lim = a.limit if getattr(a, "limit", None) else 250   # MAX 250 AWB/batch — restul, la rularea următoare
+        skip = max(0, getattr(a, "offset", 0) or 0)           # paginare batch-cu-batch (re-print)
+        cur = bpending[skip:skip + lim]
+        remaining = total_b - skip - len(cur)
+        print("  " + ("── %s " % blabel if blabel else "PRINT BATCH ") + "─" * 6)
+        print("     %d etichete %s%s · %s→%s%s%s · grupat MAGAZIN→SKU→CANTITATE"
+              % (len(cur), "DEJA descărcate (test)" if test else ("DEJA printate (re-print)" if reprint else "nedescărcate"),
+                 ((" [%d–%d] din %d%s" % (skip + 1, skip + len(cur), total_b,
+                   (" · rest %d → --offset %d" % (remaining, skip + len(cur))) if remaining else "")) if (skip or remaining) else ""),
+                 dfrom, dto,
+                 (" · magazine: " + ",".join(wants)) if wants else " · toate magazinele",
+                 (" · " + json.dumps(lbl)) if lbl else ""))
+        if olines:
+            groups = Counter((r[0],) + order_group_key(r[1], olines, a) for r in cur)
+            last_dom, shown = None, 0
+            for (dom, sk, q), n in sorted(groups.items()):
+                if shown >= 40:
+                    print("       … +%d grupuri" % (len(groups) - shown)); break
+                if dom != last_dom:
+                    print("    ── %s" % dom); last_dom = dom; shown += 1
+                print("       %-16s ×%-3d  %d etichete" % (sk, q, n)); shown += 1
+        else:
+            for dom, nm, cid, trk, _, _ in cur[:40]:
+                print("    %-12s %-11s AWB %s" % (nm, dom, trk or "—"))
+            if len(cur) > 40:
+                print("    … +%d" % (len(cur) - 40))
+        if a.apply and cur:
+            os.makedirs(outdir, exist_ok=True)
+            merged, nok, failed, logp = _dl_merge_batch(cur, outdir, ts, suffix)
+            print("     ✅ descărcate %d · eșuate %d · log %s" % (nok, len(failed), logp))
+            if merged:
+                print("     📄 batch: %s" % merged); targets.append(merged)
+            for nm, why in failed[:15]:
+                print("        ⚠️ %s — %s" % (nm, why))
+    if not a.apply:
+        print("  → [DRY-RUN] atâtea sunt de printat%s. Adaugă --apply ca să descarci + deschizi dialogul de print."
+              % (" (câte un PDF per bucket)" if len(buckets) > 1 else ""))
+        if not test:
+            print("  ⚠️ --apply MARCHEAZĂ etichetele `downloaded` (ies din coada de print) — DOAR când chiar printezi.")
+        return
+    if not targets:
+        print("  Nimic de printat."); return
+    if not getattr(a, "no_print", False):
+        _print_dialog(targets[0], getattr(a, "printer", None))
+        if len(targets) > 1:
+            print("  ℹ️ %d batch-uri (mono+multi): am deschis primul; deschide-le pe rând pt print." % len(targets))
 
 
 def main():
@@ -2875,6 +2898,7 @@ def main():
     ap.add_argument("--printed", action="store_true", help="print-batch: RE-PRINT pe etichete DEJA printate (downloaded=true) — re-printare reală a unor AWB-uri deja descărcate.")
     ap.add_argument("--by-sku", action="store_true", dest="by_sku", help="print-batch: NU printează — arată coada GRUPATĂ pe SKU (câte etichete/SKU), cele mai multe primele, ca să alegi ce produs printezi.")
     ap.add_argument("--sku-prefix", dest="sku_prefix", help="print-batch: păstrează DOAR comenzile care au un SKU pe prefixul dat (ex `HA` = toate comenzile cu produse HA-*).")
+    ap.add_argument("--complexity-split", action="store_true", dest="complexity_split", help="print-batch: separă comenzile cu 1 PRODUS (mono) de cele cu MAI MULTE (multi) — PDF-uri + loguri separate (batch_<ts>_mono/_multi), ca la pick&pack.")
     ap.add_argument("--limit", type=int, help="print-batch: max AWB-uri/batch (implicit 250). Restul rămâne pt rularea următoare.")
     ap.add_argument("--offset", type=int, default=0, help="print-batch: sare primele N etichete (paginare batch-cu-batch la RE-PRINT, ex --offset 250 = batch 2). În producție (downloaded=false) nu e nevoie — fiecare batch iese din coadă.")
     ap.add_argument("--printer", help="print-batch (Windows+SumatraPDF): printează DIRECT pe imprimanta dată, fără dialog (batch rapid).")
