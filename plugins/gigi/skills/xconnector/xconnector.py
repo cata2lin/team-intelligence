@@ -2662,6 +2662,21 @@ def order_group_key(name, olines, a):
     return ((s or "~~~~~").upper(), q or 0)
 
 
+def _olines_from_dto(dto_info):
+    """MODE A: construiește {orderName: [(sku, qty)]} din câmpurile DTO xConnector (skus + totalItemsCount +
+    lineItemsCount, #2140) — FĂRĂ Shopify. Qty exactă când comanda are 1 SKU (=totalItemsCount); la multi-SKU
+    qty per-sku nu e în DTO → 1/sku (unitățile totale reale rămân în dto_units pt complexity-split)."""
+    out = {}
+    for nm, d in dto_info.items():
+        skus = [s for s in (d.get("skus") or []) if s]
+        total = d.get("total")
+        if len(skus) == 1 and total:
+            out[nm] = [(skus[0], int(total))]
+        else:
+            out[nm] = [(s, 1) for s in skus]
+    return out
+
+
 def _dl_merge_batch(pending, outdir, ts, suffix=""):
     """Descarcă etichetele din `pending` (retry 3×), le îmbină într-un batch PDF (batch_<ts><suffix>.pdf) + log CSV,
     șterge individualele după merge. Întoarce (merged_path|None, n_ok, failed_list, log_path)."""
@@ -2734,6 +2749,7 @@ def cmd_print_batch(a):
     target_dl = test or reprint                   # ambele țintesc downloaded=true; normal = downloaded=false (nedescărcate)
     wants = [w.strip() for w in (a.shop or "").split(",") if w.strip()]  # doar pt afișaj; filtrarea o face skip_shop (listă + prefix)
     pending = []
+    dto_info = {}   # MODE A: skus+totalItemsCount direct din DTO xConnector (#2140) → fără Shopify
     for sh in load_shops():
         if skip_shop(sh, a):   # suportă --shop listă/prefix (magazine la un loc) + --exclude
             continue
@@ -2742,11 +2758,23 @@ def cmd_print_batch(a):
             doc = awb_doc(o)
             if not doc or doc.get("downloaded") is not target_dl or not doc.get("url"):
                 continue
-            pending.append((sh["shopDomain"], o.get("orderName"), doc.get("connectorId"),
+            nm = o.get("orderName")
+            pending.append((sh["shopDomain"], nm, doc.get("connectorId"),
                             doc_tracking(doc), doc.get("url"), xc.h.get("Authorization", "")))
-    # SKU+cantitate per comandă (UNA singură pasă Shopify) — pt filtrare (--sku-prefix), numărare (--by-sku)
-    # și mai ales SORTAREA PDF-ului pe magazin→SKU→cantitate. Plătită doar când chiar e nevoie.
-    olines = pending_order_lines(pending) if (pending and (getattr(a, "sku_prefix", None) or getattr(a, "by_sku", False) or a.apply)) else {}
+            if o.get("skus") is not None:   # DTO expune SKU-urile (#2140 merge-uit)
+                dto_info[nm] = {"skus": o.get("skus") or [], "total": o.get("totalItemsCount"), "lines": o.get("lineItemsCount")}
+    # SKU+cantitate per comandă — pt filtrare (--sku-prefix), numărare (--by-sku) și SORTAREA PDF-ului.
+    # MODE A (DTO xConnector are skus) → construiesc din DTO, ZERO Shopify. MODE B → pending_order_lines (Shopify).
+    need = bool(pending and (getattr(a, "sku_prefix", None) or getattr(a, "by_sku", False) or a.apply))
+    dto_units = {}
+    if need and dto_info and len(dto_info) >= 0.5 * len(pending):
+        olines = _olines_from_dto(dto_info)
+        dto_units = {nm: d["total"] for nm, d in dto_info.items() if d.get("total") is not None}
+        print("  ⚡ MODE A — SKU+cantitate direct din DTO xConnector (fără rezolvare Shopify, %d comenzi)" % len(dto_info))
+    elif need:
+        olines = pending_order_lines(pending)
+    else:
+        olines = {}
     if getattr(a, "sku_prefix", None):   # „toate comenzile cu HA" → păstrez doar comenzile care au un SKU pe prefixul dat
         from collections import Counter
         pref = a.sku_prefix.upper()
@@ -2775,11 +2803,20 @@ def cmd_print_batch(a):
         return
     # ORDINEA în PDF = grupat pe MAGAZIN → SKU → CANTITATE (toate „1×HA-0001" împreună, apoi „2×HA-0001"…),
     # NU pe ordinea brută de la xConnector (care lasă cantitățile amestecate: 1×, 2×, 1×).
+    # complexity-split cere nr PRODUSE FIZICE. `totalItemsCount` din DTO numără și articolele FĂRĂ SKU
+    # (protecție colet/Releaseit) → ar clasa greșit HA-0001×1 + protecție drept „multi". Dacă am filtrat cu MODE A,
+    # re-rezolv DOAR pending-ul filtrat (mic, ~sute) din Shopify → unități fizice exacte. (Filtrul a rulat deja rapid pe DTO.)
+    if getattr(a, "complexity_split", False) and dto_units and pending:
+        olines = pending_order_lines(pending)
+        dto_units = {}
+        print("  ↳ complexity-split: nr PRODUSE FIZICE din Shopify (%d comenzi filtrate) — DTO numără și articolele fără SKU" % len(pending))
     pending.sort(key=lambda r: (r[0],) + order_group_key(r[1], olines, a) + (r[1] or "",))
     # complexity-split: separă comenzile cu 1 PRODUS (mono) de cele cu MAI MULTE (multi) — ca la pick&pack.
     # „unități/comandă" = Σ cantitate pe toate liniile (din olines). Fără olines → nu pot împărți.
     if getattr(a, "complexity_split", False) and olines:
         def _units(nm):
+            if dto_units.get(nm) is not None:   # MODE A: totalItemsCount exact din DTO
+                return dto_units[nm]
             return sum(q for _, q in olines.get(nm, [])) or 1
         buckets = [("_mono", "1 PRODUS (mono)", [r for r in pending if _units(r[1]) == 1]),
                    ("_multi", "MAI MULTE PRODUSE (multi)", [r for r in pending if _units(r[1]) > 1])]
