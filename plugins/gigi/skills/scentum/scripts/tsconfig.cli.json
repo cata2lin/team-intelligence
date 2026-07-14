@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/lib/auth-helpers": ["./scripts/_shims/auth-helpers.ts"],
+      "@/lib/auth": ["./scripts/_shims/auth-helpers.ts"],
+      "@/*": ["./src/*"],
+      "next/cache": ["./scripts/_shims/next-cache.ts"],
+      "next/navigation": ["./scripts/_shims/next-navigation.ts"],
+      "server-only": ["./scripts/_shims/empty.ts"],
+      "client-only": ["./scripts/_shims/empty.ts"]
+    }
+  }
+}

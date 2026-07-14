@@ -1,68 +1,74 @@
 ---
 name: scentum
-description: Operează Scentum ERP (app-ul de producție parfumuri — Esteban, Nubra, George Talent, Lab Noir, Artevita, Zafra, Niche, Blink, EU) din terminal, prin serviciile CANONICE ale aplicației (aceeași logică ca UI-ul: validări, audit, numerotare — NU SQL brut). Face TOATE mutațiile disponibile în Scentum — generează "Necesar Producție" din Forecast (velocity → PR-{BRAND}-{n} DRAFT), aprobă/anulează, adaugă/șterge linii, marchează fabricat, creează/aprobă/anulează Livrări și face Recepția (push stoc în Shopify). Use pentru "fă un necesar", "necesar producție", "generează necesar Esteban/Nubra", "cât să producem", "forecast producție", "aprobă necesarul", "marchează fabricat", "creează livrare", "recepționează livrarea", "Scentum", "PR-EST", "production requirement", "Andreea → Vali".
-argument-hint: "necesar generate --brand ESTEBAN [--yes] | necesar approve --id X --yes | livrare receive --id X --yes --confirm-shopify"
+description: Operează Scentum ERP (app-ul de producție parfumuri — Esteban, Nubra, George Talent, Lab Noir, Artevita, Zafra, Niche, Blink, EU) din terminal, prin acțiunile și serviciile CANONICE ale aplicației (aceeași logică ca UI-ul — validări, audit, numerotare; NU SQL brut). Acoperă TOATE cele ~119 mutații + 65 citiri din Scentum, nu doar producția — Necesar Producție din Forecast (velocity → PR-{BRAND}-{n}), aprobare/anulare/marcat fabricat, Livrări + Recepție (push stoc în Shopify), comenzi furnizor (PO), recepții, maturare, rețete, loturi, mișcări de stoc, produse, furnizori, utilizatori. Use pentru "fă un necesar", "necesar producție", "generează necesar Esteban/Nubra", "cât să producem", "forecast producție", "aprobă necesarul", "marchează fabricat", "creează livrare", "recepționează livrarea", "comandă furnizor", "PO", "maturare", "rețetă", "lot", "Scentum", "PR-EST", "vreau să scriu în Scentum", "Andreea → Vali".
+argument-hint: "actions [modul] | sig <mod>.<fn> | call <mod>.<fn> --json '{...}' --yes | necesar generate --brand ESTEBAN --yes"
 ---
 
 # scentum
-> Author: **Gigi**. Operează Scentum ERP din CLI, prin serviciile canonice ale aplicației.
+> Author: **Gigi**. Operează Scentum ERP din CLI — **orice mutație**, prin codul canonic al app-ului.
 
 ## Ce e Scentum
-ERP-ul de **producție parfumuri** (repo privat `contact546/scentum`, Next.js + Prisma + Postgres).
+ERP-ul de **producție parfumuri** (repo privat `contact546/scentum`, Next.js 15 + Prisma + Postgres).
 Lanțul central: **Forecast** → **Necesar Producție** (`ProductionRequirement`, Andreea → Vali) →
-**Livrare** → **Recepție** (stocul intră în Shopify).
+**Livrare** → **Recepție** (stocul intră în Shopify). Plus: PO furnizori, recepții, maturare, rețete,
+loturi, mișcări de stoc.
 
 > ⚠️ **Mutațiile NU sunt pe HTTP.** API-ul expune doar PDF/upload/sync. Scrierile trăiesc în
 > **server actions** (`src/app/actions/*`) → **servicii** (`src/lib/services/*`). De aceea CLI-ul
-> rulează **în interiorul repo-ului**, importând serviciile — așa păstrezi logica de business
+> rulează **în interiorul repo-ului**, importând acțiunile — așa păstrezi logica de business
 > (validări, tranziții de stare, audit, numerotare). **Nu scrie SQL brut în Scentum.**
+> ⚠️ MCP-ul `postgres-scentum` e **READ-ONLY prin design** — din el nu poți scrie NICIODATĂ.
 
 ## Setup (o dată pe mașină)
 ```bash
 gh repo clone contact546/scentum ~/Downloads/scentum && cd ~/Downloads/scentum
 KB=~/.claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py
-# ⬇️ FOLOSEȘTE userul cu drepturi minime (scentum_rw), NU DSN-ul de superuser:
-printf 'DATABASE_URL=%s\n' "$(uv run "$KB" secret-get DATABASE_URL_SCENTUM_RW)" > .env   # NU se comite
+# DSN cu drepturi minime (rol scentum_rw), NU superuserul:
+printf 'DATABASE_URL=%s\n' "$(uv run "$KB" secret-get DATABASE_URL_SCENTUM_RW)" > .env
+printf 'SCENTUM_USER=%s\n' "emailul.tau@…"  >> .env      # ⬅️ emailul TĂU din Scentum (users)
 npm install && npx prisma generate
-cp <skill-dir>/scripts/*.ts scripts/          # scentum-cli.ts + generate-necesar.ts
+cp -r <skill-dir>/scripts/_shims <skill-dir>/scripts/*.ts scripts/
+cp <skill-dir>/scripts/tsconfig.cli.json .
 ```
 
-> 🔑 **Ca să SCRII în Scentum îți trebuie `DATABASE_URL_SCENTUM_RW`** (rol `scentum_rw`: SELECT/INSERT/
-> UPDATE/DELETE, fără superuser, fără DDL). ⚠️ **MCP-ul `postgres-scentum` e READ-ONLY prin design** —
-> din el NU poți scrie niciodată; mutațiile se fac DOAR cu CLI-ul de mai jos.
-> `DATABASE_URL_SCENTUM` (superuser) e doar pentru admin/migrații — nu-l împrăștia.
+> 🔑 **Două lucruri îți trebuie ca să scrii:**
+> 1. **`DATABASE_URL_SCENTUM_RW`** (KB) — rol `scentum_rw`: SELECT/INSERT/UPDATE/DELETE, fără
+>    superuser, fără DDL. (`DATABASE_URL_SCENTUM` = superuser, doar admin/migrații — nu-l împrăștia.)
+> 2. **`SCENTUM_USER`** = emailul tău de utilizator Scentum. Acțiunile scriu `session.user.id` în
+>    audit (createdBy/updatedBy) — deci mutațiile apar **pe numele tău**, exact ca din UI. Fără el,
+>    CLI-ul refuză. Rolul (ADMIN/OPERATOR) e citit din DB și respectat (`requireRole`).
 
-## CLI — toate mutațiile
-**Mutațiile sunt DRY-RUN implicit** → scriu doar cu `--yes`. Recepția cere în plus `--confirm-shopify`.
+## Cum rulezi (flag-ul de tsconfig e OBLIGATORIU)
 ```bash
 cd ~/Downloads/scentum
-npx tsx scripts/scentum-cli.ts                      # help
+npx tsx --tsconfig tsconfig.cli.json scripts/scentum-cli.ts <comandă>
+```
+`tsconfig.cli.json` mapează, **doar pentru CLI**, `next/cache` / `next/navigation` / `server-only` /
+`@/lib/auth*` pe shim-urile din `scripts/_shims/` (în terminal n-ai request Next → `headers()` ar crăpa).
+**Nu muta path-urile astea în `tsconfig.json`** — strici build-ul Next.
 
-# CITIRE (fără efecte)
-npx tsx scripts/scentum-cli.ts brands
-npx tsx scripts/scentum-cli.ts necesar list [--brand ESTEBAN] [--status DRAFT]
-npx tsx scripts/scentum-cli.ts necesar show --id <prId>
-npx tsx scripts/scentum-cli.ts livrare list|show --id <id>
-npx tsx scripts/scentum-cli.ts livrare eligible     # linii Necesar COMPLETED, libere de livrare
+## Toate mutațiile — dispatcher generic
+```bash
+CLI="npx tsx --tsconfig tsconfig.cli.json scripts/scentum-cli.ts"
 
-# NECESAR
-npx tsx scripts/scentum-cli.ts necesar generate --brand ESTEBAN [--lookback 60 --forecast-days 60 --round 50] --yes
-npx tsx scripts/scentum-cli.ts necesar create   --brand NUBRA --title "..." --yes     # DRAFT gol
-npx tsx scripts/scentum-cli.ts necesar add-line --id <prId> --variant <variantId> --qty 50 --yes
-npx tsx scripts/scentum-cli.ts necesar set-qty  --item <itemId> --qty 80 --yes
-npx tsx scripts/scentum-cli.ts necesar remove-line --item <itemId> --yes
-npx tsx scripts/scentum-cli.ts necesar approve  --id <prId> --yes
-npx tsx scripts/scentum-cli.ts necesar cancel   --id <prId> --reason "..." --yes
-npx tsx scripts/scentum-cli.ts necesar mark     --item <itemId> --qty 40 --yes    # fabricat (parțial OK)
-npx tsx scripts/scentum-cli.ts necesar cancel-line --item <itemId> --reason "..." --yes
+$CLI actions                      # toate modulele + funcțiile (✏️ mutație / 📖 citire) — ~119 ✏️ + 65 📖
+$CLI actions purchase-orders      # doar un modul
+$CLI sig  purchase-orders.createPurchaseOrder      # ce JSON cere (semnătura + tipurile, din sursă)
+$CLI call purchase-orders.createPurchaseOrder --json '{"type":"...","items":[…]}' --yes
+```
+**Citirile** (`get*/list*/search*/count*/…`) rulează direct. **Mutațiile sunt DRY-RUN implicit** —
+scriu doar cu `--yes`. Reguli de aur: rulezi întâi `sig`, apoi `call` fără `--yes` (vezi ce-ar face),
+abia apoi cu `--yes`.
 
-# LIVRARE
-npx tsx scripts/scentum-cli.ts livrare create   [--items id1,id2] [--notes "..."] --yes
-npx tsx scripts/scentum-cli.ts livrare add-item --id <deliveryId> --pri-item <necesarItemId> --yes
-npx tsx scripts/scentum-cli.ts livrare remove-item --item <deliveryItemId> --yes
-npx tsx scripts/scentum-cli.ts livrare approve  --id <deliveryId> --yes
-npx tsx scripts/scentum-cli.ts livrare cancel   --id <deliveryId> --reason "..." --yes
-npx tsx scripts/scentum-cli.ts livrare receive  --id <deliveryId> --yes --confirm-shopify   # ⚠️ scrie în Shopify
+## Scurtături tipate (producție — fluxul zilnic)
+```bash
+$CLI brands
+$CLI necesar list [--brand ESTEBAN] [--status DRAFT]   ·  $CLI necesar show --id <prId>
+$CLI necesar generate --brand ESTEBAN [--lookback 60 --forecast-days 60 --round 50] --yes
+$CLI necesar create|add-line|set-qty|remove-line|approve|cancel|mark|cancel-line …  --yes
+$CLI livrare list|show|eligible
+$CLI livrare create|add-item|remove-item|approve|cancel …  --yes
+$CLI livrare receive --id <deliveryId> --yes --confirm-shopify   # ⚠️ scrie stoc în Shopify
 ```
 Branduri: `ESTEBAN · NUBRA · GEORGE-TALENT · LAB-NOIR · ART · ZAFRA · NICHE · BLINK · EU`.
 
@@ -82,10 +88,13 @@ suggestedQty    = roundUpToUnit(raw, brand.productionRoundingUnit)     // defaul
   `--yes` **și** `--confirm-shopify`.
 - **Gardă STRICT la forecast**: dacă brandul are variante **nemapate** pe `ScentMaster`, forecastul
   e blocat — CLI-ul refuză și listează variantele de mapat (Mapare Produse în UI).
-- **Stări:** editabil în `DRAFT / APPROVED / PARTIALLY_PRODUCED`; terminale (read-only):
+- **Stări Necesar:** editabil în `DRAFT / APPROVED / PARTIALLY_PRODUCED`; terminale (read-only):
   `PRODUCED / CLOSED / CANCELLED`. Numerotare `PR-{BRAND}-{n}` (multi-brand: `NP-{n}`).
 - `necesar generate` rulează un **ForecastRun** real chiar și în dry-run (e o analiză, ca butonul din
   UI) — dar **nu** creează Necesarul fără `--yes`.
-- Secret DB: KB **`DATABASE_URL_SCENTUM`**. Nu-l printa; nu comite `.env`.
-- Alte servicii disponibile pentru extindere: `purchase-orders`, `receptions`, `maturation`,
-  `production`, `recipes`, `movements`, `batches` (vezi `src/lib/services/` și `src/app/actions/`).
+- **Acțiunile nu validează cu Zod** peste tot — un JSON greșit dă `TypeError`, nu un mesaj frumos.
+  De-aia `sig` există: citește-l înainte de `call`.
+- 12 din 38 de module de acțiuni scriu **direct cu Prisma** (fără service layer) — inclusiv
+  `purchase-orders`. De aceea dispatcher-ul merge pe **actions**, nu pe servicii: altfel ai rata ~40%
+  din suprafață.
+- Secrete: KB (`DATABASE_URL_SCENTUM_RW`). Nu le printa; **nu comite `.env`**.

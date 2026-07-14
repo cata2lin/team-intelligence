@@ -48,7 +48,8 @@ const prisma = new PrismaClient({
 
 const argv = process.argv.slice(2);
 const cmd = (argv[0] ?? "").toLowerCase();
-const sub = (argv[1] ?? "").toLowerCase();
+const subRaw = argv[1] ?? "";            // păstrează case-ul (numele funcțiilor sunt camelCase)
+const sub = subRaw.toLowerCase();
 const has = (n: string) => argv.includes(`--${n}`);
 const opt = (n: string, d?: string) => {
   const i = argv.indexOf(`--${n}`);
@@ -284,12 +285,119 @@ async function main() {
     return;
   }
 
+  // ── GENERIC: ORICE mutație din Scentum (toate cele ~184) ────────
+  if (cmd === "actions" || cmd === "call" || cmd === "sig") {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const dir = path.join(process.cwd(), "src/app/actions");
+    const allMods = fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith(".ts"))
+      .map((f) => f.replace(/\.ts$/, ""))
+      .sort();
+    const READ = ["get", "list", "fetch", "search", "count", "load", "preview", "check", "validate", "export"];
+    const isRead = (fn: string) => READ.some((p) => fn.toLowerCase().startsWith(p));
+
+    if (cmd === "actions") {
+      const mods = sub ? allMods.filter((m) => m === sub) : allMods;
+      if (sub && mods.length === 0) die(`Modul necunoscut: ${sub}. Vezi: scentum-cli actions`);
+      let totalW = 0, totalR = 0;
+      for (const mod of mods) {
+        let m: Record<string, unknown>;
+        try {
+          m = (await import(`../src/app/actions/${mod}`)) as Record<string, unknown>;
+        } catch (e) {
+          console.log(`\n${mod}  ✖ (${String((e as Error).message).slice(0, 50)})`);
+          continue;
+        }
+        const fns = Object.keys(m).filter((k) => typeof m[k] === "function");
+        if (!fns.length) continue;
+        console.log(`\n${mod}  (${fns.length})`);
+        for (const f of fns) {
+          isRead(f) ? totalR++ : totalW++;
+          console.log(`   ${isRead(f) ? "📖" : "✏️ "} ${mod}.${f}`);
+        }
+      }
+      console.log(`\nTOTAL: ${totalW} mutații ✏️  + ${totalR} citiri 📖`);
+      console.log(`Cheamă orice: scentum-cli call <modul>.<funcție> --json '{...}' [--yes]`);
+      return;
+    }
+
+    // call/sig <modul>.<funcție> --json '{...}'
+    const target = need(subRaw, "modul.funcție");
+    const [mod, fn] = target.split(".");
+    if (!mod || !fn) die(`Format: ${cmd} <modul>.<funcție>  (ex. ${cmd} purchase-orders.createPurchaseOrder)`);
+    if (!allMods.includes(mod)) die(`Modul necunoscut: ${mod}. Vezi: scentum-cli actions`);
+
+    /** Ce JSON cere funcția: semnătura + tipurile ei, citite din sursă. */
+    function printSig(mod: string, fn: string) {
+      const src = fs.readFileSync(path.join(dir, `${mod}.ts`), "utf8");
+      const sig = new RegExp(`export\\s+async\\s+function\\s+${fn}\\s*\\(([\\s\\S]*?)\\)\\s*(:|\\{)`).exec(src);
+      if (!sig) {
+        console.log(`(nu găsesc semnătura lui ${fn} în ${mod}.ts)`);
+        return;
+      }
+      const params = sig[1].trim();
+      console.log(`\n${mod}.${fn}(${params || ""})\n`);
+      // tipurile numite folosite în parametri, declarate în același fișier
+      for (const t of new Set([...params.matchAll(/:\s*([A-Z]\w+)/g)].map((x) => x[1]))) {
+        const decl = new RegExp(`(?:export\\s+)?(?:type|interface)\\s+${t}\\b[\\s\\S]*?\\n\\}`).exec(src);
+        if (decl) console.log(decl[0] + "\n");
+      }
+    }
+
+    if (cmd === "sig") {
+      printSig(mod, fn);
+      return;
+    }
+
+    const m = (await import(`../src/app/actions/${mod}`)) as Record<string, unknown>;
+    const f = m[fn];
+    if (typeof f !== "function") die(`${mod}.${fn} nu există. Vezi: scentum-cli actions ${mod}`);
+
+    let payload: unknown = undefined;
+    const raw = opt("json");
+    if (raw) {
+      try {
+        payload = JSON.parse(raw);
+      } catch {
+        die(`--json nu e JSON valid`);
+      }
+    }
+    if (!isRead(fn) && !APPLY) {
+      console.log(`DRY-RUN — aș chema: ${mod}.${fn}(${raw ?? ""})`);
+      console.log(`   Adaugă --yes ca să execut.`);
+      return;
+    }
+    let res: unknown;
+    try {
+      res = await (payload === undefined ? (f as () => Promise<unknown>)() : (f as (a: unknown) => Promise<unknown>)(payload));
+    } catch (e) {
+      console.error(`✖ ${mod}.${fn} a eșuat: ${(e as Error).message}`);
+      console.error(`   Vezi ce JSON cere:  scentum-cli sig ${mod}.${fn}`);
+      process.exit(1);
+    }
+    console.log(JSON.stringify(res, null, 2).slice(0, 8000));
+    return;
+  }
+
   console.log(String.raw`scentum-cli — comenzi:
-  brands
-  necesar list|show|generate|create|add-line|set-qty|remove-line|approve|cancel|mark|cancel-line
-  livrare list|show|eligible|create|add-item|remove-item|approve|cancel|receive
+
+  SCURTĂTURI (tipate):
+    brands
+    necesar list|show|generate|create|add-line|set-qty|remove-line|approve|cancel|mark|cancel-line
+    livrare list|show|eligible|create|add-item|remove-item|approve|cancel|receive
+
+  GENERIC (ORICE mutație din Scentum — ~184):
+    actions [modul]                       # listează toate modulele + funcțiile (✏️ mutație / 📖 citire)
+    sig  <modul>.<funcție>                # ce JSON cere funcția (semnătura + tipurile, din sursă)
+    call <modul>.<funcție> --json '{...}' [--yes]
+
 Mutațiile sunt DRY-RUN implicit → adaugă --yes. Recepția cere și --confirm-shopify.
-Ex: npx tsx scripts/scentum-cli.ts necesar generate --brand ESTEBAN --yes`);
+⚠️ Rulează MEREU cu:  npx tsx --tsconfig tsconfig.cli.json scripts/scentum-cli.ts ...
+Ex: ... necesar generate --brand ESTEBAN --yes
+    ... actions purchase-orders
+    ... call purchase-orders.createPurchaseOrder --json '{"supplierId":"..."}' --yes`);
 }
 
 main()
