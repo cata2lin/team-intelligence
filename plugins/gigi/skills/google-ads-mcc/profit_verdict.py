@@ -15,12 +15,25 @@ Zones (per brand, from brandref):
   CUT    CPA > breakeven_cpa                                       → losing money, fix/pause
 
 🔑 SCALE ≠ raise-budget. A SCALE campaign only deserves MORE budget if it is BUDGET-LIMITED.
-   ⚠️ Check budget-limited on TODAY's spend vs the CURRENT budget — NOT a 7-day avg. After a
-   same-day budget raise the 7-day avg reflects the OLD budget and FALSELY reads "not capped"
-   (lesson, iul-2026). A budget raise takes 1-3 days to be USED → re-check daily, don't stack
-   same-day. Budget changes ≤20% don't reset learning; a SCALE campaign still capped on its
-   NEW budget deserves another ≤20% bump. If SCALE but NOT capped → grow horizontal (non-brand
-   keywords / new products / geos), budget won't be spent.
+   ⚠️ Budget-limited signal = YESTERDAY's FULL DAY util (spent ≥92% of budget) or lost-budget-IS>5%
+   — time-of-day independent. Do NOT use (a) a 7-day avg: after a same-day raise it reflects the OLD
+   budget and falsely reads "not capped"; nor (b) today's morning spend: too early, util low for all
+   → false "not capped" (both lessons, iul-2026). `azi=` column is pacing only. A budget raise takes
+   1-3 days to be USED → re-check daily, don't stack same-day. Budget changes ≤20% don't reset
+   learning; a SCALE campaign still capped on its NEW budget deserves another ≤20% bump. If SCALE
+   but NOT capped → grow horizontal (non-brand keywords / new products / geos), budget won't be spent.
+
+🚨 CURRENCY. brandref breakeven is in RON (breakeven.py prints "AOV în RON"), but Google Ads reports CPA
+   in the ACCOUNT's currency (CZK/PLN/EUR). Comparing them raw is a units bug that INVERTS the verdict:
+   Bonhaus CZ read "CPA 125 CZK vs BE 37 = CUT, 3.4x over" when 125 CZK = 25 RON < 37 RON = actually
+   PROFITABLE (real bug, iul-2026 — nearly throttled two healthy campaigns). CPA is now converted to RON
+   via metrics.fx_rates (BNR) before every comparison, and printed as "125 CZK = 25 RON".
+
+🔑 CUT ≠ pause. A long window MASKS a recovery: a campaign reset/fixed recently still drags its bad
+   pre-fix days inside the 30d average. Belasil "All Products" (iul-2026) read CUT on 30d (CPA 44 > BE 40)
+   while its LAST 7 DAYS were 34 = profitable and still improving — cutting it would have killed a campaign
+   that had just repaired itself. So every CUT line now also prints its 7-day CPA and says whether the
+   verdict survives on the trend. NEVER pause on the long-window verdict alone.
 
 ⚠️ Google-reported ROAS is inflated ~1.5x — the CPA gate is robust; shown ROAS is Google's.
 Refresh breakeven: `gigi:fulfillment-analytics/breakeven.py --store all` → re-store in brandref.
@@ -49,6 +62,15 @@ DB=os.environ.get("DATABASE_URL_METRICS") or _kb("DATABASE_URL_METRICS")
 cn=psycopg2.connect(_clean(DB)); cn.set_session(readonly=True)
 with cn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
     cur.execute('SELECT "developerToken" dev,"loginCustomerId" mcc,"oauthClientId" cid,"oauthClientSecret" csec,"refreshToken" rt FROM google_ads_connections WHERE "isActive"=true');c=dict(cur.fetchone())
+    # 🔑 breakeven-ul din brandref e în RON (breakeven.py: „AOV în RON"), dar Google Ads dă CPA în MONEDA
+    # CONTULUI (CZK/PLN/EUR). Fără conversie, un CPA de 125 CZK părea „3,4× peste BE 37" când de fapt
+    # 125 CZK = 25 RON < 37 RON = PROFITABIL. Bug real (iul-2026): ambele campanii Bonhaus CZ ieșeau
+    # fals „CUT". Convertim ÎNTOTDEAUNA CPA-ul în RON înainte de comparație.
+    cur.execute("""SELECT DISTINCT ON ("fromCurrency") "fromCurrency" f, rate FROM fx_rates
+                   WHERE "toCurrency"='RON' AND "fromCurrency" IN ('CZK','PLN','EUR','BGN','HUF')
+                   ORDER BY "fromCurrency", "rateDate" DESC""")
+    FX={r["f"]: float(r["rate"]) for r in cur.fetchall()}
+FX["RON"]=1.0
 tok=requests.post("https://oauth2.googleapis.com/token",data={"grant_type":"refresh_token","client_id":c["cid"],"client_secret":c["csec"],"refresh_token":c["rt"]},timeout=20).json()["access_token"]
 H={"Authorization":f"Bearer {tok}","developer-token":c["dev"],"login-customer-id":re.sub(r"\D","",c["mcc"]),"Content-Type":"application/json"}
 def q(cid,g):
@@ -57,8 +79,18 @@ def q(cid,g):
 GAQL=("SELECT campaign.id,campaign.name,campaign.advertising_channel_type,campaign_budget.amount_micros,"
  "metrics.cost_micros,metrics.conversions,metrics.conversions_value FROM campaign "
  f"WHERE campaign.status='ENABLED' AND metrics.cost_micros>0 AND segments.date DURING LAST_{DAYS}_DAYS")
-TODAY_Q=("SELECT campaign.id,metrics.cost_micros,metrics.search_budget_lost_impression_share "
- "FROM campaign WHERE campaign.status='ENABLED' AND segments.date DURING TODAY")
+import datetime
+# Fereastră RECENTĂ dar AȘEZATĂ: zilele -8..-3. Sar peste ultimele 2 zile fiindcă atribuirea conversiilor
+# vine cu ÎNTÂRZIERE → CPA-ul ultimelor 1-2 zile e mereu fals-umflat (dovadă Grandia 13-iul: Google raporta
+# 58,9 conv → CPA 85 „pierdere", când magazinul avusese REAL 111 comenzi). Dacă foloseam LAST_7_DAYS,
+# lag-ul ar fi făcut orice campanie să pară că se saturează → n-aș mai fi scalat niciodată nimic.
+_t=datetime.date.today()
+_R0=(_t-datetime.timedelta(days=8)).isoformat(); _R1=(_t-datetime.timedelta(days=3)).isoformat()
+RECENT_Q=("SELECT campaign.id,metrics.cost_micros,metrics.conversions FROM campaign "
+ f"WHERE campaign.status='ENABLED' AND metrics.cost_micros>0 AND segments.date BETWEEN '{_R0}' AND '{_R1}'")
+TODAY_Q=("SELECT campaign.id,metrics.cost_micros FROM campaign WHERE campaign.status='ENABLED' AND segments.date DURING TODAY")
+YEST_Q=("SELECT campaign.id,metrics.cost_micros,metrics.search_budget_lost_impression_share "
+ "FROM campaign WHERE campaign.status='ENABLED' AND segments.date DURING YESTERDAY")
 buckets={"SCALE":[],"HOLD":[],"CUT":[]}
 for brand,cid,cur in ACCOUNTS:
     ref=br.get(brand) or {}
@@ -72,31 +104,61 @@ for brand,cid,cur in ACCOUNTS:
         cost=int(m.get("costMicros",0))/1e6; conv=float(m.get("conversions",0)); val=float(m.get("conversionsValue",0))
         if conv<8: continue
         cpa=cost/conv; roas=val/cost if cost else 0
-        z="SCALE" if cpa<=scale else ("HOLD" if cpa<=be else "CUT")
+        fx=FX.get(cur,1.0); cpa_ron=cpa*fx           # BE e în RON → compară RON cu RON
+        z="SCALE" if cpa_ron<=scale else ("HOLD" if cpa_ron<=be else "CUT")
         bud=int(r.get("campaignBudget",{}).get("amountMicros",0))/1e6
-        parsed.append((z,cc["id"],cc["name"][:26],cc.get("advertisingChannelType","")[:4],cpa,roas,conv,cost,bud))
+        parsed.append((z,cc["id"],cc["name"][:26],cc.get("advertisingChannelType","")[:4],cpa,roas,conv,cost,bud,cpa_ron,fx))
         if z=="SCALE": scale_ids.append(cc["id"])
+    # Fereastra de 30z MINTE în AMBELE sensuri — de aia trendul recent se verifică la TOATE campaniile:
+    #  · CUT stale  → campania s-a REPARAT deja (Belasil 30z=44 CUT, dar recent 34 = profitabil).
+    #  · SCALE stale → campania se SATUREAZĂ acum (Grandia 13-iul: 30z=51 zicea SCALE, dar spend +37%
+    #    adusese doar +12% comenzi → cost/comandă 44→54; am scalat în saturare pe un verdict orb).
+    recent={}
+    if parsed:
+        for r in q(cid,RECENT_Q):
+            m=r["metrics"]; c7=int(m.get("costMicros",0))/1e6; v7=float(m.get("conversions",0))
+            if v7: recent[r["campaign"]["id"]]=c7/v7
     # real-time budget-limited (TODAY) only where we have SCALE campaigns
-    today={}
+    today={}; yest={}
     if scale_ids:
         for r in q(cid,TODAY_Q):
-            m=r["metrics"]; today[r["campaign"]["id"]]={"cost":int(m.get("costMicros",0))/1e6,
+            today[r["campaign"]["id"]]=int(r["metrics"].get("costMicros",0))/1e6
+        for r in q(cid,YEST_Q):
+            m=r["metrics"]; yest[r["campaign"]["id"]]={"cost":int(m.get("costMicros",0))/1e6,
                 "blis":float(m["searchBudgetLostImpressionShare"]) if "searchBudgetLostImpressionShare" in m else None}
-    for z,cmpid,nm,ch,cpa,roas,conv,cost,bud in parsed:
-        base=f"{brand}·{nm} [{ch}] CPA={cpa:.0f} ({cur}; BE {be}, scale {scale}) ROASg~{roas:.1f} conv{DAYS}={conv:.0f}"
+    for z,cmpid,nm,ch,cpa,roas,conv,cost,bud,cpa_ron,fx in parsed:
+        loc=f"{cpa:.0f} {cur} = " if cur!="RON" else ""
+        base=f"{brand}·{nm} [{ch}] CPA={loc}{cpa_ron:.0f} RON (BE {be}, scale {scale}) ROASg~{roas:.1f} conv{DAYS}={conv:.0f}"
         if z=="SCALE":
-            t=today.get(cmpid,{}); tc=t.get("cost",0); blis=t.get("blis")
-            util=tc/bud*100 if bud else 0
-            capped = util>=65 or (blis is not None and blis>3)
-            flag="🔥 RAISE (budget-limited AZI)" if capped else "→ necapat: orizontal / așteaptă"
+            y=yest.get(cmpid,{}); yc=y.get("cost",0); blis=y.get("blis"); yutil=yc/bud*100 if bud else 0
+            tc=today.get(cmpid,0); tutil=tc/bud*100 if bud else 0
+            # SIGNAL = YESTERDAY full day (time-of-day independent). azi = pacing only.
+            # fall back to today only if the campaign had no spend yesterday (brand-new).
+            capped = (yutil>=92 or (blis is not None and blis>0.05)) or (yc==0 and tutil>=65)
+            # 🛑 SATURARE: 30z zice SCALE, dar fereastra recentă (așezată) e deja peste prag → NU mai scala,
+            # oricât de „budget-limited" ar fi. Bugetul în plus cumpără doar comenzi tot mai scumpe.
+            c7=recent.get(cmpid); c7=c7*fx if c7 is not None else None
+            sat=""
+            if c7 is not None and c7>be:
+                capped=False; sat=f" 🛑 recent CPA={c7:.0f} RON > BE {be} = SE SATUREAZĂ → NU SCALA (taie bugetul)"
+            elif c7 is not None and c7>scale:
+                sat=f" ⚠️ recent CPA={c7:.0f} RON (>scale {scale}) = randamente descrescătoare → scalează MIC sau deloc"
+            flag=("🔥 RAISE (budget-limited IERI)" if capped else "→ necapat: orizontal / așteaptă") if not sat else ""
             b=f" lostBud={blis*100:.0f}%" if blis is not None else ""
-            base+=f" | bud={bud:.0f} azi={tc:.0f}({util:.0f}%){b} {flag}"
+            base+=f" | bud={bud:.0f} IERI={yc:.0f}({yutil:.0f}%){b} azi={tc:.0f}({tutil:.0f}%) {flag}{sat}"
+        elif z=="CUT":
+            c7=recent.get(cmpid)
+            c7=c7*fx if c7 is not None else None   # 7z e tot în moneda contului → în RON
+            if c7 is None: base+=" | 7z=fără date → verifică manual înainte să tai"
+            elif c7<=scale: base+=f" | ⚠️ 7z CPA={c7:.0f} RON = SCALE! NU TĂIA — verdictul CUT e stale (fereastra {DAYS}z târăște perioada veche)"
+            elif c7<=be: base+=f" | ⚠️ 7z CPA={c7:.0f} RON < BE {be} → SE REPARĂ, NU TĂIA (lasă-l să se așeze)"
+            else: base+=f" | 7z CPA={c7:.0f} RON (tot > BE) → CUT confirmat pe trend"
         buckets[z].append(base)
-LBL={"SCALE":"🟢 SCALE (profit sănătos) — 🔥=budget-limited AZI (crește ≤20%) · necapat=orizontal",
+LBL={"SCALE":"🟢 SCALE (profit sănătos) — 🔥=budget-limited IERI (crește ≤20%) · necapat=orizontal",
  "HOLD":"🟡 HOLD (profit subțire → optimizează, nu scala)",
  "CUT":"🔴 CUT/FIX (CPA > breakeven = pierde bani)"}
-print(f"=== VERDICT PE PROFIT + BUDGET-LIMITED (AZI) — CPA {DAYS}z vs breakeven brandref ===")
-print("   ⚠️ ROASg = Google-reported (~1.5× umflat); gate = CPA. AZI e zi PARȚIALĂ → util mare/lostBud>0 = capat.")
+print(f"=== VERDICT PE PROFIT + BUDGET-LIMITED (IERI zi completă) — CPA {DAYS}z vs breakeven brandref ===")
+print("   ⚠️ ROASg=Google (~1.5× umflat); gate=CPA. Budget-limited=IERI (fiabil la orice oră); azi=doar pacing.")
 for z in ["SCALE","HOLD","CUT"]:
     print(f"\n{LBL[z]} — {len(buckets[z])}")
     for x in buckets[z]: print("  "+x)
