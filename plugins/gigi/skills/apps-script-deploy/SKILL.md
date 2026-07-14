@@ -1,7 +1,7 @@
 ---
 name: apps-script-deploy
 description: Create, read and WRITE Google Apps Script (.gs) code for the team programmatically — create a new script project (standalone or bound to a Sheet/Doc), and deploy/patch an existing project's source via the Apps Script API, using the shared looker-sheets service account + domain-wide delegation (impersonating the owner). No more manual copy-paste into the Apps Script editor. Safe by design — push/create are DRY-RUN by default, push always backs up the current code first, and read-back-verifies after writing. Use for "push apps script", "deploy gs code", "create a new apps script", "creaza un google apps script nou", "edit/update Google Apps Script programmatically", "patch the daily report script", "pune codul in apps script", "actualizeaza scriptul Raport Zilnic", "modifica functia adaugaRandZilnic2", "Apps Script API", "container-bound / standalone script source".
-argument-hint: "list | get --script-id <id> | push --script-id <id> --as owner@domain --file Code=new.gs [--apply] | create --title T --as owner@domain [--parent <sheetId>] --file Code=code.gs [--apply] | trash --script-id <id> --as owner@domain [--apply]"
+argument-hint: "list | get --script-id <id> | lint --file Code=new.gs | push --script-id <id> --as owner@domain --file Code=new.gs [--apply] | verify --sheet-id <id> --tab 'Raport Zilnic 2' | create --title T --as owner@domain [--parent <sheetId>] [--apply] | trash --script-id <id> --as owner@domain [--apply]"
 ---
 
 # apps-script-deploy
@@ -29,10 +29,15 @@ uv run scripts/gas_deploy.py list
 uv run scripts/gas_deploy.py get --script-id <ID> --out backup.json
 
 # 3. edit the .gs locally (surgical string edits on the backed-up source are safest),
-#    syntax-check it, then push  (WRITE needs --as <owner> impersonation)
+#    syntax-check + LINT it, then push  (WRITE needs --as <owner> impersonation)
 node --check Code.js                          # rename .gs->.js for the check; syntax only
-uv run scripts/gas_deploy.py push --script-id <ID> --as gheorghe.beschea@overheat.agency --file Code=Code_new.gs           # DRY-RUN
+uv run scripts/gas_deploy.py lint --file Code=Code_new.gs                                                                  # bug-urile care au picat prod
+uv run scripts/gas_deploy.py push --script-id <ID> --as gheorghe.beschea@overheat.agency --file Code=Code_new.gs           # DRY-RUN (lint-ul ruleaza automat)
 uv run scripts/gas_deploy.py push --script-id <ID> --as gheorghe.beschea@overheat.agency --file Code=Code_new.gs --apply   # write
+
+# 3b. dupa deploy: a scris scriptul valori REALE in foaie? (verificare prin EFECT)
+uv run scripts/gas_deploy.py verify --sheet-id <SHEET_ID> --tab "Raport Zilnic 2" --rows 20 --key-cols C,E,F,G --last-col W
+#    ...sau direct din push:  push ... --apply --verify-sheet <SHEET_ID> --verify-tab "Raport Zilnic 2" --verify-cols C,E,F,G
 
 # 4. create a NEW project (standalone, or bound to a Sheet/Doc via --parent <driveFileId>)
 uv run scripts/gas_deploy.py create --title "My Script" --as gheorghe.beschea@overheat.agency --file Code=code.gs           # DRY-RUN
@@ -78,6 +83,29 @@ Repeat `--file` for multiple files. Pass `appsscript=manifest.json` only if you 
   trash (reversible ~30 days). It needs DWD also authorized for `https://www.googleapis.com/auth/drive`
   (already added alongside `script.projects`). `trash` is DRY-RUN by default and refuses anything that
   isn't an `application/vnd.google-apps.script` file (won't touch a Sheet/Doc by mistake).
-- **Running a function** via the API (`scripts.run`) needs the script deployed as an API executable
-  with a matching GCP project + scopes; this skill covers *code deploy*, not execution — run from the
-  editor / a trigger after pushing.
+- **Remote RUN is NOT possible** (probat, nu presupus): `scripts.run`, `processes.list` și
+  `deployments.list` dau toate **403** cu delegarea noastră — `scripts.run` ar cere ca scriptul să fie
+  legat de proiectul GCP al SA-ului **plus** un deployment „API executable" (schimbare invazivă în
+  fiecare script de producție), iar `processes`/`deployments` ar cere scope-uri DWD noi. Execuția
+  rămâne pe seama trigger-ului / editorului. **De aceea verificarea utilă e prin EFECT** (`verify`).
+
+## `lint` — cele 7 bug-uri care CHIAR au picat producția
+Rulează automat înainte de fiecare `push` (`--no-lint` ca să sari, `--force` ca să pushezi peste ERROR).
+| Nivel | Regulă | De ce |
+|---|---|---|
+| **ERROR** | `getSheetById(` | **nu există** în Apps Script → scriptul „nu scrie nimic" |
+| **ERROR** | range sursă cu limită (`$C$2:$C$8408`, sau `'$2:$' + col + '$' + lastRow`) | limita e înghețată la rulare; datele zilei se sincronizează DUPĂ ce scrii rândul → cad dincolo de limită → **0 la tot**. Range-ul deschis (`'sheet'!$C$2:$C`) e OK — lint-ul face diferența |
+| WARN | `SpreadsheetApp.flush()` | recalc sincron pe foaie mare = „rulează la infinit" |
+| WARN | `ARRAYFORMULA` pe coloană întreagă | recalc greu pe fiecare rând |
+| WARN | `LET(` cu `FILTER/ARRAYFORMULA/UNIQUE` | LET merge doar pe **scalari**; cu array-uri s-a rupt și a dat 0 pe FB/TikTok |
+| WARN | `setValue()` în buclă | 1 apel/celulă → adună și scrie o dată cu `setValues()` |
+| WARN | citire din Sheet în buclă | N round-trip-uri |
+
+## `verify` — a scris scriptul valori reale?
+Citește ultimele N rânduri din tab (Sheets API, SA-ul e Editor) și taie exit-code 1 dacă găsește:
+- **rând recent cu TOATE metricile 0** — semnătura exactă a incidentului „0 la tot";
+- **erori de formulă** (`#REF!`, `#N/A`, …);
+- (informativ) **range-uri sursă mărginite** rămase în formulele live — inofensive pe rânduri vechi
+  (datele au intrat deja), periculoase pe rândul zilei.
+Alarmează doar la rând *complet* zero, nu la o metrică zero per brand — altfel un brand oprit
+intenționat (ex. Grandia pe pauză la FB) ar da alarmă falsă în fiecare zi.
