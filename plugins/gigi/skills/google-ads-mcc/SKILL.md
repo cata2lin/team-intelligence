@@ -49,6 +49,27 @@ prin cookie auto-tagging, **same-session** (ok pt majoritatea); pt 100% etanș =
 Carpetto (4069952156) reparat iun 2026: 14 comenzi reale / 0 conversii → COD Purchase `AW-18249884743/SoloCO7ckMUcEMfInP5D`.
 - ⚠️ **Înainte să zici „PMax e orb pe COD", verifică dacă magazinul CHIAR are formular.** Multe magazine de parfum (ex. **Nubra, GT**) folosesc **checkout NATIV** (n-au Releasit) → „Google Shopping App Purchase" trage normal → conversiile Google mici = **cold-start / cerere reală mică, NU gaură de tracking**. Doar magazinele cu COD form (deals: Carpetto/Ofertele) au nevoie de „COD Purchase". `cod_tracking.py` auto-detectează și refuză pe checkout nativ — nu forța degeaba.
 
+## 🆘 „Vânzările s-au prăbușit peste noapte" — ARBORELE DE DIAGNOSTIC (Grandia, 14-iul-2026)
+> Incident real: comenzi **−63%** față de o zi normală (30 vs 62-88 la aceeași oră), pornit brusc din zori. **Cauza NU era în Google Ads.** Ordinea asta te duce la răspuns în ~15 min; sari peste pași și pierzi ore.
+
+**PASUL 0 — verifică sursa de adevăr, NU uneltele.** Comenzile REALE din **Shopify** (`orders(query:"created_at:>=…")`, comparate **la aceeași oră** pe 10 zile), NU: (a) conversiile Google (lag 1-2 zile → subnumără brutal: raporta 58,9 conv când magazinul avusese **111** comenzi), (b) AWBprint (**subnumără zilele recente** — m-a făcut să cred că ziua precedentă fusese un „vârf" când era perfect normală → era să declar incidentul „zgomot"). **Un incident real se vede DOAR în Shopify.**
+
+**PASUL 1 — e trafic sau e conversie?** Compară clicuri vs comenzi la aceeași oră.
+- clicuri ≈ la fel, comenzi ↓↓ → **conversie** (site/ofertă/tracking) → pasul 2.
+- clicuri ↓↓ proporțional → **difuzare** (buget/bidding/feed/policy) → pasul 4.
+
+**PASUL 2 — chiar e site-ul rupt? TESTEAZĂ, nu presupune.** Un HTTP 200 pe homepage NU dovedește nimic. Rulează fluxul REAL: `products.json` → `GET /products/<handle>` → **`POST /cart/add.js`** → `GET /cart.js` → `GET /checkout`. (La Grandia toate au ieșit perfect → site-ul era nevinovat.) Verifică și **coșurile abandonate** (`abandonedCheckouts`): dacă sunt NORMALE dar comenzile au căzut → oamenii nu ajung nici la checkout (problema e mai sus), NU e checkout-ul rupt.
+
+**PASUL 3 — 🔑 TRACKING-UL. Aici era.** GA4 (`sessionDefaultChannelGroup` × `hour`): dacă **sesiunile TOTALE sunt constante/în creștere** dar mixul explodează — **`Unassigned` sare de la 1 la 400**, `Paid Shopping` se prăbușește, `Cross-network` urcă — **tracking-ul e rupt, nu businessul.**
+> **SPIRALA MORȚII (mecanismul):** tag-uri blocate → Google nu mai *vede* conversiile → smart bidding (tROAS/tCPA) crede că pierde bani → **strangulează difuzarea campaniilor bune (Shopping)** → traficul care cumpără dispare → **vânzările REALE se prăbușesc**. Se auto-accelerează oră de oră.
+- **Vinovatul tipic: un app de cookie-consent care BLOCHEAZĂ tag-urile.** La Grandia: **Omega** (`window.OMG_BLOCK_URL` + `omegaBlockScopes`) bloca `googletagmanager.com/gtag`, `google-analytics.com`, Shopify `web_pixel` și `trekkie`. Caută în HTML-ul paginii: `OMG_BLOCK_URL|omegaBlockScopes|consent|cookiebot|onetrust`.
+- Corelează cu **`themes{ updatedAt }`** — o temă modificată exact când a început căderea CVR-ului raportat de Google = semnătura.
+- ⚠️ **NU umbla la bidding până nu repari tracking-ul.** Orice schimbare de strategie făcută pe date false o înrăutățește.
+
+**PASUL 4 — abia acum Google Ads:** `change_event` (cine a schimbat ce), feed MC (`merchant_feed.py`), stoc, prețuri (motorul de repricing), `primary_status_reasons`.
+
+**Ce am EXCLUS pe rând (cu dovezi, ca să nu le mai reverifici orb):** site down · temă modificată azi · prețuri (0 modificări în 36h) · stoc · checkout · feed MC (724/728 eligibile) · feedgen · **propriile modificări de buget** (căderea începuse cu ore înainte — verifică ORA, nu presupune că ești vinovat… dar nici că nu ești).
+
 ## Campaign & asset-group map (Esteban + Belasil)
 
 Run `uv run audit_campaigns.py` for a live view with `▶ ENABLED / ⏸ PAUSED / ✗ REMOVED` icons.
