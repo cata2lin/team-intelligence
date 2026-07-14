@@ -1,7 +1,7 @@
 ---
 name: scentum
-description: Operează Scentum ERP (app-ul de producție parfumuri — Esteban, Nubra, George Talent, Lab Noir, Artevita, Zafra…) din terminal, prin serviciile CANONICE ale aplicației (aceeași logică ca UI-ul, nu SQL brut). Acum — generează DIRECT un "Necesar Producție" (rulează Forecastul velocity → creează Necesarul DRAFT PR-{BRAND}-{n}, cantități sugerate). Use pentru "fă un necesar", "necesar producție", "generează necesar Esteban/Nubra", "cât să producem", "forecast producție", "production requirement", "Scentum", "PR-EST", "necesar de la Andreea pentru Vali".
-argument-hint: "generate-necesar --brand ESTEBAN [--yes] [--lookback 60 --forecast-days 60]"
+description: Operează Scentum ERP (app-ul de producție parfumuri — Esteban, Nubra, George Talent, Lab Noir, Artevita, Zafra, Niche, Blink, EU) din terminal, prin serviciile CANONICE ale aplicației (aceeași logică ca UI-ul: validări, audit, numerotare — NU SQL brut). Face TOATE mutațiile disponibile în Scentum — generează "Necesar Producție" din Forecast (velocity → PR-{BRAND}-{n} DRAFT), aprobă/anulează, adaugă/șterge linii, marchează fabricat, creează/aprobă/anulează Livrări și face Recepția (push stoc în Shopify). Use pentru "fă un necesar", "necesar producție", "generează necesar Esteban/Nubra", "cât să producem", "forecast producție", "aprobă necesarul", "marchează fabricat", "creează livrare", "recepționează livrarea", "Scentum", "PR-EST", "production requirement", "Andreea → Vali".
+argument-hint: "necesar generate --brand ESTEBAN [--yes] | necesar approve --id X --yes | livrare receive --id X --yes --confirm-shopify"
 ---
 
 # scentum
@@ -9,56 +9,77 @@ argument-hint: "generate-necesar --brand ESTEBAN [--yes] [--lookback 60 --foreca
 
 ## Ce e Scentum
 ERP-ul de **producție parfumuri** (repo privat `contact546/scentum`, Next.js + Prisma + Postgres).
-Fluxul central: **Forecast** → **Necesar Producție** (`ProductionRequirement`, Andreea → Vali) →
-**Livrare** → recepție în Shopify.
+Lanțul central: **Forecast** → **Necesar Producție** (`ProductionRequirement`, Andreea → Vali) →
+**Livrare** → **Recepție** (stocul intră în Shopify).
 
-> ⚠️ Mutațiile NU sunt expuse pe HTTP (API-ul are doar PDF/upload/sync). Ele trăiesc în
-> **server actions** (`src/app/actions/*`) care cheamă **servicii** (`src/lib/services/*`).
-> De aceea orice script trebuie să ruleze **în interiorul repo-ului**, importând serviciile —
-> așa păstrezi logica de business (validări, audit, numerotare), nu scrii SQL brut.
+> ⚠️ **Mutațiile NU sunt pe HTTP.** API-ul expune doar PDF/upload/sync. Scrierile trăiesc în
+> **server actions** (`src/app/actions/*`) → **servicii** (`src/lib/services/*`). De aceea CLI-ul
+> rulează **în interiorul repo-ului**, importând serviciile — așa păstrezi logica de business
+> (validări, tranziții de stare, audit, numerotare). **Nu scrie SQL brut în Scentum.**
 
 ## Setup (o dată pe mașină)
 ```bash
 gh repo clone contact546/scentum ~/Downloads/scentum && cd ~/Downloads/scentum
 KB=~/.claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py
-printf 'DATABASE_URL=%s\n' "$(uv run "$KB" secret-get DATABASE_URL_SCENTUM)" > .env   # NU se comite (.gitignore)
+printf 'DATABASE_URL=%s\n' "$(uv run "$KB" secret-get DATABASE_URL_SCENTUM)" > .env   # NU se comite
 npm install && npx prisma generate
-```
-Apoi copiază scriptul din acest skill în repo:
-```bash
-cp <skill-dir>/scripts/generate-necesar.ts ~/Downloads/scentum/scripts/
+cp <skill-dir>/scripts/*.ts scripts/          # scentum-cli.ts + generate-necesar.ts
 ```
 
-## Necesar Producție — generează direct
+## CLI — toate mutațiile
+**Mutațiile sunt DRY-RUN implicit** → scriu doar cu `--yes`. Recepția cere în plus `--confirm-shopify`.
 ```bash
 cd ~/Downloads/scentum
-npx tsx scripts/generate-necesar.ts --brand ESTEBAN                 # DRY-RUN (nu creează nimic)
-npx tsx scripts/generate-necesar.ts --brand ESTEBAN --yes           # creează Necesarul DRAFT
-# opțiuni: --lookback 60 --forecast-days 60 --lead 14 --round 50 --min 1 --title "..." --notes "..."
+npx tsx scripts/scentum-cli.ts                      # help
+
+# CITIRE (fără efecte)
+npx tsx scripts/scentum-cli.ts brands
+npx tsx scripts/scentum-cli.ts necesar list [--brand ESTEBAN] [--status DRAFT]
+npx tsx scripts/scentum-cli.ts necesar show --id <prId>
+npx tsx scripts/scentum-cli.ts livrare list|show --id <id>
+npx tsx scripts/scentum-cli.ts livrare eligible     # linii Necesar COMPLETED, libere de livrare
+
+# NECESAR
+npx tsx scripts/scentum-cli.ts necesar generate --brand ESTEBAN [--lookback 60 --forecast-days 60 --round 50] --yes
+npx tsx scripts/scentum-cli.ts necesar create   --brand NUBRA --title "..." --yes     # DRAFT gol
+npx tsx scripts/scentum-cli.ts necesar add-line --id <prId> --variant <variantId> --qty 50 --yes
+npx tsx scripts/scentum-cli.ts necesar set-qty  --item <itemId> --qty 80 --yes
+npx tsx scripts/scentum-cli.ts necesar remove-line --item <itemId> --yes
+npx tsx scripts/scentum-cli.ts necesar approve  --id <prId> --yes
+npx tsx scripts/scentum-cli.ts necesar cancel   --id <prId> --reason "..." --yes
+npx tsx scripts/scentum-cli.ts necesar mark     --item <itemId> --qty 40 --yes    # fabricat (parțial OK)
+npx tsx scripts/scentum-cli.ts necesar cancel-line --item <itemId> --reason "..." --yes
+
+# LIVRARE
+npx tsx scripts/scentum-cli.ts livrare create   [--items id1,id2] [--notes "..."] --yes
+npx tsx scripts/scentum-cli.ts livrare add-item --id <deliveryId> --pri-item <necesarItemId> --yes
+npx tsx scripts/scentum-cli.ts livrare remove-item --item <deliveryItemId> --yes
+npx tsx scripts/scentum-cli.ts livrare approve  --id <deliveryId> --yes
+npx tsx scripts/scentum-cli.ts livrare cancel   --id <deliveryId> --reason "..." --yes
+npx tsx scripts/scentum-cli.ts livrare receive  --id <deliveryId> --yes --confirm-shopify   # ⚠️ scrie în Shopify
 ```
 Branduri: `ESTEBAN · NUBRA · GEORGE-TALENT · LAB-NOIR · ART · ZAFRA · NICHE · BLINK · EU`.
 
-Ce face: rulează `ForecastService.runForBrand` → citește liniile din `ForecastRow` → afișează tabelul
-(SKU · vândute · stoc · în producție · viteză/zi · **SUGERAT**) → cu `--yes` cheamă
-`ProductionRequirementService.create({brandId, forecastRunId, items})` → **DRAFT `PR-{BRAND}-{n}`**.
-
-## Formula (canonică, din `prisma/schema.prisma`)
+## Formula Forecast (canonică, din `prisma/schema.prisma`)
 ```
-velocity        = netUnitsSold(lookback) / inStockDays      (corectat pe zile OOS; fallback /lookbackDays)
+velocity        = netUnitsSold(lookback) / inStockDays     (corectat pe zile OOS; fallback /lookbackDays)
 forecastDemand  = ceil(velocity × forecastDays)
 raw             = max(0, forecastDemand − onHand − pendingIncoming)
-suggestedQty    = roundUpToUnit(raw, brand.productionRoundingUnit)   // default 50
+suggestedQty    = roundUpToUnit(raw, brand.productionRoundingUnit)     // default 50
 ```
 `pendingIncoming` = `OPEN.requestedQty + COMPLETED.manufacturedQty` din Necesarele ne-terminale.
 
 ## Notes / capcane
-- **DRY-RUN implicit** — creează Necesarul doar cu `--yes`. (Dar dry-run-ul RULEAZĂ forecastul, deci
-  scrie un `ForecastRun` — la fel ca butonul din UI. E o analiză, nu o mutație de business.)
-- **Gardă STRICT**: dacă brandul are variante **nemapate** pe `ScentMaster`, forecastul e blocat —
-  scriptul refuză și-ți listează variantele de mapat (Mapare Produse în UI).
-- Necesarul se creează **DRAFT** — aprobarea/producția rămân în fluxul normal (Vali).
-- Numerotare `PR-{BRAND}-{n}`; Necesar multi-brand = `NP-{n}` (dacă `brandId` e omis).
-- Secretul DB: KB `DATABASE_URL_SCENTUM`. Nu-l printa, nu comite `.env`.
-- **Mutații suplimentare** (aprobare, anulare, mark-manufactured, livrări, recepție) — vezi serviciile
-  `production-requirement.service.ts`, `delivery.service.ts`, `delivery-receive.service.ts`. (CLI-ul
-  pentru ele vine în pasul următor al acestui skill.)
+- **DRY-RUN implicit pe TOATE mutațiile.** Nimic nu se scrie fără `--yes`.
+- **⚠️ Recepția (`livrare receive`) e IREVERSIBILĂ din Scentum** — adaugă stoc în Shopify
+  (`inventoryAdjustQuantities`); corecția se face doar din Shopify admin. De aceea cere
+  `--yes` **și** `--confirm-shopify`.
+- **Gardă STRICT la forecast**: dacă brandul are variante **nemapate** pe `ScentMaster`, forecastul
+  e blocat — CLI-ul refuză și listează variantele de mapat (Mapare Produse în UI).
+- **Stări:** editabil în `DRAFT / APPROVED / PARTIALLY_PRODUCED`; terminale (read-only):
+  `PRODUCED / CLOSED / CANCELLED`. Numerotare `PR-{BRAND}-{n}` (multi-brand: `NP-{n}`).
+- `necesar generate` rulează un **ForecastRun** real chiar și în dry-run (e o analiză, ca butonul din
+  UI) — dar **nu** creează Necesarul fără `--yes`.
+- Secret DB: KB **`DATABASE_URL_SCENTUM`**. Nu-l printa; nu comite `.env`.
+- Alte servicii disponibile pentru extindere: `purchase-orders`, `receptions`, `maturation`,
+  `production`, `recipes`, `movements`, `batches` (vezi `src/lib/services/` și `src/app/actions/`).
