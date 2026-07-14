@@ -21,10 +21,16 @@ Lanțul central: **Forecast** → **Necesar Producție** (`ProductionRequirement
 ```bash
 gh repo clone contact546/scentum ~/Downloads/scentum && cd ~/Downloads/scentum
 KB=~/.claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py
-printf 'DATABASE_URL=%s\n' "$(uv run "$KB" secret-get DATABASE_URL_SCENTUM)" > .env   # NU se comite
+# ⬇️ FOLOSEȘTE userul cu drepturi minime (scentum_rw), NU DSN-ul de superuser:
+printf 'DATABASE_URL=%s\n' "$(uv run "$KB" secret-get DATABASE_URL_SCENTUM_RW)" > .env   # NU se comite
 npm install && npx prisma generate
 cp <skill-dir>/scripts/*.ts scripts/          # scentum-cli.ts + generate-necesar.ts
 ```
+
+> 🔑 **Ca să SCRII în Scentum îți trebuie `DATABASE_URL_SCENTUM_RW`** (rol `scentum_rw`: SELECT/INSERT/
+> UPDATE/DELETE, fără superuser, fără DDL). ⚠️ **MCP-ul `postgres-scentum` e READ-ONLY prin design** —
+> din el NU poți scrie niciodată; mutațiile se fac DOAR cu CLI-ul de mai jos.
+> `DATABASE_URL_SCENTUM` (superuser) e doar pentru admin/migrații — nu-l împrăștia.
 
 ## CLI — toate mutațiile
 **Mutațiile sunt DRY-RUN implicit** → scriu doar cu `--yes`. Recepția cere în plus `--confirm-shopify`.
