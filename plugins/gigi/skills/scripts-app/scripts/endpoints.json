@@ -1,0 +1,4848 @@
+[
+ {
+  "area": "auth",
+  "method": "POST",
+  "path": "/api/auth/login",
+  "fn": "login",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "LoginRequest",
+  "body_fields": [
+   {
+    "name": "username",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "password",
+    "type": "str",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "auth",
+  "method": "GET",
+  "path": "/api/auth/users",
+  "fn": "get_users",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "auth",
+  "method": "POST",
+  "path": "/api/auth/users",
+  "fn": "create_user",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "UserCreate",
+  "body_fields": [
+   {
+    "name": "username",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "password",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "role",
+    "type": "str",
+    "default": "'user'"
+   },
+   {
+    "name": "permissions",
+    "type": "dict",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "auth",
+  "method": "DELETE",
+  "path": "/api/auth/users/{user_id}",
+  "fn": "delete_user",
+  "kind": "mutation",
+  "path_params": [
+   "user_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "auth",
+  "method": "PUT",
+  "path": "/api/auth/users/{user_id}",
+  "fn": "update_user",
+  "kind": "mutation",
+  "path_params": [
+   "user_id"
+  ],
+  "body_model": "UserUpdate",
+  "body_fields": [
+   {
+    "name": "username",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "password",
+    "type": "Optional[str]",
+    "default": "None"
+   },
+   {
+    "name": "role",
+    "type": "str",
+    "default": "'user'"
+   },
+   {
+    "name": "permissions",
+    "type": "dict",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "awb_center",
+  "method": "POST",
+  "path": "/api/awb-center/download-labels",
+  "fn": "download_labels",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "DownloadLabelsRequest",
+  "body_fields": [
+   {
+    "name": "awbs",
+    "type": "List[Dict[str, str]]",
+    "default": null
+   },
+   {
+    "name": "paper_size",
+    "type": "str",
+    "default": "'A6'"
+   },
+   {
+    "name": "dpd_profile",
+    "type": "str",
+    "default": "'dpd-ro'"
+   }
+  ],
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "awb_center",
+  "method": "POST",
+  "path": "/api/awb-center/export-csv",
+  "fn": "export_csv",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "ExportRequest",
+  "body_fields": [
+   {
+    "name": "results",
+    "type": "List[Dict[str, Any]]",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "awb_center",
+  "method": "POST",
+  "path": "/api/awb-center/export-xlsx",
+  "fn": "export_xlsx",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "ExportRequest",
+  "body_fields": [
+   {
+    "name": "results",
+    "type": "List[Dict[str, Any]]",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "awb_center",
+  "method": "POST",
+  "path": "/api/awb-center/process",
+  "fn": "process_awbs",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "ProcessRequest",
+  "body_fields": [
+   {
+    "name": "manual_input",
+    "type": "str",
+    "default": "''"
+   },
+   {
+    "name": "store_prefix",
+    "type": "str",
+    "default": "''"
+   },
+   {
+    "name": "dpd_profile",
+    "type": "str",
+    "default": "'dpd-ro'"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "customer_service",
+  "method": "GET",
+  "path": "/api/cs/report",
+  "fn": "cs_report",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "month",
+    "type": "str"
+   },
+   {
+    "name": "max_day",
+    "type": "Optional[int]"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "customer_service",
+  "method": "GET",
+  "path": "/api/cs/tags",
+  "fn": "get_cs_tags",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "customer_service",
+  "method": "POST",
+  "path": "/api/cs/tags",
+  "fn": "save_cs_tags",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "CsTagsModel",
+  "body_fields": [
+   {
+    "name": "tags",
+    "type": "List[str]",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "daily_perf",
+  "method": "GET",
+  "path": "/api/daily-perf",
+  "fn": "get_daily_performance",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "date",
+    "type": "Optional[str]"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "daily_perf",
+  "method": "GET",
+  "path": "/api/daily-perf/brands",
+  "fn": "get_brand_map",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "daily_perf",
+  "method": "POST",
+  "path": "/api/daily-perf/brands",
+  "fn": "update_brand_map",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "BrandMapUpdate",
+  "body_fields": [
+   {
+    "name": "brand_map",
+    "type": "dict",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "daily_perf",
+  "method": "POST",
+  "path": "/api/daily-perf/clear-cache",
+  "fn": "clear_cache",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "daily_perf",
+  "method": "GET",
+  "path": "/api/daily-perf/compare",
+  "fn": "get_compare",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "date",
+    "type": "Optional[str]"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "daily_perf",
+  "method": "POST",
+  "path": "/api/daily-perf/fetch",
+  "fn": "force_fetch",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "date",
+    "type": "Optional[str]"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "daily_perf",
+  "method": "GET",
+  "path": "/api/daily-perf/range",
+  "fn": "get_range",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "start",
+    "type": "str"
+   },
+   {
+    "name": "end",
+    "type": "str"
+   },
+   {
+    "name": "aggregate",
+    "type": "bool"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "daily_perf",
+  "method": "GET",
+  "path": "/api/daily-perf/rates",
+  "fn": "get_rates",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "daily_perf",
+  "method": "POST",
+  "path": "/api/daily-perf/rates",
+  "fn": "update_rates",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "RatesUpdate",
+  "body_fields": [
+   {
+    "name": "exchange_rates",
+    "type": "dict",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "daily_perf",
+  "method": "POST",
+  "path": "/api/daily-perf/sync",
+  "fn": "sync_historical",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "from_date",
+    "type": "Optional[str]"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "daily_perf",
+  "method": "GET",
+  "path": "/api/daily-perf/tokens",
+  "fn": "list_tokens",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "daily_perf",
+  "method": "POST",
+  "path": "/api/daily-perf/tokens",
+  "fn": "add_token",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "AddTokenRequest",
+  "body_fields": [
+   {
+    "name": "name",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "token",
+    "type": "str",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "daily_perf",
+  "method": "DELETE",
+  "path": "/api/daily-perf/tokens/{token_id}",
+  "fn": "delete_token",
+  "kind": "mutation",
+  "path_params": [
+   "token_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "daily_perf",
+  "method": "GET",
+  "path": "/api/daily-perf/top-products",
+  "fn": "daily_perf_top_products",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "date",
+    "type": "str"
+   },
+   {
+    "name": "brand",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "dpd",
+  "method": "POST",
+  "path": "/api/dpd/analyze",
+  "fn": "dpd_analyze_invoice",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "file",
+    "type": "UploadFile"
+   },
+   {
+    "name": "threshold",
+    "type": "float"
+   },
+   {
+    "name": "min_weight",
+    "type": "float"
+   },
+   {
+    "name": "update_nomenclator",
+    "type": "str"
+   },
+   {
+    "name": "overwrite_manual",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "dpd",
+  "method": "POST",
+  "path": "/api/dpd/analyze-bulk",
+  "fn": "dpd_analyze_bulk",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "files",
+    "type": "List[UploadFile]"
+   },
+   {
+    "name": "threshold",
+    "type": "float"
+   },
+   {
+    "name": "min_weight",
+    "type": "float"
+   },
+   {
+    "name": "update_nomenclator",
+    "type": "str"
+   },
+   {
+    "name": "overwrite_manual",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "dpd",
+  "method": "GET",
+  "path": "/api/dpd/history",
+  "fn": "dpd_get_history",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "dpd",
+  "method": "DELETE",
+  "path": "/api/dpd/history/{history_id}",
+  "fn": "dpd_delete_history_entry",
+  "kind": "mutation",
+  "path_params": [
+   "history_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "dpd",
+  "method": "GET",
+  "path": "/api/dpd/history/{history_id}",
+  "fn": "dpd_get_history_entry",
+  "kind": "read",
+  "path_params": [
+   "history_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "dpd",
+  "method": "GET",
+  "path": "/api/dpd/nomenclator",
+  "fn": "dpd_get_nomenclator",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "dpd",
+  "method": "POST",
+  "path": "/api/dpd/nomenclator",
+  "fn": "dpd_save_nomenclator",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "dpd",
+  "method": "POST",
+  "path": "/api/dpd/nomenclator/import",
+  "fn": "dpd_import_nomenclator",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "file",
+    "type": "UploadFile"
+   },
+   {
+    "name": "paste",
+    "type": "str"
+   },
+   {
+    "name": "mode",
+    "type": "str"
+   },
+   {
+    "name": "overwrite_manual",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "dpd",
+  "method": "POST",
+  "path": "/api/dpd/nomenclator/import-files",
+  "fn": "dpd_import_nomenclator_files",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "files",
+    "type": "List[UploadFile]"
+   },
+   {
+    "name": "mode",
+    "type": "str"
+   },
+   {
+    "name": "overwrite_manual",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "dpd",
+  "method": "GET",
+  "path": "/api/dpd/parcel-history",
+  "fn": "dpd_get_parcel_history",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "limit",
+    "type": "int"
+   },
+   {
+    "name": "sku",
+    "type": "Optional[str]"
+   },
+   {
+    "name": "awb",
+    "type": "Optional[str]"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "dpd",
+  "method": "GET",
+  "path": "/api/dpd/problems",
+  "fn": "dpd_get_problems",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "date_from",
+    "type": "Optional[str]"
+   },
+   {
+    "name": "date_to",
+    "type": "Optional[str]"
+   },
+   {
+    "name": "filename",
+    "type": "Optional[str]"
+   },
+   {
+    "name": "status",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "dpd",
+  "method": "POST",
+  "path": "/api/dpd/save-dimensions",
+  "fn": "dpd_save_dimensions",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "payload",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "dpd",
+  "method": "POST",
+  "path": "/api/dpd/send-complaint",
+  "fn": "dpd_send_complaint",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "payload",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "dpd",
+  "method": "POST",
+  "path": "/api/dpd/shopify-lookup",
+  "fn": "dpd_shopify_lookup",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "payload",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "emag_labels",
+  "method": "POST",
+  "path": "/api/emag/labels/cancel",
+  "fn": "emag_labels_cancel",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "emag_labels",
+  "method": "POST",
+  "path": "/api/emag/labels/download",
+  "fn": "emag_labels_download",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "emag_labels",
+  "method": "POST",
+  "path": "/api/emag/labels/generate",
+  "fn": "emag_labels_generate",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "emag_labels",
+  "method": "GET",
+  "path": "/api/emag/labels/mapping",
+  "fn": "emag_labels_get_mapping",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "emag_labels",
+  "method": "POST",
+  "path": "/api/emag/labels/mapping",
+  "fn": "emag_labels_save_mapping",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "emag_labels",
+  "method": "GET",
+  "path": "/api/emag/labels/orders",
+  "fn": "emag_labels_orders",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "status",
+    "type": "int"
+   },
+   {
+    "name": "days",
+    "type": "int"
+   },
+   {
+    "name": "marketplace",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "emag_labels",
+  "method": "POST",
+  "path": "/api/emag/labels/preview",
+  "fn": "emag_labels_preview",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "emag_labels",
+  "method": "GET",
+  "path": "/api/emag/labels/status",
+  "fn": "emag_labels_status",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "emag_labels",
+  "method": "GET",
+  "path": "/api/emag/settings",
+  "fn": "emag_get_settings",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "emag_labels",
+  "method": "POST",
+  "path": "/api/emag/settings",
+  "fn": "emag_save_settings",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "emag_labels",
+  "method": "POST",
+  "path": "/api/emag/settings/test",
+  "fn": "emag_test_connection",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "employee_store",
+  "method": "POST",
+  "path": "/api/employee-store/order",
+  "fn": "place_order",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "EmployeeOrder",
+  "body_fields": [
+   {
+    "name": "employee_name",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "items",
+    "type": "List[CartItem]",
+    "default": null
+   },
+   {
+    "name": "notes",
+    "type": "str",
+    "default": "''"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "employee_store",
+  "method": "GET",
+  "path": "/api/employee-store/orders",
+  "fn": "get_orders",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "employee",
+    "type": "str"
+   },
+   {
+    "name": "limit",
+    "type": "int"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "employee_store",
+  "method": "DELETE",
+  "path": "/api/employee-store/orders/{order_id}",
+  "fn": "delete_order",
+  "kind": "mutation",
+  "path_params": [
+   "order_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "employee_store",
+  "method": "GET",
+  "path": "/api/employee-store/people",
+  "fn": "get_people",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "employee_store",
+  "method": "POST",
+  "path": "/api/employee-store/people",
+  "fn": "add_person",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "PersonModel",
+  "body_fields": [
+   {
+    "name": "name",
+    "type": "str",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "employee_store",
+  "method": "DELETE",
+  "path": "/api/employee-store/people/{name}",
+  "fn": "delete_person",
+  "kind": "mutation",
+  "path_params": [
+   "name"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "employee_store",
+  "method": "GET",
+  "path": "/api/employee-store/products",
+  "fn": "get_products",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "force_refresh",
+    "type": "bool"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "etransport_review",
+  "method": "POST",
+  "path": "/api/etransport-review/confirm",
+  "fn": "confirm_queue_items",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "ConfirmRequest",
+  "body_fields": [
+   {
+    "name": "queue_ids",
+    "type": "List[int]",
+    "default": null
+   },
+   {
+    "name": "save_to_hs_memory",
+    "type": "bool",
+    "default": "True"
+   },
+   {
+    "name": "save_to_product_memory",
+    "type": "bool",
+    "default": "False"
+   },
+   {
+    "name": "custom_code",
+    "type": "Optional[str]",
+    "default": "None"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "etransport_review",
+  "method": "GET",
+  "path": "/api/etransport-review/memory",
+  "fn": "get_confirmed_memory",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "search",
+    "type": "str"
+   },
+   {
+    "name": "source_type",
+    "type": "str"
+   },
+   {
+    "name": "limit",
+    "type": "int"
+   },
+   {
+    "name": "offset",
+    "type": "int"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "etransport_review",
+  "method": "PUT",
+  "path": "/api/etransport-review/memory/{hs_code}",
+  "fn": "update_memory_item",
+  "kind": "mutation",
+  "path_params": [
+   "hs_code"
+  ],
+  "body_model": "MemoryUpdateRequest",
+  "body_fields": [
+   {
+    "name": "nc8_code",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "tariff_label",
+    "type": "Optional[str]",
+    "default": "''"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "etransport_review",
+  "method": "POST",
+  "path": "/api/etransport-review/memory/{hs_code}/ai-rematch",
+  "fn": "ai_rematch_memory",
+  "kind": "mutation",
+  "path_params": [
+   "hs_code"
+  ],
+  "body_model": "AIRematchRequest",
+  "body_fields": [
+   {
+    "name": "hint",
+    "type": "str",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "etransport_review",
+  "method": "POST",
+  "path": "/api/etransport-review/openai/cancel/{job_id}",
+  "fn": "cancel_openai_match",
+  "kind": "mutation",
+  "path_params": [
+   "job_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "etransport_review",
+  "method": "POST",
+  "path": "/api/etransport-review/openai/match",
+  "fn": "run_openai_match",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "OpenAIMatchRequest",
+  "body_fields": [
+   {
+    "name": "queue_ids",
+    "type": "List[int]",
+    "default": null
+   }
+  ],
+  "other_params": [
+   {
+    "name": "background_tasks",
+    "type": "BackgroundTasks"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "etransport_review",
+  "method": "GET",
+  "path": "/api/etransport-review/openai/progress/{job_id}",
+  "fn": "check_openai_progress",
+  "kind": "read",
+  "path_params": [
+   "job_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "etransport_review",
+  "method": "POST",
+  "path": "/api/etransport-review/openai/reset-usage-stats",
+  "fn": "reset_openai_usage_stats",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "etransport_review",
+  "method": "GET",
+  "path": "/api/etransport-review/openai/usage-stats",
+  "fn": "get_openai_usage_stats",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "etransport_review",
+  "method": "GET",
+  "path": "/api/etransport-review/queue",
+  "fn": "get_review_queue",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "status",
+    "type": "str"
+   },
+   {
+    "name": "search",
+    "type": "str"
+   },
+   {
+    "name": "invoice",
+    "type": "str"
+   },
+   {
+    "name": "supplier",
+    "type": "str"
+   },
+   {
+    "name": "limit",
+    "type": "int"
+   },
+   {
+    "name": "offset",
+    "type": "int"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "etransport_review",
+  "method": "POST",
+  "path": "/api/etransport-review/reject",
+  "fn": "reject_queue_items",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "RejectRequest",
+  "body_fields": [
+   {
+    "name": "queue_ids",
+    "type": "List[int]",
+    "default": null
+   },
+   {
+    "name": "reason",
+    "type": "Optional[str]",
+    "default": "'Manual rejection'"
+   }
+  ],
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "etransport_review",
+  "method": "GET",
+  "path": "/api/etransport-review/rejected",
+  "fn": "get_rejected_memory",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "limit",
+    "type": "int"
+   },
+   {
+    "name": "offset",
+    "type": "int"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "etransport_review",
+  "method": "GET",
+  "path": "/api/etransport-review/settings",
+  "fn": "get_settings",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "etransport_review",
+  "method": "POST",
+  "path": "/api/etransport-review/settings",
+  "fn": "save_settings",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "SettingsUpdate",
+  "body_fields": [
+   {
+    "name": "openai_api_key",
+    "type": "Optional[str]",
+    "default": "None"
+   },
+   {
+    "name": "openai_model",
+    "type": "Optional[str]",
+    "default": "'gpt-4o-mini'"
+   },
+   {
+    "name": "openai_enabled",
+    "type": "Optional[bool]",
+    "default": "False"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "labels",
+  "method": "GET",
+  "path": "/api/labels",
+  "fn": "list_labels",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "search",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "labels",
+  "method": "GET",
+  "path": "/api/labels/browse-barcodes",
+  "fn": "browse_barcodes",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "search",
+    "type": "str"
+   },
+   {
+    "name": "without_barcode",
+    "type": "bool"
+   },
+   {
+    "name": "store",
+    "type": "str"
+   },
+   {
+    "name": "page",
+    "type": "int"
+   },
+   {
+    "name": "per_page",
+    "type": "int"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "labels",
+  "method": "POST",
+  "path": "/api/labels/bulk-add",
+  "fn": "bulk_add_labels",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "labels",
+  "method": "POST",
+  "path": "/api/labels/check-duplicates",
+  "fn": "check_duplicates",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "labels",
+  "method": "DELETE",
+  "path": "/api/labels/db",
+  "fn": "delete_label_entry",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "labels",
+  "method": "GET",
+  "path": "/api/labels/db",
+  "fn": "get_labels_db",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "labels",
+  "method": "POST",
+  "path": "/api/labels/db",
+  "fn": "update_label_entry",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "labels",
+  "method": "POST",
+  "path": "/api/labels/delete",
+  "fn": "delete_label_full",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "labels",
+  "method": "POST",
+  "path": "/api/labels/generate",
+  "fn": "generate_labels",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "labels",
+  "method": "POST",
+  "path": "/api/labels/generate-and-push",
+  "fn": "generate_and_push_labels",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "labels",
+  "method": "POST",
+  "path": "/api/labels/parse-csv",
+  "fn": "parse_csv_for_labels",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "file",
+    "type": "UploadFile"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "labels",
+  "method": "POST",
+  "path": "/api/labels/push-preview",
+  "fn": "push_preview",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "req",
+    "type": "Request"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "labels",
+  "method": "POST",
+  "path": "/api/labels/push-to-stores",
+  "fn": "push_to_stores",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "labels",
+  "method": "POST",
+  "path": "/api/labels/regenerate-barcode",
+  "fn": "regenerate_barcode",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "labels",
+  "method": "GET",
+  "path": "/api/labels/sku-info/{sku}",
+  "fn": "get_sku_info",
+  "kind": "read",
+  "path_params": [
+   "sku"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "labels",
+  "method": "POST",
+  "path": "/api/labels/upload",
+  "fn": "upload_label_files",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "files",
+    "type": "list[UploadFile]"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "labels_db",
+  "method": "DELETE",
+  "path": "/api/perfume-labels",
+  "fn": "delete_labels",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "ids",
+    "type": "List[int]"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "labels_db",
+  "method": "GET",
+  "path": "/api/perfume-labels",
+  "fn": "list_labels",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "brand",
+    "type": "Optional[str]"
+   },
+   {
+    "name": "search",
+    "type": "Optional[str]"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "labels_db",
+  "method": "POST",
+  "path": "/api/perfume-labels",
+  "fn": "save_labels",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "LabelBulk",
+  "body_fields": [
+   {
+    "name": "labels",
+    "type": "List[LabelIn]",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "labels_db",
+  "method": "POST",
+  "path": "/api/perfume-labels/generate-pdf",
+  "fn": "generate_pdf_from_selection",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "LabelSelectPDF",
+  "body_fields": [
+   {
+    "name": "ids",
+    "type": "List[int]",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "labels_db",
+  "method": "GET",
+  "path": "/api/perfume-labels/image/{label_id}",
+  "fn": "get_label_image",
+  "kind": "read",
+  "path_params": [
+   "label_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "labels_db",
+  "method": "POST",
+  "path": "/api/perfume-labels/import-pdf",
+  "fn": "import_pdf",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "file",
+    "type": "UploadFile"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "labels_db",
+  "method": "DELETE",
+  "path": "/api/perfume-labels/{label_id}",
+  "fn": "delete_label",
+  "kind": "mutation",
+  "path_params": [
+   "label_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "marketing",
+  "method": "GET",
+  "path": "/api/marketing/campaigns/mapped",
+  "fn": "get_mapped_campaigns",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "marketing",
+  "method": "GET",
+  "path": "/api/marketing/campaigns/unmapped",
+  "fn": "get_unmapped_campaigns",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "marketing",
+  "method": "GET",
+  "path": "/api/marketing/nomenclator/{platform}",
+  "fn": "get_nomenclator",
+  "kind": "read",
+  "path_params": [
+   "platform"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "marketing",
+  "method": "GET",
+  "path": "/api/marketing/performance",
+  "fn": "get_performance",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "date_from",
+    "type": "str"
+   },
+   {
+    "name": "date_to",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "marketing",
+  "method": "GET",
+  "path": "/api/marketing/product-groups",
+  "fn": "get_product_groups",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "marketing",
+  "method": "GET",
+  "path": "/api/marketing/raw/{platform}",
+  "fn": "get_raw",
+  "kind": "read",
+  "path_params": [
+   "platform"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "marketing",
+  "method": "POST",
+  "path": "/api/marketing/rules",
+  "fn": "create_mapping_rule",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "MappingRuleCreate",
+  "body_fields": [
+   {
+    "name": "platform",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "product_group",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "map_type",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "pattern",
+    "type": "str",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "marketing",
+  "method": "POST",
+  "path": "/api/marketing/rules/bulk",
+  "fn": "create_mapping_rules_bulk",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "MappingRuleBulkCreate",
+  "body_fields": [
+   {
+    "name": "rules",
+    "type": "List[MappingRuleCreate]",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "marketing",
+  "method": "DELETE",
+  "path": "/api/marketing/rules/{rule_id}",
+  "fn": "delete_mapping_rule",
+  "kind": "mutation",
+  "path_params": [
+   "rule_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "marketing",
+  "method": "PUT",
+  "path": "/api/marketing/rules/{rule_id}",
+  "fn": "update_mapping_rule",
+  "kind": "mutation",
+  "path_params": [
+   "rule_id"
+  ],
+  "body_model": "MappingRuleUpdate",
+  "body_fields": [
+   {
+    "name": "product_group",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "map_type",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "pattern",
+    "type": "str",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "marketing",
+  "method": "POST",
+  "path": "/api/marketing/sync/all",
+  "fn": "sync_all",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "marketing",
+  "method": "POST",
+  "path": "/api/marketing/sync/facebook",
+  "fn": "sync_facebook",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "marketing",
+  "method": "POST",
+  "path": "/api/marketing/sync/nomenclatoare",
+  "fn": "sync_nomenclatoare",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "marketing",
+  "method": "POST",
+  "path": "/api/marketing/sync/product-groups",
+  "fn": "sync_product_groups",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "marketing",
+  "method": "POST",
+  "path": "/api/marketing/sync/tiktok",
+  "fn": "sync_tiktok",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "order_rules",
+  "method": "POST",
+  "path": "/api/order-rules/execute",
+  "fn": "api_execute",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "ExecuteRequest",
+  "body_fields": [
+   {
+    "name": "rule",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "month",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "order_names",
+    "type": "List[str]",
+    "default": null
+   },
+   {
+    "name": "dry_run",
+    "type": "bool",
+    "default": "False"
+   }
+  ],
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "order_rules",
+  "method": "GET",
+  "path": "/api/order-rules/months",
+  "fn": "api_months",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "order_rules",
+  "method": "GET",
+  "path": "/api/order-rules/preview",
+  "fn": "api_preview",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "rule",
+    "type": "str"
+   },
+   {
+    "name": "month",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "perfume_stock",
+  "method": "GET",
+  "path": "/api/perfume-stock",
+  "fn": "get_perfume_stock",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "store",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "perfume_stock",
+  "method": "GET",
+  "path": "/api/perfume-stock/log",
+  "fn": "get_stock_log",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "store",
+    "type": "str"
+   },
+   {
+    "name": "limit",
+    "type": "int"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "perfume_stock",
+  "method": "POST",
+  "path": "/api/perfume-stock/ocr",
+  "fn": "ocr_stock_image",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "image",
+    "type": "UploadFile"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "perfume_stock",
+  "method": "POST",
+  "path": "/api/perfume-stock/settings",
+  "fn": "save_stock_settings",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "perfume_stock",
+  "method": "POST",
+  "path": "/api/perfume-stock/update",
+  "fn": "update_perfume_stock",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "StockUpdateRequest",
+  "body_fields": [
+   {
+    "name": "store",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "operation",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "items",
+    "type": "List[StockUpdateItem]",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "perfumes",
+  "method": "POST",
+  "path": "/api/perfumes/analyze",
+  "fn": "analyze_certificates",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "supplier",
+    "type": "str"
+   },
+   {
+    "name": "files",
+    "type": "List[UploadFile]"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "perfumes",
+  "method": "GET",
+  "path": "/api/perfumes/nomenclator",
+  "fn": "get_nomenclator",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "perfumes",
+  "method": "POST",
+  "path": "/api/perfumes/nomenclator",
+  "fn": "update_nomenclator",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "perfumes",
+  "method": "POST",
+  "path": "/api/perfumes/nomenclator/import",
+  "fn": "import_nomenclator_csv",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "supplier",
+    "type": "str"
+   },
+   {
+    "name": "file",
+    "type": "UploadFile"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "perfumes",
+  "method": "POST",
+  "path": "/api/perfumes/upload",
+  "fn": "upload_certificates",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "supplier",
+    "type": "str"
+   },
+   {
+    "name": "extracted_names",
+    "type": "str"
+   },
+   {
+    "name": "files",
+    "type": "List[UploadFile]"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "DELETE",
+  "path": "/api/analytics/categories",
+  "fn": "delete_category",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "id",
+    "type": "int"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "product_analytics",
+  "method": "GET",
+  "path": "/api/analytics/categories",
+  "fn": "get_categories",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "type",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "POST",
+  "path": "/api/analytics/categories",
+  "fn": "save_category",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "CategoryModel",
+  "body_fields": [
+   {
+    "name": "id",
+    "type": "Optional[int]",
+    "default": "0"
+   },
+   {
+    "name": "name",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "type",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "items",
+    "type": "List[str]",
+    "default": "[]"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "GET",
+  "path": "/api/analytics/product-costs",
+  "fn": "get_product_costs",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "from_date",
+    "type": "str"
+   },
+   {
+    "name": "to_date",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "POST",
+  "path": "/api/analytics/product-costs",
+  "fn": "set_product_cost",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "req",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "GET",
+  "path": "/api/analytics/product-detail",
+  "fn": "get_product_detail",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "barcode",
+    "type": "str"
+   },
+   {
+    "name": "sku",
+    "type": "str"
+   },
+   {
+    "name": "from_date",
+    "type": "str"
+   },
+   {
+    "name": "to_date",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "GET",
+  "path": "/api/analytics/product-types",
+  "fn": "get_product_types",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "GET",
+  "path": "/api/analytics/products",
+  "fn": "get_products",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "from_date",
+    "type": "str"
+   },
+   {
+    "name": "to_date",
+    "type": "str"
+   },
+   {
+    "name": "prefix",
+    "type": "str"
+   },
+   {
+    "name": "category",
+    "type": "str"
+   },
+   {
+    "name": "search",
+    "type": "str"
+   },
+   {
+    "name": "sort_by",
+    "type": "str"
+   },
+   {
+    "name": "sort_dir",
+    "type": "str"
+   },
+   {
+    "name": "show_test",
+    "type": "str"
+   },
+   {
+    "name": "unsold_only",
+    "type": "str"
+   },
+   {
+    "name": "order_filter",
+    "type": "str"
+   },
+   {
+    "name": "days_filter",
+    "type": "str"
+   },
+   {
+    "name": "limit",
+    "type": "int"
+   },
+   {
+    "name": "offset",
+    "type": "int"
+   },
+   {
+    "name": "include_cancelled",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "GET",
+  "path": "/api/analytics/settings",
+  "fn": "get_settings_endpoint",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "POST",
+  "path": "/api/analytics/settings",
+  "fn": "save_settings_endpoint",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "SettingsModel",
+  "body_fields": [
+   {
+    "name": "primary_store",
+    "type": "str",
+    "default": "'GEN'"
+   },
+   {
+    "name": "exclude_test_default",
+    "type": "bool",
+    "default": "True"
+   },
+   {
+    "name": "excluded_prefixes",
+    "type": "List[str]",
+    "default": "[]"
+   },
+   {
+    "name": "excluded_barcodes",
+    "type": "List[str]",
+    "default": "[]"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "GET",
+  "path": "/api/analytics/stores",
+  "fn": "get_analytics_stores",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "POST",
+  "path": "/api/analytics/sync",
+  "fn": "sync_analytics",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "SyncRequest",
+  "body_fields": [
+   {
+    "name": "from_date",
+    "type": "str",
+    "default": "''"
+   },
+   {
+    "name": "to_date",
+    "type": "str",
+    "default": "''"
+   },
+   {
+    "name": "sync_catalog",
+    "type": "bool",
+    "default": "True"
+   },
+   {
+    "name": "sync_sales",
+    "type": "bool",
+    "default": "True"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "POST",
+  "path": "/api/analytics/sync-delivery-rates",
+  "fn": "sync_delivery_rates",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "req",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "POST",
+  "path": "/api/analytics/sync-fb-spend",
+  "fn": "sync_fb_spend",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "req",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "GET",
+  "path": "/api/analytics/sync-status",
+  "fn": "get_sync_status",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "POST",
+  "path": "/api/analytics/sync-tk-spend",
+  "fn": "sync_tk_spend",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "req",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "GET",
+  "path": "/api/analytics/target-cpa",
+  "fn": "get_target_cpas",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "POST",
+  "path": "/api/analytics/target-cpa",
+  "fn": "set_target_cpa",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "req",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "GET",
+  "path": "/api/analytics/watchlists",
+  "fn": "get_watchlists",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "POST",
+  "path": "/api/analytics/watchlists",
+  "fn": "create_watchlist",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "WatchlistCreate",
+  "body_fields": [
+   {
+    "name": "name",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "description",
+    "type": "str",
+    "default": "''"
+   },
+   {
+    "name": "color",
+    "type": "str",
+    "default": "'#8b5cf6'"
+   },
+   {
+    "name": "source",
+    "type": "str",
+    "default": "'sales'"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "DELETE",
+  "path": "/api/analytics/watchlists/{wl_id}",
+  "fn": "delete_watchlist",
+  "kind": "mutation",
+  "path_params": [
+   "wl_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "product_analytics",
+  "method": "PUT",
+  "path": "/api/analytics/watchlists/{wl_id}",
+  "fn": "update_watchlist",
+  "kind": "mutation",
+  "path_params": [
+   "wl_id"
+  ],
+  "body_model": "WatchlistUpdate",
+  "body_fields": [
+   {
+    "name": "name",
+    "type": "Optional[str]",
+    "default": "None"
+   },
+   {
+    "name": "description",
+    "type": "Optional[str]",
+    "default": "None"
+   },
+   {
+    "name": "color",
+    "type": "Optional[str]",
+    "default": "None"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "DELETE",
+  "path": "/api/analytics/watchlists/{wl_id}/items",
+  "fn": "remove_watchlist_items",
+  "kind": "mutation",
+  "path_params": [
+   "wl_id"
+  ],
+  "body_model": "WatchlistItemsRequest",
+  "body_fields": [
+   {
+    "name": "items",
+    "type": "List[WatchlistItemAdd]",
+    "default": "[]"
+   },
+   {
+    "name": "skus",
+    "type": "List[str]",
+    "default": "[]"
+   }
+  ],
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "product_analytics",
+  "method": "GET",
+  "path": "/api/analytics/watchlists/{wl_id}/items",
+  "fn": "get_watchlist_items",
+  "kind": "read",
+  "path_params": [
+   "wl_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "product_analytics",
+  "method": "POST",
+  "path": "/api/analytics/watchlists/{wl_id}/items",
+  "fn": "add_watchlist_items",
+  "kind": "mutation",
+  "path_params": [
+   "wl_id"
+  ],
+  "body_model": "WatchlistItemsRequest",
+  "body_fields": [
+   {
+    "name": "items",
+    "type": "List[WatchlistItemAdd]",
+    "default": "[]"
+   },
+   {
+    "name": "skus",
+    "type": "List[str]",
+    "default": "[]"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "DELETE",
+  "path": "/api/profitability/clear",
+  "fn": "clear_month",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "month",
+    "type": "str"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "profitability",
+  "method": "GET",
+  "path": "/api/profitability/cogs-missing",
+  "fn": "get_cogs_missing",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "month",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "POST",
+  "path": "/api/profitability/cogs-override",
+  "fn": "save_cogs_override",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "CogsOverride",
+  "body_fields": [
+   {
+    "name": "sku",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "unit_cost",
+    "type": "float",
+    "default": null
+   },
+   {
+    "name": "currency",
+    "type": "str",
+    "default": "'RON'"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "GET",
+  "path": "/api/profitability/cogs-overrides",
+  "fn": "get_cogs_overrides",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "GET",
+  "path": "/api/profitability/excluded-orders",
+  "fn": "list_excluded_orders",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "month",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "GET",
+  "path": "/api/profitability/exclusion-rules",
+  "fn": "list_exclusion_rules",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "POST",
+  "path": "/api/profitability/exclusion-rules",
+  "fn": "add_exclusion_rule",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "ExclusionRule",
+  "body_fields": [
+   {
+    "name": "rule_type",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "value",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "reason",
+    "type": "str",
+    "default": "''"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "DELETE",
+  "path": "/api/profitability/exclusion-rules/{rule_id}",
+  "fn": "delete_exclusion_rule",
+  "kind": "mutation",
+  "path_params": [
+   "rule_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "profitability",
+  "method": "GET",
+  "path": "/api/profitability/export",
+  "fn": "export_orders_csv",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "month",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "POST",
+  "path": "/api/profitability/manual-status",
+  "fn": "set_manual_status",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "ManualStatusBulk",
+  "body_fields": [
+   {
+    "name": "items",
+    "type": "List[ManualStatusItem]",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "GET",
+  "path": "/api/profitability/marketing-overrides",
+  "fn": "get_marketing_overrides",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "month",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "POST",
+  "path": "/api/profitability/marketing-overrides",
+  "fn": "save_marketing_overrides",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "MarketingOverrideBulk",
+  "body_fields": [
+   {
+    "name": "items",
+    "type": "List[MarketingOverrideItem]",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "GET",
+  "path": "/api/profitability/marketing-sync",
+  "fn": "sync_marketing_from_daily_perf",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "month",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "GET",
+  "path": "/api/profitability/months",
+  "fn": "get_months",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "GET",
+  "path": "/api/profitability/open-orders",
+  "fn": "get_open_orders",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "month",
+    "type": "str"
+   },
+   {
+    "name": "prefix",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "GET",
+  "path": "/api/profitability/orders",
+  "fn": "list_orders",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "month",
+    "type": "str"
+   },
+   {
+    "name": "prefix",
+    "type": "Optional[str]"
+   },
+   {
+    "name": "status",
+    "type": "Optional[str]"
+   },
+   {
+    "name": "q",
+    "type": "Optional[str]"
+   },
+   {
+    "name": "courier_status",
+    "type": "Optional[str]"
+   },
+   {
+    "name": "from_date",
+    "type": "Optional[str]"
+   },
+   {
+    "name": "to_date",
+    "type": "Optional[str]"
+   },
+   {
+    "name": "limit",
+    "type": "int"
+   },
+   {
+    "name": "offset",
+    "type": "int"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "POST",
+  "path": "/api/profitability/orders/update-status",
+  "fn": "update_order_status",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "OrderStatusUpdate",
+  "body_fields": [
+   {
+    "name": "ids",
+    "type": "List[int]",
+    "default": null
+   },
+   {
+    "name": "status_category",
+    "type": "str",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "GET",
+  "path": "/api/profitability/product-stats",
+  "fn": "get_product_stats",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "month",
+    "type": "str"
+   },
+   {
+    "name": "from_date",
+    "type": "Optional[str]"
+   },
+   {
+    "name": "to_date",
+    "type": "Optional[str]"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "POST",
+  "path": "/api/profitability/refresh",
+  "fn": "refresh_open_orders",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "month",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "POST",
+  "path": "/api/profitability/remap",
+  "fn": "remap_statuses",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "month",
+    "type": "str"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "profitability",
+  "method": "GET",
+  "path": "/api/profitability/report",
+  "fn": "get_report",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "month",
+    "type": "str"
+   },
+   {
+    "name": "from_date",
+    "type": "Optional[str]"
+   },
+   {
+    "name": "to_date",
+    "type": "Optional[str]"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "POST",
+  "path": "/api/profitability/run",
+  "fn": "run_profitability",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "RunRequest",
+  "body_fields": [
+   {
+    "name": "month",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "force",
+    "type": "bool",
+    "default": "False"
+   },
+   {
+    "name": "resync_shopify",
+    "type": "bool",
+    "default": "False"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "GET",
+  "path": "/api/profitability/settings",
+  "fn": "get_settings",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "POST",
+  "path": "/api/profitability/settings",
+  "fn": "save_settings",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "SettingsModel",
+  "body_fields": [
+   {
+    "name": "exclude_test",
+    "type": "bool",
+    "default": "True"
+   },
+   {
+    "name": "country_map",
+    "type": "Dict[str, str]",
+    "default": "{}"
+   },
+   {
+    "name": "vat_rates",
+    "type": "Dict[str, float]",
+    "default": "{}"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "GET",
+  "path": "/api/profitability/status-mapping",
+  "fn": "get_status_mapping",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "POST",
+  "path": "/api/profitability/status-mapping",
+  "fn": "save_status_mapping_endpoint",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "StatusMappingBulk",
+  "body_fields": [
+   {
+    "name": "items",
+    "type": "List[StatusMappingItem]",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "POST",
+  "path": "/api/profitability/sync-sku-titles",
+  "fn": "sync_sku_titles",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "GET",
+  "path": "/api/profitability/transport-costs",
+  "fn": "get_transport_costs",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "month",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "profitability",
+  "method": "POST",
+  "path": "/api/profitability/transport-costs",
+  "fn": "save_transport_costs",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "TransportCostsBulk",
+  "body_fields": [
+   {
+    "name": "items",
+    "type": "List[TransportCostItem]",
+    "default": null
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "GET",
+  "path": "/api/inventory-calculator/incoming-impact",
+  "fn": "get_incoming_impact",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "sku",
+    "type": "str"
+   },
+   {
+    "name": "prefix",
+    "type": "str"
+   },
+   {
+    "name": "category",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "GET",
+  "path": "/api/inventory-calculator/lead-time",
+  "fn": "calc_lead_time",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "sku",
+    "type": "str"
+   },
+   {
+    "name": "lead_time",
+    "type": "int"
+   },
+   {
+    "name": "target_days",
+    "type": "int"
+   },
+   {
+    "name": "prefix",
+    "type": "str"
+   },
+   {
+    "name": "category",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "GET",
+  "path": "/api/inventory-calculator/reports",
+  "fn": "get_reports",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "prefix",
+    "type": "str"
+   },
+   {
+    "name": "category",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "GET",
+  "path": "/api/inventory-calculator/scenarios",
+  "fn": "calc_scenarios",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "sku",
+    "type": "str"
+   },
+   {
+    "name": "prefix",
+    "type": "str"
+   },
+   {
+    "name": "category",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "GET",
+  "path": "/api/purchase-orders",
+  "fn": "list_pos",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "status",
+    "type": "str"
+   },
+   {
+    "name": "search",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "POST",
+  "path": "/api/purchase-orders",
+  "fn": "create_po",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "POCreate",
+  "body_fields": [
+   {
+    "name": "order_date",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "est_arrival",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "location",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "supplier",
+    "type": "str",
+    "default": "''"
+   },
+   {
+    "name": "created_by",
+    "type": "str",
+    "default": "'Admin'"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "POST",
+  "path": "/api/purchase-orders/auto",
+  "fn": "create_auto_po",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "AutoPOCreate",
+  "body_fields": [
+   {
+    "name": "target_days",
+    "type": "int",
+    "default": "60"
+   },
+   {
+    "name": "location",
+    "type": "str",
+    "default": "'Alex'"
+   },
+   {
+    "name": "created_by",
+    "type": "str",
+    "default": "'Auto-generated'"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "GET",
+  "path": "/api/purchase-orders/{po_id}",
+  "fn": "get_po",
+  "kind": "read",
+  "path_params": [
+   "po_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "POST",
+  "path": "/api/purchase-orders/{po_id}/approve",
+  "fn": "approve_po",
+  "kind": "mutation",
+  "path_params": [
+   "po_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "POST",
+  "path": "/api/purchase-orders/{po_id}/cancel",
+  "fn": "cancel_po",
+  "kind": "mutation",
+  "path_params": [
+   "po_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "POST",
+  "path": "/api/purchase-orders/{po_id}/close",
+  "fn": "close_po",
+  "kind": "mutation",
+  "path_params": [
+   "po_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "GET",
+  "path": "/api/purchase-orders/{po_id}/export/excel",
+  "fn": "export_excel",
+  "kind": "read",
+  "path_params": [
+   "po_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "GET",
+  "path": "/api/purchase-orders/{po_id}/export/pdf",
+  "fn": "export_pdf",
+  "kind": "read",
+  "path_params": [
+   "po_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "POST",
+  "path": "/api/purchase-orders/{po_id}/items",
+  "fn": "add_po_items",
+  "kind": "mutation",
+  "path_params": [
+   "po_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "items",
+    "type": "List[POItemCreate]"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "DELETE",
+  "path": "/api/purchase-orders/{po_id}/items/{item_id}",
+  "fn": "delete_po_item",
+  "kind": "mutation",
+  "path_params": [
+   "po_id",
+   "item_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "PUT",
+  "path": "/api/purchase-orders/{po_id}/items/{item_id}",
+  "fn": "update_po_item",
+  "kind": "mutation",
+  "path_params": [
+   "po_id",
+   "item_id"
+  ],
+  "body_model": "POItemUpdate",
+  "body_fields": [
+   {
+    "name": "ordered_qty",
+    "type": "Optional[int]",
+    "default": "None"
+   },
+   {
+    "name": "received_qty",
+    "type": "Optional[int]",
+    "default": "None"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "purchase_orders",
+  "method": "POST",
+  "path": "/api/purchase-orders/{po_id}/send-to-tom",
+  "fn": "send_to_tom",
+  "kind": "mutation",
+  "path_params": [
+   "po_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "scripts",
+  "method": "GET",
+  "path": "/api/carriers/all",
+  "fn": "api_carriers_all",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "scripts",
+  "method": "GET",
+  "path": "/api/carriers/search",
+  "fn": "api_carriers_search",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "q",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "scripts",
+  "method": "GET",
+  "path": "/api/download/{job_id}/{filename:path}",
+  "fn": "api_download",
+  "kind": "read",
+  "path_params": [
+   "job_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "filename",
+    "type": "str"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "scripts",
+  "method": "GET",
+  "path": "/api/jobs/{job_id}",
+  "fn": "api_job",
+  "kind": "read",
+  "path_params": [
+   "job_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "log_offset",
+    "type": "int"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "scripts",
+  "method": "POST",
+  "path": "/api/pdf/combine-print",
+  "fn": "api_pdf_combine_print",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "files",
+    "type": "List[UploadFile]"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "scripts",
+  "method": "POST",
+  "path": "/api/pdf_tools/recombine",
+  "fn": "api_pdf_recombine",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "scripts",
+  "method": "POST",
+  "path": "/api/run/{script_key}",
+  "fn": "api_run",
+  "kind": "mutation",
+  "path_params": [
+   "script_key"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "params",
+    "type": "str"
+   },
+   {
+    "name": "files",
+    "type": "List[UploadFile]"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "scripts",
+  "method": "GET",
+  "path": "/api/scripts",
+  "fn": "api_scripts",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "scripts",
+  "method": "POST",
+  "path": "/api/tariff/confirm",
+  "fn": "api_tariff_confirm",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "product_name_normalized",
+    "type": "str"
+   },
+   {
+    "name": "tariff_code",
+    "type": "str"
+   },
+   {
+    "name": "notes",
+    "type": "str"
+   },
+   {
+    "name": "hs_code_raw",
+    "type": "str"
+   },
+   {
+    "name": "nc_code_8",
+    "type": "str"
+   },
+   {
+    "name": "supplier_name",
+    "type": "str"
+   },
+   {
+    "name": "tariff_label",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "scripts",
+  "method": "GET",
+  "path": "/api/tariff/pending",
+  "fn": "api_tariff_pending",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "scripts",
+  "method": "POST",
+  "path": "/api/tariff/reject",
+  "fn": "api_tariff_reject",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "product_name_normalized",
+    "type": "str"
+   },
+   {
+    "name": "tariff_code",
+    "type": "str"
+   },
+   {
+    "name": "notes",
+    "type": "str"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "scripts",
+  "method": "GET",
+  "path": "/api/thumbnail/{job_id}/{filename:path}",
+  "fn": "api_thumbnail",
+  "kind": "read",
+  "path_params": [
+   "job_id"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "filename",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "shopify",
+  "method": "GET",
+  "path": "/api/shopify/callback",
+  "fn": "shopify_callback",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "code",
+    "type": "str"
+   },
+   {
+    "name": "shop",
+    "type": "str"
+   },
+   {
+    "name": "hmac",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "shopify",
+  "method": "GET",
+  "path": "/api/shopify/install/{prefix}",
+  "fn": "shopify_install",
+  "kind": "read",
+  "path_params": [
+   "prefix"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "shopify",
+  "method": "GET",
+  "path": "/api/store-products/{prefix}",
+  "fn": "api_store_products",
+  "kind": "read",
+  "path_params": [
+   "prefix"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "page",
+    "type": "int"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "shopify",
+  "method": "GET",
+  "path": "/api/stores",
+  "fn": "api_stores",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "shopify_oauth",
+  "method": "GET",
+  "path": "/api/shopify/oauth/callback",
+  "fn": "callback",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "code",
+    "type": "str"
+   },
+   {
+    "name": "shop",
+    "type": "str"
+   },
+   {
+    "name": "state",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "shopify_oauth",
+  "method": "GET",
+  "path": "/api/shopify/oauth/install/{prefix}",
+  "fn": "install",
+  "kind": "read",
+  "path_params": [
+   "prefix"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "shopify_oauth",
+  "method": "GET",
+  "path": "/api/shopify/oauth/status/{prefix}",
+  "fn": "status",
+  "kind": "read",
+  "path_params": [
+   "prefix"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "test_products",
+  "method": "POST",
+  "path": "/api/test-products/manual",
+  "fn": "save_manual",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "ManualDataRequest",
+  "body_fields": [
+   {
+    "name": "sku_base",
+    "type": "str",
+    "default": null
+   },
+   {
+    "name": "real_cogs_usd",
+    "type": "Optional[float]",
+    "default": "None"
+   },
+   {
+    "name": "shipping_cost_usd",
+    "type": "Optional[float]",
+    "default": "None"
+   },
+   {
+    "name": "qty_ordered",
+    "type": "Optional[int]",
+    "default": "None"
+   },
+   {
+    "name": "order_placed",
+    "type": "Optional[bool]",
+    "default": "None"
+   },
+   {
+    "name": "factory_url",
+    "type": "Optional[str]",
+    "default": "None"
+   },
+   {
+    "name": "notes",
+    "type": "Optional[str]",
+    "default": "None"
+   },
+   {
+    "name": "manual_title",
+    "type": "Optional[str]",
+    "default": "None"
+   },
+   {
+    "name": "manual_image",
+    "type": "Optional[str]",
+    "default": "None"
+   },
+   {
+    "name": "manual_price",
+    "type": "Optional[float]",
+    "default": "None"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "test_products",
+  "method": "GET",
+  "path": "/api/test-products/products",
+  "fn": "get_products",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "view",
+    "type": "str"
+   },
+   {
+    "name": "search",
+    "type": "str"
+   },
+   {
+    "name": "sort_by",
+    "type": "str"
+   },
+   {
+    "name": "sort_dir",
+    "type": "str"
+   },
+   {
+    "name": "limit",
+    "type": "int"
+   },
+   {
+    "name": "offset",
+    "type": "int"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "test_products",
+  "method": "GET",
+  "path": "/api/test-products/products/{sku}",
+  "fn": "get_product_detail",
+  "kind": "read",
+  "path_params": [
+   "sku"
+  ],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "test_products",
+  "method": "GET",
+  "path": "/api/test-products/settings",
+  "fn": "get_settings_api",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "profile",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "test_products",
+  "method": "POST",
+  "path": "/api/test-products/settings",
+  "fn": "save_settings_api",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "SettingsRequest",
+  "body_fields": [
+   {
+    "name": "profile",
+    "type": "str",
+    "default": "'winner'"
+   },
+   {
+    "name": "settings",
+    "type": "dict",
+    "default": "{}"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "test_products",
+  "method": "GET",
+  "path": "/api/test-products/stats",
+  "fn": "stats",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "test_products",
+  "method": "POST",
+  "path": "/api/test-products/sync",
+  "fn": "sync_all",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": "SyncRequest",
+  "body_fields": [
+   {
+    "name": "sync_products",
+    "type": "bool",
+    "default": "True"
+   },
+   {
+    "name": "sync_orders",
+    "type": "bool",
+    "default": "True"
+   },
+   {
+    "name": "sync_ads",
+    "type": "bool",
+    "default": "True"
+   },
+   {
+    "name": "sync_cogs",
+    "type": "bool",
+    "default": "True"
+   },
+   {
+    "name": "update_rates",
+    "type": "bool",
+    "default": "True"
+   }
+  ],
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "test_products",
+  "method": "GET",
+  "path": "/api/test-products/sync-status",
+  "fn": "sync_status",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_awb",
+  "method": "GET",
+  "path": "/api/trendyol-awb/brand-groups",
+  "fn": "trendyol_awb_get_brand_groups",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_awb",
+  "method": "POST",
+  "path": "/api/trendyol-awb/brand-groups",
+  "fn": "trendyol_awb_save_brand_groups",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_awb",
+  "method": "POST",
+  "path": "/api/trendyol-awb/cancel",
+  "fn": "trendyol_awb_cancel",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "trendyol_awb",
+  "method": "POST",
+  "path": "/api/trendyol-awb/download",
+  "fn": "trendyol_awb_download",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "trendyol_awb",
+  "method": "GET",
+  "path": "/api/trendyol-awb/duplicates",
+  "fn": "trendyol_awb_duplicates",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_awb",
+  "method": "POST",
+  "path": "/api/trendyol-awb/ignore-duplicates",
+  "fn": "trendyol_awb_ignore_duplicates",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_awb",
+  "method": "POST",
+  "path": "/api/trendyol-awb/mark-downloaded",
+  "fn": "trendyol_awb_mark",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "trendyol_awb",
+  "method": "GET",
+  "path": "/api/trendyol-awb/packages",
+  "fn": "trendyol_awb_packages",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "days",
+    "type": "int"
+   },
+   {
+    "name": "search",
+    "type": "str"
+   },
+   {
+    "name": "statuses",
+    "type": "str"
+   },
+   {
+    "name": "refresh",
+    "type": "bool"
+   },
+   {
+    "name": "force",
+    "type": "bool"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_awb",
+  "method": "POST",
+  "path": "/api/trendyol-awb/reset-downloaded",
+  "fn": "trendyol_awb_reset",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "trendyol_awb",
+  "method": "POST",
+  "path": "/api/trendyol-awb/unmark-downloaded",
+  "fn": "trendyol_awb_unmark",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "trendyol_awb",
+  "method": "POST",
+  "path": "/api/trendyol-questions/answer",
+  "fn": "trendyol_questions_answer",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_awb",
+  "method": "GET",
+  "path": "/api/trendyol-questions/list",
+  "fn": "trendyol_questions_list",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "days",
+    "type": "int"
+   },
+   {
+    "name": "status",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_awb",
+  "method": "POST",
+  "path": "/api/trendyol-returns/approve",
+  "fn": "trendyol_returns_approve",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_awb",
+  "method": "GET",
+  "path": "/api/trendyol-returns/list",
+  "fn": "trendyol_returns_list",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "days",
+    "type": "int"
+   },
+   {
+    "name": "status",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_profit",
+  "method": "POST",
+  "path": "/api/trendyol/auto-map",
+  "fn": "trendyol_auto_map",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_profit",
+  "method": "POST",
+  "path": "/api/trendyol/auto-map-all",
+  "fn": "trendyol_auto_map_all",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_profit",
+  "method": "POST",
+  "path": "/api/trendyol/bulk-update-costs",
+  "fn": "bulk_update_costs",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_profit",
+  "method": "POST",
+  "path": "/api/trendyol/fetch-shopify-products",
+  "fn": "trendyol_fetch_shopify",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_profit",
+  "method": "POST",
+  "path": "/api/trendyol/fetch-trendyol-products",
+  "fn": "trendyol_fetch_products",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_profit",
+  "method": "GET",
+  "path": "/api/trendyol/history",
+  "fn": "trendyol_history",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_profit",
+  "method": "GET",
+  "path": "/api/trendyol/mapping",
+  "fn": "trendyol_get_mapping",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_profit",
+  "method": "POST",
+  "path": "/api/trendyol/parse-xlsx",
+  "fn": "trendyol_parse_xlsx",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "file",
+    "type": "UploadFile"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_profit",
+  "method": "POST",
+  "path": "/api/trendyol/refresh-mapping-costs",
+  "fn": "trendyol_refresh_costs",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_profit",
+  "method": "POST",
+  "path": "/api/trendyol/save-mapping",
+  "fn": "trendyol_save_mapping",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_split",
+  "method": "POST",
+  "path": "/api/trendyol-split/auto-execute",
+  "fn": "trendyol_split_auto_execute",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "high"
+ },
+ {
+  "area": "trendyol_split",
+  "method": "POST",
+  "path": "/api/trendyol-split/bulk-execute",
+  "fn": "trendyol_bulk_execute",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "trendyol_split",
+  "method": "POST",
+  "path": "/api/trendyol-split/download-labels",
+  "fn": "trendyol_download_labels",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "trendyol_split",
+  "method": "POST",
+  "path": "/api/trendyol-split/execute",
+  "fn": "trendyol_split_execute",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "high"
+ },
+ {
+  "area": "trendyol_split",
+  "method": "POST",
+  "path": "/api/trendyol-split/no-split",
+  "fn": "trendyol_no_split",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_split",
+  "method": "GET",
+  "path": "/api/trendyol-split/packages",
+  "fn": "trendyol_split_packages",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "days",
+    "type": "int"
+   },
+   {
+    "name": "search",
+    "type": "str"
+   }
+  ],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_split",
+  "method": "GET",
+  "path": "/api/trendyol-split/rules",
+  "fn": "trendyol_split_get_rules",
+  "kind": "read",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [],
+  "risk": "normal"
+ },
+ {
+  "area": "trendyol_split",
+  "method": "POST",
+  "path": "/api/trendyol-split/rules/delete",
+  "fn": "trendyol_split_delete_rule",
+  "kind": "mutation",
+  "path_params": [],
+  "body_model": null,
+  "body_fields": null,
+  "other_params": [
+   {
+    "name": "body",
+    "type": "dict"
+   }
+  ],
+  "risk": "high"
+ }
+]
