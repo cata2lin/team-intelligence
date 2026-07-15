@@ -41,6 +41,13 @@ tasks:
      --plugin <you> --name <skill> --author <You> \
      --description "..." --path plugins/<you>/skills/<skill>/SKILL.md
    ```
+   > **Catalog rendering (token discipline):** when the skills catalog in
+   > `shared/CLAUDE.team.md` is (re)generated from the DB, render each skill's
+   > description **compact (≤10 words + …)**, NOT the full description. The catalog
+   > loads into every session on every turn; full descriptions there cost ~3.3k
+   > tokens/turn team-wide for zero benefit (routing uses `find_skills` on the DB,
+   > which keeps the full text). Keep the DB descriptions full; keep the rendered
+   > catalog short. (Measured 2026-07-15: 30.8KB→17.4KB, −44%.)
 7. Open a PR. On merge, teammates get it on their next `claude plugin update`
    (or automatically if `autoUpdate` is on for the marketplace).
 
