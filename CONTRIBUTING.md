@@ -48,6 +48,8 @@ tasks:
    > tokens/turn team-wide for zero benefit (routing uses `find_skills` on the DB,
    > which keeps the full text). Keep the DB descriptions full; keep the rendered
    > catalog short. (Measured 2026-07-15: 30.8KB→17.4KB, −44%.)
+   > Drop-in final step after any regen (format-agnostic, idempotent):
+   > `uv run plugins/core/scripts/compact_catalog.py shared/CLAUDE.team.md --apply`
 7. Open a PR. On merge, teammates get it on their next `claude plugin update`
    (or automatically if `autoUpdate` is on for the marketplace).
 
