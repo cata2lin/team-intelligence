@@ -63,6 +63,27 @@ profit / seo). **Real per-node glow** (bloom) needs the community plugin *New 3D
 `assets/data-3dgraph.json` is a ready neon config for it (copy into the plugin folder,
 then restart Obsidian).
 
+## 3. Semantic auto-link (precision-gated — `suggest_links.py`)
+Hub-and-spoke (§1) only links notă→hub. This finds REAL note↔note links across clusters that hand-linking
+missed — using embeddings for candidates, then a **precision gate** so it never adds cosmetic density.
+> ⚠️ The gate is the whole point: 2026 research (CausalRAG2) shows pure cosine similarity is barely above
+> random for link quality (24.9% vs 23.9% F1); a second gate lifts it to 31.6%. **Never link on cosine alone.**
+```bash
+export GEMINI_API_KEY="$(uv run <kb.py> secret-get GEMINI_API_KEY)"   # or OPENAI_API_KEY
+uv run --no-project suggest_links.py suggest --out candidates.json --min 0.80 --topk 6   # candidates, writes nothing
+#   → GATE: read the candidates; keep ONLY pairs with a SPECIFIC real relation (same system/product/entity/bug),
+#     not "same broad area" (the hub already covers that). Write the kept pairs to vetted.json (both directions
+#     for symmetric recall): [{"a":"x","b":"y","why":"..."}, ...]
+uv run --no-project suggest_links.py apply --from vetted.json            # DRY-RUN
+uv run --no-project suggest_links.py apply --from vetted.json --apply    # writes [[links]] into "Related:"
+```
+- **Threshold tuning:** Romanian / varied wording lowers cosine — `--min 0.72` surfaces real pairs that 0.80
+  misses (e.g. `gads-*` ↔ `google-ads-mcc-skill`), but returns more candidates, so gate harder.
+- **Reject examples (cosmetic):** two per-brand change-logs; two "analytics" skills that only share a DB;
+  ad-creative notes that only share the word "ads". The hub already groups broad-domain siblings.
+- **Keep examples (specific):** a landing page ↔ its product's brand note; a launch ↔ its suspension;
+  a lesson ↔ the skill that operates it; an audit ↔ the rulebook it enforces.
+
 ## Honest expectations
 A few hundred notes will never look like the 8,900-node marketing renders — that density
 comes from note **count + real `[[links]]`**, not from settings. This skill maximizes the
