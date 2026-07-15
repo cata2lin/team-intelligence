@@ -11,7 +11,8 @@
     { "query": "file:google OR file:gads OR file:pmax OR file:ads", "color": { "a": 1, "rgb": 57542 } },
     { "query": "file:cs OR file:richpanel OR file:xconnector OR file:awb OR file:dpd", "color": { "a": 1, "rgb": 11820799 } },
     { "query": "file:profit OR file:pnl OR file:cache OR file:marketing OR file:cpa", "color": { "a": 1, "rgb": 16765247 } },
-    { "query": "file:seo OR file:blog OR file:social OR file:articles OR file:organic", "color": { "a": 1, "rgb": 3791242 } }
+    { "query": "file:seo OR file:blog OR file:social OR file:articles OR file:organic", "color": { "a": 1, "rgb": 3791242 } },
+    { "query": "file:scentum OR file:scripts-app OR file:contact546 OR file:bi-grandia OR file:inventorysync OR file:tom OR file:metrics-app", "color": { "a": 1, "rgb": 3135939 } }
   ],
   "collapse-display": false,
   "showArrow": false,
