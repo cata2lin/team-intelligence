@@ -8,6 +8,20 @@ argument-hint: "sync --apply | query --sku HA --country RO --by-sku | print --st
 
 > Author: **Gigi**. Separare rapidă a etichetelor de printat, per SKU × magazin × cantitate.
 
+## ⚠️ PENTRU AGENT (Claude) — operatorul din depozit NU rulează comenzi, DOAR vorbește
+Când operatorul cere ceva în limbaj natural, **TU rulezi comanda potrivită** (cu tool-ul tău) și-i arăți
+**rezultatul clar** (numere, magazine, SKU-uri). NU-i arăta comanda și NU-i cere s-o ruleze el. Mapare:
+| Operatorul zice | Tu rulezi |
+|---|---|
+| „ce am de printat azi?" | `query --country RO --by-store` |
+| „câte HA de printat pe RO?" | `query --sku HA --country RO --by-sku` |
+| „printează HA pe RO" | `print --sku HA --country RO --open` → se deschide Chrome pe mașina depozitului → el apasă Ctrl+P |
+| „parfumuri de 3 pe Esteban" | `query --store esteban --items 3 --by-sku` (sau `print … --open` dacă zice „printează") |
+| „deschide de printat pe Ofertele" | `print --store ofertele --open` |
+| „câte s-au printat azi?" | `printed --country RO` |
+- **`print … --open` se rulează LOCAL pe mașina depozitului** (deschide Chrome ACOLO, unde e imprimanta).
+- Dacă indexul pare vechi (cronul de noapte n-a rulat), rulează întâi `sync --apply` (~20s), apoi întrebarea.
+
 ## Cum funcționează (2 pași)
 1. **Noaptea (cron 01:00, `print_queue_nightly.sh`)** — interoghează xConnector pe TOATE magazinele
    ÎN PARALEL (doar comenzi NEexpediate = coada reală), filtrează etichetele AWB nedescărcate,
