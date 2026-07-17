@@ -33,7 +33,21 @@ uv run "$S" query --type deals --country RO --by-store
 uv run "$S" print --sku HA --country RO              # DRY-RUN: ce s-ar deschide
 uv run "$S" print --sku HA --country RO --open       # descarcă fresh → merge PDF (pypdf) → Chrome → marchează PRINTAT
 uv run "$S" print --store esteban --items 3 --open   # parfumurile de 3 pe Esteban
+
+# CÂTE S-AU PRINTAT (de la baseline; cu cronul de noapte = „printate azi")
+uv run "$S" printed --country RO                      # câte din coadă au fost deja descărcate (printate)
 ```
+
+## Rutină depozit (dimineața)
+```bash
+S="${CLAUDE_PLUGIN_ROOT}/skills/print-queue/print_queue.py"
+uv run "$S" query --country RO --by-store     # 1. ce am de printat azi, pe magazine
+uv run "$S" print  --sku HA --country RO --open   # 2. deschide lotul în Chrome → Ctrl+P
+uv run "$S" printed --country RO              # 3. câte s-au printat (control)
+```
+> Cronul de la **01:00** (`print_queue_nightly.sh`) construiește coada peste noapte → dimineața pașii 1-2 sunt instant.
+> „Câte s-au printat azi" NU e un câmp în xConnector (nu are timestamp pe descărcare) → se calculează ca DIFERENȚĂ
+> față de baseline-ul de la 1 noaptea (comenzile care au ieșit din coadă = printate azi).
 
 ## Reguli importante
 - **NU printează singur** — doar DESCHIDE un PDF unic (merged cu `pypdf`, fără SumatraPDF/qpdf) în Chrome;

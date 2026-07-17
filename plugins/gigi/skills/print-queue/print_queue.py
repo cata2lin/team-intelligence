@@ -24,7 +24,7 @@ INTEROGHEAZĂ INSTANT din DB și, când vrea, DESCHIDE etichetele filtrate ÎN C
   uv run print_queue.py print --sku HA --country RO --open         # descarcă+merge PDF → deschide Chrome → marchează printat
 Read-only fără --apply/--open. Scrie DOAR în metrics.print_queue.
 """
-import os, sys, argparse, subprocess, datetime, time, tempfile, urllib.parse as up, urllib.request
+import os, sys, argparse, subprocess, datetime, time, tempfile, collections, urllib.parse as up, urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -275,6 +275,39 @@ def cmd_print(a):
         len(ok_ids), merged, len(ok_ids), (" %d eșec." % fails) if fails else ""))
 
 
+def cmd_printed(a):
+    """Câte s-au PRINTAT de la baseline (indexul). xConnector n-are timestamp pe descărcare → singura
+    cale = DIFF: comenzile din index care ACUM sunt downloaded=true = printate de la baseline încoace.
+    Cu cronul de la 1 noaptea (baseline = început de zi), asta = „printate azi"."""
+    cn = _metrics(); cur = cn.cursor()
+    snap = _check_index(cur)
+    if not snap:
+        print("  Index gol — rulează întâi: print_queue.py sync --apply"); return
+    w, params = _where(a)
+    cur.execute(f"SELECT DISTINCT order_id, store_domain, store FROM public.print_queue WHERE {w}", params)
+    rows = cur.fetchall(); cn.close()
+    xcs = {s["shopDomain"]: X.XC(s["apiKey"]) for s in X.load_shops()}
+    def chk(oid, dom, store):
+        try:
+            s, d = xcs[dom].get("/api/orders/by-id", "orderId=%s" % oid)
+            o = d if (isinstance(d, dict) and d.get("orderId")) else ((d.get("order") if isinstance(d, dict) else None) or d)
+            doc = X.awb_doc(o) if o else None
+            return (store, doc.get("downloaded") if doc else None)
+        except Exception:
+            return (store, "err")
+    printed = collections.Counter(); still = collections.Counter(); total = 0
+    with ThreadPoolExecutor(max_workers=14) as ex:
+        for f in as_completed([ex.submit(chk, oid, dom, st) for oid, dom, st in rows]):
+            st, dl = f.result(); total += 1
+            printed[st] += 1 if dl is True else 0
+            still[st] += 1 if dl is False else 0
+    print("  Baseline (index): %s · %d comenzi verificate" % (snap, total))
+    print("  ✓ PRINTATE de la baseline: %d" % sum(printed.values()))
+    for st, c in printed.most_common():
+        if c: print("     %-18s %d" % (st, c))
+    print("  · încă de printat: %d" % sum(still.values()))
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -286,6 +319,9 @@ def main():
     pr = sub.add_parser("print")
     for f in ["sku", "store", "country", "type"]: pr.add_argument("--" + f)
     pr.add_argument("--items", type=int); pr.add_argument("--open", action="store_true"); pr.set_defaults(fn=cmd_print)
+    pt = sub.add_parser("printed")
+    for f in ["sku", "store", "country", "type"]: pt.add_argument("--" + f)
+    pt.add_argument("--items", type=int); pt.set_defaults(fn=cmd_printed)
     a = ap.parse_args(); a.fn(a)
 
 
