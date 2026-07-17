@@ -4,6 +4,7 @@
 # doar interoghează + deschide în Chrome. Instalare cron (pe VPS, ca nomen_health.sh):
 #     0 1 * * * /root/Scripturi/.../print-queue/print_queue_nightly.sh >> /var/log/print_queue.log 2>&1
 set -euo pipefail
+export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"   # cron n-are uv în PATH
 cd "$(dirname "$0")"
 echo "===== print_queue nightly $(date '+%F %T') ====="
 uv run print_queue.py sync --apply
