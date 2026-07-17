@@ -64,8 +64,8 @@ uv run "$S" printed --country RO              # 3. câte s-au printat (control)
 > față de baseline-ul de la 1 noaptea (comenzile care au ieșit din coadă = printate azi).
 
 ## Reguli importante
-- **NU printează singur** — doar DESCHIDE un PDF unic (merged cu `pypdf`, fără SumatraPDF/qpdf) în Chrome;
-  operatorul apasă Ctrl+P. Depozitul e pe Windows → deschide `chrome`.
+- **NU printează singur** — DESCHIDE PDF-uri în Chrome (merged cu `pypdf`, fără SumatraPDF/qpdf); operatorul apasă Ctrl+P. Depozitul e pe Windows → `chrome`.
+- **Loturi de max 250** — dacă sunt multe etichete, sparge în loturi de **250** (un PDF/lot, deschis separat — Chrome/imprimanta nu duc un PDF uriaș). `--batch N` schimbă mărimea.
 - **`--open` = mutație**: descarcă eticheta (xConnector o marchează `downloaded` → iese din coada tuturor)
   + o marchează `printed_at` în DB. Fără `--open` = DRY-RUN, zero efecte.
 - **La print re-interoghează comanda FRESH** (AWB-ul se poate schimba între noapte și dimineață) — nu
