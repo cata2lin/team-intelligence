@@ -233,46 +233,53 @@ def cmd_print(a):
         print("\n  DRY-RUN — nimic descărcat/deschis. Adaugă --open ca să deschizi în Chrome + marchezi printat."); cn.close(); return
     if not jobs:
         print("  Nimic de printat."); cn.close(); return
-    # descarcă fiecare etichetă → merge cu pypdf → deschide un singur PDF în Chrome
+    # descarcă în LOTURI de max --batch etichete → un PDF/lot → deschide fiecare în Chrome (Chrome/imprimanta nu duc un PDF uriaș)
     from pypdf import PdfWriter
     xcs = {s["shopDomain"]: X.XC(s["apiKey"]) for s in X.load_shops()}
     outdir = os.path.join(tempfile.gettempdir(), "print_queue")
     os.makedirs(outdir, exist_ok=True)
-    merged = os.path.join(outdir, "print_%s.pdf" % datetime.datetime.now().strftime("%H%M%S"))
-    writer = PdfWriter(); ok_ids = []; done_ids = []; fails = 0
-    for oid, nm, st, dom, trk0, url0 in jobs:
-        xc = xcs.get(dom)
-        try:
-            # RE-INTEROGHEAZĂ comanda ACUM (AWB-ul poate s-a schimbat între sync și print) — nu folosi URL-ul vechi
-            s, d = xc.get("/api/orders/by-id", "orderId=%s" % oid)
-            o = d if (isinstance(d, dict) and d.get("orderId")) else ((d.get("order") if isinstance(d, dict) else None) or d)
-            doc = X.awb_doc(o) if o else None
-            if not doc:
-                print("  ⚠️ %s: nu mai are AWB (sar)" % nm); continue
-            if doc.get("downloaded") is not False:
-                done_ids.append(oid); continue  # descărcat/printat între timp → doar marchez printat, nu re-descarc
-            cid = doc.get("connectorId"); trk = X.doc_tracking(doc)
-            url = doc.get("url") or doc.get("awbPdfUrl") or (
-                X.XBASE + "/api/document/shipping-label?connectorId=%s&trackingNumber=%s" % (cid, up.quote(str(trk or ""))))
-            req = urllib.request.Request(url, headers={"Authorization": xc.h["Authorization"]}) if url.startswith(X.XBASE) else urllib.request.Request(url)
-            data = urllib.request.urlopen(req, timeout=60).read()
-            fp = os.path.join(outdir, "%s.pdf" % nm)
-            open(fp, "wb").write(data)
-            writer.append(fp); ok_ids.append(oid)
-        except Exception as e:
-            fails += 1; print("  ⚠️ %s: %s" % (nm, str(e)[:50]))
-        time.sleep(0.5)  # pacing ≤2/s
+    stamp = datetime.datetime.now().strftime("%H%M%S")
+    BATCH = a.batch or 250
+    lots = [jobs[i:i + BATCH] for i in range(0, len(jobs), BATCH)]
+    done_ids = []; fails = 0; total_ok = 0; files = []
+    for bi, chunk in enumerate(lots, 1):
+        writer = PdfWriter(); ok_ids = []
+        for oid, nm, st, dom, trk0, url0 in chunk:
+            xc = xcs.get(dom)
+            try:
+                # RE-INTEROGHEAZĂ comanda ACUM (AWB-ul poate s-a schimbat între sync și print) — nu folosi URL-ul vechi
+                s, d = xc.get("/api/orders/by-id", "orderId=%s" % oid)
+                o = d if (isinstance(d, dict) and d.get("orderId")) else ((d.get("order") if isinstance(d, dict) else None) or d)
+                doc = X.awb_doc(o) if o else None
+                if not doc:
+                    print("  ⚠️ %s: nu mai are AWB (sar)" % nm); continue
+                if doc.get("downloaded") is not False:
+                    done_ids.append(oid); continue  # descărcat/printat între timp → doar marchez printat
+                cid = doc.get("connectorId"); trk = X.doc_tracking(doc)
+                url = doc.get("url") or doc.get("awbPdfUrl") or (
+                    X.XBASE + "/api/document/shipping-label?connectorId=%s&trackingNumber=%s" % (cid, up.quote(str(trk or ""))))
+                req = urllib.request.Request(url, headers={"Authorization": xc.h["Authorization"]}) if url.startswith(X.XBASE) else urllib.request.Request(url)
+                data = urllib.request.urlopen(req, timeout=60).read()
+                fp = os.path.join(outdir, "%s.pdf" % nm)
+                open(fp, "wb").write(data)
+                writer.append(fp); ok_ids.append(oid)
+            except Exception as e:
+                fails += 1; print("  ⚠️ %s: %s" % (nm, str(e)[:50]))
+            time.sleep(0.5)  # pacing ≤2/s
+        if not ok_ids:
+            continue
+        merged = os.path.join(outdir, "print_%s_lot%02d.pdf" % (stamp, bi))
+        with open(merged, "wb") as fh: writer.write(fh)
+        _open_chrome(merged); files.append(merged)
+        cur.execute("UPDATE public.print_queue SET printed_at=now() WHERE order_id IN %s", (tuple(ok_ids),)); cn.commit()
+        total_ok += len(ok_ids)
+        print("  ✓ lot %d/%d: %d etichete → %s (deschis în Chrome)" % (bi, len(lots), len(ok_ids), os.path.basename(merged)))
     if done_ids:
         cur.execute("UPDATE public.print_queue SET printed_at=now() WHERE order_id IN %s", (tuple(done_ids),)); cn.commit()
-        print("  (%d erau deja descărcate între timp → marcate printat)" % len(done_ids))
-    if not ok_ids:
-        print("  Nicio etichetă descărcată."); cn.close(); return
-    with open(merged, "wb") as fh: writer.write(fh)
-    _open_chrome(merged)
-    cur.execute("UPDATE public.print_queue SET printed_at=now() WHERE order_id IN %s", (tuple(ok_ids),))
-    cn.commit(); cn.close()
-    print("\n  ✓ %d etichete → %s (deschis în Chrome — apasă Ctrl+P). %d marcate PRINTAT în DB.%s" % (
-        len(ok_ids), merged, len(ok_ids), (" %d eșec." % fails) if fails else ""))
+        print("  (%d erau deja descărcate → marcate printat)" % len(done_ids))
+    cn.close()
+    print("\n  ✓ TOTAL %d etichete în %d lot(uri) de max %d → apasă Ctrl+P în fiecare fereastră Chrome.%s" % (
+        total_ok, len(files), BATCH, (" %d eșec." % fails) if fails else ""))
 
 
 def cmd_printed(a):
@@ -318,7 +325,7 @@ def main():
     q.add_argument("--items", type=int); q.add_argument("--by-sku", action="store_true"); q.add_argument("--by-store", action="store_true"); q.add_argument("--limit", type=int, default=60); q.set_defaults(fn=cmd_query)
     pr = sub.add_parser("print")
     for f in ["sku", "store", "country", "type"]: pr.add_argument("--" + f)
-    pr.add_argument("--items", type=int); pr.add_argument("--open", action="store_true"); pr.set_defaults(fn=cmd_print)
+    pr.add_argument("--items", type=int); pr.add_argument("--open", action="store_true"); pr.add_argument("--batch", type=int, default=250); pr.set_defaults(fn=cmd_print)
     pt = sub.add_parser("printed")
     for f in ["sku", "store", "country", "type"]: pt.add_argument("--" + f)
     pt.add_argument("--items", type=int); pt.set_defaults(fn=cmd_printed)
