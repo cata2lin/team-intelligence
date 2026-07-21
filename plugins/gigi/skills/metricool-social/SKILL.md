@@ -42,7 +42,18 @@ NAS dependency (content = Google Drive, a cloud API reachable from the VPS), so 
 - **Poster resilience**: if the all-4-networks post fails, it retries WITHOUT youtube (a reel YT-Shorts rejects
   won't kill TikTok/IG/FB). Deals brands auto-skip youtube (not connected).
 
-## Refill the queue (on the VPS, no sync needed)
+## Refill the queue — AUTOMAT (cron), plus manual la nevoie
+**Coada se umple singură** — reumplerea a fost ultimul pas manual din pipeline, acum e automatizată.
+`refill_queue.py` (wrapper `refill.sh`) rulează din crontab root:
+`30 4 * * * /usr/bin/flock -n /tmp/social_poster.lock /root/social-queue/refill.sh` →
+**04:30 Berlin = 05:30 RO**, cu **ACELAȘI lock ca posterul** (10:00 RO), ca să nu scrie niciodată
+simultan în `queue.json`. Pentru fiecare brand din rotație cu **sub `--min` (3)** posturi nepostate
+cheamă pickerul potrivit (Drive pt branduri, HA pt deals) și-l duce la **`--target` (5)**.
+Log: `/root/social-queue/refill.log`. Test sigur oricând: `uv run refill_queue.py --dry`.
+Un brand fără conținut în folder = **no-op ieftin** (0 candidați, zero cost Gemini) → se auto-repară
+singur când apare conținut, fără intervenție.
+
+Manual (top-up punctual):
 `uv run vps.py run '... cd /root/social-queue; uv run pick_drive_brand.py "Nubra" "Esteban" --per 4'` — the
 picker appends straight to the VPS `queue.json`. (Mac refill still works via **pull → pick → push**: `vps.py get`
 queue.json → run picker locally → `vps.py put` back, so VPS posted-flags aren't clobbered.)
@@ -71,6 +82,19 @@ uv run scripts/pick_ha_deals.py --per 2                            # deals: only
 Drive libraries: **CREATIVE** `1pjDE3spDnpRuLUtTUzNUPx9XRyPA_gBP` (subfolder per brand; prefer the edited
 `CREATIVE` subfolder, `MATERIALE BRUTE` = raw). **HA-1** `1CdUfqKisb22urOr8seDxik4wvEAXJQLw` + **HA-2**
 `1z8kFoaV6NFcuR-THt_S5jqVGpcuauuvR` (one folder per `HA-####`, ready reels in `CREATIVE DENISA`).
+**Sursă explicită per brand:** `BRAND_FOLDERS` din `pick_drive_brand.py` mapează brandul → folder Drive —
+obligatoriu când numele din rotație nu se potrivește cu folderul: **`GT`** → „5. GEORGE TALENT" (altfel
+găsea 0 la infinit), **`Nocturna`** și **`Rossi`** (n-au folder sub CREATIVE), **`Lab Noir`** → **„UGC Cristina"**
+(UGC de la creatoare, cu subfoldere pe luni — se intră recursiv). Altfel se caută după nume sub CREATIVE.
+Ad-hoc: `--folder <ID>`. Când folderul e explicit (curatoriat de om), gate-ul `pe_brand` nu mai blochează.
+
+⚠️ **FĂRĂ BARE NEGRE — 2 straturi** (înainte treceau clipuri care ieșeau cu bare):
+1. **filtru dur pe metadata Drive** — doar vertical real (`h > w` ȘI `w/h ≤ 0.65`, adică 9:16); respinge
+   4:5 / pătrat / 16:9, cărora platformele le pun bare. (La cenzus: Belasil 23, Nocturna 22, Gento 5 astfel.)
+2. **verificare vizuală** — Gemini întoarce `bare_negre` (letterbox/pillarbox **ars în imagine**, ex. un 16:9
+   pus pe pânză verticală) → clipul e respins. Ăsta e stratul care contează când formatul e deja 9:16.
+
+Plus **dedupe** pe nume normalizat + durată (același clip urcat de 8 ori cu nume ușor diferite).
 Vetting keeps `ok_de_postat && pe_brand`; burned brand-own text is fine, only FOREIGN watermarks are rejected.
 ⚠️ **HA rule: verify the SKU is active + in stock in the store every time** (pick_ha_deals does this via Shopify).
 ⚠️ `--per N` value must not leak in as a brand (fixed) — and NEVER run a picker (writes queue.json) concurrently
