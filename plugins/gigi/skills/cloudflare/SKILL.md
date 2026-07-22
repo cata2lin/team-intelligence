@@ -1,7 +1,7 @@
 ---
 name: cloudflare
-description: Operate Cloudflare for ALL Arona domains via the API — DNS management (read AND edit records on every zone) and R2 object storage. One team API token from the secret store (CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID); never printed. DNS = list zones, list/get/create/update/delete records (A, AAAA, CNAME, MX, TXT, NS, SRV…) on the ~35 zones (esteban.ro, grandia.ro, nubra.ro, george-talent.ro, belasil.ro, bonhaus.*, nocturna.*, casaofertelor.ro, magdeal.ro, gento.ro, carpetto.ro, covoria.ro, apreciat.ro, reduceribune.ro, arona.ro …). R2 = list buckets/objects, upload/download (S3-compatible; only once R2 is enabled on the account). Use for "add/change a DNS record", "set a TXT/SPF/DMARC/verification record", "point a subdomain (CNAME/A)", "Cloudflare zone", "domain verification (Google/Klaviyo/Shopify/Meta)", "what DNS records does X have", "store files on R2/Cloudflare object storage". Triggers: cloudflare, dns, dns record, txt record, cname, a record, mx, spf, dmarc, domain verification, zone, nameserver, r2, object storage, bucket.
-argument-hint: "verify | zones | dns-list <domain> | dns-create/update/delete <domain> ... --apply | r2-*"
+description: Operate Cloudflare for ALL Arona domains via the API — DNS management (read AND edit records on every zone) and R2 object storage. One team API token from the secret store (CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID); never printed. DNS = connect a domain or subdomain to a Shopify store in one command (`shopify-domain` — writes exactly the records Shopify needs, root A 23.227.38.65 / subdomain CNAME shops.myshopify.com, forced DNS-only because an orange-cloud record stops Shopify from issuing the SSL certificate), list zones, list/get/create/update/delete records (A, AAAA, CNAME, MX, TXT, NS, SRV…) on the ~35 zones (esteban.ro, grandia.ro, nubra.ro, george-talent.ro, belasil.ro, bonhaus.*, nocturna.*, casaofertelor.ro, magdeal.ro, gento.ro, carpetto.ro, covoria.ro, apreciat.ro, reduceribune.ro, arona.ro …). R2 = list buckets/objects, upload/download (S3-compatible; only once R2 is enabled on the account). Use for "add/change a DNS record", "set a TXT/SPF/DMARC/verification record", "point a subdomain (CNAME/A)", "Cloudflare zone", "domain verification (Google/Klaviyo/Shopify/Meta)", "what DNS records does X have", "store files on R2/Cloudflare object storage". Triggers: cloudflare, dns, dns record, txt record, cname, a record, mx, spf, dmarc, domain verification, zone, nameserver, r2, object storage, bucket.
+argument-hint: "verify | zones | dns-list <domain> | shopify-domain <domain> [--sub bg] --apply | dns-create/update/delete <domain> ... --apply | r2-*"
 ---
 
 # cloudflare
@@ -43,6 +43,10 @@ uv run "$CF" dns-create grandia.ro --type TXT --name _verif --content '"token=ab
 uv run "$CF" dns-update esteban.ro --name www --type CNAME --content shops.myshopify.com --apply
 uv run "$CF" dns-delete nubra.ro --id <record_id> --apply
 
+# conectează un domeniu la Shopify (pune EXACT recordurile cerute, DNS only):
+uv run "$CF" shopify-domain duppo.eu --sub bg --apply   # subdomeniu -> CNAME shops.myshopify.com
+uv run "$CF" shopify-domain duppo.eu --apply            # rădăcină -> A 23.227.38.65 + www CNAME
+
 # R2 (only once enabled on the account):
 uv run "$CF" r2-buckets
 uv run "$CF" r2-ls <bucket> --prefix img/ --max 50
@@ -56,6 +60,12 @@ update/delete take either `--id` (from `dns-list`) or `--name`+`--type` when tha
 pair is unique.
 
 ## Notes / gotchas
+- 🛒 **Shopify + Cloudflare: recordul TREBUIE să rămână DNS-only (norișor GRI).** Cu proxy pornit
+  Shopify nu poate valida domeniul și **nu emite certificatul SSL** — magazinul rămâne fără https.
+  `shopify-domain` forțează `proxied=false` tocmai de-aia. Ținte (verificate pe esteban.ro /
+  grandia.ro / nubra.ro): **rădăcină = A `23.227.38.65`**, **orice subdomeniu = CNAME
+  `shops.myshopify.com`** (niciodată A pe subdomeniu). DNS-ul singur NU atașează domeniul — mai
+  trebuie Shopify admin → Settings → Domains → *Connect existing domain* → Verify.
 - **`proxied`** only applies to A/AAAA/CNAME. Use `--proxied` to turn the orange
   cloud on; on update use `--no-proxied` to turn it off. DNS-only records (MX, TXT,
   NS, mail A records) must stay unproxied.
@@ -73,5 +83,8 @@ pair is unique.
 
 ## Common tasks
 - **Domain verification** (Google/Klaviyo/Shopify/Meta): `dns-create <domain> --type TXT --name @ --content '"...=..."' --apply`.
+- **Conectează un magazin Shopify la domeniu**: `shopify-domain <domain> [--sub bg] --apply` —
+  idempotent (spune „există deja"), arată ce record ar șterge (ex. parcarea Namecheap) înainte, și
+  printează pașii rămași din Shopify admin.
 - **Point a subdomain**: `dns-create <domain> --type CNAME --name sub --content target.example.com --apply`.
 - **Email**: SPF/DKIM/DMARC are TXT/CNAME — change with `dns-update`; MX with care (affects mail for the whole domain).
