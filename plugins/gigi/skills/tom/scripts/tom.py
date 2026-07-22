@@ -131,6 +131,13 @@ def sql(query):
     cn = db(); c = cn.cursor(); c.execute(query); rows(c)
 
 # ── HMAC /api/v1 (writes as a source app) ───────────────────────────────
+def load_body(arg):
+    """--json acceptă și `@fisier` — un PO de 100+ linii nu încape ca argument de shell."""
+    if arg.startswith("@"):
+        return json.loads(Path(arg[1:]).read_text(encoding="utf-8"))
+    return json.loads(arg)
+
+
 def signed(method, path, body_obj=None, source=None, yes=False):
     k = SRC_KEY.get(source.upper()) if source else None
     if not k: sys.exit(f"unknown source '{source}'. Known: {', '.join(sorted(set(SRC_KEY)))}")
@@ -183,16 +190,16 @@ def main():
     elif a.cmd == "po-get":
         signed("GET", f"/api/v1/po/{a.source.upper()}/{a.sourcePoId}", source=a.source)
     elif a.cmd == "po-create":
-        signed("POST", "/api/v1/po", json.loads(a.body), a.source, a.yes)
+        signed("POST", "/api/v1/po", load_body(a.body), a.source, a.yes)
     elif a.cmd == "po-amend":
-        signed("POST", f"/api/v1/po/{a.source.upper()}/{a.sourcePoId}/amend", json.loads(a.body), a.source, a.yes)
+        signed("POST", f"/api/v1/po/{a.source.upper()}/{a.sourcePoId}/amend", load_body(a.body), a.source, a.yes)
     elif a.cmd == "po-cancel":
         body = {"scope": a.scope, "reason": a.reason}
         if a.note: body["note"] = a.note
         if a.scope == "ITEMS": body["source_line_ids"] = (a.lines or "").split(",")
         signed("POST", f"/api/v1/po/{a.source.upper()}/{a.sourcePoId}/cancel", body, a.source, a.yes)
     elif a.cmd == "product-upsert":
-        signed("POST", "/api/v1/products/upsert", json.loads(a.body), a.source, a.yes)
+        signed("POST", "/api/v1/products/upsert", load_body(a.body), a.source, a.yes)
     else: ap.print_help()
 
 if __name__ == "__main__":
