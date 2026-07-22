@@ -20,6 +20,7 @@ Comenzi:
   dns-create <domeniu> --type TXT --name _foo --content "v=..." [--ttl 1] [--proxied] --apply
   dns-update <domeniu> (--id <rec_id> | --name www --type CNAME) --content "..." [--ttl] [--proxied|--no-proxied] --apply
   dns-delete <domeniu> (--id <rec_id> | --name www --type CNAME) --apply
+  shopify-domain <domeniu> [--sub bg] --apply    # recordurile cerute de Shopify (DNS only!)
   r2-buckets                               # (când R2 e activat)
   r2-ls <bucket> [--prefix p] [--max 50]
   r2-put <bucket> <key> <fisier-local> --apply
@@ -289,6 +290,63 @@ def cmd_r2_get(a):
         _r2_guard(e)
 
 
+SHOPIFY_ROOT_IP = "23.227.38.65"       # A pentru radacina (verificat pe esteban.ro/grandia.ro/nubra.ro)
+SHOPIFY_CNAME = "shops.myshopify.com"  # CNAME pentru orice subdomeniu (www, bg, shop…)
+
+
+def cmd_shopify_domain(a):
+    """Pune recordurile de care are nevoie Shopify pentru un domeniu/subdomeniu.
+
+    Subdomeniu (bg.duppo.eu)  -> CNAME bg -> shops.myshopify.com
+    Radacina  (duppo.eu)      -> A @ -> 23.227.38.65  +  CNAME www -> shops.myshopify.com
+
+    Recordurile raman NEPROXIATE intentionat: cu norisorul portocaliu Shopify nu poate
+    valida domeniul si nu emite certificatul SSL — magazinul ramane fara https.
+    """
+    zid = resolve_zone(a.domain)
+    want = ([("CNAME", a.sub, SHOPIFY_CNAME)] if a.sub
+            else [("A", "@", SHOPIFY_ROOT_IP), ("CNAME", "www", SHOPIFY_CNAME)])
+
+    plan = []
+    for typ, name, content in want:
+        fq = _fqdn(name, a.domain)
+        existing = [r for r in _find_records(zid, name, None, a.domain) if r["name"] == fq]
+        conflict = [r for r in existing if r["type"] in ("A", "AAAA", "CNAME")]
+        if any(r["type"] == typ and str(r["content"]).rstrip(".") == content for r in conflict):
+            proxied = next(r.get("proxied") for r in conflict
+                           if r["type"] == typ and str(r["content"]).rstrip(".") == content)
+            print(f"  = {typ:5} {fq:28} -> {content}  (exista deja"
+                  + (", ⚠ PROXIAT — treci-l pe DNS only" if proxied else "") + ")")
+            continue
+        plan.append((typ, fq, content, conflict))
+
+    if not plan:
+        print("nimic de facut — recordurile Shopify sunt deja puse.")
+    for typ, fq, content, conflict in plan:
+        for r in conflict:
+            print(f"  - STERG  {r['type']:5} {r['name']:28} -> {str(r['content'])[:40]}")
+        print(f"  + CREEZ  {typ:5} {fq:28} -> {content}  (DNS only)")
+
+    if plan and not a.apply:
+        print("(dry-run — adauga --apply ca sa execut)")
+    elif plan:
+        for typ, fq, content, conflict in plan:
+            for r in conflict:
+                die_if_fail(cf("DELETE", f"/zones/{zid}/dns_records/{r['id']}"), "delete")
+            body = {"type": typ, "name": fq, "content": content, "ttl": 1, "proxied": False}
+            res = cf("POST", f"/zones/{zid}/dns_records", body=body)
+            die_if_fail(res, "create")
+            print(f"✅ {typ} {fq} -> {content}  id={res['result']['id']}")
+
+    host = _fqdn(a.sub, a.domain) if a.sub else a.domain
+    print(f"""
+Mai departe, din Shopify admin (DNS-ul singur nu ataseaza domeniul):
+  Settings -> Domains -> Connect existing domain -> {host} -> Verify
+  Certificatul SSL se emite automat dupa verificare (de obicei minute).
+Pana atunci {host} nu raspunde deloc — normal, Shopify nu serveste un hostname
+neatasat unui magazin. Verifica propagarea:  dig +short {host}""")
+
+
 def main():
     p = argparse.ArgumentParser(description="Cloudflare (DNS + R2) pentru domeniile ARONA")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -306,6 +364,10 @@ def main():
     sp.add_argument("--apply", action="store_true"); sp.set_defaults(fn=cmd_dns_update)
 
     sp = sub.add_parser("dns-delete"); sp.add_argument("domain"); sp.add_argument("--id"); sp.add_argument("--name"); sp.add_argument("--type"); sp.add_argument("--apply", action="store_true"); sp.set_defaults(fn=cmd_dns_delete)
+
+    sp = sub.add_parser("shopify-domain"); sp.add_argument("domain")
+    sp.add_argument("--sub", help="subdomeniu (ex. bg). Fara el = radacina + www")
+    sp.add_argument("--apply", action="store_true"); sp.set_defaults(fn=cmd_shopify_domain)
 
     sub.add_parser("r2-buckets").set_defaults(fn=cmd_r2_buckets)
     sp = sub.add_parser("r2-ls"); sp.add_argument("bucket"); sp.add_argument("--prefix"); sp.add_argument("--max", type=int, default=50); sp.set_defaults(fn=cmd_r2_ls)
