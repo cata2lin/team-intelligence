@@ -52,6 +52,18 @@
     "google-sheets": {
       "command": "uv",
       "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_env_launch.py", "FILE:SERVICE_ACCOUNT_PATH=GA4_SA_JSON", "--", "uvx", "mcp-google-sheets"]
+    },
+    "search-console": {
+      "command": "uv",
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_env_launch.py", "FILE:GOOGLE_APPLICATION_CREDENTIALS=GA4_SA_JSON", "--", "npx", "-y", "mcp-server-gsc"]
+    },
+    "clickup": {
+      "command": "uv",
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_env_launch.py", "CLICKUP_API_KEY=CLICKUP_API_TOKEN", "CLICKUP_TEAM_ID=CLICKUP_TEAM_ID", "--", "npx", "-y", "@taazkareem/clickup-mcp-server"]
+    },
+    "dataforseo": {
+      "command": "uv",
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_env_launch.py", "DATAFORSEO_USERNAME=DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD=DATAFORSEO_PASSWORD", "--", "npx", "-y", "dataforseo-mcp-server"]
     }
   }
 }
