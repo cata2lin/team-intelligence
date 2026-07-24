@@ -5,6 +5,8 @@ description: Generate, publish, and rewrite editorial blog articles for the Lab 
 
 # labnoir-articles
 
+> ⚠️ **COMASAT în `core:articles` (2026-07-24).** Acest skill rămâne funcțional dar e înlocuit de **`core:articles --store labnoir`** (un pipeline pt toate magazinele de parfum). Prefer `core:articles`. `shared/skills-audit.md` §7.
+
 > Author: **Arona core**. Ported from assistant v2.
 
 Publish and rewrite editorial blog articles on the **Lab Noir** Shopify store
