@@ -49,4 +49,4 @@ Checklist + conținut gata de paste: `~/Downloads/free-listings/`. Priorități 
 - **Crunchbase/LinkedIn** = browserul automat e BLOCAT (Cloudflare) → omul, în browserul lui.
 - **NAP unic**: ARONA SRL · CUI RO37247302 · J51/151/2017 · Str. Dunărea nr. 9, Călărași 910093 · 2017.
 
-Companion: `gigi:shopify-stores` (sameAs/temă), `gigi:cloudflare` (verificare domeniu DNS), `gigi:analytics` (`dataforseo.py backlinks --list` = follow/nofollow), `gigi:instapress` (dofollow câștigat), `gigi:seo-schema`. Memorii: [[offsite-seo-strategy]], [[grandia-self-hosted-feeds]].
+Companion: `gigi:shopify-stores` (sameAs/temă), `gigi:cloudflare` (verificare domeniu DNS), `gigi:analytics` (`dataforseo.py backlinks --list` = follow/nofollow), `gigi:instapress` (dofollow câștigat), `gigi:schema`. Memorii: [[offsite-seo-strategy]], [[grandia-self-hosted-feeds]].

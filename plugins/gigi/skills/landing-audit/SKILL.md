@@ -46,4 +46,4 @@ this script together = the full audit.
 - Audit a page **before** you scale ad spend to it (`product-matrix` SCALE products especially).
 
 ## Unghiuri noi (adoptate MIT)
-- **gigi:ads-landing** — audit post-click cu message-match ad→LP + Core Web Vitals (Playwright). **gigi:seo-sxo** — page-type vs intent (de ce nu rankează pagina).
+- **gigi:landing-audit** — audit post-click cu message-match ad→LP + Core Web Vitals (Playwright). **gigi:seo-sxo** — page-type vs intent (de ce nu rankează pagina).

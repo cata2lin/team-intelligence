@@ -258,4 +258,4 @@ After a run: `kb.py log --type skill --action used --name gigi:shopify-seo --sum
 ## Unghiuri noi (skilluri SEO adoptate MIT)
 - **gigi:seo-backlinks** — profil off-site/backlinks (Common Crawl/Moz/Bing) — dimensiunea off-page pe care shopify-seo (on-page) n-o acoperă.
 - **gigi:seo-drift** — monitor de REGRESIE SEO (baseline + diff după modificări temă/app) — rulează-l după ORICE schimbare de temă/skill pe cele 21 magazine.
-- **gigi:seo-technical** (management AI-crawlers GPTBot/ClaudeBot) · **gigi:seo-schema** (schema avansat, validare policy/merchant) · **gigi:seo-sxo** (page-type vs intent) · **gigi:seo-cluster** (topic clusters).
+- **gigi:seo-technical** (management AI-crawlers GPTBot/ClaudeBot) · **gigi:schema** (schema avansat, validare policy/merchant) · **gigi:seo-sxo** (page-type vs intent) · **gigi:seo-cluster** (topic clusters).

@@ -64,4 +64,4 @@ download de chromium). Flux: nume → `biz_id` (suggestion) → reclame (search)
 - Longevitatea e proxy, nu performanță certă — un creativ vechi încă activ e foarte probabil câștigător, dar confirmă cu bunul-simț (poate fi un evergreen de brand).
 
 ## Unghiuri noi (adoptate MIT)
-- **gigi:competitors** + **gigi:competitor-profiling** — research competiție dincolo de reclame. **gigi:ads-competitor** — framework de analiză ads competiție.
+- **gigi:competitors** + **gigi:competitor-profiling** — research competiție dincolo de reclame. **gigi:competitor-ads** — framework de analiză ads competiție.
