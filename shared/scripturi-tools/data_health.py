@@ -79,7 +79,7 @@ def _judge(rows, key, ts, sla_h, note=""):
 
 # ---------------------------------------------------------------- checks
 
-def check_metrics(rows):
+def check_metrics(rows, ctx):
     """Warehouse: spend per platformă (brand + per-SKU), P&L pe brand, curs valutar, sync_runs."""
     dsn = _dsn("DATABASE_URL_METRICS")
     if not dsn:
@@ -87,7 +87,8 @@ def check_metrics(rows):
     import psycopg2
     cx = psycopg2.connect(dsn); cur = cx.cursor()
 
-    # SLA 36h: build_cache rulează 5:30 + la fiecare 3h între 9 și 21
+    # SLA 36h: build_cache rulează 5:30 + la fiecare 3h între 9 și 21.
+    # Reținem prospețimea cache-ului per platformă — WMS (redundant) e critic DOAR dacă și cache-ul e stale.
     for tbl, pref in (("cache.daily_ad_spend_ron", "spend"), ("cache.product_ad_spend", "spend_sku")):
         cur.execute("SELECT platform, MAX(date) FROM %s GROUP BY platform ORDER BY 1" % tbl)
         got = cur.fetchall()
@@ -95,6 +96,8 @@ def check_metrics(rows):
             rows.append((CRIT, pref, "tabel gol"))
         for plat, mx in got:
             _judge(rows, "%s.%s" % (pref, plat), mx, 36)
+            if tbl == "cache.daily_ad_spend_ron":
+                ctx.setdefault("cache_fresh", {})[plat] = (_age_h(mx) is not None and _age_h(mx) <= 36)
 
     cur.execute("SELECT MAX(month) FROM cache.brand_pnl_monthly")
     mx = cur.fetchone()[0]
@@ -152,7 +155,7 @@ def check_metrics(rows):
     cx.close()
 
 
-def check_awbprint(rows):
+def check_awbprint(rows, ctx):
     """Sursa de adevăr livrare: dacă sync-ul ei stă, tot ce ține de livrat/transport e vechi."""
     dsn = _dsn("DATABASE_URL_AWBPRINT")
     if not dsn:
@@ -166,7 +169,7 @@ def check_awbprint(rows):
     cx.close()
 
 
-def check_profitdb(rows):
+def check_profitdb(rows, ctx):
     """Motorul de profit + calea de marketing token-independentă (WMS)."""
     if not os.path.exists(PF_DB):
         rows.append((CRIT, "profitability.db", "fișierul lipsește")); return
@@ -174,10 +177,25 @@ def check_profitdb(rows):
     cur = cx.cursor()
     cur_month = datetime.utcnow().strftime("%Y-%m")
 
-    # FB se resetează zilnic în sheet (cron orar) → dacă stă >30h am pierdut zile definitiv
-    for src, sla, note in (("fb", 30, "WMS Facebook"), ("tt", 48, "WMS TikTok")):
+    # WMS = sursă REDUNDANTĂ de marketing per-SKU: din 2026-06 profit_by_sku cade automat pe
+    # cache când WMS lipsește pe o platformă (per zi). Deci WMS stale NU e critic cât timp cache-ul
+    # acoperă platforma respectivă — altfel te-ar suna zilnic degeaba (WMS TikTok e mort de o lună,
+    # dar cache-ul TikTok e proaspăt din tiktok_warehouse_sync). Critic DOAR dacă pică AMBELE.
+    cache_fresh = ctx.get("cache_fresh", {})
+    for src, plat, sla, note in (("fb", "meta", 36, "WMS Facebook"), ("tt", "tiktok", 48, "WMS TikTok")):
         cur.execute("SELECT MAX(date) FROM wms_ad_spend WHERE source=?", (src,))
-        _judge(rows, "wms.%s" % src, cur.fetchone()[0], sla, note)
+        mx = cur.fetchone()[0]
+        age = _age_h(mx)
+        stale = age is None or age > sla
+        covered = cache_fresh.get(plat, False)
+        if not stale:
+            rows.append((OK, "wms.%s" % src, "%s · %.0fh · %s" % (str(mx)[:16], age or 0, note)))
+        elif covered:
+            rows.append((WARN, "wms.%s" % src, "%s vechi %.0fh — dar cache %s e proaspăt, fallback acoperă (%s)"
+                         % (str(mx)[:16], age or 0, plat, note)))
+        else:
+            rows.append((CRIT, "wms.%s" % src, "%s vechi %.0fh ȘI cache %s stale → marketing per-SKU descoperit (%s)"
+                         % (str(mx)[:16], age or 0, plat, note)))
 
     cur.execute("SELECT MAX(created_at) FROM profit_orders")
     _judge(rows, "profit_orders", cur.fetchone()[0], 30)
@@ -207,9 +225,10 @@ def main():
     a = ap.parse_args()
 
     rows = []
+    ctx = {}  # check_metrics populează cache_fresh înainte ca check_profitdb să-l citească
     for fn in (check_metrics, check_awbprint, check_profitdb):
         try:
-            fn(rows)
+            fn(rows, ctx)
         except Exception as e:
             rows.append((CRIT, fn.__name__, "checkul însuși a crăpat: %s: %s" % (type(e).__name__, str(e)[:120])))
 
