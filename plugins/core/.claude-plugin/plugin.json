@@ -68,6 +68,10 @@
     "sqlite-profitability": {
       "command": "uv",
       "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/sqlite_ssh_mcp_launch.py"]
+    },
+    "sentry": {
+      "command": "uv",
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_env_launch.py", "SENTRY_ACCESS_TOKEN=SENTRY_AUTH_TOKEN", "LIT:SENTRY_HOST=de.sentry.io", "--", "npx", "-y", "@sentry/mcp-server@latest"]
     }
   }
 }
