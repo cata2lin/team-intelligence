@@ -27,7 +27,7 @@ Welcome · Abandoned Cart · Abandoned Checkout · Browse Abandonment · **Post-
 Per-store Klaviyo **Private API Key** in KB: `KLAVIYO_<STORE>_PRIVATE_KEY` (e.g. `KLAVIYO_ESTEBAN_PRIVATE_KEY`). Read scopes only. Klaviyo requires a `revision` header — default `2024-10-15`, override via env `KLAVIYO_REVISION`. Currently only **Esteban** is connected; add other stores' keys to extend.
 
 ## How to use
-Run `gap` first → it hands you the build list (which flows to create). Then brief whoever builds the flows (content from `core:esteban-articles` brand voice + the marketing-psychology/copy frameworks). Pair with RFM segments from our own order data (`metrics.orders`) for targeting. **Read-only**: this never edits flows or sends — it audits.
+Run `gap` first → it hands you the build list (which flows to create). Then brief whoever builds the flows (content from `core:articles` brand voice + the marketing-psychology/copy frameworks). Pair with RFM segments from our own order data (`metrics.orders`) for targeting. **Read-only**: this never edits flows or sends — it audits.
 
 ## Caveats / v2
 - Gap match is keyword-based (EN+RO); a flow with an unusual name may be miscounted — eyeball `flows` output.

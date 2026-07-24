@@ -23,4 +23,4 @@ uv run richpanel_backlog_janitor.py --apply         # EXECUTĂ (închide/snooze 
 - Clasificare reciclată din `gigi:cs-comment-intelligence`.
 
 ## De refolosit cu
-- `cs-comment-intelligence` (lead-urile/reclamațiile de tratat) · `cs-sla-dashboard` (vezi backlog-ul) · `cs-order-status` (ETA pt snooze).
+- `cs-comment-intelligence` (lead-urile/reclamațiile de tratat) · `cs-sla-dashboard` (vezi backlog-ul) · `cs-360` (ETA pt snooze).

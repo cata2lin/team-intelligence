@@ -14,7 +14,7 @@
 ## 0. TL;DR — the only open items
 | # | Item | Owner | Unblocks |
 |---|---|---|---|
-| 1 | Commit the `blog-rollout/*` pipeline + `articles/{esteban,gt,nubra}.json`; de-hardcode the Mac `BASE` path | **Gigi** | `core:esteban-articles`, `core:gt-articles`, `core:nubra-articles` |
+| 1 | Commit the `blog-rollout/*` pipeline + `articles/{esteban,gt,nubra}.json`; de-hardcode the Mac `BASE` path | **Gigi** | `core:articles`, `core:articles`, `core:articles` |
 | 2 | Port the claudekit design skills into the marketplace convention (or commit the missing sibling skills) | **Catalin** | `library:banner-design`, `library:design` |
 | 3 | `kb.py secret-set SMARTBILL_STORES <value>` | **Gigi** | `gigi:cs-actions` (invoice subcommand) |
 | 4 | Decide VPS access: reuse `PROFIT_SSH_*` (in DB) like `ha-grandia-pnl`, **or** ship the SSH key | **Gigi/admin** | ~10 CS/profitability skills |
@@ -26,7 +26,7 @@ Everything below expands these. Nothing else is required — all other secrets, 
 
 ## 1. Files missing from the repo (BLOCKED skills)
 
-### 1a. Blog article pipeline → `core:esteban-articles`, `core:gt-articles`, `core:nubra-articles`
+### 1a. Blog article pipeline → `core:articles`, `core:articles`, `core:articles`
 These three crash: the build pipeline and the article inputs are not committed, and the publish
 script reads a hardcoded path on Gigi's Mac.
 **Gigi must commit** (today only at `/Users/gheorghebeschea/Downloads/Scripturi/blog-rollout`):
@@ -35,7 +35,7 @@ script reads a hardcoded path on Gigi's Mac.
 - `articles/esteban.json`, `articles/gt.json`, `articles/nubra.json`
 - **and** replace `BASE = /Users/gheorghebeschea/Downloads/Scripturi/blog-rollout` with a repo-relative
   path (or `$NAS_ROOT`).
-> `core:labnoir-articles` already works (articles embedded in the script) — same pattern fixes the other three.
+> `core:articles` already works (articles embedded in the script) — same pattern fixes the other three.
 
 ### 1b. Library design skills → `library:banner-design`, `library:design`
 Imported from claudekit and never fully ported to the marketplace convention.
@@ -75,8 +75,8 @@ sibling skills. The underlying scripts are fine; only the wiring is wrong. *(Off
 
 ### 3a. SSH to the VPS `root@84.46.242.181` — ~10 skills
 These read live data over key-based SSH with **no stored credential**, so a teammate without the key
-can't run them: `cod-confirmation`, `cs-address-guard`, `cs-ghost-shipments`, `cs-order-status`,
-`cs-proactive-delays`, `cs-profile`, `cs-refused-recovery`, `cs-stock-answer`, `customer-identity`,
+can't run them: `cod-confirmation`, `cs-address-guard`, `cs-ghost-shipments`, `cs-360`,
+`cs-proactive-delays`, `cs-360`, `cs-refused-recovery`, `cs-stock-answer`, `customer-identity`,
 `metrics-cache` (ETL). **Pick one (Gigi/admin):**
 - **Preferred / zero-touch:** convert these to SSH via paramiko using the `PROFIT_SSH_HOST/USER/PASS`
   creds **already in the DB** (exactly how `gigi:ha-grandia-pnl` works) — no per-machine key.

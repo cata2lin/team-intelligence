@@ -5,7 +5,7 @@
 > Toate merg pe DB / xConnector / Richpanel, **fără să consume rația API Shopify**.
 >
 > ⚠️ Greșeala tipică (de evitat): „ce comandă are telefonul 07…?" → NU căuta raw în AWBprint.
-> → **`gigi:cs-customer-360 --phone 07…`** (normalizează formatul singur).
+> → **`gigi:cs-360 customer --phone 07…`** (normalizează formatul singur).
 >
 > 🪟 **Mașinile CS + depozitul sunt pe WINDOWS** (consolă cp1252): skill-urile forțează UTF-8 la output, deci
 > NU mai crapă pe diacritice. Dacă scrii un script nou care printează ț/ș/ă → pune din prima
@@ -15,21 +15,21 @@
 ## 1. 🔎 CAUT o comandă / un client
 | Am … | Tool | Exemplu |
 |---|---|---|
-| **telefon** client | `gigi:cs-customer-360` | `cs_customer_360.py --phone 0748620192` → toate comenzile lui, LTV, refuzuri. **Merge și `40748…` / `+40748…`** (ultimele 9 cifre). |
-| **nume** client | `gigi:cs-customer-360` | `cs_customer_360.py --name "Rebeca Kiss"` |
-| **email** client | `gigi:cs-customer-360` | `cs_customer_360.py --email ana@gmail.com` |
+| **telefon** client | `gigi:cs-360 customer` | `cs360.py customer --phone 0748620192` → toate comenzile lui, LTV, refuzuri. **Merge și `40748…` / `+40748…`** (ultimele 9 cifre). |
+| **nume** client | `gigi:cs-360 customer` | `cs360.py customer --name "Rebeca Kiss"` |
+| **email** client | `gigi:cs-360 customer` | `cs360.py customer --email ana@gmail.com` |
 | **nr comandă** (GT123) | `gigi:xconnector links` | `xconnector.py links --order GT45911` → status + linkuri Shopify/xConnector/tracking |
 | **AWB / tracking** | `gigi:xconnector links` | `xconnector.py links --awb 81313116658` |
-| „**unde e comanda**" (WISMO) | `gigi:cs-order-status` | după order# / telefon / AWB → order + fulfillment + tracking |
+| „**unde e comanda**" (WISMO) | `gigi:cs-360 wismo` | după order# / telefon / AWB → order + fulfillment + tracking |
 | identitate **cross-platform** (Shopify ↔ Richpanel) | `gigi:customer-identity` | leagă email/telefon/FB/IG de comenzi și tichete |
 
-> ⚠️ xConnector API **NU** caută după telefon/nume (doar order# / AWB / SKU / dată). Telefon/nume = DOAR `cs-customer-360`.
+> ⚠️ xConnector API **NU** caută după telefon/nume (doar order# / AWB / SKU / dată). Telefon/nume = DOAR `cs-360`.
 
 ## 2. 🧩 PROFIL 360 („spune-mi tot despre comanda/clientul X") — ORCHESTRARE (combini, nu un singur tool)
 1. `gigi:xconnector links --order GT123` → comanda + status + linkuri
-2. `gigi:cs-customer-360 --phone <al lui>` → alte comenzi + profil + refuzuri
+2. `gigi:cs-360 customer --phone <al lui>` → alte comenzi + profil + refuzuri
 3. `gigi:cs-tickets` / Richpanel → tichetele clientului
-4. (opțional) `gigi:cs-conversation-profile` / `gigi:cs-profile` → profil 360 pe o conversație Richpanel
+4. (opțional) `gigi:cs-360 conversation --llm` / `gigi:cs-360 conversation` → profil 360 pe o conversație Richpanel
 
 **Exemplu** — CS: „cine e clientul de la GT45911 și ce mai are?"
 → `links --order GT45911` (afli telefonul + statusul) → `cs-customer-360 --phone <telefon>` (istoricul) → `cs-tickets` (tichete).
@@ -99,8 +99,8 @@ Magazinul unui tichet = **PAGINA pe care a venit** = câmpul **`to.id`** (page i
 Fallback dacă n-ai `to.id`: prefixul comenzii din mesaj (EST/GT/MAG…) → magazin. Vezi memoria [[fb-page-store-map]].
 
 ## ⚠️ Capcane care au stricat lucruri înainte (citește)
-1. **Telefon negăsit** = format. Caută după ultimele **9 cifre** (`cs-customer-360` o face). Nu scrie `phone = '07…'` exact.
-2. **NU căuta raw în AWBprint** pt client/telefon — sursă greșită. `cs-customer-360` = `metrics.orders`.
+1. **Telefon negăsit** = format. Caută după ultimele **9 cifre** (`cs-360` o face). Nu scrie `phone = '07…'` exact.
+2. **NU căuta raw în AWBprint** pt client/telefon — sursă greșită. `cs-360` = `metrics.orders`.
 3. **„Eroare la caracter românesc" pe Windows** = lipsește `sys.stdout.reconfigure(encoding="utf-8")`. Skill-urile CS îl au.
 4. **Rația Shopify**: lookup-urile CS NU lovesc Shopify live (DB/xConnector/Richpanel).
 5. **Print**: descărcarea unei etichete o scoate din coada de print — fă-o DOAR la print real (`--apply`).
