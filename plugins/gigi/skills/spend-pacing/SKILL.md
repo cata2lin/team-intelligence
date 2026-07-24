@@ -14,6 +14,10 @@ user-invokable: true
 
 # spend-pacing — pacing buget ads + MER pe luna curentă
 
+> ⚠️ **MER-ul de aici = venit PLASAT brut / spend** (nu profit net, nu ex-TVA, nu doar livrate). E pentru
+> PACING de buget, NU pentru profit. Pentru profit/contribuție reală (delivered, ex-TVA, − COGS − transport −
+> marketing) sursa CANONICĂ e **`gigi:multi-brand-pnl`**. Nu confunda MER-ul de pacing cu marja reală.
+
 ## Când o folosești
 „Suntem pe buget luna asta?", „cine cheltuie prea repede?", „cât ajungem la final de lună?",
 „care e MER-ul pe brand?", „pe ce canal merge banii la Esteban?".

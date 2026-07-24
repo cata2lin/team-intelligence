@@ -10,6 +10,8 @@ tested_with: claude-code v2.x
 
 # Competitor Ad Intelligence
 
+> ⚠️ **DEPRECAT — acoperit** de **`gigi:competitor-ads`** (ARONA + Gemini vision, reutilizează `ads-transparency`). Folosește `gigi:competitor-ads`. `shared/skills-audit.md` §7.
+
 ## Process
 
 1. Identify target competitors (from user input or industry analysis)

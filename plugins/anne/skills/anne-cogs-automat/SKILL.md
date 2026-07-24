@@ -6,6 +6,11 @@ argument-hint: "--skus HA-0001 HA-0002 ... [--stores OFER RED BON MAG] [--apply]
 
 # ha-cogs-update — Adaugare COGS automat HA
 
+> ℹ️ **COGS canonic per-SKU** = câmpul Shopify `unitCost` scris de acest skill — e în **RON pe toate magazinele**
+> (landed cost), citit ex-TVA (÷1,21) de `profit_by_sku`/engine. Alte surse au ALT scop, nu-l contrazic: `anne:stoc-arona`
+> = COGS din facturi import (LEI) pt contabilă; `gigi:cod-product-validator` = benchmark categorie pt pre-lansare;
+> AWBprint = fallback. Pt profit real per-SKU, sursa e câmpul ăsta Shopify. Vezi `shared/skills-audit.md` §5.6.
+
 > Autor: **Anne**. Disponibil pentru toata echipa prin plugin-ul `anne`.
 
 Seteaza **Cost per item** (COGS) pe cele 4 magazine deals HA in Shopify, pornind de la

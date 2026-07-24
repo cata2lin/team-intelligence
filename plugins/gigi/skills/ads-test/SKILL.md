@@ -8,6 +8,8 @@ tested_with: claude-code v2.x
 
 # A/B Test Design & Experiment Planning
 
+> ⚠️ **DEPRECAT — duplicat.** Acoperit de **`gigi:ab-testing`** (superset: + program de experimentare). Folosește `gigi:ab-testing`. `shared/skills-audit.md` §7.
+
 <!-- Created: 2026-04-13 | v1.5 -->
 <!-- Source: OpenClaudia/openclaudia-skills (ab-test-setup concept) -->
 

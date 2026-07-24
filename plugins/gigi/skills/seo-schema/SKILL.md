@@ -15,6 +15,8 @@ metadata:
 
 # Schema Markup Analysis & Generation
 
+> ⚠️ **DEPRECAT (2026-07-24) — duplicat pur.** Identic funcțional cu **`gigi:schema`**. Folosește `gigi:schema` (canonic). Vezi `shared/skills-audit.md` §7.
+
 ## Detection
 
 1. Scan page source for JSON-LD `<script type="application/ld+json">`

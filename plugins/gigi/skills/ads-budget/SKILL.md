@@ -8,6 +8,12 @@ tested_with: claude-code v2.x
 
 <!-- Updated: 2026-04-13 | v1.5 -->
 
+> ⚠️ **CORECȚIE ARONA (COD) — 2026-07-24.** Regulile generice de aici (**„3× Kill Rule", „70/20/10", „20% scaling"**)
+> ignoră marja și rata de livrare COD → decizii kill/scale greșite pe conturi cu refuzuri. Pentru conturile reale
+> ARONA, kill/scale se judecă pe **PROFIT vs breakeven ROAS COD-aware** — folosește **`gigi:budget-simulator`** +
+> **`gigi:campaign-structure`** (și `gigi:google-ads-mcc/profit_verdict.py` pentru SCALE/HOLD/CUT). Acest skill
+> generic = doar referință conceptuală. Vezi `shared/skills-audit.md` §5.4.
+
 # Budget Allocation & Bidding Strategy
 
 ## Process

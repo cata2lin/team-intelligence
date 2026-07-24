@@ -8,6 +8,12 @@ tested_with: claude-code v2.x
 
 <!-- Updated: 2026-04-13 | v1.5 -->
 
+> ⚠️ **CORECȚIE ARONA — 2026-07-24.** Pragul de fatigue de aici (CTR scade >20% în 14 zile = FAIL) **contrazice**
+> pragul canonic din **`gigi:creative-fatigue`** (fatigue = Δfreq>+15% **ȘI** (ΔCTR<−10% **SAU** ΔCPA>+20%),
+> data-driven din warehouse). Ar eticheta aceeași campanie diferit. **Pentru detecția reală de fatigue pe conturile
+> ARONA folosește `gigi:creative-fatigue`** (pragul compozit). Acest skill = doar audit calitativ generic de creative.
+> Vezi `shared/skills-audit.md` §5.3.
+
 # Cross-Platform Creative Quality Audit
 
 ## Process

@@ -5,6 +5,11 @@ description: Build a live monthly P&L for the Grandia brand from Shopify (orders
 
 # grandia-pnl
 
+> ⚠️ **Sursă DIFERITĂ de engine-ul canonic.** Acest skill calculează P&L Grandia din Shopify+AWBprint (gold
+> standard pe transport real Grandia), dar poate diverge de `cache.brand_pnl_monthly`. Pentru P&L consolidat/
+> comparabil între branduri (delivered ex-TVA) sursa CANONICĂ e **`gigi:multi-brand-pnl`** (Grandia = un brand
+> acolo). Folosește acest skill pt deep-dive Grandia; pt „% din profit / ranking branduri" → multi-brand-pnl.
+
 > 🗺️ **Profitabilitate** — pipeline CANONIC + „unde găsesc ce“: `shared/HARTA.md`. Per-SKU/categorie = `metrics-cache/profit_by_sku.py` (transport real + marketing CPA); logica unică = `profit_core.py`.
 
 > Author: **Arona core**.

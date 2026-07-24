@@ -6,6 +6,10 @@ argument-hint: "--months 2026-04,2026-05 [--prefixes GRAN,EST,GT] [--no-ha]"
 
 # ha-grandia-pnl
 
+> ⚠️ Citește direct din `profit_orders` (VPS) → linia HA-* vs GRAN. E o VEDERE (HA vs Grandia), NU sursa de adevăr
+> pt profit pe brand. Pt P&L canonic pe brand (delivered ex-TVA, `cache.brand_pnl_monthly`) → **`gigi:multi-brand-pnl`**.
+> Verifică întâi că `profit_orders` e sincronizat azi (vezi memoria „profit-orders-no-cron-silent-collapse").
+
 > 🗺️ **Profitabilitate** — pipeline CANONIC + „unde găsesc ce“: `shared/HARTA.md`. Per-SKU/categorie = `metrics-cache/profit_by_sku.py` (transport real + marketing CPA); logica unică = `profit_core.py`.
 > Author: **Gigi**. NET P&L per linie (HA vs Grandia / orice prefix), din engine-ul de profitabilitate.
 

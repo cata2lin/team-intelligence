@@ -5,6 +5,11 @@ description: All-in P&L for ANY or ALL of the 16+ Arona brands (Esteban, GT, Nub
 
 # multi-brand-pnl
 
+> ✅ **SURSA CANONICĂ de profit net pe brand** (delivered only, ex-TVA, − COGS − transport − marketing, din
+> `cache.brand_pnl_monthly`). Când alt skill dă alt „profit" (spend-pacing MER, cpa-report Sheet, grandia-pnl,
+> ha-grandia-pnl), ĂSTA e reperul. ⚠️ **`--estimat` (daily_perf, gross-cu-TVA, toate comenzile) SUPRAESTIMEAZĂ
+> profitul — DEPRECAT**, folosește-l doar pt viteză daily, nu pt decizii. Vezi `shared/skills-audit.md` §5.1.
+
 > 🗺️ **Profitabilitate** — pipeline CANONIC + „unde găsesc ce“: `shared/HARTA.md`. Per-SKU/categorie = `metrics-cache/profit_by_sku.py` (transport real + marketing CPA); logica unică = `profit_core.py`.
 > 🆕 **`--range --from YYYY-MM-DD --to YYYY-MM-DD`** = profit REAL pe o FEREASTRĂ EXACTĂ de zile (nu lună întreagă): rulează engine-ul cu `from_date/to_date`, marketing însumat DOAR pe fereastră (fix 2026-06), + grad de așezare livrare (livrate/plecate, „în curs"). Ex: `--brands nubra --from 2026-06-01 --to 2026-06-15 --range`.
 >
