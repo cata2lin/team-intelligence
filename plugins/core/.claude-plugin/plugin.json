@@ -64,6 +64,10 @@
     "dataforseo": {
       "command": "uv",
       "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_env_launch.py", "DATAFORSEO_USERNAME=DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD=DATAFORSEO_PASSWORD", "--", "npx", "-y", "dataforseo-mcp-server"]
+    },
+    "sqlite-profitability": {
+      "command": "uv",
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/sqlite_ssh_mcp_launch.py"]
     }
   }
 }
