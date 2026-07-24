@@ -216,6 +216,28 @@ def check_profitdb(rows, ctx):
     cx.close()
 
 
+def check_heartbeats(rows, ctx):
+    """Dead-man-switch: cronuri care pinguie pe SUCCES (heartbeat.py). Overdue = n-a rulat/a picat.
+    Prinde exact golul pe care prospețimea datelor nu-l acoperă („cronul nu s-a executat deloc")."""
+    if not os.path.exists(PF_DB):
+        return
+    cx = sqlite3.connect(PF_DB); cx.execute("PRAGMA busy_timeout=8000;")
+    try:
+        hb = cx.execute("SELECT name, last_ping, expected_interval_min, note FROM cron_heartbeat").fetchall()
+    except sqlite3.Error:
+        cx.close(); return
+    cx.close()
+    for name, last, interval, note in hb:
+        if not interval:
+            rows.append((WARN, "hb.%s" % name, "fără interval setat (nu pot judeca overdue)")); continue
+        age = _age_h(last)
+        # grace: 2× intervalul + 30 min buffer (toleranță la jitter de cron / rulare lentă)
+        limit_h = (interval * 2 + 30) / 60.0
+        det = "ultimul ping %s · %.1fh (interval %dmin)" % (str(last)[:16], age or 0, interval)
+        rows.append((CRIT if (age is None or age > limit_h) else OK, "hb.%s" % name,
+                     (det + (" · " + note if note else "")) if age is not None else "NICIUN ping vreodată"))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Watchdog de prospețime a datelor ARONA")
     ap.add_argument("--email", help="destinatar (email trimis DOAR dacă e ceva roșu)")
@@ -226,7 +248,7 @@ def main():
 
     rows = []
     ctx = {}  # check_metrics populează cache_fresh înainte ca check_profitdb să-l citească
-    for fn in (check_metrics, check_awbprint, check_profitdb):
+    for fn in (check_metrics, check_awbprint, check_profitdb, check_heartbeats):
         try:
             fn(rows, ctx)
         except Exception as e:
