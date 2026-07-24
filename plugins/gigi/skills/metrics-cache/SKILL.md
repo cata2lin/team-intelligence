@@ -97,7 +97,14 @@ suma `order_awbs` care e duplicată), fallback flat. (Înlocuiește vechiul TODO
 - **< cutover (ISTORIC, NEATINS)** = `cache.product_ad_spend` (Meta+TikTok via token OAuth + Google native).
 - **≥ cutover (FORWARD) = WMS, TOKEN-INDEPENDENT** — spend FB+TikTok din sheet-ul WMS (`12L1KlG4…`, conector
   direct, NU OAuth-ul Meta care pică ~la 60 zile), capturat de **`shared/scripturi-tools/wms_ad_spend_sync.py`**
-  (cron orar) în `profitability.db.wms_ad_spend` + mapare (Nomenclator sheet + supliment). **Google mereu din cache.**
+  (cron orar) în `profitability.db.wms_ad_spend`. **Google mereu din cache.** ⚠️ **Fallback per platformă/zi:**
+  dacă WMS n-are o platformă pe o zi (ex. WMS TikTok înghețat), `profit_by_sku` ia acele zile din cache — deci
+  nu cade tăcut pe 0 (păzit de `data_health.py`).
+- **MAPAREA E DB-AUTHORITATIVE, NU din sheet.** Cronul orar NU mai atinge sheet-ul; maparea trăiește în
+  `profitability.db` (`wms_nomen` + `wms_nomen_extra` persistente). Sheet-ul se importă DOAR explicit cu
+  `wms_ad_spend_sync.py --sync-sheet` (fail-safe: nu golește un tabel dacă sheet-ul întoarce 0 rânduri).
+  Editezi regulile cu **`scripts/mapping_admin.py`** (`rules`/`resolve`/`audit`/`lint`/**`add-rule`**/`rm-rule`) —
+  NU în cod, NU în sheet. Regulile adăugate manual în DB supraviețuiesc (seed idempotent din `EXTRA`, fără DROP).
 - Atribuire (`scripts/wms_marketing.py`): (0) **SKU exact** (`HA-####`) din campanie/ad → direct pe SKU; (1)
   **keyword produs** din campanie **+ ad name** (FĂRĂ diacritice, cel mai LUNG câștigă) → grup; (2) **cont** →
   grup-brand. Alocat pe **COMENZI** (CPA uniform). Grup `Test` exclus; conturi partajate rezolvate din ad name. **~99.6%.**
