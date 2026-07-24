@@ -111,6 +111,75 @@ def upsert_daily_perf(recs):
     conn.commit(); conn.close()
 
 
+def _env_url(key):
+    """Citește o valoare KEY=... din /root/Scripturi/.env (fără a o afișa)."""
+    try:
+        for line in open(BASE + "/.env", encoding="utf-8"):
+            line = line.strip()
+            if line.startswith(key + "="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except Exception:
+        return None
+    return None
+
+
+def _pg_connect(url):
+    import urllib.parse, pg8000.dbapi
+    u = urllib.parse.urlparse(url)
+    kw = dict(user=urllib.parse.unquote(u.username or ""), password=urllib.parse.unquote(u.password or ""),
+              host=u.hostname, port=u.port or 5432, database=(u.path or "/").lstrip("/"))
+    try:
+        return pg8000.dbapi.connect(ssl_context=True, **kw)
+    except Exception:
+        return pg8000.dbapi.connect(**kw)
+
+
+WAREHOUSE_SINCE_MONTH = "2026-05"   # warehouse-ul TikTok e COMPLET din 2026-05 (12+ conturi); înainte doar 4
+
+def warehouse_overrides(since_month=WAREHOUSE_SINCE_MONTH):
+    """Override ad-spend per (month,prefix) din cache.daily_ad_spend_ron (metrics, AUTORITATIV: Meta=Graph,
+    Google, TikTok=warehouse-token FĂRĂ phantom capture-all) pt lunile >= since_month. Rulează DUPĂ
+    refresh_overrides (care ia TikTok din RZ2 cu phantom pe conturi partajate: Reduceri +64k, Esteban +30k) →
+    CÂȘTIGĂ pt lunile recente. Grandia rămâne pe grandia_overrides (rulează după). Verificat la sursa API
+    TikTok 2026-07. Vezi [[mapping-tiktok-attribution]] și [[profit-data-sources-truth]]."""
+    murl = _env_url("DATABASE_URL_METRICS")
+    if not murl:
+        print("warehouse_overrides skipped: fără DATABASE_URL_METRICS"); return 0
+    name2pfx = dict(BRAND_TO_PREFIX)
+    try:
+        sys.path.insert(0, BASE); import profit_core as pc
+        for pfx, nm in pc.PREFIX_BRAND.items():
+            name2pfx.setdefault(nm, pfx)
+    except Exception:
+        pass
+    nlow = {(k or "").strip().lower(): v for k, v in name2pfx.items()}
+    # Include GRANDIA: daily_ad_spend_ron are toate 3 canale complet din 2026-05 (Google PMax 150k + Meta +
+    # TikTok), pe când grandia_overrides (feed-ul agenției SkilledPPC) A MURIT ~24-iun → subnumără ~45k și dă
+    # GRAN fals-POZITIV. Rulăm DUPĂ grandia_overrides → câștigăm pt lunile >= 2026-05; istoricul < 2026-05 rămâne
+    # pe grandia_overrides.
+    try:
+        conn = _pg_connect(murl); cur = conn.cursor()
+        cur.execute("SELECT b.name, to_char(d.date,'YYYY-MM') m, COALESCE(SUM(d.spend_ron),0) "
+                    "FROM cache.daily_ad_spend_ron d JOIN brands b ON b.id=d.brand_id "
+                    "WHERE to_char(d.date,'YYYY-MM') >= %s GROUP BY b.name, to_char(d.date,'YYYY-MM')", (since_month,))
+        agg = {}
+        for name, m, s in cur.fetchall():
+            pfx = nlow.get((name or "").strip().lower())
+            if not pfx:
+                continue
+            agg[(m, pfx)] = agg.get((m, pfx), 0.0) + float(s or 0)
+        conn.close()
+    except Exception as e:
+        print("warehouse_overrides skipped:", type(e).__name__, e); return 0
+    pf = sqlite3.connect(PF_DB); n = 0
+    for (m, pfx), amt in agg.items():
+        pf.execute("INSERT OR REPLACE INTO profit_marketing_override (month,prefix,amount) VALUES (?,?,?)",
+                   (m, pfx, round(amt, 2)))
+        n += 1
+    pf.commit(); pf.close()
+    return n
+
+
 def refresh_overrides(months=None):
     dp = sqlite3.connect(DP_DB); dp.row_factory = sqlite3.Row
     pf = sqlite3.connect(PF_DB)
@@ -236,6 +305,8 @@ if __name__ == "__main__":
         upsert_daily_perf(recs)
         cur_month = today[:7]
         n, _ = refresh_overrides(months={cur_month})
+        if cur_month >= WAREHOUSE_SINCE_MONTH:
+            warehouse_overrides(since_month=cur_month)   # corectează TikTok phantom pe luna curentă
         dp = sqlite3.connect(DP_DB)
         d, s = dp.execute("SELECT COUNT(*), ROUND(SUM(total_spend)) FROM daily_perf WHERE date=?", (today,)).fetchone()
         dp.close()
@@ -246,8 +317,10 @@ if __name__ == "__main__":
     recs = build_records(rows)
     upsert_daily_perf(recs)
     n, changes = refresh_overrides()  # ALL months present in daily_perf (full history)
-    gn = grandia_overrides()  # Grandia: pull full history from its own DB
-    print("CSV rows: %d | daily_perf upserted: %d | overrides refreshed: %d | Grandia months: %d" % (len(rows) - 1, len(recs), n, gn))
+    gn = grandia_overrides()  # Grandia: istoric din DB-ul propriu (+ hybrid top-up luna curentă)
+    wn = warehouse_overrides()  # >= 2026-05: ad-spend din daily_ad_spend_ron (TikTok fără phantom; CÂȘTIGĂ, incl GRANDIA)
+    print("CSV rows: %d | daily_perf upserted: %d | overrides refreshed: %d | Grandia months: %d | warehouse(>=%s): %d"
+          % (len(rows) - 1, len(recs), n, gn, WAREHOUSE_SINCE_MONTH, wn))
     # verification
     dp = sqlite3.connect(DP_DB)
     for b in ("Esteban", "George Talent", "Nubra", "Ofertele Zilei"):

@@ -3,11 +3,13 @@
 # dependencies = ["requests>=2.31", "psycopg2-binary>=2.9"]
 # ///
 """
-Google per-SKU spend pentru conturile PMax (în afară de Grandia, care vine deja nativ din
-google_ads_product_insights_daily). Trage shopping_performance_view (segments.product_item_id +
-metrics.cost_micros) via MCC (gads.py), mapează product_item_id (ultimul număr = variant
-shopifyNumericId) → variants.sku, scrie cache.product_ad_spend (platform='google', source='google_pmax').
-Conturi RON → fără FX. Aditiv: nu atinge sursa google_product_insights (Grandia).
+Google per-SKU spend pentru conturile PMax (INCL Grandia). Trage shopping_performance_view
+(segments.product_item_id + metrics.cost_micros) via MCC (gads.py), mapează product_item_id
+(ultimul număr = variant shopifyNumericId) → variants.sku, scrie cache.product_ad_spend
+(platform='google', source='google_pmax'). Conturi RON → fără FX.
+⚠️ Grandia (9069610821) e cont AGENȚIE — `google_ads_product_insights_daily` e GOL pt el (sync-ul
+nativ nu-l acoperă), de-aia Google-ul Grandiei ajungea UNMAPPED în cache.product_ad_spend. Adăugat
+aici (2026-07-24) ca să vină per-produs LIVE din shopping_performance_view, ca restul.
 
   cd .../google-ads-mcc && DATABASE_URL_METRICS=... uv run <acest dir>/google_product_spend.py --since 2025-01-01 --apply
 """
@@ -18,9 +20,10 @@ sys.path.insert(0, os.environ.get("GADS_DIR") or str(Path(__file__).resolve().pa
 sys.path.insert(0, "/root/Scripturi")   # core.stores (Shopify tokens) pe VPS
 import gads
 
-# conturi ARONA pe Google (RON), FĂRĂ Grandia (deja nativ). account_id → (brand metrics, prefix store).
+# conturi ARONA pe Google (RON), INCL Grandia (agenție, native insights gol → live). account_id → (brand metrics, prefix store).
 ACCOUNTS = {"5229815058": ("Esteban", "EST"), "7566352958": ("Belasil", "BELA"),
-            "4069952156": ("Carpetto", "CARP"), "8148962111": ("Gento", "GEN")}
+            "4069952156": ("Carpetto", "CARP"), "8148962111": ("Gento", "GEN"),
+            "9069610821": ("Grandia", "GRAN")}
 
 
 def shopify_variant_skus(shop, token):

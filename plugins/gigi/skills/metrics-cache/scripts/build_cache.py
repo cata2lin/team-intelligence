@@ -241,6 +241,52 @@ def _fetch_azi():
             continue
     return None
 
+# TikTok: din 2026-05 warehouse-ul `tiktok_campaign_insights_daily` e COMPLET (12+ conturi) → atribuim
+# per-brand cu tt_attrib (token/owner) în loc de RZ2 (care are PHANTOM capture-all pe conturi partajate:
+# Reduceri lua 72k din 78k contul ROSSI în loc de 8k reali; Esteban +30k). Înainte de 2026-05 warehouse-ul
+# are doar 4 conturi (incomplet) → rămânem pe RZ2. Verificat la sursa API 2026-07. Vezi [[mapping-tiktok-attribution]].
+TIKTOK_WAREHOUSE_SINCE = "2026-05-01"
+
+def _warehouse_tiktok_rows(mcur, bname, bslug, brand_store, norm, since, until):
+    """Per-(date,brand) TikTok RON din warehouse-ul complet, atribuit corect pe token (tt_attrib).
+    Returnează [(date, store_name, brand_id, 'tiktok', ron, 'warehouse_token')]. Ridică excepție dacă
+    setup-ul eșuează → apelantul face fallback pe RZ2."""
+    import sys as _sys
+    from pathlib import Path as _P
+    from collections import defaultdict
+    skills = _P(os.environ.get("ARONA_SKILLS_DIR") or _P(__file__).resolve().parents[2])
+    for d in (str(_P(__file__).resolve().parent), str(skills / "tiktok-ads")):
+        if d not in _sys.path:
+            _sys.path.insert(0, d)
+    import tt_attrib, brandmap, json as _json
+    brands = list(_json.loads((skills / "meta-ads/brand_map.json").read_text()).keys())
+    M = tt_attrib.build_maps(brands, brandmap.tiktok_accounts)
+
+    def _bid(brand):
+        b = norm(brand)
+        return bname.get(b) or bslug.get(b) or bname.get(norm(brand.split()[0])) or bslug.get(norm(brand.split()[0]))
+
+    mcur.execute("""SELECT i.date, a.name, i."campaignName", i."spendRon"
+                    FROM tiktok_campaign_insights_daily i JOIN tiktok_ad_accounts a ON a.id=i."adAccountId"
+                    WHERE i.date >= %s AND i.date <= %s AND i."spendRon" IS NOT NULL""", (since, until))
+    agg = defaultdict(float); orphan = 0.0
+    for d, acct, camp, ron in mcur.fetchall():
+        ron = float(ron or 0)
+        if ron == 0 or tt_attrib.is_test(camp):
+            continue
+        brand = tt_attrib.attribute(acct, camp, M)
+        bid = _bid(brand) if brand else None
+        if bid is None:
+            orphan += ron; continue
+        agg[(d, bid)] += ron
+    rows = []
+    for (d, bid), ron in agg.items():
+        store = brand_store.get(bid) or f"tt.{bid}"   # unic per brand (altfel coliziune PK date×store×tiktok)
+        rows.append((d, store, bid, "tiktok", round(ron, 2), "warehouse_token"))
+    if orphan > 500:
+        print(f"[daily_ad_spend_ron] ⚠ TikTok warehouse orphan (fără token/owner): {orphan:.0f} RON")
+    return rows
+
 def run_daily_ad_spend(apply):
     import re, csv, io, datetime
     from psycopg2.extras import execute_values
@@ -270,8 +316,28 @@ def run_daily_ad_spend(apply):
         if awb_max is None or d > awb_max: awb_max = d
         for plat, val in (("meta", fb), ("tiktok", tk), ("google", gg)):
             if val is not None:
+                # TikTok >= 2026-05: îl luăm din warehouse-token (fără phantom RZ2), nu de aici
+                if plat == "tiktok" and str(d) >= TIKTOK_WAREHOUSE_SINCE:
+                    continue
                 rows.append((d, store, bid, plat, float(val), "awbprint"))
     aconn.close()
+    # TikTok >= 2026-05 din warehouse-ul complet, atribuit corect pe token (înlocuiește RZ2-phantom).
+    # Fallback SIGUR: dacă atribuirea eșuează, reîncarcă TikTok din marketing_daily_costs (comportament vechi).
+    wh_until = (awb_max or datetime.date.today()).isoformat() if hasattr(awb_max, "isoformat") else str(awb_max or datetime.date.today())
+    try:
+        wh_rows = _warehouse_tiktok_rows(mcur, bname, bslug, brand_store, norm, TIKTOK_WAREHOUSE_SINCE, wh_until)
+        rows += wh_rows
+        print(f"[daily_ad_spend_ron] TikTok warehouse-token >= {TIKTOK_WAREHOUSE_SINCE}: {len(wh_rows)} rânduri (brand×zi), "
+              f"{round(sum(r[4] for r in wh_rows))} RON")
+    except Exception as e:
+        print(f"[daily_ad_spend_ron] ⚠ warehouse TikTok eșuat ({type(e).__name__}: {e}); FALLBACK pe RZ2 pt TikTok")
+        aconn2 = psycopg2.connect(clean_dsn(adsn)); ac2 = aconn2.cursor()
+        ac2.execute("SELECT cost_date, store_name, tiktok FROM marketing_daily_costs WHERE cost_date >= %s", (TIKTOK_WAREHOUSE_SINCE,))
+        for d, store, tk in ac2.fetchall():
+            if tk is not None:
+                bid = ovr.get((store or "").strip().lower()) or bslug.get(skey(store))
+                rows.append((d, store, bid, "tiktok", float(tk), "awbprint"))
+        aconn2.close()
     # 2) current-day overlay from the live sheet tab (only dates AWBprint doesn't have yet)
     overlay = 0; azi = _fetch_azi()
     if azi:
@@ -380,8 +446,21 @@ def run_product_ad_spend(apply):
         execute_values(mcur,
             "INSERT INTO cache.product_ad_spend (date,brand_id,sku,product_title,platform,spend_ron,source) "
             "VALUES %s ON CONFLICT (date,sku,platform) DO UPDATE SET spend_ron=EXCLUDED.spend_ron, "
-            "brand_id=COALESCE(EXCLUDED.brand_id,cache.product_ad_spend.brand_id), source=EXCLUDED.source",
+            "brand_id=COALESCE(EXCLUDED.brand_id,cache.product_ad_spend.brand_id), source=EXCLUDED.source, "
+            "computed_at=now()",
             fbtk, page_size=2000)
+        # IDEMPOTENT (fără a pierde last-known-good pe pull parțial): șterge cheile SKU STALE (dintr-o rulare
+        # veche cu alt mapping SAU dublu-cont) DOAR în scope-urile (date,brand,platform) reîmprospătate ACUM
+        # (au computed_at=now()). Un brand ne-reîmprospătat (API picat pt el) nu apare cu now() → rândurile lui
+        # rămân neatinse. Fără asta, spend-ul re-mapat se ACUMULează sub chei diferite (ex CZ Meta: 'UNMAPPED'
+        # 58k VECHI + 'Lavete abrazive' 79k = 2× realul 94k). Vezi [[sku-ad-spend-mapping]].
+        mcur.execute("""DELETE FROM cache.product_ad_spend p
+            WHERE p.source='meta_tiktok_campaign_map' AND p.computed_at < now()
+              AND EXISTS (SELECT 1 FROM cache.product_ad_spend f
+                          WHERE f.source='meta_tiktok_campaign_map' AND f.computed_at = now()
+                            AND f.date=p.date AND f.platform=p.platform
+                            AND f.brand_id IS NOT DISTINCT FROM p.brand_id)""")
+        print(f"[product_ad_spend] idempotent cleanup: {mcur.rowcount} rânduri SKU stale șterse (scope reîmprospătat)")
     else:
         print("[product_ad_spend] ⚠ live_rows gol (API picat?) — PĂSTREZ meta/tiktok existent (nu șterg, nu scriu).")
     mcur.execute("SELECT COUNT(*), platform FROM cache.product_ad_spend GROUP BY platform")

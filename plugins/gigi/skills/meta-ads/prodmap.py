@@ -80,6 +80,16 @@ def load():
                                  else {"facebook": [], "tiktok": []})
     return _RULES
 
+def _pat_matches(pat, target):
+    """Pattern-urile SCURTE (≤3 car., ex 'LA','LM','GT') se potrivesc DOAR pe word-boundary — altfel 'la' prinde
+    'lavete', 'alex' etc. ca substring și un cont întreg cade fals pe un produs (bug 'Lavete abrazive' CZ 79k
+    fantomă). Pattern-urile lungi rămân substring (sunt destul de specifice). Vezi [[mapping-tiktok-attribution]]."""
+    if not pat:
+        return False
+    if len(pat) <= 3:
+        return re.search(r"(?<![a-z0-9])" + re.escape(pat) + r"(?![a-z0-9])", target) is not None
+    return pat in target
+
 def product_of(platform, account, campaign, ad=""):
     """Campaign/ad → product group: AUTO HA-<digits> (in campaign OR ad), else first matching rule, else 'Unmapped'."""
     m = re.search(r"(?<![A-Za-z0-9])(HA-\d+)", f"{campaign or ''} {ad or ''}", re.IGNORECASE)
@@ -89,7 +99,7 @@ def product_of(platform, account, campaign, ad=""):
         if not pat: continue
         target = {"ACCOUNT": account, "CAMPAIGN_KEYWORD": campaign, "AD_KEYWORD": ad,
                   "CAMPAIGN_AND_AD": f"{campaign} && {ad}"}.get(r["map_type"], "")
-        if pat in _norm(target): return r["product_group"]
+        if _pat_matches(pat, _norm(target)): return r["product_group"]
     return "Unmapped"
 
 def is_test(campaign):

@@ -315,8 +315,17 @@ def main():
     # Sigur la rulări parțiale (rețea flaky): nu pierde date existente, doar le actualizează/adaugă.
     execute_values(mcur,
         "INSERT INTO cache.product_ad_spend (date,brand_id,sku,product_title,platform,spend_ron,source) VALUES %s "
-        "ON CONFLICT (date,sku,platform) DO UPDATE SET spend_ron=EXCLUDED.spend_ron, brand_id=COALESCE(EXCLUDED.brand_id,cache.product_ad_spend.brand_id), source=EXCLUDED.source",
+        "ON CONFLICT (date,sku,platform) DO UPDATE SET spend_ron=EXCLUDED.spend_ron, brand_id=COALESCE(EXCLUDED.brand_id,cache.product_ad_spend.brand_id), source=EXCLUDED.source, computed_at=now()",
         rows, page_size=2000)
+    # IDEMPOTENT: șterge cheile SKU stale (mapping vechi/dublu-cont) DOAR în scope-urile (date,brand,platform)
+    # reîmprospătate ACUM. Filtrul pe platform respectă --platform tiktok (nu atinge Meta). Vezi [[sku-ad-spend-mapping]].
+    mcur.execute("""DELETE FROM cache.product_ad_spend p
+        WHERE p.source='meta_tiktok_campaign_map' AND p.computed_at < now()
+          AND EXISTS (SELECT 1 FROM cache.product_ad_spend f
+                      WHERE f.source='meta_tiktok_campaign_map' AND f.computed_at = now()
+                        AND f.date=p.date AND f.platform=p.platform
+                        AND f.brand_id IS NOT DISTINCT FROM p.brand_id)""")
+    print(f"[ad_spend_live] idempotent cleanup: {mcur.rowcount} rânduri SKU stale șterse (scope reîmprospătat)")
     mconn.commit(); mconn.close()
     plat_lbls = sorted({r[4] for r in rows})
     print(f"\nAPPLIED — platforme={','.join(plat_lbls)}; {len(rows)} rânduri upsert (source=meta_tiktok_campaign_map). Facebook neatins la --platform tiktok.")

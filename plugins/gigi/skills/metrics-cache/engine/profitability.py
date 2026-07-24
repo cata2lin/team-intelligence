@@ -1896,11 +1896,14 @@ async def get_report(
         for _pfx, _bid in _pc.prefix_brandid(_n2i).items():
             _b2p.setdefault(_bid, _pfx)
         def _spend_pas(lo, hi_excl):
-            """SUM(spend_ron) per prefix din cache.product_ad_spend pe [lo, hi_excl)."""
+            """SUM(spend_ron) per prefix din cache.daily_ad_spend_ron pe [lo, hi_excl).
+            ⚠ SURSA per-brand = daily_ad_spend_ron (AUTORITATIV: Meta=Graph, Google, TikTok=warehouse-token),
+            NU product_ad_spend (care e per-PRODUS: acumulează chei SKU stale + pull parțial → total per-brand
+            greșit ±100k; ex CZ Meta 151k vs 94k real). Verificat la sursa API 2026-07. Vezi [[profit-data-sources-truth]]."""
             out = {}
-            _cur.execute("SELECT brand_id, SUM(spend_ron) FROM cache.product_ad_spend "
-                         "WHERE date >= %s AND date < %s AND sku <> %s GROUP BY brand_id",
-                         (lo, hi_excl, "TEST"))
+            _cur.execute("SELECT brand_id, SUM(spend_ron) FROM cache.daily_ad_spend_ron "
+                         "WHERE date >= %s AND date < %s GROUP BY brand_id",
+                         (lo, hi_excl))
             for _bid, _sp in _cur.fetchall():
                 _pfx = _b2p.get(_bid)
                 if _pfx:
@@ -1923,9 +1926,9 @@ async def get_report(
         else:
             marketing = dict(marketing_fullmonth)
         _mc.close()
-        log.info("marketing din cache.product_ad_spend: %d prefixe (fereastra=%s)", len(marketing), bool(win_from or win_to))
+        log.info("marketing din cache.daily_ad_spend_ron (per-brand autoritativ): %d prefixe (fereastra=%s)", len(marketing), bool(win_from or win_to))
     except Exception as e:
-        log.warning("cache.product_ad_spend marketing indisponibil (%s); fallback daily_perf", e)
+        log.warning("cache.daily_ad_spend_ron marketing indisponibil (%s); fallback daily_perf", e)
         marketing = {}; marketing_fullmonth = {}
     if not marketing and not marketing_fullmonth:
         try:
@@ -2098,10 +2101,13 @@ async def get_report(
                 rate = rates.get(currency, 1.0)
                 incasari_ron += rev * rate
 
-                # COGS = unit_cost Shopify în MONEDA MAGAZINULUI → convertit în RON cu același curs ca venitul
-                # (înainte se aduna ca RON → CZ/PL/BG erau greșit; fix aliniat cu profit_by_sku/profit_core)
+                # COGS = unit_cost Shopify care e INTRODUS ÎN RON pe TOATE magazinele (landed cost, cu TVA
+                # RO 21%), chiar dacă Shopify îl etichetează cu moneda magazinului (CZK/PLN/EUR). Deci NU se
+                # convertește cu cursul — se adună direct ca RON. (Bug 2026-07: un "fix" anterior îl înmulțea
+                # cu `rate` → CZ/PL/BG ieșeau ~5× mai mici, ex. CZ iun 2.677 vs real 15.581. Costul e gross;
+                # ex-TVA se scoate downstream la `cogs_fara_tva = cogs_total/(1+vat_rate)`.)
                 cogs_val = o.get("cogs", 0)
-                cogs_total += cogs_val * rate
+                cogs_total += cogs_val
 
             # Track missing COGS
             if o.get("cogs_missing", 0) > 0:
