@@ -1,33 +1,29 @@
 #!/bin/bash
-# run_profit_sync.sh — sincronizează comenzile lunii curente în motorul de profit (profit_orders).
+# run_profit_sync.sh — sincronizează profit_orders (motorul de profit) pt luna curentă ȘI cea precedentă.
 #
-# DE CE EXISTĂ: `profit_orders` e scris DOAR de endpointul `/api/profitability/run` al aplicației
-# web — care nu avea niciun cron. A rămas nesincronizat 23 de zile (1→23 iul 2026), timp în care
-# `cache.brand_pnl_monthly` s-a recalculat la fiecare 3 ore și a raportat fidel, pentru iulie,
-# 0 comenzi livrate / 0 venit / −1.508.923 RON pierdere. Toate skill-urile care moștenesc acel
-# cache (multi-brand-pnl, daily-ops-briefing, agency-audit, product-matrix) au dat același răspuns
-# fals. Descoperit de data_health.py, nu de un om.
+# DE CE (2026-07-24): vechiul script apela `scripts_cli.py call POST /api/profitability/run` dintr-un path
+# `scripts-app/scripts` care S-A MUTAT + app-ul web nu mai rula → cron-ul crăpa tăcut pe `cd` → profit_orders
+# ne-sincronizat → `cache.brand_pnl_monthly` (sursa unică) subnumăra livrările (ex CZ iunie 2.174 vs 2.450 real
+# = falsă pierdere −14k). ACUM apelăm DIRECT `profit_orders_sync.py` (care rulează run_profitability în proces,
+# fără app/CLI). Vezi [[profit-orders-no-cron-silent-collapse]].
 #
-# `resync_shopify=true` e obligatoriu: dacă luna are deja rânduri, endpointul sare peste Shopify
-# și doar re-face tracking-ul AWB — deci comenzile noi n-ar intra niciodată.
-# În primele 3 zile ale lunii reluăm și luna precedentă, ca s-o închidem cu datele finale.
-#
-# cron: 30 2 * * *  (înaintea build_cache de la 5:30, ca P&L-ul să se recalculeze pe date proaspete)
-set -euo pipefail
-set -a; source /root/Scripturi/.env; set +a
-cd /root/Scripturi/team-intelligence/plugins/gigi/skills/scripts-app/scripts
+# Re-sincronizează ȘI luna precedentă ÎN FIECARE ZI (nu doar primele 3): livrările internaționale (CZ/PL/BG via
+# DPD) ajung săptămâni mai târziu, iar dacă luna se îngheață devreme, coada de livrări se pierde.
+set -uo pipefail
+set -a; source /root/Scripturi/.env 2>/dev/null; set +a
+PY=/root/Scripturi/.venv/bin/python
+SYNC=/root/Scripturi/profit_orders_sync.py
+cd /root/Scripturi
 
-run_month () {
-  /root/.local/bin/uv run scripts_cli.py call POST /api/profitability/run \
-    --json "{\"month\":\"$1\",\"resync_shopify\":true,\"force\":true}" --apply --confirm
-}
+echo "=== $(date -u '+%F %T') UTC — sync luna curentă $(date +%Y-%m) ==="
+$PY "$SYNC" "$(date +%Y-%m)"; rc_cur=$?
 
-echo "=== $(date '+%F %T') sync luna curentă $(date +%Y-%m) ==="
-run_month "$(date +%Y-%m)"
+prev=$(date -d "$(date +%Y-%m-01) -1 day" +%Y-%m)
+echo "=== $(date -u '+%F %T') UTC — re-închid luna precedentă $prev (coada de livrări intl) ==="
+$PY "$SYNC" "$prev"; rc_prev=$?
 
-if [ "$((10#$(date +%d)))" -le 3 ]; then
-  prev=$(date -d "$(date +%Y-%m-01) -1 day" +%Y-%m)
-  echo "=== $(date '+%F %T') închid luna precedentă $prev ==="
-  run_month "$prev"
+# exit 0 DOAR dacă ambele au reușit → cron-ul face `&& heartbeat.py profit_sync`; altfel data_health semnalează.
+if [ "$rc_cur" -eq 0 ] && [ "$rc_prev" -eq 0 ]; then
+  echo "✅ sync OK (curent + $prev)"; exit 0
 fi
-echo "=== $(date '+%F %T') gata ==="
+echo "⚠️ sync eșuat (cur=$rc_cur prev=$rc_prev)"; exit 1
