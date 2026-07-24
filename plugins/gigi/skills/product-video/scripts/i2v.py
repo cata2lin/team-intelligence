@@ -45,9 +45,10 @@ def run_replicate(model, image, prompt, frames, fps, resolution, out):
         sys.exit("lipsește REPLICATE_API_TOKEN din KB")
     os.environ["REPLICATE_API_TOKEN"] = tok
     import replicate
+    img_in = image if image.startswith("http") else open(image, "rb")   # URL sau fișier
     try:
         res = replicate.run(model, input={
-            "image": open(image, "rb"), "prompt": prompt,
+            "image": img_in, "prompt": prompt,
             "num_frames": frames, "frames_per_second": fps, "resolution": resolution, "go_fast": True})
     except Exception as e:
         if "402" in str(e) or "Insufficient credit" in str(e):
@@ -66,7 +67,8 @@ def run_fal(model, image, prompt, frames, fps, resolution, out):
         sys.exit("lipsește FAL_KEY din KB (kb.py secret-set FAL_KEY <key_id:key_secret>) — ia de la fal.ai/dashboard/keys")
     os.environ["FAL_KEY"] = key
     import fal_client
-    url = fal_client.upload_file(image)
+    # URL public (ex. Shopify CDN) → direct, fără upload (upload-ul fal poate da 403 pe unele chei)
+    url = image if image.startswith("http") else fal_client.upload_file(image)
     try:
         res = fal_client.subscribe(model, arguments={
             "image_url": url, "prompt": prompt,
@@ -95,9 +97,12 @@ def main():
     ap.add_argument("--resolution", default="480p", choices=["480p", "720p"])
     a = ap.parse_args()
 
-    if not os.path.exists(os.path.expanduser(a.image)):
+    if a.image.startswith("http"):
+        image = a.image                                  # URL public (Shopify CDN etc.)
+    elif os.path.exists(os.path.expanduser(a.image)):
+        image = os.path.expanduser(a.image)
+    else:
         sys.exit(f"imagine inexistentă: {a.image}")
-    image = os.path.expanduser(a.image)
     model = a.model or DEFAULT_MODEL[a.provider]
     out = os.path.expanduser(a.out) if a.out else os.path.splitext(image)[0] + "_i2v.mp4"
 
