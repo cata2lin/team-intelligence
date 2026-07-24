@@ -82,4 +82,4 @@ Campaigns** (SPC — the ones that return code `40002` on the normal endpoint).
 - Per-account **currency**; `--daily` is in the account currency.
 
 ## Unghiuri noi (adoptate MIT)
-- **gigi:ads-creative** + **gigi:ad-creative** — framework-uri creative. **gigi:ads-attribution** — atribuire. **gigi:ads-budget** — alocare. **gigi:ads-test** — A/B. **gigi:tiktok-content** — partea organică.
+- **gigi:ads-creative** + **gigi:ad-creative** — framework-uri creative. **gigi:ads-attribution** — atribuire. **gigi:ads-budget** — alocare. **gigi:ab-testing** — A/B. **gigi:tiktok-content** — partea organică.
