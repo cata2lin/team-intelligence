@@ -6,8 +6,8 @@ argument-hint: "--store esteban|gt|nubra|labnoir  (+ --dry-run | --draft | LIVE)
 
 # articles — blog editorial/SEO pt magazinele de parfum ARONA (un pipeline, 4 branduri)
 
-> Author: **Arona core**. Unifică `esteban-articles` + `gt-articles` + `nubra-articles` (partajau deja
-> `blog_publish_articles.py --store <x>`) + `labnoir-articles` (variantă cu scripturi proprii). Pipeline complet
+> Author: **Arona core**. Unifică `articles` + `articles` + `articles` (partajau deja
+> `blog_publish_articles.py --store <x>`) + `articles` (variantă cu scripturi proprii). Pipeline complet
 > + lecții: `shared/apps/blog-playbook.md`. Voce per brand: `shared/apps/<store>.md`.
 
 ## Alege magazinul (`--store`)

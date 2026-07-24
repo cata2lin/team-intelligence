@@ -1,6 +1,6 @@
 ---
 name: cs-tickets
-description: Operate the Richpanel helpdesk (the team's CS inbox for all Arona brands) via the Richpanel MCP, tied to our own order/deliverability data. Triage open tickets (by channel/age/agent, oldest-unanswered first), look up a customer's conversations by email/phone/order, DRAFT and send replies, add private notes, assign/close/snooze/tag, and pull CS analytics (volume, first-response-time, backlog, CSAT, per-agent, per-channel). For order questions it combines the ticket with gigi:cs-order-status / gigi:cs-customer-360 so the reply has the real order + AWB status. Use for "answer this ticket", "triage CS inbox", "find this customer's tickets", "draft a reply", "CS backlog / response time", "tichete", "raspunde clientului", "raspuns timp", "agent workload". Requires the Richpanel MCP connector (https://mcp.richpanel.com/mcp) to be connected.
+description: Operate the Richpanel helpdesk (the team's CS inbox for all Arona brands) via the Richpanel MCP, tied to our own order/deliverability data. Triage open tickets (by channel/age/agent, oldest-unanswered first), look up a customer's conversations by email/phone/order, DRAFT and send replies, add private notes, assign/close/snooze/tag, and pull CS analytics (volume, first-response-time, backlog, CSAT, per-agent, per-channel). For order questions it combines the ticket with gigi:cs-360 wismo / gigi:cs-360 customer so the reply has the real order + AWB status. Use for "answer this ticket", "triage CS inbox", "find this customer's tickets", "draft a reply", "CS backlog / response time", "tichete", "raspunde clientului", "raspuns timp", "agent workload". Requires the Richpanel MCP connector (https://mcp.richpanel.com/mcp) to be connected.
 ---
 
 # CS — Tichete Richpanel (operare prin MCP + datele noastre)
@@ -24,7 +24,7 @@ Helpdesk-ul Richpanel acoperă TOATE brandurile (org `nocturna954`; email-uri co
 
 ## Unelte Richpanel (MCP) și când le folosești
 - **Triaj:** `list_conversations` (status=open, channel=, startDate/endDate, sortKey=updatedAt) → grupează pe canal/vechime; cele mai vechi neasignate/nerăspunse primele. `list_tags` + filtru `tagIds`.
-- **Caută client/comandă:** `search_conversations_by_customer`, `get_customer_by_email_or_phone`. Pentru contextul comenzii (status livrare + AWB), rulează **`gigi:cs-order-status --order <nr>`** sau **`gigi:cs-customer-360 --phone <tel>`** și pune răspunsul pe baza lor.
+- **Caută client/comandă:** `search_conversations_by_customer`, `get_customer_by_email_or_phone`. Pentru contextul comenzii (status livrare + AWB), rulează **`gigi:cs-360 wismo --order <nr>`** sau **`gigi:cs-360 customer --phone <tel>`** și pune răspunsul pe baza lor.
 - **Citește firul:** `get_conversation` (mode=audit pt mesaje paginate).
 - **Răspunde (DOAR DRAFT în mod testare):** `create_draft` — întotdeauna; `add_private_note` pt notițe interne. **NU folosi `send_message`** (interzis acum, vezi bannerul). Agentul uman revizuiește și trimite draftul din Richpanel.
 - **Gestionează:** `assign_conversation`, `update_conversation_status` (close), `snooze_conversation`, `add_tags_to_conversation`/`remove_tags_from_conversation`/`create_tag`.
@@ -32,8 +32,8 @@ Helpdesk-ul Richpanel acoperă TOATE brandurile (org `nocturna954`; email-uri co
 - **Analytics:** `query_analytics` (metrics: new_conversations, closed_conversations, backlog, frt, csat; dimensions: agent|channel|team|tags; startDate/endDate) + `get_available_metrics`. `list_ai_closure_candidates` pt tichete închidibile automat.
 
 ## Workflow-uri tipice
-- **WISMO (unde e coletul):** găsește tichetul → extrage nr comandă din subiect → `gigi:cs-order-status --order EST… --reply` → pune răspunsul ca `create_draft`.
-- **Refuz / colet întors:** identifică din `gigi:cs-order-status` (Refuzata) → folosește mesajul de win-back din `gigi:cs-refused-recovery`.
+- **WISMO (unde e coletul):** găsește tichetul → extrage nr comandă din subiect → `gigi:cs-360 wismo --order EST… --reply` → pune răspunsul ca `create_draft`.
+- **Refuz / colet întors:** identifică din `gigi:cs-360 wismo` (Refuzata) → folosește mesajul de win-back din `gigi:cs-refused-recovery`.
 - **Curățenie backlog:** `list_ai_closure_candidates` + tichete Judge.me/recenzii → `update_conversation_status=closed` în masă (după confirmare).
 - **Performanță agenți (completă):** `query_analytics dimension=agent` (volum, FRT, închise) combinat cu `gigi:cs-agent-performance` (comenzi plasate + profit) = imaginea totală per agent.
 

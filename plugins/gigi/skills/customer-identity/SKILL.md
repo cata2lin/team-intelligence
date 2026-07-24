@@ -36,4 +36,4 @@ uv run customer_identity.py --email x@y.ro --json     # ieșire structurată
 - `RICHPANEL_MCP_TOKEN`, `DATABASE_URL_METRICS` (din KB / `kb.py secret-get`).
 - Acces SSH la VPS-ul Scripturi pentru `profit_orders` (livrabilitate/profit).
 
-Read-only peste tot. Vezi și `gigi:cs-customer-360` (doar Shopify) și `gigi:richpanel-export` (istoricul tichetelor).
+Read-only peste tot. Vezi și `gigi:cs-360 customer` (doar Shopify) și `gigi:richpanel-export` (istoricul tichetelor).

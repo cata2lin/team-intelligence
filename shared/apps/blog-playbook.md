@@ -1,7 +1,7 @@
 # BLOG PLAYBOOK — ARONA perfume stores (GT / Esteban / Nubra)
 
-Operational guide shared by the `gt-articles`, `esteban-articles`,
-`nubra-articles` skills. Brand **voice** lives in `gt.md` / `esteban.md` /
+Operational guide shared by the `articles`, `articles`,
+`articles` skills. Brand **voice** lives in `gt.md` / `esteban.md` /
 `nubra.md`; this file is the **process** (pipeline, SEO, footer, lessons).
 All scripts use the **ARONA Assistant** app (`kb_env` loads `SHOPIFY_ARONA_*`).
 
