@@ -44,13 +44,18 @@
 - **Segmente clienți / RFM / LTV / retenție / churn / forecast cerere** → `gigi:data-analytics` (pe AWBprint *delivered* = venit COD real, identitate=email, per magazin/monedă; NU pe Shopify brut care include refuzurile).
 - **Livrabilitate/refuz/COD/transport** → `gigi:fulfillment-analytics` / `gigi:deliverability-monitor`.
 - **Cât/când reaprovizionez (PO planner)** → `gigi:reorder-planner` (viteză din inventory_daily_snapshots, reorder_qty + dată stockout per SKU; stock-restock-alerts = doar alertă, ăsta = cantitate).
+- **Ce marfă vine, ÎN CE CONTAINER, câte bucăți / „a mai fost comandat?"** → `gigi:inbound-containers`. ⚠️ **TOM nu e sursa de adevăr pt CONȚINUT**: liniile trecute pe tabele de mărimi ajung `CANCELLED` („Use of tables in multiple sizes") și marfa e totuși produsă — packing list-ul real e **fișierul de containere KDocs** (o foaie/container, `#9`…`#59`; view-only + WASM → se citește vizual prin chrome-devtools). TOM îți dă doar scheletul (`shipments` = „Container 43-44-45", toate `DRAFT`, fără date). Vezi [[container-pipeline-kdocs]].
 - **Pacing buget ads + MER pe lună** → `gigi:spend-pacing` (spend din cache.daily_ad_spend_ron token-independent, proiecție run-rate, MER per brand/canal). Snapshot zilnic = daily-ops-briefing.
 - **Saturație audiență / refresh creative (Meta+TikTok)** → `gigi:creative-fatigue` (freq↑+CTR↓/CPA↑ la nivel de cont; drill per-creativ via meta-ads/tiktok-ads).
 - **Promo COD (2+1) face bani?** → `gigi:promo-profitability` (contribuție netă/comandă pe unități/comandă, AWBprint delivered, COGS pe toate unitățile incl gratis).
 - **COGS/preț/stoc Shopify** → `gigi:shopify-stores`.
 
-## 🎯 Target CPA per magazin (aprobat 2026-06-27 — TOATE canalele)
-Pe **CPA / comandă PLASATĂ**, de aplicat pe Google + Meta + TikTok. **Regulă de aur: Google = CPA MAI MIC decât Social** (prinde brand + intenție mare, ieftin; tCPA-ul mic disciplinează PMax/non-brand-ul scump, brandul oricum e sub prag). Sursă programatică: `brandref` (`target_cpa_social` / `target_cpa_google`). Detalii + breakeven (plafon) în memoria [[target-cpa-per-store]].
+## 🎯 Target CPA + VERDICT PE PROFIT per magazin
+> ⚠️ **Reașezat pe PROFIT (9-iul-2026):** CPA-target agresiv (15/20) eticheta greșit PMax profitabil drept „scump". Pt **scale/cut pe PMax/Shopping/all-channel judecă pe PROFIT vs breakeven REAL**, nu pe CPA-target.
+
+**Verdict pe profit (canonic):** `gigi:google-ads-mcc/profit_verdict.py` → SCALE/HOLD/CUT per campanie, cu breakeven real din `brandref` (`breakeven_cpa`/`scale_cpa`/`breakeven_roas`, populat din `gigi:fulfillment-analytics/breakeven.py --store all`). Zone: **CPA ≤ `scale_cpa`(=BE_CPA×0.7)=SCALE** · scale<CPA≤`breakeven_cpa`=HOLD · CPA>BE=CUT. ⚠️ ROAS Google umflat ~1.5× → gate-ul robust = CPA. Dovadă: Gento/GT PMax „unprofitable" pe CPA-target dar SCALE pe profit; Carpetto = CUT real.
+
+**Target CPA (aprobat 2026-06-27) = DOAR pt Search NON-BRAND** (eficiență). Pe **CPA / comandă PLASATĂ**. **Regulă: Google = CPA MAI MIC decât Social** (prinde brand + intenție mare, ieftin). Sursă: `brandref` (`target_cpa_social`/`target_cpa_google`). Detalii + breakeven în [[target-cpa-per-store]].
 
 | Magazin | Social (Meta/TikTok) | Google |
 |---|--:|--:|
@@ -75,6 +80,21 @@ Pe **CPA / comandă PLASATĂ**, de aplicat pe Google + Meta + TikTok. **Regulă 
 > - **tool-uri operaționale** (sync_raport_zilnic, sync_barcodes, sheets_labels, shopify_image_manager, shopify_tag_orders_parallel, sku_to_url, upload_shopify_img) → `shared/scripturi-tools/` (vezi README-ul de acolo).
 > - **subsistemul e-Transport ANAF / SmartBill** (CLI `python -m etransport.main`, 47 module: parsers/services/exporters/catalogs) → `shared/etransport/`. Credențiale din env (`SMARTBILL_EMAIL/TOKEN/CIF`, OpenAI key ca param), DB = SQLite local. Deploy: `scp -r shared/etransport $VPS:/root/Scripturi/`.
 > - Aplicația web (routes/models/dashboard) + modulele importate (serial_refuser, shipment, validation_service) + `data/` (utilitare one-off) **rămân pe VPS** — nu se urcă.
+
+## 🛡️ Monitorizare + operare (VPS) — „ce se strică tăcut" prins automat
+> De ce: eșecurile ARONA erau TĂCUTE (token Meta mort 11 zile, cron TikTok oprit necunoscut, `profit_orders`
+> nesincronizat 23 zile → brand_pnl iulie −1,5M fals). Acum sistemul se plânge singur. **Email DOAR pe erori reale/noi.**
+
+| Tool (`shared/scripturi-tools/`, rulează pe VPS) | Ce face | Cron |
+|---|---|---|
+| `data_health.py` | Watchdog prospețime DATE (verifică ieșirea pipeline-urilor vs SLA, nu „a rulat jobul"): spend/brand_pnl/fx/tokenuri/sync_runs/AWBprint/WMS/profit_orders + **heartbeat cronuri**. Email pe roșu. | `15 9 *` |
+| `reconcile_sources.py` | Reconciliere 3-surse (engine↔AWBprint livrate, sheet↔warehouse marketing) + istoric drift în `recon_history`. Email DOAR pe drift NOU. | `30 9 *` |
+| `deploy_parity.py` | Paritate cod git(origin/main)↔fișiere flat VPS (`check`/`deploy`). Email pe fișier nou-divergent. Prinde cauza bombelor de drift. | `45 9 *` |
+| `heartbeat.py` | Dead-man-switch: cronurile pinguie pe SUCCES (`&& heartbeat.py <nume>`); `data_health` semnalează „n-a rulat deloc". Cablat pe 9 cronuri pipeline. | — |
+| `backup_profitdb.py` | Backup CONSISTENT (SQLite online-backup API) + gzip + rotație(7) al `profitability.db` (333MB→60MB). | `30 3 *` |
+| `deploy.sh` | Deploy GIT-DRIVEN sigur: `git fetch` + sync flat (via parity, cu `.bak`) + `pull --ff-only` checkout. Înlocuiește scp manual. | `ssh <vps> 'bash /root/Scripturi/deploy.sh --apply'` |
+
+> **Deploy corect = `deploy.sh --apply`**, NU scp manual (scp-ul manual = cauza divergențelor git↔VPS). Vezi memoria [[data-health-watchdog]].
 
 ## Lecții/capcane salvate (în KB: `kb.py resource-list`)
 - **Cache/backfill FAIL-SAFE**: nu face DELETE pe istoric apoi reinsert condiționat — un pull eșuat șterge tot. Pur upsert. Învelește apelurile externe în retry-on-timeout (googleapiclient aruncă TimeoutError brut, nu RequestException).
