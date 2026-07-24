@@ -151,7 +151,9 @@ def main():
         rate = fx.get(ocurr[k], 1.0)                          # (G) monedă magazin → RON
         share = (r["line_revenue"] or 0) / olt               # cotă pe venit (rație, moneda se simplifică)
         rev_ex = (ototal[k] * rate * share) / (1 + vat)      # venit = cotă din total comandă, în RON, ex-TVA
-        cogs = pc.cogs_ron(r["qty"], line_cogs_store=r["line_cogs"], rate_store=rate, override=cogs_ov.get(s), fx=fx)
+        # COGS: line_cogs e INTRODUS ÎN RON pe toate magazinele (chiar dacă Shopify etichetează CZK/PLN/EUR)
+        # → rate_store=1.0 (NU cursul comenzii; înmulțirea cu curs făcea CZ/PL/BG ~5× mai mici). Vezi profitability.py.
+        cogs = pc.cogs_ron(r["qty"], line_cogs_store=r["line_cogs"], rate_store=1.0, override=cogs_ov.get(s), fx=fx)
         cogs_ex = cogs / (1 + vat)                            # (H) override + (G) RON, ca engine-ul
         # transport: 'awb'/'dpd' = cost real DEJA ex-TVA (transport_cost_fara_tva) → direct; 'estimat' =
         # cost_per_parcel GROSS (TVA transport = RO 21%) → /1.21. (NU /(1+vat): scotea TVA de două ori pe awb/dpd.)
@@ -175,14 +177,40 @@ def main():
         nxt = "%d-%02d-01" % (int(y) + (1 if mm == 12 else 0), 1 if mm == 12 else mm + 1)
         if mconn is None:
             mconn = psycopg2.connect(_clean(os.environ["DATABASE_URL_METRICS"])); cur = mconn.cursor()
-        # Meta+TikTok din cache DOAR pe istoric (< cutover) — de la cutover le ia WMS. Google rămâne din cache
+        # Meta+TikTok din cache pe istoric (< cutover) — de la cutover le ia WMS. Google rămâne din cache
         # pe TOATĂ luna (WMS = doar FB+TikTok, n-are Google; Google nu depinde de tokenul Meta).
-        cache_hi = min(nxt, WMS_CUTOVER)
-        cur.execute("SELECT sku, brand_id, SUM(spend_ron) FROM cache.product_ad_spend "
-                    "WHERE date>=%s AND ((platform IN ('meta','tiktok') AND date<%s) OR (platform='google' AND date<%s)) "
-                    "GROUP BY sku, brand_id",
-                    (a.month + "-01", cache_hi, nxt))
-        cache_rows = cur.fetchall()
+        #
+        # ⚠️ Cutoverul NU e suficient singur: dacă sheet-ul WMS moare pe o platformă, zilele fără date
+        # ar da marketing 0, tăcut. S-a întâmplat — WMS TikTok a stat blocat pe 2026-06-23 o lună
+        # întreagă. Deci ne uităm la ce zile acoperă EFECTIV WMS, per platformă, iar restul cad
+        # înapoi pe cache (care e alimentat separat, de tiktok_warehouse_sync). Zi acoperită de WMS
+        # ⇒ sărită din cache, deci fără dublare.
+        covered = {"meta": set(), "tiktok": set()}
+        try:
+            _cc = sqlite3.connect(a.db); _cc.execute("PRAGMA busy_timeout=8000;")
+            for src, d in _cc.execute("SELECT DISTINCT source, date FROM wms_ad_spend WHERE date>=? AND date<?",
+                                      (a.month + "-01", nxt)):
+                covered["meta" if src == "fb" else "tiktok"].add(d)
+            _cc.close()
+        except Exception as e:
+            sys.stderr.write(f"[wms] nu pot citi acoperirea WMS: {type(e).__name__}: {e}\n")
+
+        cur.execute("SELECT sku, brand_id, platform, date::text, SUM(spend_ron) FROM cache.product_ad_spend "
+                    "WHERE date>=%s AND date<%s GROUP BY sku, brand_id, platform, date",
+                    (a.month + "-01", nxt))
+        agg = {}; gap_days = {"meta": set(), "tiktok": set()}; gap_ron = {"meta": 0.0, "tiktok": 0.0}
+        for s_, b_, plat, d_, sp in cur.fetchall():
+            if plat in covered and d_ >= WMS_CUTOVER:
+                if d_ in covered[plat]:
+                    continue                          # ziua vine din WMS → n-o lua și din cache
+                gap_days[plat].add(d_); gap_ron[plat] += float(sp or 0)
+            k = (s_, b_)
+            agg[k] = agg.get(k, 0.0) + float(sp or 0)
+        cache_rows = [(s_, b_, v) for (s_, b_), v in agg.items()]
+        for plat in ("meta", "tiktok"):
+            if gap_days[plat]:
+                sys.stderr.write("[mkt] WMS n-are %s pe %d zile din lună → %d RON luați din cache\n"
+                                 % (plat, len(gap_days[plat]), round(gap_ron[plat])))
         # alocare CANONICĂ pe comenzi (profit_core) — direct/grup/brand, CPA uniform
         mk, leftover = pc.allocate_marketing_by_orders(cache_rows, set(sku.keys()), s2g, orders_count, brand_oc)
         # WMS de la cutover → finalul lunii (FB+TikTok per-SKU, USD→RON, alocat pe comenzi; token-independent)
