@@ -63,3 +63,39 @@
 4. **Skill merges** one cluster at a time (articles → cro → rma → cs-360 → cs-refusals → cs-watchdog → google-ads), each via `gigi:publish-skill`, keeping old names as thin aliases for one release.
 
 > Cross-refs: data plumbing & traps in the team memory (profitability-marketing-feed-fix, organic-traffic-analysis, cs-richpanel-pipeline-deploy). Shopify client model in shopify-seo/shopify-stores. Brand→account mapping in bi-data-integrity-check.
+
+---
+
+# Part 2 — Marketing clusters + CONTRADICTIONS (2026-07-24)
+
+> The 2026-06-16 plan above covers CS/profit/ops overlap + the cache/lib layer (still valid — the CS-360 / cs-refusals / cs-watchdog / rma / articles / google-ads merges are confirmed). This part adds what it didn't: the **marketing clusters** (SEO ~33, ADS ~30) and, more importantly, **contradictions** — skills that give *opposite* answers, not just duplicate work.
+
+## 5. ⚠️ CONTRADICTIONS (fix these first — a wrong number here loses money)
+
+1. **P&L — 4-5 divergent "profit/delivered" definitions.** `multi-brand-pnl` (engine, DELIVERED ex-VAT) vs its own `--estimat` (daily_perf, gross-with-VAT, "OVERSTATES profit") vs `spend-pacing` MER (placed GROSS) vs `cpa-report` (Sheet, gross) vs `core:grandia-pnl` (Shopify+AWBprint) vs `ha-grandia-pnl` (profit_orders). `ops-health reconcile` exists *because* these diverge. **Fix:** one `pnl_core` (delivered, ex-VAT); deprecate `--estimat`; align spend-pacing/cpa-report/promo-profitability/cs-agent-performance on it. Fold `core:grandia-pnl`+`ha-grandia-pnl` into `multi-brand-pnl` modes.
+2. **Breakeven ROAS — contradictory formula.** `ads-math`: `1/margin`. `budget-simulator`+`campaign-structure`: `1/(margin×delivery_rate)` (COD-aware). ARONA is COD with refusals (delivery<1) → `ads-math` greenlights campaigns that actually lose money (e.g. 50% margin, 70% delivery: ads-math says BE ROAS 2.0, real 2.86). **Fix:** archive `ads-math`+`ads-budget`; `budget-simulator` is canonical.
+3. **Creative fatigue threshold — different cutoffs.** `creative-fatigue`: Δfreq>+15% AND (ΔCTR<−10% OR ΔCPA>+20%). `ads-creative`: CTR decline >20% = fail. Same campaign labeled differently. **Fix:** one threshold in `creative-fatigue`.
+4. **Kill/scale rule.** `ads-budget`: generic "3× kill" + 70/20/10 (ignores margin & delivery). `budget-simulator`/`campaign-structure`: profit vs COD-aware breakeven. **Fix:** COD-aware wins; archive generic.
+5. **Attribution model.** `ads-attribution` assumes pixel/app world (AAK iOS view-through, GA4 DDA, MMP). ARONA attributes by **campaign-name token** (`tiktok-ads`, `attribution-audit`). `ads-attribution` is inapplicable → archive.
+6. **COGS — 4 definitions.** `anne-cogs-automat` writes `(cogs+ship)×USD×1.10×1.21` to Shopify; `grandia-pnl`/`fulfillment-analytics` read COGS from AWBprint; `anne:stoc-arona` from import invoices (LEI); `cod-product-validator` from category benchmark. Per-product P&L is ambiguous by source. **Fix:** declare the canonical per-SKU COGS source; others reference it.
+
+## 6. Root cause of marketing bloat: two vendored suites installed wholesale
+- **SEO suite** (`AgriciDaniel v2.2.0`, ~21 `category: seo` skills) + **ADS generic suite** (~16, `user-invokable:false`, tested 2026-05-17). Both advisory, US-centric, **do not touch the real accounts/stores**. They sit on top of the ARONA-operational skills (shopify-seo, meta/tiktok/google-ads-mcc, campaign-structure…) that actually execute. Treat each suite as ONE "audit toolkit" cited by a hub, not ~37 top-level skills.
+- Broken internal ref: 6+ vendored SEO skills say "see **seo-audit**" but the installed hub is `seo` → rename `seo` → `seo-audit`.
+
+## 7. Marketing consolidation map (SEO+ADS+content: ~55 → ~33)
+- **GEO quintuplet → one `seo-geo`:** fold `ai-seo` + `shopify-geo` (mode `--score`) into `seo-geo`; strip GEO section from `seo`. (-2, biggest single bloat)
+- **Pure duplicates (mechanical, zero loss):** `schema`⇔`seo-schema`, `programmatic-seo`⇔`seo-programmatic`, `seo-local`⇔`seo-maps`, `ads-test`⇔`ab-testing`. (-4)
+- **SEO audit family:** `seo` (rename→`seo-audit`, hub) absorbs `seo-page`, `seo-sitemap`; keep `seo-technical`/`seo-drift`/`site-architecture`/`seo-cluster`/`seo-sxo`/`seo-hreflang` (distinct). `seo-content`+`seo-content-brief`→one; `seo-plan`→`content-strategy`; `seo-flow` redundant→archive. (-5)
+- **Budget/math COD-aware:** `budget-simulator` absorbs `ads-math`+`ads-budget`. (-2, see contradiction 2)
+- **Archive inapplicable-to-COD / covered:** `ads-attribution` (pixel world), `ads-competitor` (covered by `competitor-ads`), `ads-landing` (covered by `landing-audit`+`cro`). (-3)
+- **Copy/creative family:** `ad-copy` absorbs `ad-creative`+`ads-create`; `creative-fatigue` absorbs `ads-creative` (align thresholds); `ads`+`ads-plan`→one. (-3)
+- **Image-gen family:** collapse `ads-generate`+`ads-photoshoot`+`seo-image-gen` under one image-gen umbrella (vs `ad-banners` which stays — uses real NAS photos). (-2)
+- **Articles ×4 → `articles --store <brand>`** (confirmed from Part 1; labnoir must call `ai-scrub`, not re-implement the RO blocklist). (-3)
+
+## 8. App-factory cluster: healthy, just clarify the pre-submit gates
+`app-honesty-gate` (truth + UI works) vs `shopify-app-ux-audit` (UX patterns) vs `library:shopify-app-launch` (113 Partner reqs / rejection classes) vs `shopify-app-go-public-pcd` (PCD/billing). All four are distinct — document the call order (truth-gate → UX-gate → policy-gate → PCD-gate) so they aren't run redundantly before submit. No merges.
+
+## 9. Net
+- CS/profit/ops (Part 1): ~25 → ~9. Marketing (Part 2): ~55 → ~33. **Total ~18-22 skills removable without capability loss**, plus 6 contradictions to resolve (these matter more than the count — they produce wrong numbers today).
+- Nothing destructive — execute per-item after sign-off, old names as thin aliases for one release. Contradictions (§5) first, then pure duplicates (§7), then the larger folds.
