@@ -5,6 +5,8 @@ description: Generate, verify and publish editorial/SEO blog articles for the Nu
 
 # nubra-articles
 
+> ⚠️ **COMASAT în `core:articles` (2026-07-24).** Acest skill rămâne funcțional dar e înlocuit de **`core:articles --store nubra`** (un pipeline pt toate magazinele de parfum). Prefer `core:articles`. `shared/skills-audit.md` §7.
+
 > Author: **Arona core**. Sibling of `labnoir-articles`, generalized for the
 > ARONA perfume stores. Brand voice doc: `shared/apps/nubra.md`. **Full
 > operational pipeline + lessons: `shared/apps/blog-playbook.md`.**
