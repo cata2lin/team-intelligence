@@ -10,16 +10,21 @@ Golul din stack-ul nostru: aveam image-gen (foto statică) dar **nu** video gene
 prin **GPU cloud** (Replicate/fal — niciun model video open NU rulează practic pe Mac). Ruta image-to-video
 e **cablată și testată** (auth OK, apel corect); așteaptă doar **credit Replicate**.
 
-## Ready-to-run: image-to-video (Wan 2.2)
+## Ready-to-run: image-to-video (DOI provideri — Replicate ȘI fal.ai)
 
 ```bash
+# Replicate (Wan 2.2 fast), token KB REPLICATE_API_TOKEN:
 uv run scripts/i2v.py --image "~/Downloads/esteban negru 1.png" \
   --prompt "the perfume bottle slowly rotates 360 degrees, elegant studio lighting, premium fragrance commercial, glass reflections, shallow depth of field"
-# → esteban negru 1_i2v.mp4  (81 cadre / 16fps ≈ 5s, 480p)
+
+# fal.ai (Wan 2.2 A14B), token KB FAL_KEY — are adesea credit gratuit de start:
+uv run scripts/i2v.py --provider fal --image "~/Downloads/esteban negru 1.png" --prompt "..."
+# → *_i2v.mp4  (81 cadre / 16fps ≈ 5s, 480p)
 ```
 
-- Model implicit **`wan-video/wan-2.2-i2v-fast`** (rapid, ~$0,05–0,10/clip). Calitate mai mare: `--model wan-video/wan-2.2-i2v-a14b --resolution 720p`.
-- Token în KB `REPLICATE_API_TOKEN` (cont `gbeschea`). **⚠️ Necesită credit** la replicate.com/account/billing — altfel 402 (scriptul îți spune clar).
+- **Replicate**: implicit `wan-video/wan-2.2-i2v-fast` (~$0,05–0,10/clip). Token KB `REPLICATE_API_TOKEN` (cont `gbeschea`). ⚠️ necesită credit (billing) — altfel 402.
+- **fal.ai**: implicit `fal-ai/wan/v2.2-a14b/image-to-video`; viteză: `--model fal-ai/ltxv-13b-098-distilled/image-to-video`. Token KB `FAL_KEY` (de la fal.ai/dashboard/keys).
+- Ambele: mesaj CLAR dacă lipsește cheia/creditul (nu crapă urât). Calitate mai mare: `--resolution 720p`.
 - Cea mai bună intrare = foto de produs cu **fundal curat, sticlă/obiect frontal 3D** (nu etichetă plată).
 
 ## Catalogul de modele (cercetat 2026-07-24, doar ce e curat legal + relevant)
