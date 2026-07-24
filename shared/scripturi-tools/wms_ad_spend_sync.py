@@ -108,22 +108,26 @@ def upsert(recs):
 
 
 def pull_mappings(svc, conn):
-    """Trage tabelele de mapare (Nomenclator FB/TT + Product Group) -> profitability.db (full replace)."""
-    conn.execute("DROP TABLE IF EXISTS wms_nomen")
-    conn.execute("CREATE TABLE wms_nomen (platform TEXT, product_group TEXT, map_type TEXT, pattern TEXT)")
+    """Import OPTIONAL din sheet (rulat DOAR cu --sync-sheet). Maparea e DB-AUTHORITATIVE; asta e doar
+    o punte de refresh la cerere. FAIL-SAFE: NU golim un tabel daca sheet-ul intoarce 0 randuri (un citit
+    esuat/gol nu mai poate sterge maparea). Regulile manuale traiesc separat in wms_nomen_extra (nu se ating)."""
+    nomen = []
     for plat, tab in (("fb", TAB_NOMEN_FB), ("tt", TAB_NOMEN_TT)):
-        recs = []
         for r in _read(svc, tab)[1:]:
             if len(r) >= 3 and (r[0] or "").strip() and (r[2] or "").strip():
-                recs.append((plat, r[0].strip(), (r[1] or "").strip().upper(), r[2].strip()))
-        conn.executemany("INSERT INTO wms_nomen VALUES (?,?,?,?)", recs)
-    conn.execute("DROP TABLE IF EXISTS wms_product_group")
-    conn.execute("CREATE TABLE wms_product_group (sku TEXT, grp TEXT)")
+                nomen.append((plat, r[0].strip(), (r[1] or "").strip().upper(), r[2].strip()))
+    if nomen:  # fail-safe: doar daca am chiar date
+        conn.execute("DROP TABLE IF EXISTS wms_nomen")
+        conn.execute("CREATE TABLE wms_nomen (platform TEXT, product_group TEXT, map_type TEXT, pattern TEXT)")
+        conn.executemany("INSERT INTO wms_nomen VALUES (?,?,?,?)", nomen)
     pg = []
     for r in _read(svc, TAB_PRODUCT_GROUP)[1:]:
         if len(r) >= 2 and (r[0] or "").strip():
             pg.append((r[0].strip(), (r[1] or "").strip()))
-    conn.executemany("INSERT INTO wms_product_group VALUES (?,?)", pg)
+    if pg:  # fail-safe
+        conn.execute("DROP TABLE IF EXISTS wms_product_group")
+        conn.execute("CREATE TABLE wms_product_group (sku TEXT, grp TEXT)")
+        conn.executemany("INSERT INTO wms_product_group VALUES (?,?)", pg)
     conn.commit()
     return (conn.execute("SELECT COUNT(*) FROM wms_nomen").fetchone()[0],
             conn.execute("SELECT COUNT(*) FROM wms_product_group").fetchone()[0])
@@ -133,8 +137,8 @@ def build_supplement(conn):
     """Supliment PERSISTENT (refresh la fiecare rulare): reguli cont->grup pt conturile simple lipsă din
     Nomenclatorul sheet (Nubra, Bonhaus CZ/RO/PL, Esteban 3, grandia.ro, Reflexino, Rossi, Nocturna...) +
     SKU->grup pt grupurile-BRAND care NU-s în Product Group (generat din comenzi, per prefix magazin)."""
-    conn.execute("DROP TABLE IF EXISTS wms_nomen_extra")
-    conn.execute("CREATE TABLE wms_nomen_extra (platform TEXT, product_group TEXT, map_type TEXT, pattern TEXT)")
+    # PERSISTENT: nu mai DROP (regulile adaugate manual in DB via mapping_admin.py add-rule trebuie sa supravietuiasca).
+    conn.execute("CREATE TABLE IF NOT EXISTS wms_nomen_extra (platform TEXT, product_group TEXT, map_type TEXT, pattern TEXT)")
     # NB: Esteban 2 -> Esteban e DEJA în Nomenclatorul sheet (account-level, tot contul). Esteban 3 + Reflexino
     # sunt MAGDEAL MULTI-PRODUS -> PER PRODUS via keyword (NU account-fallback), deci NU le punem aici; restul
     # neacoperit de keyword cade pe cache. „fără teste": grupul Test e exclus în wms_marketing.
@@ -154,7 +158,11 @@ def build_supplement(conn):
         ("fb", "Sort", "CAMPAIGN_KEYWORD", "SORT FLORAL"), ("tt", "Sort", "CAMPAIGN_KEYWORD", "SORT FLORAL"),
         ("fb", "Covoras magic", "CAMPAIGN_KEYWORD", "COVORAS MAGIC"), ("tt", "Covoras magic", "CAMPAIGN_KEYWORD", "COVORAS MAGIC"),
     ]
-    conn.executemany("INSERT INTO wms_nomen_extra VALUES (?,?,?,?)", EXTRA)
+    # seed idempotent din EXTRA (baza definita in cod), FARA sa stergem regulile adaugate manual in DB
+    have = set(conn.execute("SELECT platform,product_group,map_type,pattern FROM wms_nomen_extra"))
+    for rec in EXTRA:
+        if rec not in have:
+            conn.execute("INSERT INTO wms_nomen_extra VALUES (?,?,?,?)", rec)
     PREFIX_GROUP = {"NUB": "Nubra", "CZ": "Bonhaus CZ", "PL": "Bonhaus PL", "BON": "Bonhaus RO",
                     "ROSSI": "Rossi"}
     conn.execute("DROP TABLE IF EXISTS wms_product_group_extra")
@@ -188,9 +196,16 @@ if __name__ == "__main__":
     if recs:
         upsert(recs)
     _c = sqlite3.connect(PF_DB); _c.execute("PRAGMA busy_timeout=8000;")
-    nn, npg = pull_mappings(svc, _c)
+    # Maparea e DB-AUTHORITATIVE. Sheet-ul se importa DOAR explicit cu --sync-sheet (fail-safe).
+    # Rularea orara (cron, fara flag) NU mai atinge sheet-ul => pipeline de mapare 100% DB.
+    if "--sync-sheet" in sys.argv:
+        nn, npg = pull_mappings(svc, _c)
+        print("[--sync-sheet] import mapare din sheet: wms_nomen=%d, wms_product_group=%d" % (nn, npg))
+    else:
+        nn = _c.execute("SELECT COUNT(*) FROM wms_nomen").fetchone()[0]
+        npg = _c.execute("SELECT COUNT(*) FROM wms_product_group").fetchone()[0]
     ne, npge = build_supplement(_c); _c.close()
-    print("upsert %d rânduri | mapări: wms_nomen=%d, wms_product_group=%d | supliment: nomen_extra=%d, pg_extra=%d"
+    print("upsert %d rânduri | mapări (DB): wms_nomen=%d, wms_product_group=%d | supliment: nomen_extra=%d, pg_extra=%d"
           % (len(recs), nn, npg, ne, npge))
     conn = sqlite3.connect(PF_DB)
     for src in ("fb", "tt"):
