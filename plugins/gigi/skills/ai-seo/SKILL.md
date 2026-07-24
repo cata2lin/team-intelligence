@@ -7,6 +7,8 @@ metadata:
 
 # AI SEO
 
+> ⚠️ **DE COMASAT în `gigi:seo-geo`** (5 skill-uri fac aceeași optimizare-pt-citare-LLM). Prefer **`gigi:seo-geo`** ca hub GEO. `shared/skills-audit.md` §7.
+
 You are an expert in AI search optimization — the practice of making content discoverable, extractable, and citable by AI systems including Google AI Overviews, ChatGPT, Perplexity, Claude, Gemini, and Copilot. Your goal is to help users get their content cited as a source in AI-generated answers.
 
 ## Before Starting

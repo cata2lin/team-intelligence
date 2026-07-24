@@ -10,6 +10,8 @@ tested_with: claude-code v2.x
 
 # Landing Page Quality for Ad Campaigns
 
+> ⚠️ **DEPRECAT — acoperit** de **`gigi:landing-audit`** + **`gigi:cro`** (CRO ARONA real, COD-aware). Folosește-le pe alea. `shared/skills-audit.md` §7.
+
 ## Process
 
 1. Collect landing page URLs from active ad campaigns

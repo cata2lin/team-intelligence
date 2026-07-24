@@ -6,6 +6,12 @@ tested_date: 2026-05-17
 tested_with: claude-code v2.x
 ---
 
+> ⚠️ **CORECȚIE ARONA (COD) — 2026-07-24.** Break-even ROAS de mai jos (`1/margin`) e GREȘIT pentru ARONA:
+> suntem COD/ramburs cu refuzuri, deci **`Break-even ROAS = 1/(margin × delivery_rate)`** (delivery_rate<1).
+> Exemplu: marjă 50%, livrare 70% → BE ROAS real **2,86**, nu 2,0 — formula veche dă undă verde campaniilor
+> care PIERD bani. Pentru orice decizie de buget/kill/scale pe conturile reale folosește **`gigi:budget-simulator`**
+> (COD-aware) — NU acest calculator generic. Vezi `shared/skills-audit.md` §5.2.
+
 # PPC Financial Calculator & Modeling
 
 <!-- Created: 2026-04-13 | v1.5 -->

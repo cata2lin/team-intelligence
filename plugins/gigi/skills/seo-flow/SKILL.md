@@ -17,6 +17,8 @@ metadata:
 
 # FLOW Framework — Find · Leverage · Optimize · Win
 
+> ⚠️ **DEPRECAT — wrapper redundant** de prompturi peste ce fac deja skill-urile SEO concrete (seo-audit/seo-technical/seo-content). Folosește skill-urile directe. `shared/skills-audit.md` §7.
+
 > Framework and prompts © Daniel Agrici, CC BY 4.0 — github.com/AgriciDaniel/flow
 
 FLOW is an evidence-led SEO operating model built for the AI-search era. Claude SEO

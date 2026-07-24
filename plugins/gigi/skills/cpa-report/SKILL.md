@@ -6,6 +6,10 @@ argument-hint: "audit | audit --brand Covoria | shopify-pull --brand LABNOIR --s
 
 # cpa-report — audit + operare a raportului „CPA și financiar 2025"
 
+> ⚠️ Ăsta e un tool de **ops-pe-Sheet** (auditează/operează foaia „CPA și financiar", cifre GROSS din
+> connector), **NU sursa de adevăr pt profit**. Pentru profit/contribuție canonic (delivered, ex-TVA) →
+> **`gigi:multi-brand-pnl`** (engine `cache.brand_pnl_monthly`). Vezi `shared/skills-audit.md` §5.1.
+
 Raportul (sheet `1IVg0fI-...`, [[cpa-financiar-live-report]]) e alimentat de un **conector 3rd-party** care trage FB/Shopify/Google în filele sursă (`Facebook Ads`(+azi), `Shopify`(+azi), `Google Ads azi`, `Tiktok Ads`(+azi)); două scripturi Apps Script (`adaugaRandZilnicAzi` = „Raport azi", `adaugaRandZilnic2` = „Raport Zilnic 2") construiesc rândurile din lista `BRANDS` + `Mapping`. **Când un brand e pe 0 / lipsește, cauza aproape mereu = date lipsă în filele SURSĂ**, nu formula.
 
 ```bash

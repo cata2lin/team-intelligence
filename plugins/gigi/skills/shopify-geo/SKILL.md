@@ -5,6 +5,8 @@ argument-hint: "score --url <page>  |  robots --url <domain>"
 ---
 
 # Shopify GEO/AEO — get cited by AI search
+
+> ⚠️ **DE COMASAT în `gigi:seo-geo`** (mod `--score` offline). Prefer **`gigi:seo-geo`** ca hub GEO unic. `shared/skills-audit.md` §7.
 > Author: Gigi.
 
 Classic SEO (rank in blue links) is covered by `gigi:analytics` (GSC) + `gigi:shopify-seo`. This skill covers the NEW surface: **being cited by AI answer engines** (ChatGPT, Perplexity, Google AI Overviews) and winning featured snippets — a gap none of our other tools touched. All offline, no keys.

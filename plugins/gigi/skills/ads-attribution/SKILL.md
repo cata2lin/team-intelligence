@@ -6,6 +6,12 @@ tested_date: 2026-05-17
 tested_with: claude-code v2.x
 ---
 
+> ⚠️ **CORECȚIE ARONA — 2026-07-24.** Modelul de aici (AdAttributionKit iOS view-through, GA4 data-driven, MMP/
+> AppsFlyer, Consent Mode V2) presupune o lume **pixel/app** care **NU se aplică ARONA**: suntem COD/ramburs, cu
+> atribuire pe **TOKEN de campanie** din numele campaniei (conturi partajate multi-brand). Pentru atribuirea reală
+> a spend-ului pe brand folosește **`gigi:attribution-audit`** + maparea din `gigi:tiktok-ads`/`meta-ads` (vezi
+> memoria „mapping-tiktok-attribution"). Acest skill = inaplicabil pe modelul nostru. Vezi `shared/skills-audit.md` §5.5.
+
 # Cross-Platform Attribution Health Audit
 
 Attribution decay is the silent revenue killer of 2026 — Consent Mode V2 EEA

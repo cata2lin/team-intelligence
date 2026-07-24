@@ -22,6 +22,8 @@ metadata:
 
 # Maps Intelligence (March 2026)
 
+> ⚠️ **DE COMASAT în `gigi:seo-local`** (GBP+NAP+citations+local-schema se suprapun total). Prefer `gigi:seo-local`. `shared/skills-audit.md` §7.
+
 Maps platform analysis for local businesses. Works with external APIs to assess
 how a business appears on Google Maps, Bing Places, Apple Maps, and OpenStreetMap.
 

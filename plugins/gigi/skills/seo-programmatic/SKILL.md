@@ -17,6 +17,8 @@ metadata:
 
 # Programmatic SEO Analysis & Planning
 
+> ⚠️ **DEPRECAT — duplicat.** Near-identic cu **`gigi:programmatic-seo`**. Folosește `gigi:programmatic-seo`. `shared/skills-audit.md` §7.
+
 Build and audit SEO pages generated at scale from structured data sources.
 Enforces quality gates to prevent thin content penalties and index bloat.
 
