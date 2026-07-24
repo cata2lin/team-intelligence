@@ -24,9 +24,12 @@ def vat_for_prefix(prefix: str) -> float:
 # ---- COGS în RON (override are prioritate, ca engine-ul; conversie din moneda magazinului) ----
 def cogs_ron(qty=0, line_cogs_store=None, unit_cost_store=None, rate_store=1.0, override=None, fx=None) -> float:
     """COGS în RON. Prioritate: override=(cost,currency) per-unit × qty (ca engine l.1509);
-    altfel line_cogs_store (total pe linie, în moneda magazinului) × rate_store [profit_by_sku];
+    altfel line_cogs_store (total pe linie) × rate_store [profit_by_sku];
     altfel unit_cost_store (per-unit) × rate_store × qty [engine/per-linie].
-    fx={currency:rate_to_ron} pt moneda override-ului; rate_store=rate_to_ron al monedei comenzii."""
+    ⚠️ Costul din Shopify (unitCost) e INTRODUS ÎN RON pe TOATE magazinele (landed cost cu TVA RO 21%),
+    chiar dacă Shopify îl etichetează cu moneda magazinului (CZK/PLN/EUR). Deci pt line_cogs_store/
+    unit_cost_store **rate_store=1.0** (NU cursul comenzii — altfel CZ/PL/BG ies ~5× mai mici).
+    rate_store!=1 doar dacă vreodată costul chiar e în valută. fx={currency:rate_to_ron} pt override."""
     if override:
         oc, ocur = override
         return (oc or 0) * ((fx or {}).get(ocur, 1.0)) * (qty or 0)
