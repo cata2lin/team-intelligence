@@ -126,6 +126,10 @@ _COURIER_ALIASES = {
 _DELIVERED = [
     "delivered", "livrat", "livrare efectuata", "livrare finalizata",
     "delivery successful", "colet livrat", "predat destinatarului",
+    # Sameday COD: statusuri POST-livrare — rambursul se transferă/încasează DOAR după ce coletul
+    # a fost livrat și clientul a plătit. „Rambursul a fost transferat" = livrat + ramburs încasat.
+    # (Un colet chiar returnat spune „returnat" → prins de _RETURNED, care e verificat înainte.)
+    "rambursul a fost transferat", "ramburs transferat", "ramburs incasat",
 ]
 _REFUSED = [
     "refused", "refuz", "refuzat", "respins", "rejected",
