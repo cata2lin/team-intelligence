@@ -8,17 +8,20 @@
 DE CE (complement la awbprint_reconcile.py): reconcilierea din profit_orders (Shopify PAID) NU acoperă
 comenzile pe care engine-ul de profit nu le poate urmări — cele fără AWB legat în profit_orders („Lipsă
 awb"/„Netrimisa"), deși AWBprint ARE numărul AWB. Aici mergem la sursa ultimă de adevăr = CURIERUL.
-Backlog verificat 2026-07-25: din 1.206 blocate → 349 livrate + 23 refuzate/retur recuperate (curier
-confirmă), 129 chiar în tranzit, 534 „generat" (AWB făcut dar curierul nu l-a ridicat NICIODATĂ =
-colet care n-a plecat efectiv — semnal operațional separat). Vezi [[sameday-tracking-gap-awbprint]].
 
-⚠️ NU scrie în profit_orders — engine-ul îl re-derivă din courier_status la fiecare sync (2:30), deci
-un flip acolo se pierde. AWBprint don't-downgrade păstrează statusul terminal → scriem DOAR acolo.
+VERIFICĂ TOATE AWB-URILE comenzii, nu doar cel principal: o comandă poate avea AWB-ul principal blocat
+(„generat"/anulat, curierul nu l-a ridicat) DAR să fi plecat pe un AWB REFĂCUT (alt tracking din
+`order_awbs`). Colectăm principal (`orders.tracking_number`) + toate alternativele non-retur/non-redirect
+din `order_awbs`, verificăm fiecare, și dacă ORICARE e livrat → comanda e livrată. Backlog 2026-07-25:
+main-AWB a recuperat 349 livrate + 23 refuzate; AWB-alternativ încă 4 (Grandia refăcute pe DPD etc.).
+Rămân 534 „generat" (AWB făcut, curierul NU l-a ridicat niciodată = colet care n-a plecat — semnal
+operațional, de investigat separat). Vezi [[sameday-tracking-gap-awbprint]].
+
+⚠️ NU scrie în profit_orders — engine-ul re-derivă `status_category` din `courier_status` la fiecare
+sync (2:30), deci un flip acolo se pierde. AWBprint don't-downgrade păstrează terminalul → scriem DOAR acolo.
 
 RULARE (VPS): `.venv/bin/python courier_verify.py` (DRY) · `... --apply` (scrie) · `--limit=N` (test).
-CRON (03:30, după awbprint_reconcile 03:15). ⚠️ Cost API: ~1 cerere DPD /10 AWB-uri → mărginit prin
-AWB_MAX_AGE_DAYS (implicit 90; strânge-l la 45 dacă vrei mai puține apeluri — livratele se rezolvă în
-câteva zile de la expediere, deci fereastra 14-45z prinde ~tot ce se poate recupera).
+CRON (03:30, după awbprint_reconcile 03:15). ⚠️ Cost API DPD mărginit prin AWB_MAX_AGE_DAYS (implicit 90).
   30 3 * * * cd /root/Scripturi && set -a && . /root/Scripturi/.env && set +a && \
     /usr/bin/flock -n /tmp/courier_verify.lock /root/Scripturi/.venv/bin/python /root/Scripturi/courier_verify.py --apply \
     >> /root/Scripturi/logs/courier_verify.log 2>&1 && /root/Scripturi/.venv/bin/python /root/Scripturi/heartbeat.py courier_verify
@@ -26,9 +29,8 @@ Secrete: DATABASE_URL_AWBPRINT (.env) + COURIER_CREDS_JSON (KB, via awb_track.lo
 import os
 import sys
 import re
-import json
 import asyncio
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 import psycopg2
 import httpx
@@ -44,6 +46,7 @@ NONTERMINAL = (
 )
 # normalize_status -> AWBprint terminal aggregated_status (returned & refused = pierdere transport)
 TERMINAL = {"delivered": "delivered", "returned": "refused", "refused": "refused"}
+RANK = {"delivered": 3, "refused": 2}  # la agregare pe comandă, livrarea are prioritate
 MIN_AGE = int(os.environ.get("AWB_MIN_AGE_DAYS", "14"))
 MAX_AGE = int(os.environ.get("AWB_MAX_AGE_DAYS", "90"))
 
@@ -63,58 +66,76 @@ def main():
 
     cx = psycopg2.connect(_clean(os.environ["DATABASE_URL_AWBPRINT"]))
     cur = cx.cursor()
+    # o comandă blocată + TOATE AWB-urile ei non-retur (principal + alternative din order_awbs)
     cur.execute(
-        """SELECT o.order_number, o.tracking_number, o.aggregated_status, COALESCE(o.total_price,0)
-           FROM orders o
-           WHERE o.aggregated_status = ANY(%s) AND o.tracking_number IS NOT NULL AND o.awb_count>=1
-             AND o.frisbo_created_at < now() - (%s || ' days')::interval
-             AND o.frisbo_created_at > now() - (%s || ' days')::interval""",
+        """WITH stuck AS (
+             SELECT o.id, o.order_number, o.tracking_number AS main_awb,
+                    o.aggregated_status, COALESCE(o.total_price,0) AS price
+             FROM orders o
+             WHERE o.aggregated_status = ANY(%s) AND o.tracking_number IS NOT NULL AND o.awb_count>=1
+               AND o.frisbo_created_at < now() - (%s || ' days')::interval
+               AND o.frisbo_created_at > now() - (%s || ' days')::interval)
+           SELECT st.order_number, st.aggregated_status, st.price, awb.tn
+           FROM stuck st
+           CROSS JOIN LATERAL (
+             SELECT st.main_awb AS tn
+             UNION
+             SELECT oa.tracking_number FROM order_awbs oa
+             WHERE oa.order_id=st.id AND oa.tracking_number IS NOT NULL
+               AND COALESCE(oa.is_return_label,false)=false AND COALESCE(oa.is_redirect_label,false)=false
+           ) awb
+           WHERE awb.tn IS NOT NULL""",
         (list(NONTERMINAL), str(MIN_AGE), str(MAX_AGE)),
     )
     rows = cur.fetchall()
-    if limit:
-        rows = rows[:limit]
 
-    dpd_awbs, sd_awbs, meta = [], [], {}
-    for onum, awb, agg, price in rows:
-        awb = (awb or "").strip()
-        if not awb:
+    orders = {}          # order_number -> {agg, price, awbs:set}
+    for onum, agg, price, tn in rows:
+        tn = (tn or "").strip()
+        if not tn:
             continue
-        meta[awb] = (onum, agg, float(price))
-        ck = awb_track.guess_courier(awb)
-        if ck == "dpd-ro":
-            dpd_awbs.append(awb)
-        elif ck == "sameday":
-            sd_awbs.append(awb)
-    print(f"AWBprint blocate cu AWB ({MIN_AGE}-{MAX_AGE}z): {len(rows)} | "
-          f"DPD {len(dpd_awbs)} · Sameday {len(sd_awbs)} · alt {len(rows)-len(dpd_awbs)-len(sd_awbs)}", flush=True)
+        o = orders.setdefault(onum, {"agg": agg, "price": float(price), "awbs": set()})
+        o["awbs"].add(tn)
+    if limit:
+        orders = dict(list(orders.items())[:limit])
+
+    allawb = {a for o in orders.values() for a in o["awbs"]}
+    dpd_awbs = [a for a in allawb if awb_track.guess_courier(a) == "dpd-ro"]
+    sd_awbs = [a for a in allawb if awb_track.guess_courier(a) == "sameday"]
+    print(f"Comenzi blocate ({MIN_AGE}-{MAX_AGE}z): {len(orders)} | AWB-uri de verificat: {len(allawb)} "
+          f"(DPD {len(dpd_awbs)} · Sameday {len(sd_awbs)} · alt {len(allawb)-len(dpd_awbs)-len(sd_awbs)})", flush=True)
 
     async def verify():
         raw = {}
         async with httpx.AsyncClient(timeout=40) as cl:
             if dpd_awbs:
                 raw.update(await awb_track.track_dpd(cl, dpd_awbs, dpd))
-            for awb in sd_awbs:
+            for a in sd_awbs:
                 try:
-                    raw[awb] = await awb_track.track_sameday(cl, awb, sd)
+                    raw[a] = await awb_track.track_sameday(cl, a, sd)
                 except Exception as e:
-                    raw[awb] = f"eroare {type(e).__name__}"
+                    raw[a] = f"eroare {type(e).__name__}"
         return raw
 
     raw = asyncio.run(verify())
+    normmap = {a: awb_track.normalize_status(s) for a, s in raw.items()}
 
-    resolved, by_norm, by_new = {}, Counter(), defaultdict(lambda: [0, 0.0])
-    for awb, st in raw.items():
-        norm = awb_track.normalize_status(st)
-        by_norm[norm] += 1
-        new = TERMINAL.get(norm)
-        onum, agg, price = meta[awb]
-        if new and new != agg:
-            resolved[onum] = new
-            by_new[new][0] += 1
-            by_new[new][1] += price
-    print(f"Status real la curier: {dict(by_norm)}", flush=True)
-    print(f"🔧 REZOLVABILE (terminal): {len(resolved)}", flush=True)
+    resolved, by_new, on_alt = {}, defaultdict(lambda: [0, 0.0]), 0
+    for onum, o in orders.items():
+        best = None  # terminal aggregated_status
+        for awb in o["awbs"]:
+            nm = normmap.get(awb)
+            if nm in TERMINAL:
+                cand = TERMINAL[nm]
+                if best is None or RANK[cand] > RANK[best]:
+                    best = cand
+        if best and best != o["agg"]:
+            resolved[onum] = best
+            by_new[best][0] += 1
+            by_new[best][1] += o["price"]
+            if len(o["awbs"]) > 1:
+                on_alt += 1
+    print(f"🔧 REZOLVABILE (terminal): {len(resolved)}  (din care pe AWB alternativ: {on_alt})", flush=True)
     for new, (n, rv) in sorted(by_new.items(), key=lambda x: -x[1][0]):
         print(f"    -> {new:10} {n:5}   {rv:>12,.0f} RON brut", flush=True)
 
