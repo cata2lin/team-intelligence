@@ -613,10 +613,20 @@ def correct_address(xc, o, shop_domain, apply=False):
     msl = ms if isinstance(ms, list) else (ms.get("matchers") or ms.get("matches") or [])
     # zip/oraș/județ ≥0.95 + stradă ≥0.90 (relaxat — există plasă de siguranță DPD/client la preluare).
     # UN singur candidat (fără competitor) = nu riscăm o adresă validă-dar-greșită.
-    strong = [m for m in msl if all((fscore(m, f)[1] or 0) >= 0.95 for f in ("zipCode", "county", "city"))
+    # REGULA D (zip lipsă): dacă clientul N-a dat un zip RO valabil (6 cifre) — ex "-"/gol/"123" — NU putem
+    # cere scor pe zipCode (n-are ce potrivi). Atunci identitatea geografică = județ+oraș+stradă; ADOPTĂM
+    # zip-ul candidatului canonic (confirmat la /zip-code mai jos). Garda „un singur candidat" rămâne: fără
+    # zip ca dezambiguizator, dacă apar 2+ candidați tari → tot manual (nu ghicim între străzi omonime).
+    input_zip = (ad.get("zip") or "").strip()
+    ro_zip_given = bool(re.fullmatch(r"\d{6}", input_zip))
+    zip_gate = (lambda mm: (fscore(mm, "zipCode")[1] or 0) >= 0.95) if ro_zip_given else (lambda mm: True)
+    strong = [m for m in msl if zip_gate(m)
+              and all((fscore(m, f)[1] or 0) >= 0.95 for f in ("county", "city"))
               and (fscore(m, "streetName")[1] or 0) >= 0.90]
+    zip_adopted = not ro_zip_given
     if len(strong) != 1:
-        return "manual", None, "%d candidați (zip/oraș/județ≥0.95, stradă≥0.90)" % len(strong)
+        crit = "zip/oraș/județ≥0.95, stradă≥0.90" if ro_zip_given else "oraș/județ≥0.95, stradă≥0.90 (zip lipsă→nomenclator)"
+        return "manual", None, "%d candidați (%s)" % (len(strong), crit)
     m = strong[0]
     czip = str(fscore(m, "zipCode")[0] or "")
     ccity = fscore(m, "city")[0] or ad.get("city") or ""
@@ -645,7 +655,8 @@ def correct_address(xc, o, shop_domain, apply=False):
         applied["city"] = ccity.title()
     applied["zip"] = czip
     applied["address1"] = new_a1
-    detail = "%s, %s %s (%s)" % (new_a1, applied.get("city"), czip, applied.get("province"))
+    detail = "%s, %s %s (%s)%s" % (new_a1, applied.get("city"), czip, applied.get("province"),
+                                   "  [zip din nomenclator — input lipsă/invalid]" if zip_adopted else "")
     if not apply:
         return "would-correct", applied, detail
     body = {"orderId": oid,
@@ -653,8 +664,10 @@ def correct_address(xc, o, shop_domain, apply=False):
                               _digest({k: _fold(str(v)) for k, v in ad.items()}, 12), _digest(applied, 12)),
             "appliedShippingAddress": applied,
             "expectedAddressHash": d.get("addressHash"), "expectedStatusHash": d.get("statusHash"),
-            "expectedEvidenceHash": d.get("evidenceHash"), "agentClaimedConfidence": 0.96,
-            "agentRationale": "Single canonical candidate, all core fields >=0.95, zip confirmed, house number preserved.",
+            "expectedEvidenceHash": d.get("evidenceHash"), "agentClaimedConfidence": 0.95 if zip_adopted else 0.96,
+            "agentRationale": ("Single canonical candidate; county/city/street strong; input zip missing/invalid so zip adopted from the canonical candidate and confirmed via /zip-code; house number preserved."
+                               if zip_adopted else
+                               "Single canonical candidate, all core fields >=0.95, zip confirmed, house number preserved."),
             "modelName": "gigi-xconnector", "mcpClientId": "gigi-xconnector"}
     s, b = http("POST", XBASE + "/api/orders/ai-correct-address", xc.h, body)
     return ("corrected" if s == 200 else "error:%s" % s), applied, detail
