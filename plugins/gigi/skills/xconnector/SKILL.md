@@ -112,12 +112,14 @@ xConnector a adăugat (2026-06) filtre pe `getOrders`, expuse prin comanda **`or
 - **ce comandă** e + **status** (adresă VALID/WRONG · AWB făcut/fără · expediat/neexpediat · **livrare REALĂ** din AWBprint `aggregated_status`: waiting_for_courier/in_transit/delivered/refused…);
 - **linkuri**: Shopify admin (`/admin/orders/<orderId>`), **xConnector dashboard** (`/shop/<domain>/order?orderId=<merchantOrderId>` — atenție: dashboard-ul folosește `merchantOrderId`, NU orderId-ul Shopify!), **tracking** curier (`/track?connectorId&trackingNumber`).
 - **Mapare ID** (cheie): API `orderId` = ID Shopify; API `merchantOrderId` = ID-ul din URL-ul dashboard xConnector.
+- **RETURURI (BI Grandia → xConnector):** un retur/redirect creat în BI Grandia **NU e o comandă separată** — apare ca **etichetă SHIPPING_LABEL suplimentară pe comanda-părinte** (același `merchantOrderId`). Regula fiabilă: **o expediere = o singură etichetă** (2 colete = tot 1 AWB/etichetă), deci **prima** SHIPPING_LABEL = **DUS** (outbound), **oricare de după = RETUR/REDIRECT**. `links` le listează pe toate cu marcaj DUS/RETUR + status descărcat; dacă `--awb` e un AWB de retur, te duce pe comanda-părinte și te avertizează. **DA, retururile Grandia ajung în xConnector și se pot descărca** (verificat: GRAND18363 → dus `81326488944` + retururi `81326489142`/`81326489296`, toate DPD, toate descărcate). ⚠️ În DTO **NU există flag de retur** — singurul semnal e „a doua etichetă+"; AWBprint nu le distinge (DPD-urile de retur nici nu ajung în AWBprint, doar AWB-ul Frisbo de dus). Vezi [[bi-grandia-returns-xconnector]].
 
-**CS order-360 = ORCHESTRARE (nu duplic):** când CS întreabă despre o comandă, combină `links` (comandă+status+linkuri, xConnector+AWBprint) **+** `gigi:cs-customer-360` (alte comenzi ale clientului, LTV, refuzuri — din DB) **+** `gigi:cs-tickets`/Richpanel (tichetele clientului). Toate **fără Shopify live** (DB/Richpanel/xConnector). Căutare CS după **nume/telefon** → `gigi:cs-customer-360` (xConnector n-are filtru pe nume/telefon; doar order#/AWB).
+**CS order-360 = ORCHESTRARE (nu duplic):** când CS întreabă despre o comandă, combină `links` (comandă+status+linkuri, xConnector+AWBprint) **+** `gigi:cs-360 customer` (alte comenzi ale clientului, LTV, refuzuri — din DB) **+** `gigi:cs-tickets`/Richpanel (tichetele clientului). Toate **fără Shopify live** (DB/Richpanel/xConnector). Căutare CS după **nume/telefon** → `gigi:cs-360 customer` (xConnector n-are filtru pe nume/telefon; doar order#/AWB).
 
 ### `print-batch` — PRINT în depozit (descarcă etichetele nedescărcate, grupate pe produs/cantitate/dată)
 `uv run xconnector.py print-batch [--shop a,b] [--sku HA-0002] [--total-items 1] [--from <d> --to <d>] [--sort sku] [--limit N] [--apply]`.
 Selectează etichetele **nedescărcate** (`downloaded=false` = coada de print), le **descarcă** (PDF), le pune într-un **batch PDF merged** în ordinea grupată, scrie un **log CSV cu `downloaded_at`** (audit „când s-a printat"), apoi **trimite direct în coada imprimantei**. Rulează **LOCAL** (mașina cu imprimanta — are uv + acces la secrete).
+- 🔁 **DOAR eticheta de DUS, NICIODATĂ retururile.** `print-batch` și `not-downloaded` folosesc `awb_doc()` = **prima** SHIPPING_LABEL (outbound); etichetele de RETUR/REDIRECT (a doua+, `return_labels()`) **nu intră în coada de print** — ele **pleacă de la client**, nu se printează în depozit. (Nu descărca returul odată cu restul AWB-urilor la print.)
 - **Imprimantă „aleasă o dată, ținută minte"**: la **prima** rulare cu `--apply` te întreabă imprimanta (listă din sistem), o **salvează** în `~/.arona_printbatch.json`, iar de la a doua rulare merge **DIRECT în coadă** — fără Chrome, fără Ctrl+P. Trimite **toate** batch-urile (mono+multi), nu doar primul. `--choose-printer` = re-alege · `--printer "Nume"` = o setezi din comandă (+ o reține) · `--print-dialog` = revii o dată la dialogul vechi.
 - **Cum trimite silent pe Windows (fără instalări obligatorii)**, în cascadă: **SumatraPDF** `-print-to` dacă e (cel mai curat) → verbul shell **`printto`** (Edge/Adobe, oricare imprimantă) → verbul **`print`** pe imprimanta **default** (zero-install). Dacă niciuna nu merge sau nu e TTY → cade pe dialog: **Chrome → Ctrl+P** (cum deschidea xConnector), macOS Preview+Cmd⌘P, Linux xdg-open.
 - **Grupare**: implicit `sort=sku` → toate „1×SKU1" împreună, apoi „1×SKU2"… Filtre: `--sku` (produs, potrivire exactă), `--total-items` (cantitate), `--from/--to` (interval, yyyy-MM-dd sau DD/MM/YYYY).
@@ -188,14 +190,25 @@ Connector de facturare = tip **SMART_BILL** (ales automat dacă e unul singur; a
 - Cheile **nu se printează niciodată**. Din **2026-06-24** avem chei pe **toate cele 19 magazine active**
   (toate cu `ROLE_AUTOMATION` + 17 permisiuni, expiră 22-sep-2026), nu doar George Talent.
 
-## Magazine EXTERNE (CZ/PL/BG) — validate cu HERE Geocoding, curier DPD Romania
+## Magazine EXTERNE (CZ/PL/BG/HU/SK) — nomenclator național + HERE Geocoding, curier DPD Romania
 Validatorul de adrese xConnector e **centrat pe România** → magazinele externe (**Bonhaus CZ `vthuzq-7j`,
-PL `f0yrmh-ia`, BG `ux1x6n-n2`**) primesc `WRONG`/`UNKNOWN` în masă (false-positive, BG ~98%). KPI-ul nostru e
-**AWB făcut**, deci pe externe `fulfill` NU folosește validatorul RO, ci **HERE Geocoding** (`here_validate`,
-cheie KB `HERE_API_KEY`): geocodează adresa în `countryCode` (CZE/POL/BGR) și dacă `queryScore ≥ 0.9` (`HERE_MIN_SCORE`)
-→ face AWB; sub prag (sau eroare HERE) → **fail-closed** = lasă la CS, nu face AWB. Curier = **DPD Romania**
-(livrează cross-border, ca toate). Externele **NU intră** în corecția de text RO (`ai-correct-address`) — doar HERE da/nu.
+PL `f0yrmh-ia`, BG `ux1x6n-n2`, HU `63e901-2f`, SK `16w7xv-0w`**) primesc `WRONG`/`UNKNOWN` în masă (false-positive, BG ~98%). KPI-ul nostru e
+**AWB făcut**, deci pe externe `fulfill` NU folosește validatorul RO, ci **întâi nomenclatorul național** (`intl_nomen`
+dispatcher: CZE→`cz_addresses`, POL→`pl_addresses`, BGR→`bg_localities`, **HUN/SVK→`geonames_localities`+`geonames_streets`**),
+apoi **HERE Geocoding** ca fallback (`here_validate`, cheie KB `HERE_API_KEY`): geocodează adresa în `countryCode` și dacă
+`queryScore ≥ 0.9` (`HERE_MIN_SCORE`) → face AWB; sub prag (sau eroare HERE) → **fail-closed** = lasă la CS, nu face AWB.
+Curier = **DPD Romania** (livrează cross-border, ca toate). Externele **NU intră** în corecția de text RO (`ai-correct-address`).
 Test CZ (dry-run): din 52 unfulfilled, 31 validate HERE → AWB, 21 chiar proaste → CS. Cheile lor rămân utile și pt AWB/facturi.
+
+**HU/SK nomenclator (`geonames_nomenclator.py`, 2026-07-27)** — sursă **GeoNames postal** (`geonames_localities`: HU 3571 + SK 5233)
++ **street-level din OSM** (`geonames_streets`: HU 43.762 + SK 27.799 străzi, din Geofabrik `.pbf` via `geonames_streets_build.py`).
+`gn_validate_and_correct` (generic per țară): (1) localitate reală → valid, zip lipsă → completează **din STRADĂ** (cod
+poștal stradă-specific, `find_street` fuzzy ≥0.86) sau din localitate; (2) zip→oraș (`locality_for_pc`, **space-agnostic** —
+SK stochează „974 01", clientul dă „97401"); (3) typo localitate fuzzy ≥0.9; (4) → HERE. **De ce street-level:** la orașe
+mari zip-ul „central" al localității e greșit — Budapest+„Váci utca" → **1052** (District V), NU zip generic Budapest;
+Bratislava+„Hlavná" → **83101**. Verificat pe **comenzi reale**: Bonhaus HU 800 → **100% rescue** (414 străzi confirmate în OSM),
+SK 800 → **99% rescue** (412 confirmate; 3 reziduu = garbage real: adresă PL pe magazin SK, zip invalid+typo). Rebuild nomenclator:
+`uv run geonames_streets_build.py HU hungary.osm.pbf` (idempotent, DELETE per-country + COPY). Tabelele-s în `metrics.public` (central → cronul VPS le citește).
 
 ## Siguranță (corecția de adrese)
 Corecția urmează porțile skill-ului oficial xConnector **aac** (`/agentic-address-correction`), conservator:
@@ -234,8 +247,74 @@ de N min** (Flow a avut timp și n-a făcut AWB):
   (7 zile) → îi fac AWB; **cele VECHI** → le **anulez** (reason OTHER, fără refund/restock/notify, **protecție livrare**: nu anulez
   ce a plecat). **CS-placed / draft order** (tag agent CS sau `sourceName=shopify_draft_order`) → **NU se dedup-ează, dar PRIMESC AWB**.
   Fără client / status incert → NU expediez, NU anulez (conservator — erorile API cad pe „skip").
+- **`t` în NOTE = CS a corectat manual → DE TRIMIS** (cerut de owner). CS pune marker-ul `t` în nota comenzii
+  după ce corectează adresa. `fulfill` îl detectează (`t` ca token de sine stătător, case-insensitive: „t"/„T"/„corectat t"
+  → da; „trimite"/„test" → nu) și **forțează AWB**, sărind ruta WRONG→CS. ⚠️ Aplică TOTUȘI corecția automată
+  (nomenclator RO / intl) înainte — „poate CS n-a verificat exact zip-ul". Dar **`t` NU face o adresă genuin greșită să
+  devină bună**: dacă rămâne `WRONG`, DPD tot respinge AWB-ul (→ eșec/retry) — atunci CS trebuie să repare **adresa
+  reală** în Shopify, nu doar să pună `t`. Dedup rămâne activ (rulează înaintea deciziei de adresă).
+- **`fără xc` → tag `i` AUTOMAT.** Comenzile unfulfilled+open care NU apar în xConnector (nesincronizate) nu pot primi
+  AWB; `fulfill --apply` le pune tag-ul **`i`** în Shopify (idempotent) ca să fie găsibile (filtru pe tag). Cerut de owner:
+  „când nu apar, pus tag".
+- **DEJA EXPEDIAT (fulfillment anulat) → NU re-expedia** (gardă anti-dublă-expediere). O comandă LIVRATĂ căreia i s-a
+  ANULAT fulfillment-ul reapare în Shopify ca `unfulfilled+open` (deși are tracking). `shopify_unfulfilled` citește
+  `fulfillments.trackingInfo`; dacă are ORICE tracking → `shipped=True` → `fulfill` o **sare** (contor
+  `deja-expediat-fulfillment-anulat`). Fără asta, cronul i-ar face AWB NOU = coletul pleacă de 2 ori (bani pierduți).
+  **Fix-ul pt astea = re-pune fulfillment-ul** cu tracking-ul original (`fulfillmentCreateV2`, `notifyCustomer:false`) +
+  marchează paid dacă nu e. Incident 25-iul: 7 comenzi (5 CZ Packeta + Lux + Nubra), toate PAID+livrate, fulfillment
+  anulat → re-fulfilled. Vezi [[fulfillment-cancelled-reship-guard]].
+- **ZIP LIPSĂ RO → cod GENERAL al orașului** (`ro_city_general_zip`, în `nomenclator_correct`), cu GARDĂ pe
+  mărimea localității. Când zip-ul lipsește și strada e REALĂ dar neindexată în nomenclator/HERE (owner: „zip-ul
+  e pentru străzile care nu-s indexate altfel"), iar ORAȘUL e valid → `MIN(cod_postal)` pe localitate din
+  `romania_addresses` (codul general, ex. Buzău→120001, Constanța→900003, Oradea→410001). Data-driven, orice oraș.
+  **Gardă (owner):**
+  - **Oraș MARE** (`ro_city_is_big` = >25 coduri poștale distincte pe localitate) → codul general se aplică DOAR
+    dacă adresa are **stradă+număr real**, căutat în TOATE câmpurile (a1/a2/oraș/județ — „adresa poate fi oriunde";
+    `_addr_has_street_and_number`). Fără stradă+număr (doar oraș / „undefined" / nume firmă) → **CS**.
+  - **RURAL/sat mic** → merge și FĂRĂ număr (numele localității ajunge curierului); dacă n-are stradă deloc →
+    **„Strada Principală"** (+ nr dacă e undeva; `_rural_street`).
+  - ⚠️ Străzile INDEXATE (ex. **Bulevardul Mamaia** Constanța, cu intervale de numere: nr.1→900697, nr.20→900673,
+    nr.100→900527) sunt rezolvate SPECIFIC de nomenclator (conștient de `numar` = interval) — NU cad pe codul general.
+    Abrevierile („bvd."/„b-dul"/„bd") se expandează la „Bulevardul" în pre-clean, deci se leagă de nomenclator.
+  NU suprascrie un zip existent. Deblochează cat. „zip lipsă" (~25% din reziduul CS). Vezi [[address-correction-rules]].
+- **Field-agnostic (owner „orice câmp de adresă poate fi în ORICE câmp")** — set de reguli în pre-clean-ul
+  `nomenclator_correct`, din analiza cozii CS (`cs_queue.db`): **(a)** ZIP din orice câmp (`_zip_from_fields` +
+  gardă `_zip_matches_city` să nu contrazică orașul — ex. nu suprascrie Buzău cu 905800=Constanța); **(b)** city
+  cu „Județ X" (inclusiv diacritice Ț/ț: „ZalĂu JudeȚ SĂlaj"→„Zalău", apoi județ-din-oraș→Sălaj); **(c)** termeni
+  MAGHIARI (`_translate_hungarian`: „Palás köz 7 szám"→„Aleea Palás nr 7"; univoc: utca/tér/köz/körút/szám/megye,
+  nu „ter"/„ut" simple); **(d)** typo „Stada"→„Strada". ⚠️ Nomenclatorul PRINDE DEJA: sat/comună din a1
+  (Fulga/Parța/Chirileu), zip-in-city-field („305600"→Sânnicolau Mare), Sector→București, deglue — reziduul era
+  stuck pe APLICARE (cache `.here_ok`, reparat), nu pe reguli lipsă.
+- **JUDEȚ din ORAȘ** (`ro_judet_from_city` în pre-clean-ul `nomenclator_correct`). Owner: „orice câmp poate fi
+  în orice câmp" — câmpul `province` e des defaultat GREȘIT (Slatina/Constanța/Voluntari/Câmpina puse ca
+  „București"; sectoare Buc puse ca „Ilfov"). Dacă orașul e NE-ambiguu în nomenclator (sau municipiu dominant la
+  omonime: Slatina→Olt, nu satele omonime) și județul diferă → OVERRIDE province cu județul orașului, ÎNAINTE de
+  lookup (scopează corect + fixează bug-ul „Slatina→a matchuit o stradă în București"). Sub-tipar dominant în
+  reziduul CS: **București↔Ilfov** (Voluntari/Chiajna/Mogoșoaia = Ilfov). Măsurat ~30 din reziduu. Vezi [[address-correction-rules]].
+- **Fallback DPD general-zip la AWB-make** (`ro_genzip_fallback` în `_do_awb`, RO-only, o dată/comandă via
+  `.ro_genzip_fixed`). Owner: „dacă nu merge [zip-ul specific] să faci AWB la DPD, pune codul general". Când DPD
+  respinge PERMANENT (non-tranzitoriu — ex. `receiver.address.siteId.valid-locality-id`, NU „was not created")
+  un zip specific → pune codul GENERAL al orașului → reîncearcă O DATĂ. Rulează DUPĂ `dpd_fix_locality` (findSite pe
+  zip) + phone-fix, ÎNAINTE de escaladarea agentică. (Un cod poștal specific descoperit se poate salva permanent în
+  nomenclator, ex. Șoseaua Nordului Buzău→120320: `INSERT` în `romania_addresses`, rolul `scraper` are drept.)
+- **SNAP la strada CURIERULUI** (`courier_street_snap` în `nomenclator_correct`). Owner „dacă mai igienizăm":
+  când nomenclatorul RO zice adresa validă DAR curierul (xConnector) o ține **WRONG/UNKNOWN** fiindcă strada nu-i
+  în baza LUI, validatorul curierului sugerează strada apropiată (`addressMatchers[].streetName`). Dacă **scor≥0.80
+  ȘI string-similară** cu ce a scris clientul → folosim sugestia (păstrând nr casă): „Bulevardul.Tineretului"→
+  „tineretului" (0.87)→VALID · „Leghes"→„leghesului" · „Mureșului"→„mureș". **GARDĂ obligatorie de similaritate**:
+  „Minovici"→„caloian vasile" (scor 0.80 dar stradă COMPLET diferită) e RESPINS (difflib+prefix). Ce nu are sugestie
+  bună (Arțarului 0.41) → CS. Dovedit: EST221376 a devenit VALID.
+- **Recuperare la fails==2** (`_do_awb`): când `correct_address` (xc.match, conservator) dă „manual", cheamă și
+  `nomenclator_correct` (bogat: pre-clean/deglue/fix-JUDEȚ/snap-curier) — prinde comenzi altfel pierdute via-HERE.
+- ⚠️ **Citirea adreselor în masă: RETRY pe `by_id`.** La colectare paralelă (>~8 workeri), `xcl.by_id(orderId)` poate
+  pica pe rate-limit și întoarce gol → **NU trata „adresă goală" ca reală** (poate fi doar fetch eșuat). Fă retry
+  (3-4×, backoff) + concurență mică. `by_id` e METODĂ pe instanța XC (`xcl.by_id`), NU pe modul. Câmpul `shippingAddress`
+  (+ `originalCustomerAddress`, `latestAddressValidation.addressMatchers` = motivul WRONG pe componente zip/oraș/stradă).
 - **Grandia auto-rutează** (voluminos → Dragon Star, restul DPD) — nu mai trebuie `--exclude`. Sare automat magazinele cu AWB deja făcut.
 - **Dry-run by default.** Sursa „plecat" = AWBprint. Consistent cu cele 2 Shopify Flow-uri de duplicate (NU le înlocuiește — le completează).
+- **Stare/cache** (`.cron_giveup`/`.here_ro_nogo`/`.held_sweep`/`.awb_failcount`/`.dpd_corrected`/`.intl_sanitized`/`.ro_phone_fixed`/`.ro_genzip_fixed`):
+  fac cronul să SARĂ backlog-ul deja încercat. Ca să re-încerci TOT de la zero (ex. după ce CS a corectat în masă),
+  **șterge-le** (păstrează dedup-ul — ăla e pe tag-uri Shopify, nu pe fișiere). `--held-sweep-hours 0` forțează hold-urile.
 
 ## Cron (VPS)
 `correct --apply` rulează periodic pe VPS (flock + log, `0 8-20 * * *`): corectează automat ce e sigur, sare

@@ -1,0 +1,21 @@
+# Fișiere de STARE runtime (cache-uri corecție adrese, cursoare cron) — generate pe VPS, NU în git
+.awb_events.jsonl
+.awb_failcount
+.cron_giveup
+.cron_held
+.dpd_corrected
+.fulfill_cursor
+.held_sweep
+.here_ro_nogo*
+.here_ro_ok
+.intl_sanitized
+.nomen_health.json
+.ro_genzip_fixed
+.ro_phone_fixed
+.bak_pre_*
+# Backup-uri de dezvoltare
+*.bak
+*.bak_*
+*.py.bak*
+__pycache__/
+*.pyc

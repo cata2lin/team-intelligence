@@ -22,6 +22,38 @@ def norm_lat(s):
 def pc4(z):
     d = re.sub(r"\D", "", z or ""); return d if len(d) == 4 else ""
 
+# tip-arteră BG (ул.=улица/stradă, бул.=булевард, пл.=площад/piață, ж.к.=cartier) + bloc/intrare/etaj/ap — de scos
+_BG_ARTERY = re.compile(r"(?i)\b(ул|улица|бул|булевард|пл|площад|жк|ж\s*к|бл|блок|вх|вход|ет|етаж|ап|апартамент|"
+                        r"ul|bul|pl|str|ulica|bulevard|no|nr|№)\b\.?")
+def _bg_street_core(a1):
+    """Numele străzii din a1 BG: scoate tipul de arteră + tot de la primul NUMĂR (nr casă + bloc/etaj). Pt match în bg_streets."""
+    s = norm_cyr(a1)                    # lowercase cirilic, alnum+space
+    s = _BG_ARTERY.sub(" ", s)
+    s = re.sub(r"\d.*$", "", s)         # taie de la prima cifră (nr casă + restul)
+    return re.sub(r"\s+", " ", s).strip()
+
+def find_street(cur, locality, a1):
+    """Potrivește STRADA clientului în bg_streets (pt localitate) → cod poștal STRADĂ-specific (mai precis decât
+    cel al localității). Fuzzy pe street_norm (cirilic) / street_lat (transliterat), prag 0.86. None dacă nu leagă.
+    BG e locality-driven → asta NU respinge, doar RAFINEAZĂ zip-ul când strada chiar există."""
+    core = _bg_street_core(a1)
+    if not core or len(core) < 3:
+        return None
+    try:
+        cur.execute("SELECT street_norm, street_lat, postcode FROM public.bg_streets WHERE city_norm=%s", (norm_cyr(locality),))
+        rows = cur.fetchall()
+    except Exception:
+        return None
+    if not rows:
+        return None
+    from difflib import SequenceMatcher
+    lat = norm_lat(core); best_pc = None; best_r = 0.0
+    for sn, sl, pc_ in rows:
+        r = max(SequenceMatcher(None, core, sn or "").ratio(), SequenceMatcher(None, lat, sl or "").ratio())
+        if r > best_r and pc_:
+            best_r = r; best_pc = pc4(pc_)
+    return best_pc if (best_r >= 0.86 and best_pc) else None
+
 # ridicare de la oficiu curier / punct de livrare -> strada irelevanta, adresa e livrabila
 _OFFICE = re.compile(
     r"(офис|еконт|еконтомат|спиди|спийди|автомат|автогара|куриер|до\s*офис|пощ|каса\s*на|"
@@ -56,8 +88,10 @@ def find_locality(cur, cands):
     """intoarce (name, postcode) daca vreo varianta se potriveste (cirilic sau transliterat latin)."""
     for c in cands:
         if not c: continue
+        # PREFERĂ rândul CU cod poștal (localitatea are multe rânduri — nodul place e des fără postcode; altul îl are)
         cur.execute("""SELECT name, postcode FROM public.bg_localities
-                       WHERE name_norm=%s OR name_lat=%s ORDER BY cnt DESC LIMIT 1""", (c, norm_lat(c)))
+                       WHERE name_norm=%s OR name_lat=%s
+                       ORDER BY (postcode IS NOT NULL AND postcode<>'') DESC, cnt DESC LIMIT 1""", (c, norm_lat(c)))
         r = cur.fetchone()
         if r: return r[0], r[1]
     return None
@@ -105,10 +139,17 @@ def bg_validate_and_correct(cur, city, zip_, address1, address2=""):
     if is_office(a1) or is_office(a2) or is_office(cty):
         return {"status": "valid", "address": None, "note": "ridicare de la oficiu curier"}
 
-    # 2) localitatea clientului e reala -> valid (BG locality-driven; strada/numar optionale)
+    # 2) localitatea clientului e reala -> valid (BG locality-driven; strada/numar optionale).
+    #    ZIP-FILL (owner): dacă lipsește codul poștal (4 cifre) → completează-l — STRADĂ-specific din bg_streets
+    #    dacă strada se potrivește (mai precis), altfel reprezentativul localității din bg_localities.
     cands = city_candidates(cty)
     loc = find_locality(cur, cands)
     if loc:
+        if not pc:
+            z = find_street(cur, loc[0], a1) or (pc4(loc[1]) if loc[1] else "")
+            if z:
+                return {"status": "corrected", "address": {"city": loc[0], "zip": z, "address1": a1},
+                        "note": "localitate reala (%s) + zip completat %s" % (loc[0], z)}
         return {"status": "valid", "address": None, "note": "localitate reala (%s)" % loc[0]}
 
     # 3) localitate negasita -> relocheaza din cod postal (4 cifre)
