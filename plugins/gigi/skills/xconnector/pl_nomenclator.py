@@ -112,9 +112,10 @@ def pl_validate_and_correct(cur, city, zip_, address1, address2=""):
     n = bldg_number(address2, address1)         # numărul e des în address2 ('2m39'); apoi address1
     par = None if n is None else n % 2
 
-    # curierul are nevoie de numar casa; fara el = incomplet -> CS
-    if n is None:
-        return {"status": "cs", "address": None, "note": "fara numar casa"}
+    # PL: adresele FĂRĂ număr SE LIVREAZĂ (istoric 16.216 livrate → 99 fără număr = 0,6%; mai rar ca CZ 3,7%,
+    # dar curierul PL livrează pe stradă+oraș+cod, mai ales la sate). NU mai blocăm pe lipsa numărului — lăsăm
+    # strada/localitatea/codul să decidă (valid/corrected = livrabil); localitate proastă ⇒ needs_geocoder → CS.
+    # (decizie user 2026-07-25, ca la CZ.) `n=None` e tolerat mai jos (pick_postcode primește None doar cu gardă).
 
     # 1) strada exista in vreo varianta de localitate? -> adresa e REALA (livrabila chiar daca HERE a picat)
     #    free-first: codurile PRG au erori spatiale + clientul isi stie codul -> daca a dat un cod valid, il PASTRAM;
@@ -124,7 +125,7 @@ def pl_validate_and_correct(cur, city, zip_, address1, address2=""):
         if rows:
             if pc:
                 return {"status": "valid", "address": None, "note": "strada exista + cod prezent (pastrez codul clientului)"}
-            chosen = pick_postcode(rows, n, par)
+            chosen = pick_postcode(rows, n, par) if n is not None else None  # fără număr: nu putem alege pe paritate
             if chosen:
                 return {"status": "corrected", "address": {"city": city, "zip": chosen, "address1": address1},
                         "note": "cod lipsa derivat din strada+numar (paritate)"}
