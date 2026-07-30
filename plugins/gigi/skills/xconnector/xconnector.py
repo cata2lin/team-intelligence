@@ -2818,12 +2818,12 @@ def intl_genzip_fallback(xc, o, shop_domain, country):
         return False
     canon = None
     try:
-        if country == "BG":
+        if country == "BGR":   # HERE_COUNTRY dă coduri de 3 litere (BGR/CZE/POL), NU 2 (BG/CZ)
             import bg_nomenclator as BG
             loc = BG.find_locality(mcur, BG.city_candidates(city))
             if loc and loc[1]:
                 canon = BG.pc4(loc[1])
-        elif country == "CZ":
+        elif country == "CZE":
             import cz_nomenclator as CZ
             from collections import Counter
             rows = CZ.load_by_locality(mcur, CZ._cz_city_denoise(city))
