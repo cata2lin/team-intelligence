@@ -1,0 +1,4 @@
+.dup_guard_handled
+*.bak
+*.bak_*
+__pycache__/
