@@ -89,5 +89,34 @@ def xc_inv_make(order: str, apply: bool = False) -> str:
     """Creează factură pt o comandă (SmartBill). DRY-RUN dacă apply=false."""
     return _run(XC,["inv-make","--order",order]+(["--apply"] if apply else []))
 
+
+# ─── Tracking multi-curier + livrabilitate (erau doar CLI) ───────────────
+AWBTRACK=os.path.join(HERE,"..","awb-track","awb_track.py")
+DELIV=os.path.join(HERE,"..","deliverability-monitor","deliverability_monitor.py")
+
+@mcp.tool()
+def awb_track(awb: str = "", courier: str = "", problems_only: bool = False) -> str:
+    """Status LIVE la unul sau mai multe AWB-uri, pe orice curier (DPD/Sameday/Econt/Packeta).
+    awb = unul sau mai multe separate prin virgulă. problems_only=true arată doar cele blocate.
+    Pentru statusul din baza noastră (fără să lovești curierul), folosește `xc_links`."""
+    a=[]
+    for x in [s.strip() for s in awb.split(",") if s.strip()]:
+        a+=["--awb",x]
+    if courier: a+=["--courier",courier]
+    if problems_only: a.append("--problems")
+    return _run(AWBTRACK,a,timeout=300)
+
+@mcp.tool()
+def deliverability(brand: str = "", by: str = "", month: str = "",
+                   min_sent: int = 0, limit: int = 40) -> str:
+    """Scurgerea de bani din REFUZURI / livrări eșuate, pe magazin sau altă dimensiune.
+    by = dimensiunea de grupare; month = YYYY-MM. Complementar cu `arona-cs-guard`,
+    care dă cozile de acțiune, nu diagnosticul agregat."""
+    a=[]
+    for k,v in (("--brand",brand),("--by",by),("--month",month),
+                ("--min-sent",min_sent),("--limit",limit)):
+        if v: a+=[k,str(v)]
+    return _run(DELIV,a,timeout=420)
+
 if __name__=="__main__":
     mcp.run()
