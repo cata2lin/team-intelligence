@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["mcp>=1.2","psycopg2-binary>=2.9","requests>=2.31"]
+# dependencies = ["mcp>=1.2,<2","psycopg2-binary>=2.9","requests>=2.31"]
 # ///
 """arona-ads MCP — un singur server peste TOT ce ține de Google Ads + Merchant Center (+ Shopify, adăugat separat).
 
