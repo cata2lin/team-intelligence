@@ -107,6 +107,10 @@ def pl_validate_and_correct(cur, city, zip_, address1, address2=""):
         city, zip_ = zip_, city
     street, _ = parse_street_number(address1 or "")
     sn = norm(street); pc = pc_norm(zip_)
+    # FĂRĂ STRADĂ reală (clientul a scris „nie ma ulicy"/„brak ulicy"/gol): localitatea poate fi validă DAR
+    # curierul cere o stradă → NU „valid" (ar duce la AWB nelivrabil) → status „cs" (contact client pt adresă).
+    if re.search(r"(nie\s*ma\s*ulic|brak\s*ulic|bez\s*ulic|niema\s*ulic|^\s*-*\s*$)", sn):
+        return {"status": "cs", "address": None, "note": "fără stradă reală (%s) → contact client pt adresă" % ((address1 or "gol")[:20])}
     cands = pl_city_candidates(city)
     cn = cands[0] if cands else norm(city)      # forma principală de localitate
     n = bldg_number(address2, address1)         # numărul e des în address2 ('2m39'); apoi address1

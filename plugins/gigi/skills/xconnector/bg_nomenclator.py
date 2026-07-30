@@ -57,8 +57,11 @@ def find_street(cur, locality, a1):
 # ridicare de la oficiu curier / punct de livrare -> strada irelevanta, adresa e livrabila
 _OFFICE = re.compile(
     r"(офис|еконт|еконтомат|спиди|спийди|автомат|автогара|куриер|до\s*офис|пощ|каса\s*на|"
-    r"econt|speedy|office|kurier|paketomat|dhl|gls|posta)", re.I)
+    # + transliterări LATINE frecvente pe care clienții le scriu (Еконт→Ekont cu k, Спиди→Spidi/Spedi):
+    r"econt|ekont|e-?kont|speedy|spidi|spiidi|spedi|spidy|office|ofis|ofice|kurier|courier|paketomat|dhl|gls|posta|bgpost)", re.I)
 def is_office(text): return bool(_OFFICE.search(text or ""))
+# „stradă lipsă" literală — clientul a scris explicit că n-are stradă (Няма / НямаС / nie ma / undefined)
+_NOSTREET = re.compile(r"(няма|nyama|nqma|nie\s*ma|undefined|^\s*-*\s*$)", re.I)
 
 # prefixe de tip localitate pe care le scoatem inainte de match
 _LOCPFX = re.compile(r"^(гр|град|с|село|общ|община|обл|област|кв|ж\s*к)\b\.?\s*", re.I)
@@ -138,6 +141,13 @@ def bg_validate_and_correct(cur, city, zip_, address1, address2=""):
     # 1) ridicare de la oficiu curier -> livrabila (strada/cod irelevante)
     if is_office(a1) or is_office(a2) or is_office(cty):
         return {"status": "valid", "address": None, "note": "ridicare de la oficiu curier"}
+
+    # 1b) FĂRĂ STRADĂ reală (Няма/НямаС/gol/doar-număr): localitatea poate fi validă DAR curierul cere o stradă
+    #     → NU întoarce „valid" (ar duce la AWB nelivrabil, refuzat de DPD), NU e office (verificat mai sus)
+    #     → status „cs": contact client pt stradă. (Distinct de needs_geocoder ca CS să știe EXACT ce lipsește.)
+    _core = _bg_street_core(a1)
+    if len(_core) < 2 or _NOSTREET.search(_core):
+        return {"status": "cs", "address": None, "note": "fără stradă reală (%s) → contact client pt adresă" % ((a1 or "gol")[:20])}
 
     # 2) localitatea clientului e reala -> valid (BG locality-driven; strada/numar optionale).
     #    ZIP-FILL (owner): dacă lipsește codul poștal (4 cifre) → completează-l — STRADĂ-specific din bg_streets
