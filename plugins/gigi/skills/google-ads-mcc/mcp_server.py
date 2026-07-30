@@ -202,5 +202,82 @@ def shopify_feed_gaps(prefix: str, limit: int = 40, enrich: bool = False, brand:
     r=subprocess.run(["uv","run",os.path.join(HERE,"shopify_feed_gaps.py")]+a,capture_output=True,text=True,env=env,timeout=320)
     return ((r.stdout or "").strip() or "(fără output)")+(("\n[stderr] "+r.stderr[:300]) if r.returncode!=0 else "")
 
+
+# ─── Ads intelligence (skill-uri surori, până acum doar CLI) ──────────────
+def _sib(skill, name, args, timeout=420):
+    """Rulează un script dintr-un skill FRATE (../<skill>/<name>)."""
+    r=subprocess.run(["uv","run",os.path.join(HERE,"..",skill,name)]+[str(x) for x in args],
+                     capture_output=True,text=True,env=_env(),timeout=timeout)
+    return ((r.stdout or "").strip() or "(fără output)")+(("\n[stderr] "+(r.stderr or "")[:300]) if r.returncode!=0 else "")
+
+@mcp.tool()
+def ads_anomalies(customer: str = "", recent: int = 7, baseline: int = 28, min_spend: float = 0) -> str:
+    """Detector de ANOMALII pe Google Ads — compară ultimele zile complete cu baseline-ul și scoate
+    deviațiile de spend/ROAS/CPA/CPC. ⚠️ Ultimele 1-2 zile mint mereu (lag de conversie) — vezi
+    `gigi:gads-verdict-traps`."""
+    a=["--recent",recent,"--baseline",baseline]
+    if customer: a+=["--customer",customer]
+    if min_spend: a+=["--min-spend",min_spend]
+    return _sib("ads-anomalies","scripts/anomaly_detector.py",a)
+
+@mcp.tool()
+def creative_fatigue(platform: str = "", recent: int = 7, baseline: int = 28,
+                     all_accounts: bool = False, min_spend: float = 0) -> str:
+    """Saturație de audiență / oboseală de creativ (Meta+TikTok): frecvență în creștere cu CTR în
+    scădere sau CPA în creștere, la nivel de cont. platform=meta|tiktok."""
+    a=["--recent",recent,"--baseline",baseline]
+    if platform: a+=["--platform",platform]
+    if all_accounts: a.append("--all")
+    if min_spend: a+=["--min-spend",min_spend]
+    return _sib("creative-fatigue","scripts/creative_fatigue.py",a)
+
+@mcp.tool()
+def campaign_structure(customer: str = "", brand_terms: str = "", margin: float = 0,
+                       delivery_rate: float = 0) -> str:
+    """Revizuire de STRUCTURĂ pe campaniile ENABLED — separarea brand/non-brand, suprapuneri,
+    ce ar trebui despărțit. brand_terms = csv."""
+    a=[]
+    if customer: a+=["--customer",customer]
+    if brand_terms: a+=["--brand-terms",brand_terms]
+    if margin: a+=["--margin",margin]
+    if delivery_rate: a+=["--delivery-rate",delivery_rate]
+    return _sib("campaign-structure","scripts/campaign_review.py",a)
+
+@mcp.tool()
+def budget_simulator(customer: str = "", campaign: str = "", days: int = 30,
+                     elasticity: float = 0, margin: float = 0, scenarios: str = "") -> str:
+    """Simulator „ce-ar fi dacă" pe buget — modelează efectul unei creșteri/scăderi.
+    ⚠️ Verifică ÎNTÂI costul MARGINAL real (Δspend/Δcomenzi): un CPA mediu sănătos poate ascunde
+    o scalare care pierde bani (`gigi:gads-verdict-traps`)."""
+    a=["--days",days]
+    for k,v in (("--customer",customer),("--campaign",campaign),("--elasticity",elasticity),
+                ("--margin",margin),("--scenarios",scenarios)):
+        if v: a+=[k,v]
+    return _sib("budget-simulator","scripts/budget_sim.py",a)
+
+@mcp.tool()
+def agency_audit(days: int = 30, from_date: str = "", to_date: str = "") -> str:
+    """Responsabilizarea agenției pe paid social — ce a rulat efectiv vs ce a raportat."""
+    a=[]
+    if from_date and to_date: a+=["--from",from_date,"--to",to_date]
+    else: a+=["--days",days]
+    return _sib("agency-audit","agency_audit.py",a)
+
+@mcp.tool()
+def cpa_report(brand: str = "", store: str = "", from_date: str = "", to_date: str = "") -> str:
+    """CPA per brand/magazin pe interval — pe comandă PLASATĂ. Praguri și reguli: `gigi:tcpa-policy`."""
+    a=[]
+    for k,v in (("--brand",brand),("--store",store),("--from",from_date),("--to",to_date)):
+        if v: a+=[k,v]
+    return _sib("cpa-report","scripts/cpa_report.py",a)
+
+@mcp.tool()
+def ads_transparency(region: str = "RO", limit: int = 20, samples: int = 0) -> str:
+    """Ce reclame rulează un competitor, din Google Ads Transparency Center (fără login).
+    Rank pe LONGEVITATE = cel mai bun proxy public de performanță."""
+    a=["--region",region,"--limit",limit]
+    if samples: a+=["--samples",samples]
+    return _sib("ads-transparency","adstransparency.py",a)
+
 if __name__=="__main__":
     mcp.run()
