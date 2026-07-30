@@ -125,6 +125,50 @@ Useful signals: `campaign.primary_status_reasons` = `BUDGET_CONSTRAINED` (→ sc
 - **Capcană GAQL:** `metrics.search_budget_lost_impression_share` NU se poate selecta în același query cu `campaign_budget` pe toate tipurile (PMax) → query-uri SEPARATE per câmp.
 - **Capcană shell:** NU face `gads.py … --format json | uv run -` cu un heredoc — `-` citește scriptul din stdin și ajunge să interpreteze JSON-ul ca cod (`name 'false' is not defined`). Salvează JSON-ul într-un fișier, apoi rulează formatter-ul pe fișier.
 
+## 0. MCP server „arona-ads" (`mcp_server.py`) — Google Ads + Merchant + Shopify într-un singur loc, ușor de rulat
+Strat SUBȚIRE peste engine-ul nostru (importă `gads.py`; restul prin subprocess pe scripturile TESTATE — zero duplicare).
+Read-only by default; **mutațiile Google Ads sunt DRY-RUN dacă nu pui `apply=true`**; **mutațiile Shopify cer `confirm_mutation=true`**
+(Shopify n-are dry-run). Credențiale din KB (self-provisioning la pornire), nu se printează. Python/FastMCP, stdio.
+**17 tool-uri:** `gads_accounts`, `gads_query` (GAQL raw), `gads_portfolio`, `gads_profit_verdict`, `gads_ngram`,
+`gads_negative_cleaner`, `gads_change_history`, `merchant_feed_health`, **`merchant_performance`** (clicuri/CTR/zombie per produs),
+`gads_set_budget/set_tcpa/set_status/add_negatives/add_keywords` (gated), `shopify_stores`, `shopify_graphql` (gardă mutații),
+**`shopify_feed_gaps`** (produse fără productType → `--enrich` rulează feed_attr_filler).
+> 🔗 **Chain feed-revival:** `merchant_performance` (zombie 0-clicuri) → `shopify_feed_gaps` (productType lipsă) → `feed_attr_filler` (titlu/atribute).
+> ⚠️ **uv nested:** tool-urile care fac subprocess `uv run` scot `VIRTUAL_ENV` din env (`_env()`), altfel copilul erediează venv-ul greșit.
+```bash
+# înregistrare (user-scope, disponibil în toate sesiunile):
+claude mcp add --scope user arona-ads -- uv run /Users/gheorghebeschea/.claude/plugins/marketplaces/team-intelligence/plugins/gigi/skills/google-ads-mcc/mcp_server.py
+```
+> De ce MCP peste CLI-ul nostru (nu Composio/CLI-uri externe): tokenurile stau DOAR în KB (Composio = SaaS terț = încalcă regula),
+> avem reads+writes (Bin-Huang open-cli = read-only), și reutilizăm codul testat + disciplina dry-run. Merchant MCQL performance
+> reports (idee din nicolasacchi/merchant-cli) = de adăugat în Python, nu adopta binarul Go.
+
+## 1a. Tooling in-house adăugat (25-iul-2026, din deep research — capabilități pe care nu le aveam)
+Native Python, se leagă de wrapper-ul v21. Toate READ-ONLY / DRY (doar raportează candidați; aplici cu `add-negatives`/`add-keywords`).
+```bash
+# n-gram search-term mining (replică Optmyzr/Opteo): risipă (candidați negative) + câștigători (candidați keyword)
+uv run ngram_miner.py --customer 5031005158 --days 30 --brand "george talent,gt" --min-cost 25
+# negative cleaner: LLM (OpenAI din KB) marchează negativele PREA LARGI care blochează trafic legitim
+uv run negative_cleaner.py --customer 7566352958 --brand "Belasil — detergenți & curățenie RO" --limit 300
+# feed attribute filler (replică FeedGen): completează atribute lipsă + titluri long-tail pt „zombie products" PMax
+uv run feed_attr_filler.py --sample                       # sau --input produse.json/csv
+```
+- `ngram_miner.py`: agregă search_term_view în 1/2/3-grame (cost/conv/CPA), stopwords RO+EN, exclude brand; risipă = cost≥prag+0conv, câștigători = conv+CPA mic. **Complementul lipsă la `search_terms.py`** (ăla per-term; ăsta pe pattern).
+- `negative_cleaner.py`: trage negativele (campanie + liste partajate + ad-group), le clasează RISC/OK cu LLM în chunk-uri de 100 (retry pe 5xx). Complementar lui ngram (unul ADAUGĂ, altul scoate greșite).
+- `feed_attr_filler.py`: LLM → titlu optimizat + google_product_category + product_type + culoare/material + descriere. Scrii înapoi în Shopify (metafields) via `gigi:shopify-stores`. ⚠️ OpenAI 5xx tranzitoriu → are 6 retry-uri.
+
+### 🎯 Pârghia STRUCTURALĂ: Offline Conversions cu marja reală (bidding pe profit livrat, nu pe ROAS umflat)
+Capturezi `gclid` la landing → la status `delivered` (AWBprint) urci marja (`brand_pnl`) ca `conversion_value`. **🔬 Verificat live:** crearea acțiunii `UPLOAD_CLICKS` merge (200), DAR `uploadClickConversions` e **BLOCAT** pe tokenul nostru („use the **Data Manager API**; limited to existing users") → integrare nouă trebuie pe **Data Manager API**.
+- ✅ **Pas 1 REZOLVAT (25-iul): captură gclid pe toate 13 magazinele** — `uv run gclid_capture.py --stores GRAN,EST,GT,NUB,BELA,GEN,CARP,OFER,BON,CZ,PL,ROSSI,NOC --apply`. Injectează idempotent un snippet în `layout/theme.liquid` (gclid/gbraid/wbraid din URL → localStorage 90z → `/cart/update.js` o dată/sesiune → `order.customAttributes`). Shopify captează UTM(campanie) în customerJourney, dar **NU gclid** (curăță query-ul din landingPage) → de aia snippetul custom.
+  - 🐛 **Capcană idempotență:** marker-ul e `ar_cid_set` (literal REAL), NU `ar_gclid` (ăla e `'ar_'+k` concatenat, nu apare în sursă → ai re-injecta la infinit). 🐛 **Shopify Asset API = read-after-write lag** → verificarea imediată dă fals-negativ; verifică cu **delay 5-8s** (re-rulare dry: „DEJA are captura"=OK).
+- ⏳ Pas 2: onboarding **Data Manager API** (partea Google). ⏳ Pas 3: job zilnic upload. ⚠️ COD-form (Releasit/EasySell) — confirmă că atributul ajunge pe comandă. Vezi [[gads-external-tools-to-adopt]].
+
+### Modele adoptabile (rulează pe cloud-ul GPU Replicate/fal — NU pe Mac; toate comercial-OK UE unde marcat)
+- **Background-removal feed:** `ZhengPeng7/BiRefNet` (MIT). ⚠️ **NU `briaai/RMBG-2.0`** = CC BY-NC (capcană non-comercială). Batch peste pozele de produs → CTR Shopping.
+- **QA creative:** `rsinema/aesthetic-scorer` (MIT, CLIP, CPU) — scor 0-5 pe 7 dimensiuni, gate înainte de spend. Heuristic, nu predictor CTR.
+- **Copy RO local:** `OpenLLM-Ro` (RoLlama/RoMistral) pt RSA/PMax în română fără cost API — integrează în `gigi:ad-copy`. Licență per-model de verificat + eval pe limite de caractere.
+- **Playbook PMax:** `itallstartedwithaidea/agent-skills` (MIT) — SKILL.md `pmax-optimization` (asset groups, audience signals, search themes, URL-expansion, înlocuiește assets „Low" în 2 săpt). Strat de INSTRUCȚIUNI pt wrapper-ul nostru, nu tool nou.
+
 ## 1b. Keyword research — Keyword Planner (`kw_ideas.py`) — și pentru SEO
 Volume REALE de căutare lunară (RO) via `generateKeywordIdeas`. Read-only. **Util mai ales pt SEO** (gigi:shopify-seo): ce cuvinte au cerere → ce colecții/articole merită. Geo RO=2642, **limbă RO=1032 PESTE TOT** (și Keyword Planner ȘI targeting campanii — language constants sunt universale). 🔴 **NU 1038 = Catalană** (bug istoric care a lansat Gento/GT/Nubra/Carpetto/Ofertele pe catalană).
 ```bash
@@ -168,6 +212,38 @@ Template: **`build_belasil_nonbrand.py`** (adapt CID, names, keywords, RSAs). Ru
 - Create **PAUSED** so a human reviews before enabling (or enable via `set-status`).
 
 PMax is **not** built well via API — create it in the UI; use the API to attach assets (below) and optimize.
+
+## 3b. Create a **Standard Shopping** campaign (feed-only, zero creative) — testat: Casa Ofertelor 21-iul-2026
+Vehiculul corect când feed-ul e aprobat dar **nu ai încă creative** pt un asset group PMax (PMax cere ≥3 titluri,
+≥2 descrieri, logo 1:1, imagini 1.91:1 + 1:1). Shopping rulează 100% din feed. Când adaugi PMax mai târziu, **el
+preia automat prioritatea** peste Shopping pe aceleași produse → munca nu se pierde.
+
+### 🔴 `MAXIMIZE_CONVERSIONS` NU e permisă pe `advertising_channel_type: SHOPPING`
+→ `contextError: OPERATION_NOT_PERMITTED_FOR_CONTEXT`. Testat live: ✅ `maximizeConversionValue` · ✅ `targetSpend` ·
+✅ `manualCpc{enhancedCpcEnabled}` · ❌ `maximizeConversions`. La cont cu **ZERO istoric de conversii**, NU value-bidding
+(se sufocă, §257). Mergi pe **`MANUAL_CPC` + eCPC** cu plafon derivat: **CPC_max = breakeven_CPA × CR magazin**
+(ex. Casa Ofertelor `41 × 3,8% ≈ 1,50 RON`). După 15-30 conv → `MAXIMIZE_CONVERSION_VALUE`.
+
+### Rețeta (5 apeluri, în ordine)
+1. `campaignBudgets:mutate` → `{name, amountMicros, deliveryMethod:"STANDARD", explicitlyShared:false}`
+2. `campaigns:mutate` → `advertisingChannelType:"SHOPPING"`, `manualCpc:{enhancedCpcEnabled:true}`,
+   `shoppingSetting:{merchantId, feedLabel:"RO", campaignPriority:0, enableLocal:false}`,
+   `containsEuPoliticalAdvertising:"DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING"`, `status:"PAUSED"`
+3. `adGroups:mutate` → `type:"SHOPPING_PRODUCT_ADS"` + `cpcBidMicros`
+4. `adGroupAds:mutate` → `ad:{shoppingProductAd:{}}` (obiect GOL — imagine/titlu vin din feed)
+5. `adGroupCriteria:mutate` → `listingGroup:{type:"UNIT"}` fără `caseValue` = **„toate produsele"**
+Creează PAUSED, verifică `campaign.serving_status=SERVING`, apoi pornește. `feedLabel` = eticheta din Merchant Center.
+> ⚠️ `fieldError: REQUIRED "The required field was not present."` apare IDENTIC pe TOATE strategiile de licitare —
+> de fapt e `containsEuPoliticalAdvertising` (§3). Scoate `location.fieldPathElements` din eroare, nu ghici.
+> 🛵 **Magazin DEALS (Releasit/COD form) → rulează `cod_tracking.py --cid <cid> --apply` ca PAS 0**, ÎNAINTE să
+> judeci conversiile: COD-form-ul ocolește checkout-ul nativ → pixelul „Purchase" nu trage → **0 conv = tracking rupt,
+> NU trafic prost** (Casa Ofertelor 21-iul: 91 clk/zi, 0 conv → era Releasit). Pui `AW-…/label` în tab-ul app-ului COD.
+
+### 📉 Structura Shopping — NU rula campanii care se suprapun la aceeași prioritate
+Mai multe Standard Shopping pe **aceeași `campaignPriority`** care acoperă aceleași produse **CONCURĂ** între ele
+(Grandia 25-iul: 3 campanii toate pe prio 2 → cea slabă irosea buget). Fix: **pauzează loserul** (traficul curge la
+cea eficientă de aceeași prioritate) SAU tiering pe priorități 1/2/3. Segmentează pe `custom_label` (ex. conversion-rate),
+nu lăsa overlap la aceeași prioritate.
 
 ## 4. Video pipeline — upload to YouTube + attach to Performance Max
 Google Ads does **not** host raw video. Video assets are **YouTube videos** referenced by id. Two ways onto YouTube:
@@ -286,6 +362,32 @@ A PMax asset group needs a full set before it serves beyond Shopping. Build with
 - **Two separate "learnings".** *Bidding* learning resets on budget/tROAS changes (Belasil PMax: a 10-Jun tROAS change → ROAS −65% for ~2 weeks → **HOLD, don't keep touching it**). *Ad-strength* recompute (PENDING) is triggered by asset/text edits and is separate from bidding. Use `change_history.py` to see which change caused a drop before reacting.
 - **Ad Strength ≠ performance — don't chase EXCELLENT.** It's a Google guidance label; an AVERAGE asset group can print ROAS 37. Assets maxed on every lever (15/5/5 text + images + video + extensions, all diverse) still sit at AVERAGE because EXCELLENT is Google's opaque call — not always attainable. Rewriting copy on a *performing* campaign for the badge resets learning and can lower real ROAS. Fix genuinely repetitive/off-keyword copy (see **`gigi:ad-copy`**); leave the winners alone and optimise **profit**.
 
+## ⏱️ REGULA TIMESTAMP-URILOR — verifică ÎNTOTDEAUNA *când* + *cât a trecut* înainte de orice buget/bid
+> **NU te baza pe „am ridicat acum câteva minute" din memoria conversației.** O sesiune se compactează
+> și se reia peste ore/zile — „acum câteva minute" în dialog poate fi de fapt **3 zile** în timp real.
+> O decizie de scalare (a se așeza 1-3 zile; nu re-stivui în aceeași zi; „tot capped pe bugetul NOU → încă un pas")
+> depinde EXACT de câtă vreme reală a trecut. Dacă greșești ceasul, greșești decizia.
+
+**Ritualul obligatoriu înainte de a atinge un buget/target (fă-l de fiecare dată):**
+1. **Cât e ceasul ACUM** — `date "+%Y-%m-%d %H:%M %Z"` (nu presupune „azi/ieri" din memorie).
+2. **Când a fost modificat ULTIMA oară** bugetul/bidul acelei campanii — `change_history.py --customer <cid> --days 8`
+   (sursă autoritativă: `change_event`, cu user + valoarea veche→nouă). **Calculează Δ = acum − ultima modificare.**
+3. **Ce s-a întâmplat ÎNTRE TIMP + cum a evoluat** — s-a așezat? tot capped pe bugetul nou (util IERI)? CPA a driftat
+   (7z vs 30z)? → abia apoi verdictul: Δ<~1 zi = **NU re-stivui**; Δ 1-3 zile + tot capped + profitabil = **încă un ≤20%**;
+   Δ mare + necapat = orizontal.
+4. **Loghează cu data absolută** ce ai făcut (în memorie: „22-iul 17:59", nu „azi").
+
+> 🐛 `change_history.py` cerea `DURING LAST_N_DAYS` care e **INVALID pentru change_event** (INVALID_ARGUMENT) —
+> reparat 25-iul să folosească `BETWEEN` cu datetime explicit. Toate modificările noastre prin API apar sub
+> `contact@novosdigital.ro` (tokenul OAuth = contul agenției), nu sub un user uman.
+
+## 📉 LAG DE ATRIBUIRE — nu judeca o campanie pe ULTIMELE 1-2 zile de conversii
+Conversiile Google se atribuie cu ÎNTÂRZIERE (mai ales COD/PMax) → ultimele 1-2 zile arată **fals-puține** conversii.
+O zi recentă de „0 conv" pe 130 clicuri **NU** e colaps — se umple retroactiv. **Ia agregatul pe 7z**, nu ziua de ieri.
+*(Grandia Click Range 25-iul: vederea zilnică arăta 0 conv pe 24-iul → părea PMax care drenează; agregatul 7z real =
+17,5 conv la CPA 53 < BE 79 = sănătos. Era să pauzez o campanie bună pe zgomot de lag.)* Tool-ul `profit_verdict.py`
+sare deja peste ultimele 2 zile (fereastra așezată -8..-3) exact din motivul ăsta — aplică aceeași disciplină manual.
+
 ## 🚦 Rețetă COLD-START → SCALARE pe ETAPE (canonic — ce faci la fiecare stadiu al contului)
 > Fundamentat pe Google Ads Help + consens practicieni (2024-26) + datele noastre reale. **Regula de aur: „learning-ul" se măsoară în CONVERSII, nu zile** (~50 conv / 3 cicluri ca să se calibreze). O campanie cu <15 conv/lună poate sta în learning SĂPTĂMÂNI. **Toate pragurile = fereastră 30 zile, la nivel de campanie.**
 
@@ -304,6 +406,17 @@ A PMax asset group needs a full set before it serves beyond Shopping. Build with
 - **Lost IS (Rank) mare + cheltuie SUB buget** → **NU buget** (n-are ce face cu el) → **relaxează targetul** (`set-tcpa` în sus / `set-troas` în jos) **10-15%/pas**, sau bid mai agresiv. *(ex. GT Non-Brand: IS 10%, 87% lost rank → tCPA 15→22; Grandia Shopping-New tROAS 4 > ROAS real 3,2 = sufoca → 3,2.)*
 - **Orizontal ÎNAINTE de vertical** când e saturat (IS ~100% + volum plat): keywords non-brand noi, produse/asset groups noi, geo-uri, campanie **New-Customer** separată. Buget în plus pe o campanie saturată împinge spend în query-uri slabe → **CPA urcă**.
 - **Duplici un winner** doar pt teritoriu NOU (geo/segment): copia **reintră în learning de la zero** + pot canibaliza aceeași licitație. Preferă **buget-raise când e buget-limitat; duplicare doar când e saturat/teritoriu nou**.
+
+**🎯 DIRECȚIA target-ului — un tCPA/tROAS STRÂNGE doar campania de PESTE prag; sub prag o LĂRGEȘTE.**
+Un tCPA de 50 pe o campanie care rulează deja la CPA 36 nu o „disciplinează" — îi RIDICĂ plafonul de la ~36 la
+50 → cheltuie MAI MULT, la CPA mai mare. Deci un target de eficiență (ex. „tCPA 50 pe tot contul") se pune **DOAR
+pe campaniile al căror CPA curent e PESTE target**; pe cele deja sub el = contraproductiv (le scumpești). Verifică
+CPA-ul curent per campanie ÎNAINTE. *(Grandia 25-iul: tCPA 50 pus DOAR pe [Categorii de interese] (CPA 76>50);
+Shopping-New (48), Click Range (36), Low-promoted (36) lăsate — 50 le-ar fi lărgit.)*
+> ⚠️ **`set-tcpa` pe o campanie value-bidding (tROAS) COMUTĂ strategia** (MAXIMIZE_CONVERSION_VALUE→MAXIMIZE_CONVERSIONS)
+> → **resetează learning ~1-2 săpt**. Convertește DOAR campanii cu ≥15-30 conv/30z; NU reseta workhorse-ul (ex. o
+> campanie care e 67% din spend și deja la target) pt un câștig marginal. tROAS→tCPA = alegi COUNT peste VALOARE
+> (tCPA tratează o comandă de 50 și una de 500 la fel) — potrivit când AOV e uniform / vrei control pe cost.
 
 **Praguri de conversii ca să STRÂNGI bidding-ul (30 zile, per campanie):**
 - **Max Conversions fără target** = start (merge de la ~15-20 conv/lună). **tCPA**: 15 minim / **30 recomandat** (`set-tcpa`). **tROAS Search**: 15 minim / **50+ de încredere** (`set-troas`).
