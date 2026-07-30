@@ -64,7 +64,12 @@ def main():
     cid=a.customer; H=auth()
     days=min(a.days,30)
     if a.days>30: print("⚠ Google păstrează doar 30 zile de change history.")
-    where=f"change_event.change_date_time DURING LAST_{days}_DAYS"
+    # ⚠️ change_event NU acceptă `DURING LAST_N_DAYS` (dă INVALID_ARGUMENT) — cere OBLIGATORIU
+    # un interval BETWEEN cu datetime-uri explicite, fereastra ≤30 zile. now()+1zi ca prag sus (pad tz).
+    import datetime as _dt
+    _to=_dt.datetime.now()+_dt.timedelta(days=1); _from=_dt.datetime.now()-_dt.timedelta(days=days)
+    where=(f"change_event.change_date_time BETWEEN "
+           f"'{_from.strftime('%Y-%m-%d %H:%M:%S')}' AND '{_to.strftime('%Y-%m-%d %H:%M:%S')}'")
     if a.by: where+=f" AND change_event.user_email = '{a.by}'"
     q=(f"SELECT change_event.change_date_time, change_event.user_email, change_event.client_type, "
        f"change_event.change_resource_type, change_event.resource_change_operation, change_event.changed_fields, "

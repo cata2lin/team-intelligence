@@ -3,6 +3,14 @@ name: merchant-center-feed
 description: Google Merchant Center feed health — which products are DISAPPROVED / not eligible (and why, per reason code) AND which are ELIGIBLE_LIMITED (eligible but reach-reduced — e.g. pending initial policy review on a new account, or missing GTIN) with their reasons. Disapproved/limited products = lost Shopping/PMax impressions and sales, critical for stores that lean on PMax (Grandia) and for new launches (Carpetto/Gento). Read-only, via the new Merchant API; --store accepts a raw merchant ID. Use for "feed health", "disapproved products", "why isn't this product showing in Shopping", "produsele sunt approved?", "pending review", "Merchant Center issues", "produse dezaprobate", "feed Google Shopping", "PMax feed".
 argument-hint: "--store <grandia|esteban|belasil> | --all | --account-issues <merchant> | --set-business-info <merchant> [--name .. --cs-uri ..] [--apply]"
 ---
+## Performance per produs (`merchant_reports.py`, adăugat 25-iul) — ce nu are feed-health
+`merchant_feed.py` = feed-HEALTH (dezaprobări). `merchant_reports.py` = PERFORMANCE: clicuri/impresii/CTR/conversii per PRODUS din `product_performance_view` (MCQL), + lista ZOMBIE (0 clicuri) = candidați pt `gigi:google-ads-mcc/shopify_feed_gaps` → `feed_attr_filler`.
+```bash
+uv run merchant_reports.py --store grandia --days 30 --top 30
+uv run merchant_reports.py --store 5677157050 --mcql "SELECT offer_id,title,clicks FROM product_performance_view WHERE date DURING LAST_30_DAYS"
+```
+⚠️ Câmpul de valoare NU e `conversion_value_micros` (invalid) → `conversion_value`. Auth = același OAuth uman din KB.
+
 
 # merchant-center-feed — Google Shopping/PMax feed health
 > Author: Gigi.
