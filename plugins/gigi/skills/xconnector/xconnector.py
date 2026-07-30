@@ -2799,6 +2799,44 @@ def ro_genzip_fallback(xc, o, shop_domain):
     return False
 
 
+def intl_genzip_fallback(xc, o, shop_domain, country):
+    """REACTIV — DPD a respins LOCALITATEA (valid-locality-id) pt o comandă INTL cu ORAȘ bun dar ZIP greșit
+    (ex BG Шумен + 9750 = de fapt satul Мадара; DPD BG rezolvă PE COD → respinge codul care nu-i al localității).
+    Pune zip-ul CANONIC al localității din nomenclatorul național → DPD îl rezolvă pe cod. SIGUR fiindcă e REACTIV:
+    se declanșează DOAR pe respingerea DPD, deci NU atinge zip-uri VALIDE (ex BG 8127/Ветрен pe care DPD îl acceptă
+    — comanda aia nici nu ajunge aici). Complementar cu `dpd_fix_locality` (care face invers: zip valid → corectează
+    orașul). True dacă a schimbat zip-ul (altfel retry n-are rost)."""
+    try:
+        ad = (xc.by_id(o.get("orderId")) or {}).get("shippingAddress") or {}
+    except Exception:
+        return False
+    city = (ad.get("city") or "").strip(); cur_zip = (ad.get("zip") or "").strip()
+    if not city:
+        return False
+    mcur = metrics_cursor()
+    if not mcur:
+        return False
+    canon = None
+    try:
+        if country == "BG":
+            import bg_nomenclator as BG
+            loc = BG.find_locality(mcur, BG.city_candidates(city))
+            if loc and loc[1]:
+                canon = BG.pc4(loc[1])
+        elif country == "CZ":
+            import cz_nomenclator as CZ
+            from collections import Counter
+            rows = CZ.load_by_locality(mcur, CZ._cz_city_denoise(city))
+            pscs = Counter(r["psc"] for r in rows if r.get("psc"))
+            if pscs:
+                canon = pscs.most_common(1)[0][0]
+    except Exception:
+        return False
+    if canon and canon != cur_zip:
+        return intl_correct_write(xc, o, shop_domain, {"zip": canon})
+    return False
+
+
 _PRIMARY_DOMAIN = {}
 
 
@@ -3592,6 +3630,17 @@ def _ro_genzip_fixed():
     return _RO_GENZIP_FIXED
 def ro_genzip_fixed_add(n):
     _here_state_add(RO_GENZIP_FIXED_FILE, n); _ro_genzip_fixed().add(n)
+
+
+INTL_GENZIP_FIXED_FILE = os.path.join(_HERE_DIR, ".intl_genzip_fixed")   # comenzi INTL cărora le-am pus zip-ul CANONIC al localității după respingerea DPD pe localitate (o dată)
+_INTL_GENZIP_FIXED = None
+def _intl_genzip_fixed():
+    global _INTL_GENZIP_FIXED
+    if _INTL_GENZIP_FIXED is None:
+        _INTL_GENZIP_FIXED = _here_state_load(INTL_GENZIP_FIXED_FILE)
+    return _INTL_GENZIP_FIXED
+def intl_genzip_fixed_add(n):
+    _here_state_add(INTL_GENZIP_FIXED_FILE, n); _intl_genzip_fixed().add(n)
 
 
 # Contor de eșecuri AWB per comandă (persistent, JSON). Un AWB care pică N ture la rând (latență sync care nu se
@@ -4660,6 +4709,20 @@ def _do_awb(xc, sh, st, cons, con, name, o, notify):
             ok, s, d = _create_label(xc, body, _ctx={"store": sh["shopDomain"], "order": name})
             if ok:
                 awb_event(kind="ro-genzip-fallback", store=sh["shopDomain"], order=name, result="ok")
+                return True, False, None
+            msg = (d.get("errorMessage") if isinstance(d, dict) else str(d)) or ""
+            transient = s in (429, 500, 502, 503, 504) or (s == 422 and "was not created" in msg)
+    # INTL (BG/CZ): DPD a respins LOCALITATEA (valid-locality-id) cu ORAȘ bun dar ZIP greșit (ex BG Шумен+9750 = de
+    # fapt satul Мадара) → pune zip-ul CANONIC al localității din nomenclator → DPD rezolvă pe cod → reîncearcă.
+    # REACTIV (doar pe respingerea DPD) = ZERO fals-pozitiv (nu atinge zip-uri valide ca 8127). O SINGURĂ dată/comandă.
+    if _ctry and not transient and ("localit" in msg.lower()) and name not in _intl_genzip_fixed():
+        _igchg = intl_genzip_fallback(xc, o, sh["shopDomain"], _ctry)
+        intl_genzip_fixed_add(name)
+        if _igchg:
+            time.sleep(3.0)
+            ok, s, d = _create_label(xc, body, _ctx={"store": sh["shopDomain"], "order": name})
+            if ok:
+                awb_event(kind="intl-genzip-fallback", store=sh["shopDomain"], order=name, result="ok")
                 return True, False, None
             msg = (d.get("errorMessage") if isinstance(d, dict) else str(d)) or ""
             transient = s in (429, 500, 502, 503, 504) or (s == 422 and "was not created" in msg)

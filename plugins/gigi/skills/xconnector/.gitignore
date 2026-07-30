@@ -19,3 +19,4 @@
 *.py.bak*
 __pycache__/
 *.pyc
+.intl_genzip_fixed
