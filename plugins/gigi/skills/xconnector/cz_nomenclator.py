@@ -174,6 +174,18 @@ def cz_validate_and_correct(cur, city, zip_, address1, address2=""):
                     "note":"localitate corectată (typo→%s) + PSČ"%fobec}
         return {"status":"corrected","address":{"city":fobec,"address1":a1},
                 "note":"localitate corectată (typo→%s)"%fobec}
+    # ── DERIVĂ ORAȘUL DIN PSČ (insight owner): oraș scris nesigur (typo/garbled, negăsit prin niciun lookup)
+    # DAR PSČ valid → localitatea din PREFIXUL PSČ (primele 3 cifre = districtul poștal CZ; tabelul ține doar
+    # PSČ-ul principal per obec, ex 71000, deci 710 42 exact pică → cad pe prefix). Localitatea dominantă a
+    # prefixului = orașul de livrare. Ex: 710→Ostrava (Vsetim), 370→České Budějovice (Branik). Ultimă instanță
+    # (după ce toate lookup-urile de oraș au picat) → NU suprascrie un oraș bun; CZ livrează pe localitate+stradă.
+    if psc:
+        cur.execute("SELECT obec FROM public.cz_addresses WHERE psc LIKE %s AND obec_norm<>'' "
+                    "GROUP BY obec ORDER BY sum(cnt) DESC NULLS LAST LIMIT 1",(psc[:3]+"%",))
+        pr=cur.fetchone()
+        if pr and pr[0]:
+            return {"status":"corrected","address":{"city":pr[0],"zip":psc,"address1":a1},
+                    "note":"oraș derivat din prefix PSČ %s→%s (oraș scris nesigur)"%(psc[:3],pr[0])}
     return {"status":"needs_geocoder","address":None,
             "note":"localitate/PSČ negăsite în RÚIAN" + ("" if num else " (+fără număr)")}
 
