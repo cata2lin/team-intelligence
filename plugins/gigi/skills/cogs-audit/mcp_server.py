@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["mcp>=1.2","google-api-python-client>=2.100","google-auth>=2.30"]
+# dependencies = ["mcp>=1.2,<2","google-api-python-client>=2.100","google-auth>=2.30"]
 # ///
 """arona-data MCP — diagnostic pe DATE: de ce minte o cifră.
 

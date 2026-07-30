@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["mcp>=1.2","requests>=2.31"]
+# dependencies = ["mcp>=1.2,<2","requests>=2.31"]
 # ///
 """arona-studio MCP — creative/content: generare imagine AI, de-AI (ai-scrub), date canal YouTube.
 
