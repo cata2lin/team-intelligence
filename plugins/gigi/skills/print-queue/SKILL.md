@@ -1,84 +1,97 @@
 ---
 name: print-queue
-description: Coada de PRINT pentru DEPOZIT — ce etichete AWB sunt de printat, per SKU / magazin / cantitate / tip, din xConnector, INSTANT dintr-un index. Un cron la 1 noaptea salvează în `metrics.print_queue` tot ce-i de printat PÂNĂ IERI (NU ziua curentă); dimineața depozitul întreabă instant și DESCHIDE etichetele filtrate ÎN CHROME (NU printează singur — operatorul apasă Ctrl+P), iar comenzile deschise se marchează PRINTAT în DB. Folosește pentru „ce am de printat", „câte HA de printat", „coada de print depozit", „etichete de printat", „parfumuri de 3 pe Esteban", „deschide de printat pe Ofertele/MagDeal/Bonhaus", „print depozit", „de printat pe RO", „câte de printat pe fiecare magazin". Interogare SEMANTICĂ: magazin (esteban/ofertele/magdeal/bonhaus…), țară (RO/INTL), tip (deals/parfumuri/covoare/unghii), SKU (HA-…), cantitate (buc/comandă). Read-only by default; deschiderea în Chrome (`print --open`) descarcă etichetele (marchează downloaded server-side) + le marchează printat.
-argument-hint: "sync --apply | query --sku HA --country RO --by-sku | print --store esteban --items 3 --open"
+description: Coada de PRINT pe STAȚIE (depozit / uzina2) — ce etichete AWB are de printat STAȚIA TA, per SKU / magazin / cantitate / categorie, live din xConnector. Fiecare stație vede DOAR magazinele ei (`--machine depozit|uzina2`), nu coada întregii firme. Operatorul întreabă în limbaj natural, agentul rulează `pull` (refresh ~15s) + `plan` (instant) și spune NUMĂRUL; la print, `open` descarcă etichetele filtrate și le DESCHIDE ÎN CHROME (NU printează singur — operatorul apasă Ctrl+P). Folosește pentru „câte AWB-uri am de printat", „ce am de printat azi", „coada de print", „etichete de printat pe uzina 2", „câte HA de printat", „parfumuri de 3 pe Esteban", „deschide de printat pe Ofertele/MagDeal/Bonhaus", „print depozit". Read-only by default; `open` descarcă etichetele (le scoate din coadă server-side) + le marchează printat.
+argument-hint: "pull --machine uzina2 | plan --machine uzina2 --by-sku | open --sku HA --machine uzina2"
 ---
 
-# print-queue — coada de print pt depozit (din xConnector, indexată)
+# print-queue — coada de print, per STAȚIE
 
-> Author: **Gigi**. Separare rapidă a etichetelor de printat, per SKU × magazin × cantitate.
+> Author: **Gigi**. Separare rapidă a etichetelor de printat, per stație × SKU × magazin × cantitate.
 
-## ⚠️ PENTRU AGENT (Claude) — operatorul din depozit NU rulează comenzi, DOAR vorbește
-Când operatorul cere ceva în limbaj natural, **TU rulezi comanda potrivită** (cu tool-ul tău) și-i arăți
-**rezultatul clar** (numere, magazine, SKU-uri). NU-i arăta comanda și NU-i cere s-o ruleze el. Mapare:
+## ⚠️ PENTRU AGENT (Claude) — operatorul NU rulează comenzi, DOAR vorbește
+Când operatorul cere ceva în limbaj natural, **TU rulezi comanda** și-i arăți **rezultatul clar**
+(numere, magazine, SKU-uri). NU-i arăta comanda și NU-i cere s-o ruleze el.
+
+**Stația se deduce singură** din `PRINT_MACHINE` (setat o dată pe laptop) — nu întreba operatorul
+pe ce mașină e. Dacă variabila lipsește, folosește `--machine <stația>` explicit.
+
 | Operatorul zice | Tu rulezi |
 |---|---|
-| „ce am de printat azi?" | `query --country RO --by-store` |
-| „câte HA de printat pe RO?" | `query --sku HA --country RO --by-sku` |
-| „printează HA pe RO" | `print --sku HA --country RO --open` → se deschide Chrome pe mașina depozitului → el apasă Ctrl+P |
-| „parfumuri de 3 pe Esteban" | `query --store esteban --items 3 --by-sku` (sau `print … --open` dacă zice „printează") |
-| „deschide de printat pe Ofertele" | `print --store ofertele --open` |
-| „câte s-au printat azi?" | `printed --country RO` |
-- **`print … --open` se rulează LOCAL pe mașina depozitului** (deschide Chrome ACOLO, unde e imprimanta).
-- Dacă indexul pare vechi (cronul de noapte n-a rulat), rulează întâi `sync --apply` (~20s), apoi întrebarea.
+| „câte AWB-uri am de printat?" | `pull` apoi `plan --by-store` → spui **numărul total + pe magazine** |
+| „ce am de printat azi?" | `pull` apoi `plan --by-category` |
+| „câte HA de printat?" | `plan --sku HA --by-sku` |
+| „parfumuri de 3 pe Esteban" | `plan --shop esteban --items 3 --by-sku` |
+| „printează HA" | `open --sku HA` → se deschide Chrome pe stație → el apasă Ctrl+P |
+| „deschide de printat pe Ofertele" | `open --shop ofertele` |
+| „câte s-au printat?" | `printed` |
+| „mai scoate o dată lotul ăla" | `reprint --batch <nume>` |
 
-## Cum funcționează (2 pași)
-1. **Noaptea (cron 01:00, `print_queue_nightly.sh`)** — interoghează xConnector pe TOATE magazinele
-   ÎN PARALEL (doar comenzi NEexpediate = coada reală), filtrează etichetele AWB nedescărcate,
-   explodează pe SKU și salvează în **`metrics.print_queue`** tot ce-i de printat **PÂNĂ IERI**
-   (nu ziua curentă — comenzile de azi încă intră). ~20s.
-2. **Dimineața (depozitul)** — întreabă INSTANT din index și deschide în Chrome ce vrea.
+- **`pull` = refresh (~15s), `plan` = instant.** Rulează `pull` o dată la începutul sesiunii, apoi
+  `plan` de câte ori vrei. Dacă operatorul cere un număr și n-ai făcut `pull` în sesiunea asta, fă-l întâi.
+- **`open` se rulează LOCAL pe stație** (deschide Chrome ACOLO, unde e imprimanta).
+
+## Două scripturi — nu le confunda
+| Fișier | Rol | Unde rulează |
+|---|---|---|
+| **`print_queue.py`** | **Stația.** `pull/plan/open/printed/reprint`, filtrat pe `--machine`. Live din xConnector, cache în SQLite local (`~/.arona_print_queue.db`). | laptopul din depozit / uzina2 |
+| `print_queue_central.py` | **Centralul.** `sync/query/print/printed` → construiește `metrics.print_queue` (Postgres) pentru raportare. Cron 01:00 via `print_queue_nightly.sh`. | VPS |
+
+> Stația folosește **întotdeauna `print_queue.py`**. Centralul e pentru cronul de noapte — nu-l rula pe stație.
+
+## Setup stație (o singură dată)
+```bash
+# Windows (PowerShell), apoi terminal NOU:
+setx PRINT_MACHINE uzina2        # sau: depozit
+```
+`print_queue.py` își găsește singur `xconnector.py` dacă folderele stau unul lângă altul
+(`../xconnector/xconnector.py`) — layout-ul normal din marketplace. Dacă e în altă parte:
+`setx XCONNECTOR_PY C:\cale\catre\xconnector.py`.
+
+> ⚠️ `xconnector.py` **nu rulează singur** — importă 23 de module-frate (`address_rules.py`,
+> `*_nomenclator.py`…). Copiază tot folderul `xconnector/`, nu doar fișierul.
 
 ## Comenzi
 ```bash
 S="${CLAUDE_PLUGIN_ROOT}/skills/print-queue/print_queue.py"
 
-# REFRESH manual (dacă vrei acum, nu aștepți cronul). Interval: --days N sau --from/--to.
-uv run "$S" sync --apply
-uv run "$S" sync --apply --from 2026-07-10 --to 2026-07-14
+# 1. REFRESH coada stației (~15s). Implicit: de la 1 ale lunii până azi.
+uv run "$S" pull                              # magazinele stației (din PRINT_MACHINE)
+uv run "$S" pull --machine uzina2             # explicit
+uv run "$S" pull --days 7                     # altă fereastră
+uv run "$S" pull --all                        # include și etichetele deja descărcate
 
-# CE E DE PRINTAT (instant, semantic)
-uv run "$S" query --country RO --by-store            # cât e de printat pe fiecare magazin RO
-uv run "$S" query --sku HA --country RO --by-sku     # câte HA pe RO, per SKU (de la multe la puține)
-uv run "$S" query --store esteban --items 3 --by-sku # parfumuri de 3 pe Esteban
-uv run "$S" query --type deals --country RO --by-store
+# 2. CE E DE PRINTAT (instant, din cache)
+uv run "$S" plan --by-store                   # total + pe magazine  ← răspunsul la „câte am de printat"
+uv run "$S" plan --by-category                # pe categorii de produs
+uv run "$S" plan --sku HA --by-sku            # câte HA, per SKU
+uv run "$S" plan --shop esteban --items 3     # parfumuri de 3 pe Esteban
 
-# PRINT — deschide în CHROME ce-i filtrat; NU printează singur (operatorul apasă Ctrl+P)
-uv run "$S" print --sku HA --country RO              # DRY-RUN: ce s-ar deschide
-uv run "$S" print --sku HA --country RO --open       # descarcă fresh → merge PDF (pypdf) → Chrome → marchează PRINTAT
-uv run "$S" print --store esteban --items 3 --open   # parfumurile de 3 pe Esteban
+# 3. PRINT — deschide în CHROME ce-i filtrat; NU printează singur (operatorul apasă Ctrl+P)
+uv run "$S" open --sku HA                     # descarcă fresh → merge PDF → Chrome → marchează PRINTAT
+uv run "$S" open --shop esteban --items 3
+uv run "$S" open --sku HA --no-open           # pregătește PDF-ul fără să deschidă Chrome
 
-# CÂTE S-AU PRINTAT (de la baseline; cu cronul de noapte = „printate azi")
-uv run "$S" printed --country RO                      # câte din coadă au fost deja descărcate (printate)
+# 4. CONTROL
+uv run "$S" printed                           # ce s-a printat
+uv run "$S" reprint --batch <nume>            # re-deschide un lot deja printat
 ```
-
-## Rutină depozit (dimineața)
-```bash
-S="${CLAUDE_PLUGIN_ROOT}/skills/print-queue/print_queue.py"
-uv run "$S" query --country RO --by-store     # 1. ce am de printat azi, pe magazine
-uv run "$S" print  --sku HA --country RO --open   # 2. deschide lotul în Chrome → Ctrl+P
-uv run "$S" printed --country RO              # 3. câte s-au printat (control)
-```
-> Cronul de la **01:00** (`print_queue_nightly.sh`) construiește coada peste noapte → dimineața pașii 1-2 sunt instant.
-> „Câte s-au printat azi" NU e un câmp în xConnector (nu are timestamp pe descărcare) → se calculează ca DIFERENȚĂ
-> față de baseline-ul de la 1 noaptea (comenzile care au ieșit din coadă = printate azi).
 
 ## Reguli importante
-- **NU printează singur** — DESCHIDE PDF-uri în Chrome (merged cu `pypdf`, fără SumatraPDF/qpdf); operatorul apasă Ctrl+P. Depozitul e pe Windows → `chrome`.
-- **Loturi de max 250** — dacă sunt multe etichete, sparge în loturi de **250** (un PDF/lot, deschis separat — Chrome/imprimanta nu duc un PDF uriaș). `--batch N` schimbă mărimea.
-- **`--open` = mutație**: descarcă eticheta (xConnector o marchează `downloaded` → iese din coada tuturor)
-  + o marchează `printed_at` în DB. Fără `--open` = DRY-RUN, zero efecte.
-- **La print re-interoghează comanda FRESH** (AWB-ul se poate schimba între noapte și dimineață) — nu
-  folosește URL-ul vechi din index. Comenzile deja descărcate între timp = marcate printat, nu re-descărcate.
-- **Semantic**: `--store` prinde nume/alias (esteban, ofertele, magdeal, bonhaus, gt…), `--country RO|INTL`
-  (INTL = doar Bonhaus CZ/PL/BG), `--type deals|parfumuri|covoare|unghii`, `--sku` = prefix (HA prinde HA-*),
-  `--items` = bucăți/comandă.
+- **NU printează singur** — DESCHIDE PDF-uri în Chrome (merged cu `pypdf`); operatorul apasă Ctrl+P.
+  Stațiile sunt pe Windows → `chrome`.
+- **`open` = mutație**: descarcă eticheta (xConnector o marchează `downloaded` → **iese din coada
+  tuturor stațiilor**) + o marchează printat. `plan` = zero efecte.
+- **Fiecare stație vede doar magazinele ei.** Magazinele împărțite între stații apar la ambele —
+  de aceea `open` re-interoghează comanda FRESH și sare peste ce-a descărcat deja cealaltă stație.
+- **Loturi de max 250** (`--batch N`) — Chrome/imprimanta nu duc un PDF uriaș.
+- **Semantic**: `--shop` prinde nume/alias (esteban, ofertele, magdeal, bonhaus, gt…),
+  `--sku` = prefix (HA prinde HA-*), `--items` = bucăți/comandă, `--threshold` = pragul de „multe bucăți".
 
 ## Sursa cozii = xConnector (NU AWBprint)
-Coada „de printat" = etichetă AWB `downloaded=false` din **xConnector**. AWBprint (`is_printed`/awb_pdf_url) e
-fluxul vechi **Frisbo** — NU-l folosi pt asta. Config xConnector: KB `XCONNECTOR_SHOPS` / `~/.aac/input.json`.
+Coada „de printat" = etichetă AWB `downloaded=false` din **xConnector**. AWBprint (`is_printed`/`awb_pdf_url`)
+e fluxul vechi **Frisbo** — NU-l folosi pt asta. Config xConnector: KB `XCONNECTOR_SHOPS` / `~/.aac/input.json`.
 
-## Complementar cu `agentic-label-batch` (pachet aac-pilot)
-Acela = motorul de download+merge cu opțiuni avansate (grupuri, `--complexity-split`). Skill-ul ăsta adaugă
-**DESCOPERIREA** (ce SKU-uri + câte, gap-ul `no-sku-discovery-endpoint`) + indexul persistent + print direct în
-Chrome. Notă: xConnector OrderDTO expune acum `skus`/`totalItemsCount` (MODE A live, #2140 merged).
+## Rulare de pe server (fără fișiere pe stație)
+Skill-ul e executabil și prin Second Brain (`gigi:print-queue`, acțiunile `pull`/`plan`/`printed` = tier
+`allow`; `open`/`reprint` = `ask`). Util pentru ÎNTREBĂRI („câte am de printat"). **Printul real trebuie
+rulat local** — Chrome trebuie să se deschidă lângă imprimantă.
