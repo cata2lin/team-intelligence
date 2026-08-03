@@ -6,6 +6,11 @@ argument-hint: "pull --machine uzina2 | plan --machine uzina2 --by-sku | open --
 
 # print-queue — coada de print, per STAȚIE
 
+> 🏷️ **Numele canonic de echipă = `depozit:print-queue`** (Second Brain). ACESTA (`plugins/gigi/skills/print-queue/`)
+> e SURSA DE COD — aici se fac update-urile (PR), stațiile le iau prin plugin-update / `git pull` (NU editați copii
+> locale pe stații). Rămâne în plugin-ul `gigi` fiindcă `print_queue.py` importă `xconnector.py` ca frate. `gigi:print-queue`
+> (vechiul index `metrics.print_queue`) e DEPRECAT → tombstone spre `depozit:print-queue`.
+
 > Author: **Gigi**. Separare rapidă a etichetelor de printat, per stație × SKU × magazin × cantitate.
 
 ## ⚠️ PENTRU AGENT (Claude) — operatorul NU rulează comenzi, DOAR vorbește
