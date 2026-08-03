@@ -84,8 +84,14 @@ def cmd_pull(a):
                  o.get("lineItemsCount") or 0, psku, pqty, datetime.datetime.now().isoformat(timespec="seconds")))
             n += 1
     con.commit()
-    print(f"PULL live: {n} etichete de printat -> {DB}  ({dfrom}->{dto}, shops={wants or 'toate'})")
-    for shop, tot in cur.execute("select shop, count(*) from queue group by shop order by 2 desc"): print(f"  {shop:30} {tot}")
+    # AFIȘARE = ce va vedea `plan` (filtrat FIN pe categorie via `_machine_keep`), NU tot ce s-a cache-uit.
+    # Cache-ul rămâne COMPLET (upsert pe toate magazinele mașinii) ca `plan --machine all` / rapoartele să meargă;
+    # doar numărul + breakdown-ul AFIȘAT se filtrează pe mașină, ca `pull` și `plan` să dea ACELAȘI număr. (bug fix:
+    # pentru magazinele split, `pull` număra HA+LAVETE+restul, iar `plan --machine` doar categoriile mașinii → supra-numărare.)
+    from collections import Counter
+    kept = _rows(cur, a)
+    print(f"PULL live: {len(kept)} etichete de printat -> {DB}  ({dfrom}->{dto}, shops={wants or 'toate'})")
+    for shop, tot in Counter(r["shop"] for r in kept).most_common(): print(f"  {shop:30} {tot}")
 
 def _rows(cur, a):
     wants = [w.strip() for w in (a.shop or "").split(",") if w.strip()]
