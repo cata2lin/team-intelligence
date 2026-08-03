@@ -116,7 +116,8 @@ xConnector a adăugat (2026-06) filtre pe `getOrders`, expuse prin comanda **`or
 
 **CS order-360 = ORCHESTRARE (nu duplic):** când CS întreabă despre o comandă, combină `links` (comandă+status+linkuri, xConnector+AWBprint) **+** `gigi:cs-360 customer` (alte comenzi ale clientului, LTV, refuzuri — din DB) **+** `gigi:cs-tickets`/Richpanel (tichetele clientului). Toate **fără Shopify live** (DB/Richpanel/xConnector). Căutare CS după **nume/telefon** → `gigi:cs-360 customer` (xConnector n-are filtru pe nume/telefon; doar order#/AWB).
 
-### `print-batch` — PRINT în depozit (descarcă etichetele nedescărcate, grupate pe produs/cantitate/dată)
+### `print-batch` — [⚠️ DEPRECAT → `depozit:print-queue`] PRINT în depozit (descarcă etichetele nedescărcate, grupate pe produs/cantitate/dată)
+> **Tool-ul canonic de print depozit e acum `depozit:print-queue`** (per-stație: `pull`→`plan`→`open --machine depozit|uzina2`). `print-batch` rămâne funcțional (fără rutare pe stație) doar pt compatibilitate — nu-l folosi pt print nou. Secțiunea de mai jos = referință istorică.
 `uv run xconnector.py print-batch [--shop a,b] [--sku HA-0002] [--total-items 1] [--from <d> --to <d>] [--sort sku] [--limit N] [--apply]`.
 Selectează etichetele **nedescărcate** (`downloaded=false` = coada de print), le **descarcă** (PDF), le pune într-un **batch PDF merged** în ordinea grupată, scrie un **log CSV cu `downloaded_at`** (audit „când s-a printat"), apoi **trimite direct în coada imprimantei**. Rulează **LOCAL** (mașina cu imprimanta — are uv + acces la secrete).
 - 🔁 **DOAR eticheta de DUS, NICIODATĂ retururile.** `print-batch` și `not-downloaded` folosesc `awb_doc()` = **prima** SHIPPING_LABEL (outbound); etichetele de RETUR/REDIRECT (a doua+, `return_labels()`) **nu intră în coada de print** — ele **pleacă de la client**, nu se printează în depozit. (Nu descărca returul odată cu restul AWB-urilor la print.)

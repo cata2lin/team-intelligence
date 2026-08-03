@@ -6418,7 +6418,11 @@ def cmd_print_batch(a):
     filtrabile pe produs (--sku), cantitate (--total-items) și interval (--from/--to). Descarcă PDF-urile,
     le pune într-un batch (în ordinea grupată), LOGHEAZĂ timestamp-ul, deschide dialogul de print.
     Dry-run by default (listează, NU descarcă). --apply DESCARCĂ → flip `downloaded` (ies din coada de print!).
-    Rulează LOCAL (mașina cu imprimanta — are uv + acces la secrete)."""
+    Rulează LOCAL (mașina cu imprimanta — are uv + acces la secrete).
+    ⚠️ DEPRECAT: tool-ul canonic de print depozit e acum `depozit:print-queue` (per-stație: `pull`→`plan`→
+    `open --machine depozit|uzina2`, fiecare stație vede DOAR magazinele ei). print-batch rămâne funcțional (fără
+    rutare pe stație) doar pt compatibilitate."""
+    print("  ⚠️ print-batch e DEPRECAT → folosește `depozit:print-queue` (pull → plan → open --machine …). Continui pe legacy…")
     import datetime, os, csv
     dfrom, dto = date_window(a)
     flt = orders_filters(a)
