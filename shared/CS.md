@@ -54,12 +54,13 @@
 | comandă nouă COD / swap / resend gratis | `gigi:cs-actions` | rezolvă clientul + plasează/înlocuiește |
 
 ## 5. 🖨️ PRINT etichete în depozit (Windows + Chrome)
-`gigi:xconnector print-batch` — descarcă etichetele NEdescărcate, grupate pe **produs** (`--sku`) + **cantitate** (`--total-items`) + **dată** (`--from/--to`), **cross-magazin** (`--shop a,b,c`), → batch PDF + log → deschide în Chrome (Ctrl+P).
+**Tool canonic = `depozit:print-queue`** (rulează LOCAL pe stație, live din xConnector, per-STAȚIE: fiecare mașină vede DOAR magazinele ei via `--machine depozit|uzina2`). Operatorul vorbește, agentul rulează `pull` (refresh ~15s) + `plan` (instant) → spune NUMĂRUL; la print, `open` descarcă etichetele filtrate + le deschide în Chrome (operatorul apasă Ctrl+P).
 **Exemple:**
-- HA-0002 de pe toate magazinele deals, la un loc: `print-batch --sku HA-0002 --shop covoareauto-ro,bonhaus,audusp-rf,ofertelezilei --apply`
-- doar 10-14 iunie, max 100: `print-batch --from 2026-06-10 --to 2026-06-14 --limit 100 --apply`
-- test sigur (etichete deja descărcate, zero impact pe coadă): `print-batch --test --limit 5`
-> ⚠️ `--apply` marchează etichetele `downloaded` → ies din coada de print. Dry-run by default.
+- câte AWB-uri am de printat: `pull --machine <depozit|uzina2>` apoi `plan` → total + pe magazine
+- HA-0002: `pull --machine depozit` apoi `open --sku HA-0002 --machine depozit`
+- parfumuri de 3 pe Esteban: `plan --shop esteban --items 3`
+> ⚠️ `open` marchează etichetele `downloaded` (ies din coada TUTUROR stațiilor) → DOAR la print real. `pull`/`plan` = zero efecte.
+> `gigi:xconnector print-batch` = **DEPRECAT** (fără rutare pe stație) — folosit doar pt compatibilitate; nu-l mai folosi pt print nou.
 
 ## 6. 💬 TICHETE (Richpanel)
 | Vreau … | Tool |
