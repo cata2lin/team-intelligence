@@ -7,5 +7,5 @@ export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"                             
 set -euo pipefail
 cd "$(dirname "$0")"
 echo "===== print_queue nightly $(date '+%F %T') ====="
-uv run print_queue.py sync --apply
+uv run print_queue_central.py sync --apply
 echo "===== done $(date '+%F %T') ====="
