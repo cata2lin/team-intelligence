@@ -535,7 +535,17 @@ SELECT o.id, o."name", o."brandId",
   o."shopifyCreatedAt", o."cancelledAt",
   oo.status_category, oo.delivery_status, oo.is_refusal, oo.awb, oo.courier_status
 FROM public.orders o
-LEFT JOIN cache.order_outcome oo ON oo.order_name = o."name"
+-- Numele comenzii NU e unic intre magazine: primele comenzi ale fiecarui shop se cheama
+-- '#1001'..'#1008' (dinainte de conventia cu prefix GT/EST/PAT...). '#1006' exista simultan
+-- pe Ce Pat Ai, Magdeal, Bonhaus PL si Carpetto. Un join pe nume le incruciseaza si produce
+-- acelasi order_id de mai multe ori -> UniqueViolation care oprea TOT `--all` (30-iul-2026).
+-- `public.orders` are brandId, `order_outcome` are shop/prefix: nu exista cheie comuna de
+-- magazin, deci deduplicam determinist. Afecteaza 8 comenzi din 2025, nesemnificative.
+LEFT JOIN (
+  SELECT DISTINCT ON (order_name) *
+  FROM cache.order_outcome
+  ORDER BY order_name, created_at DESC
+) oo ON oo.order_name = o."name"
 WHERE o."deletedAt" IS NULL;
 """
 
@@ -975,7 +985,10 @@ def last_months(n):
         if m == 0: m = 12; y -= 1
     return out
 async def main():
-    for mo in last_months(6):
+    # Fereastra e configurabila: BRAND_PNL_MONTHS. Implicit 6 (rularea zilnica), dar la
+    # backfill istoric o urci (ex 18) ca sa reconstruiesti si lunile vechi. Fara asta,
+    # extinderea motorului pe 2025 nu ajungea niciodata in cache.
+    for mo in last_months(int(os.environ.get("BRAND_PNL_MONTHS") or 6)):
         try:
             r = await get_report(month=mo, from_date=None, to_date=None)
         except Exception as e:
@@ -1101,7 +1114,13 @@ def run(table, apply):
     # apply: ensure schema/table, then transactional truncate+insert
     cur.execute(spec["ddl"])
     cur.execute(f"TRUNCATE cache.{table}")
-    cur.execute(f"INSERT INTO cache.{table} {spec['cols']} " + spec["select"])
+    # ON CONFLICT DO NOTHING: tabelul tocmai a fost TRUNCATE-uit, deci orice coliziune vine
+    # din SELECT-ul sursa (un join care multiplica randuri) — nu din date vechi. Fara asta,
+    # UN singur order_id duplicat opreste TOT `--all`, iar cronul iese non-zero => heartbeat-ul
+    # nu mai pinguie si tabelele de dupa (order_enriched, ticket_order_link, product_returns)
+    # raman nereimprospatate. S-a intamplat din 30-iul-2026, tacut.
+    cur.execute(f"INSERT INTO cache.{table} {spec['cols']} " + spec["select"].rstrip().rstrip(';')
+                + " ON CONFLICT DO NOTHING")
     cur.execute(f"SELECT COUNT(*) FROM cache.{table}")
     written = cur.fetchone()[0]
     log_refresh(cur, table, written)
