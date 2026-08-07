@@ -2671,6 +2671,14 @@ def intl_correct_write(xc, o, shop_domain, corr):
         for k in ("city", "zip", "address1", "address2", "firstName", "lastName", "phone"):
             if corr.get(k) is not None:
                 applied[k] = corr[k]
+        # CZ/SK: curierul (DPD) cere PSČ în format CANONIC „NNN NN" (cu spațiu). Corecțiile intl produc digit-only
+        # („29001") care, scris peste un „290 01" bun, face DPD să respingă (valid-locality-id/recipient) — comenzile
+        # CORECTATE se blocau, cele necorectate (Flow) plecau, cu adresă identică. Re-formatăm ORICE PSČ CZ/SK de 5
+        # cifre la „NNN NN". Punct UNIC: toate corecțiile intl (dpd_intl_sanitize / intl_genzip_fallback / nomen) trec aici.
+        if HERE_COUNTRY.get(shop_domain) in ("CZE", "SVK"):
+            _d5 = re.sub(r"\D", "", str(applied.get("zip") or ""))
+            if len(_d5) == 5:
+                applied["zip"] = _d5[:3] + " " + _d5[3:]
         body = {"orderId": oid,
                 "idempotencyKey": "intlnom-%s-%s-%s" % (_digest(shop_domain, 8), oid, _digest(applied, 12)),
                 "appliedShippingAddress": applied, "expectedAddressHash": d.get("addressHash"),
@@ -2703,8 +2711,8 @@ def _zip_candidates(country, z):
         return []
     out = []
     for m in re.finditer(pat, str(z)):
-        if country == "CZE":
-            c = m.group(1) + m.group(2)             # „710 42" / „43004už" → „71042"
+        if country in ("CZE", "SVK"):
+            c = m.group(1) + " " + m.group(2)       # PSČ canonic DPD = „NNN NN" cu spațiu („710 42", „43004už"→„430 04")
         elif country == "POL":
             c = m.group(1) + "-" + m.group(2)       # „42-700Lubliniec" → „42-700"
         else:
@@ -4798,8 +4806,8 @@ def sweep_held_orders(xc, sh, st, xmap, cron_giveup, mcur, intl, dfrom, apply):
                 ad = _bd.get("shippingAddress") or {}
                 nres = intl_nomen(country, mcur, ad)
                 if nres is not None and nres.get("status") in ("valid", "corrected"):
-                    if nres.get("status") == "corrected" and nres.get("address"):
-                        intl_correct_write(xc, o, sh["shopDomain"], nres["address"])
+                    # NU scriem corecția intl proactiv (AI_CORRECTION → DPD cere email obligatoriu → blocaj; vezi bucla
+                    # principală). Necorectate se livrează cross-border; corecția reactivă rămâne pe respingerea reală.
                     deliverable = True
             else:
                 # RO — încearcă FRESH ambele motoare (ignoră cache-ul here_nogo, care e permanent pe intrări RO
@@ -5080,10 +5088,7 @@ def cmd_fulfill(a):
                 if a.apply:
                     try:
                         if intl:
-                            _ad = xc.by_id(o.get("orderId")).get("shippingAddress") or {}
-                            _nr = intl_nomen(HERE_COUNTRY[sh["shopDomain"]], metrics_cursor_live(), _ad)
-                            if _nr and _nr.get("status") == "corrected" and _nr.get("address"):
-                                intl_correct_write(xc, o, sh["shopDomain"], _nr["address"])
+                            pass   # intl: NU corectăm proactiv (AI_CORRECTION → DPD cere email → blocaj). AWB as-is; reactiv pe respingere.
                         else:
                             nomenclator_correct(xc, o, sh["shopDomain"], metrics_cursor_live(), apply=True)
                     except Exception:
@@ -5100,9 +5105,13 @@ def cmd_fulfill(a):
                 if nres is not None and nres.get("status") in ("valid", "corrected", "cs"):
                     if nres["status"] == "cs":
                         hard += 1; bad_addr.append(name); continue   # chiar fără număr casă → HOLD (bad-address)
-                    if nres["status"] == "corrected" and a.apply and nres.get("address"):
-                        intl_correct_write(xc, o, sh["shopDomain"], nres["address"])   # scriu orașul/PSČ corectat (best-effort)
-                    do_awb = True; ready += 1                   # nomenclator confirmă livrabil → AWB
+                    # NU scriem corecția intl PROACTIV (chiar dacă nomen zice „corrected"): apelul ai-correct-address
+                    # (AI_CORRECTION) pune comanda într-o stare unde DPD cere EMAIL destinatar obligatoriu, iar COD-urile
+                    # n-au email + Shopify blochează scrierea PII (order/customer email = null fără eroare) → BLOCAJ
+                    # definitiv. DOVADĂ: comenzi CZ FULFILLED 1/20 au AI_CORRECTION, cele BLOCATE 2/2 → corecția le strică.
+                    # Intl NEcorectate se livrează pe DPD Romania cross-border (rutare pe PSČ). Trimitem AS-IS; corecția
+                    # REACTIVĂ (dpd_fix_locality/dpd_intl_sanitize/intl_genzip) rămâne DOAR pe respingerea REALĂ a curierului.
+                    do_awb = True; ready += 1                   # nomenclator confirmă livrabil → AWB AS-IS
                 else:
                     # țară fără nomenclator (PL/BG) SAU needs_geocoder → HERE cu cache (decizie o dată/comandă)
                     if name in here_nogo:
