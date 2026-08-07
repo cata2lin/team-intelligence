@@ -65,16 +65,37 @@ def _zip_ok(zp, shop):
     return len(d) == _ZIP_LEN.get(_country(shop), 6)
 
 
-def _diagnose(ad, reason, shop=""):
+def _courier_hint(err):
+    """Traduce eroarea REALĂ a curierului (din event-log) într-un hint scurt RO — ca reziduul să spună CAUZA
+    reală, nu doar euristica pe adresă (multe adrese sunt VALIDE, dar curierul respinge pe email/localitate/format)."""
+    low = (err or "").lower()
+    if not low:
+        return None
+    if "email" in low:
+        return "curier: email lipsă"
+    if "valid-locality" in low or "localit" in low:
+        return "curier: localitate nevalidă (DPD)"
+    if "phone" in low or "telefon" in low:
+        return "curier: telefon"
+    if "was not created" in low:
+        return "curier: respins (format/stradă)"
+    return "curier: " + (err or "").strip()[:60]
+
+
+def _diagnose(ad, reason, shop="", awb_err=""):
     """OBSERVAȚIE auto: ce pare în neregulă cu adresa (hint de lucru pt CS / găsit reguli).
     Se reîmprospătează la fiecare sync (reflectă adresa curentă). Distinctă de `notes` (adnotarea manuală).
-    Validarea zip e pe ȚARĂ (RO 6 cifre, BG 4, CZ/PL 5) — nu marca intl ca „zip nevalid"."""
+    Validarea zip e pe ȚARĂ (RO 6 cifre, BG 4, CZ/PL 5) — nu marca intl ca „zip nevalid".
+    `awb_err` = ultima eroare REALĂ a curierului din event-log → prioritară (spune de ce a picat de fapt AWB-ul)."""
     a1 = (ad.get("address1") or "").strip()
     a2 = (ad.get("address2") or "").strip()
     zp = (ad.get("zip") or "").strip()
     city = (ad.get("city") or "").strip()
     prov = (ad.get("province") or "").strip()
     h = []
+    ch = _courier_hint(awb_err)
+    if ch:
+        h.append(ch)   # cauza REALĂ a curierului, prima (nu presupune că-i adresa)
     if not a1 and not a2:
         h.append("adresă goală")
     elif not re.search(r"\d", a1 + " " + a2):
@@ -89,14 +110,14 @@ def _diagnose(ad, reason, shop=""):
         h.append("fără județ")
     if city and re.fullmatch(r"\d+", city):
         h.append("localitate = cod poștal")
-    if reason == "awb-esec-repetat":
+    if reason == "awb-esec-repetat" and not ch:
         h.append("AWB eșuat repetat")
     return "; ".join(h) if h else reason
 
 
 def sync(days):
     cutoff = (date.today() - timedelta(days=days)).isoformat()
-    made, held = set(), {}
+    made, held, awb_err = set(), {}, {}
     for line in open(EVENT_LOG, encoding="utf-8"):
         try:
             e = json.loads(line)
@@ -107,6 +128,8 @@ def sync(days):
             continue
         if e.get("kind") in ("awb", "release-awb") and e.get("result") == "ok":
             made.add(o)
+        if e.get("kind") == "awb" and e.get("result") == "fail" and (e.get("error") or "").strip():
+            awb_err[o] = (e.get("error") or "").strip()   # ultima (=cea mai recentă) eroare reală a curierului
         if e.get("kind") == "hold" and e.get("reason") in ("bad-address", "awb-esec-repetat"):
             held[o] = e.get("reason")
     open_cs = {o: r for o, r in held.items() if o not in made}
@@ -134,10 +157,45 @@ def sync(days):
     for o in open_now:
         if o in made or o in awb_real:
             cur.execute("UPDATE cs_queue SET status='resolved', last_seen=? WHERE order_number=?", (now, o))
+    # STATUS SHOPIFY (sursa de adevăr pt fulfillment): comenzile FULFILLED (au AWB pe ORICE cale — inclusiv curieri
+    # care nu populează tracking-ul în AWBprint) → resolved; CANCELLED → uncorrectable. Fără asta coada raporta 79%
+    # false-open (măsurat: 45 fulfilled + 9 cancelled din 70). Best-effort: dacă lipsesc tokenurile → skip grațios.
+    sh_res = sh_cnl = 0
+    try:
+        import xconnector as _xc
+        toks = {t["prefix"]: t for t in _xc.load_shopify_tokens()}
+        prefs = sorted(toks, key=len, reverse=True)
+        def _tok(nm):
+            for p in prefs:
+                if (nm or "").upper().startswith(p.upper()):
+                    return toks[p]
+            return None
+        for o in open_now:
+            if o in made or o in awb_real:
+                continue   # deja resolved pe AWBprint
+            st = _tok(o)
+            if not st:
+                continue
+            try:
+                node = _xc.find_order(st["shopDomain"], st["adminToken"], o)
+            except Exception:
+                node = None
+            if not node:
+                continue
+            if node.get("cancelledAt"):
+                cur.execute("UPDATE cs_queue SET status='uncorrectable', observatie=?, last_seen=? "
+                            "WHERE order_number=? AND status='open'", ("anulată în Shopify", now, o)); sh_cnl += 1
+            elif node.get("displayFulfillmentStatus") == "FULFILLED":
+                cur.execute("UPDATE cs_queue SET status='resolved', last_seen=? "
+                            "WHERE order_number=? AND status='open'", (now, o)); sh_res += 1
+        if sh_res or sh_cnl:
+            print("Shopify: %d marcate resolved (fulfilled) · %d uncorrectable (anulate)" % (sh_res, sh_cnl))
+    except Exception as ex:
+        print("Shopify status-check indisponibil: %s" % ex, file=sys.stderr)
     ins = upd = 0
     for o, reason in open_cs.items():
         ad = addr.get(o) or {}
-        obs = _diagnose(ad, reason, _shop(o))
+        obs = _diagnose(ad, reason, _shop(o), awb_err.get(o, ""))
         row = (o, _shop(o), ad.get("address1"), ad.get("address2"), ad.get("city"), ad.get("province"),
                (ad.get("zip") or "").strip(), reason)
         cur.execute("SELECT status FROM cs_queue WHERE order_number=?", (o,))
