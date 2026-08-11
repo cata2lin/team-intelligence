@@ -150,7 +150,7 @@ def addr_from_xconnector(order_name):
             "provinceCode": a.get("provinceCode"), "countryCode": "RO", "phone": a.get("phone")}
 
 
-FRISBO_BASE = "https://ingest.apis.store-view.frisbo.dev"
+FRISBO_BASE = "https://ingest.apis.orqestra.app"
 # prefix magazin (stores.csv) → org Frisbo (FRISBO_ORG_TOKENS name)
 FRISBO_BY_PREFIX = {
     "EST": "esteban.ro", "ROSSI": "rossinails.ro", "NOC": "nocturna.ro", "LUX": "nocturnalux.ro",

@@ -7173,7 +7173,7 @@
   },
   "servers": [
     {
-      "url": "https://ingest.apis.store-view.frisbo.dev",
+      "url": "https://ingest.apis.orqestra.app",
       "description": "Production server"
     }
   ],

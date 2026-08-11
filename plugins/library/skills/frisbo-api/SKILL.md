@@ -1,6 +1,6 @@
 ---
 name: frisbo-api
-description: Complete reference for the Frisbo Store-View / Fulfillment-Monitor API (ingest.apis.store-view.frisbo.dev, OpenAPI 3.1). Use whenever reading, syncing, parsing, or debugging anything that calls Frisbo, receives Frisbo order/product data, or maps Frisbo statuses. Covers every endpoint, every order/product/shipment field, all status enums (aggregated vs raw shipment vs fulfillment), notes/tags/metafields, pagination, and sync best practices. The authoritative machine-readable spec is bundled as openapi.json next to this file.
+description: Complete reference for the Frisbo Store-View / Fulfillment-Monitor API (ingest.apis.orqestra.app, OpenAPI 3.1). Use whenever reading, syncing, parsing, or debugging anything that calls Frisbo, receives Frisbo order/product data, or maps Frisbo statuses. Covers every endpoint, every order/product/shipment field, all status enums (aggregated vs raw shipment vs fulfillment), notes/tags/metafields, pagination, and sync best practices. The authoritative machine-readable spec is bundled as openapi.json next to this file.
 ---
 
 # Frisbo Store-View API — Complete Reference
@@ -15,7 +15,7 @@ Frisbo is the 3PL/fulfillment provider. The **Store-View / Fulfillment-Monitorin
 
 | | |
 |---|---|
-| **Base URL** | `https://ingest.apis.store-view.frisbo.dev` |
+| **Base URL** | `https://ingest.apis.orqestra.app` |
 | **Auth** | `Authorization: Bearer <token>` on every request. Missing/invalid → `401`. |
 | **Auth scheme** | OAuth2 password flow, `tokenUrl: /api/v1/users/login`. In practice each **organization** is given a long-lived JWT by the Frisbo account manager. |
 | **Multi-org** | One JWT per Frisbo *organization*. The JWT payload embeds `organization_uid`. To sync N orgs, iterate tokens. Decode `token.split('.')[1]` (base64) → `{organization_uid}`. |
