@@ -3883,6 +3883,91 @@ def awbprint_identity(order_number):
                 pass
 
 
+def awbprint_phone_fp(order_number):
+    """(store_uid, phone9, total, currency, nsku, created, fin) din AWBprint, sau None. phone9 = ultimele
+    9 cifre din shipping_address.phone. Baza gardei de duplicat pe TELEFON (email/nume/GID pot diferi:
+    typo, fise COD separate; telefonul e constant)."""
+    try:
+        import pg8000.native
+        from urllib.parse import urlparse, unquote
+    except Exception:
+        return None
+    url = os.environ.get("DATABASE_URL_AWBPRINT") or ""
+    if not url:
+        try:
+            url = subprocess.run(["uv", "run", KB, "secret-get", "DATABASE_URL_AWBPRINT"],
+                                 capture_output=True, text=True, timeout=40).stdout.strip()
+        except Exception:
+            url = ""
+    if not url.startswith("postgres"):
+        return None
+    up_ = urlparse(url); con = None
+    try:
+        con = pg8000.native.Connection(user=unquote(up_.username or ""), password=unquote(up_.password or ""),
+                                       host=up_.hostname, port=up_.port or 5432, database=up_.path.lstrip("/"), ssl_context=True)
+        r = con.run("select store_uid, "
+                    "right(regexp_replace(coalesce((shipping_address::jsonb)->>'phone',''),'[^0-9]','','g'),9), "
+                    "total_price::text, coalesce(currency,''), coalesce(unique_sku_count,0), frisbo_created_at, coalesce(financial_status,'') "
+                    "from orders where order_number = :n order by id desc limit 1", n=order_number)
+        if not r:
+            return None
+        suid, ph9, total, curr, nsku, created, fin = r[0]
+        if not ph9 or len(ph9) < 9:
+            return None
+        return {"store_uid": suid, "phone9": ph9, "total": total, "cur": curr, "nsku": int(nsku or 0), "created": created, "fin": fin}
+    except Exception:
+        return None
+    finally:
+        if con is not None:
+            try:
+                con.close()
+            except Exception:
+                pass
+
+
+def awbprint_phone_sibling(fp, order_number, window_hours=48):
+    """Frate in ACELASI magazin cu ACELASI telefon + suma+moneda + nr SKU, +/-window ore, care ARE DEJA
+    AWB (tracking_number not null, necancelat). Intoarce numele fratelui sau None."""
+    if not fp or not fp.get("phone9"):
+        return None
+    try:
+        import pg8000.native
+        from urllib.parse import urlparse, unquote
+    except Exception:
+        return None
+    url = os.environ.get("DATABASE_URL_AWBPRINT") or ""
+    if not url:
+        try:
+            url = subprocess.run(["uv", "run", KB, "secret-get", "DATABASE_URL_AWBPRINT"],
+                                 capture_output=True, text=True, timeout=40).stdout.strip()
+        except Exception:
+            url = ""
+    if not url.startswith("postgres"):
+        return None
+    up_ = urlparse(url); con = None
+    try:
+        con = pg8000.native.Connection(user=unquote(up_.username or ""), password=unquote(up_.password or ""),
+                                       host=up_.hostname, port=up_.port or 5432, database=up_.path.lstrip("/"), ssl_context=True)
+        r = con.run(
+            "select order_number from orders "
+            "where store_uid = :s and order_number <> :n and tracking_number is not null "
+            "and coalesce(aggregated_status,'') <> 'cancelled' "
+            "and right(regexp_replace(coalesce((shipping_address::jsonb)->>'phone',''),'[^0-9]','','g'),9) = :ph "
+            "and total_price::text = :tot and coalesce(currency,'') = :cur and coalesce(unique_sku_count,0) = :ns "
+            "and frisbo_created_at between :t::timestamp - interval '%d hours' and :t::timestamp + interval '%d hours' "
+            "order by frisbo_created_at desc limit 1" % (int(window_hours), int(window_hours)),
+            s=fp["store_uid"], n=order_number, ph=fp["phone9"], tot=fp["total"], cur=fp["cur"], ns=fp["nsku"], t=fp["created"])
+        return r[0][0] if r else None
+    except Exception:
+        return None
+    finally:
+        if con is not None:
+            try:
+                con.close()
+            except Exception:
+                pass
+
+
 def cmd_awb_make(a, _resolved=None):
     sh, xc, o = _resolved or resolve_order(a.order, a, a.days)
     if not o:
@@ -4889,6 +4974,7 @@ def cmd_fulfill(a):
     # Gardă de DUPLICAT în aceeași tură: {(magazin, cheie_client, set_SKU)} cărora le-am făcut deja AWB.
     # AWBprint (oglinda Frisbo) reflectă cu întârziere → fără asta, două dubluri din aceeași tură ies AMBELE.
     made_ident = set()
+    made_phone = set()  # garda pe TELEFON: (magazin, tel9, suma, moneda, nr_sku)
     for _pos, sh in enumerate(_ordered):
         if _use_rot and _pos > 0 and (time.time() - run_start) > budget_s:
             save_fulfill_cursor((_start_idx + _pos) % _n)   # tura viitoare CONTINUĂ de la acest magazin (cele rămase)
@@ -5186,6 +5272,7 @@ def cmd_fulfill(a):
                 _exempt = any(t in CS_AGENT_TAGS for t in tags) or source == "shopify_draft_order" or DUP_OK in tags
                 _ckey = (cust or "").strip()
                 _skus = frozenset()
+                _pfp = None
                 if not _exempt:
                     _ident, _skus = awbprint_identity(name)
                     _ckey = _ckey or _ident
@@ -5195,11 +5282,40 @@ def cmd_fulfill(a):
                         awb_event(kind="dup-in-run", store=sh["shopDomain"], order=name, result="blocked")
                         print("    ⚠️ %s = DUPLICAT în aceeași tură (același client + produse tocmai expediate) → NU fac AWB (la CS)" % name)
                         continue
+                    # GARDĂ DUPLICAT pe TELEFON: email/nume/GID pot diferi (typo, fișe COD separate), telefonul e constant.
+                    # cross-run (frate cu AWB in AWBprint, +/-48h, aceeași sumă+monedă+nr SKU) + same-run (made_phone).
+                    _pfp = awbprint_phone_fp(name)
+                    if _pfp:
+                        _pkey = (sh["shopDomain"], _pfp["phone9"], _pfp["total"], _pfp["cur"], _pfp["nsku"])
+                        _psib = awbprint_phone_sibling(_pfp, name)  # nume frate cross-run cu AWB, sau None
+                        if _psib or _pkey in made_phone:
+                            # STRICT IDENTIC (aceleași SKU-uri) + NEplătit card → ANULEZ (regula 4b, restock ON); altfel HOLD.
+                            _ident_dup = False
+                            if _psib and (_pfp.get("fin") or "").lower() != "paid":
+                                _st_ok, _sk_ok = awbprint_compare(name, _psib)
+                                _ident_dup = bool(_st_ok and _sk_ok)
+                            if _ident_dup:
+                                dup_cancel += 1
+                                _res = cancel_duplicate(sh, xc, o, st, name, a.apply)
+                                awb_event(kind="dup-phone", store=sh["shopDomain"], order=name, sibling=_psib,
+                                          result=(_res if isinstance(_res, str) else "cancelled"))
+                                print("    🗑️ %s = DUPLICAT pe TELEFON IDENTIC cu %s (telefon+sumă+SKU) → ANULEZ (restock)" % (name, _psib))
+                                continue
+                            dup_untag += 1
+                            hold_and_log(st, sh["shopDomain"], name, "dup-telefon", a.apply)
+                            if a.apply: cron_held_add(name)
+                            awb_event(kind="dup-phone", store=sh["shopDomain"], order=name,
+                                      sibling=(_psib or "in-run"), result="held")
+                            print("    ⚠️ %s = DUPLICAT pe TELEFON (nu 100%% identic / card / same-run) ca %s → HOLD (la CS)"
+                                  % (name, _psib or "frate din tură"))
+                            continue
                 ok, perm, hreason = _do_awb(xc, sh, st, cons, con, name, o, a.notify)
                 if ok:
                     made += 1
                     if not _exempt and _ckey and _skus:
                         made_ident.add((sh["shopDomain"], _ckey, _skus))
+                    if not _exempt and _pfp:
+                        made_phone.add((sh["shopDomain"], _pfp["phone9"], _pfp["total"], _pfp["cur"], _pfp["nsku"]))
                 else:
                     failed += 1
                     if perm:
