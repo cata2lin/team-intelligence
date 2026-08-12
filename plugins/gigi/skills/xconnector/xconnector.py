@@ -3662,6 +3662,17 @@ def ro_genzip_fixed_add(n):
     _here_state_add(RO_GENZIP_FIXED_FILE, n); _ro_genzip_fixed().add(n)
 
 
+DPD_STREET_FIXED_FILE = os.path.join(_HERE_DIR, ".dpd_street_fixed")   # comenzi RO cărora le-am CANONIZAT strada via DPD findStreet (o dată)
+_DPD_STREET_FIXED = None
+def _dpd_street_fixed():
+    global _DPD_STREET_FIXED
+    if _DPD_STREET_FIXED is None:
+        _DPD_STREET_FIXED = _here_state_load(DPD_STREET_FIXED_FILE)
+    return _DPD_STREET_FIXED
+def dpd_street_fixed_add(n):
+    _here_state_add(DPD_STREET_FIXED_FILE, n); _dpd_street_fixed().add(n)
+
+
 INTL_GENZIP_FIXED_FILE = os.path.join(_HERE_DIR, ".intl_genzip_fixed")   # comenzi INTL cărora le-am pus zip-ul CANONIC al localității după respingerea DPD pe localitate (o dată)
 _INTL_GENZIP_FIXED = None
 def _intl_genzip_fixed():
@@ -4767,16 +4778,93 @@ def dpd_site_by_city(country_id, city, province, street=None):
     return None, "ambiguu (%d judete: %s)" % (len(exact), ",".join(sorted({(s.get("region") or "?") for s in exact})[:4]))
 
 
+_DPD_STREET_CACHE = {}
+
+
+def _dpd_street_name(a1):
+    """Numele BARE al străzii pt findStreet DPD (fără prefix Strada/Bd, fără nr/bloc/cifre). '' dacă n-are stradă."""
+    a = _fold(a1 or "")
+    a = re.split(r"(?i)\b(nr|no|bl|bloc|sc|scara|ap|apt|et|etaj|km)\b", a)[0]
+    a = re.sub(r"(?i)^\s*(str\.?|strada|bd\.?|b-?dul|bulevardul|aleea|calea|soseaua|sos\.?|drumul|intrarea|intr\.?|piata|splaiul)\s+", "", a.strip())
+    a = re.sub(r"[,\.].*$", "", a)
+    a = re.sub(r"\d+", "", a).strip(" ,.-")
+    return a
+
+
+def dpd_find_street(country_id, site_id, name):
+    """DPD `/location/street` — străzile unui SIT care se potrivesc cu `name`, cu numele CANONIC (`actualName`)
+    + `streetId`. Nomenclatorul de STRĂZI al DPD (până acum nefolosit). [] dacă niciuna. Cache pe (sit, nume)."""
+    key = (site_id, _fold(name))
+    if key in _DPD_STREET_CACHE:
+        return _DPD_STREET_CACHE[key]
+    auth = _dpd_auth()
+    out = []
+    if auth and site_id and name:
+        try:
+            req = urllib.request.Request("https://api.dpd.ro/v1/location/street/",
+                  data=json.dumps({**auth, "countryId": country_id, "siteId": site_id, "name": _fold(name).upper()}).encode(),
+                  headers={"Content-Type": "application/json"})
+            out = json.loads(urllib.request.urlopen(req, timeout=25).read()).get("streets") or []
+        except Exception:
+            out = []
+    _DPD_STREET_CACHE[key] = out
+    return out
+
+
+def dpd_street_canon(xc, o, shop_domain, name):
+    """REACTIV pe eșec de stradă: DPD `findStreet` → numele CANONIC din nomenclatorul DPD (Rahova→Rahovei,
+    „doctor Oprescu"→„Dr. Oprescu Dumitru"). RO-only, DPD-AUTORITATIV (nu ghicește — folosește numele DPD).
+    Rescrie DOAR numele străzii, păstrând nr/bloc. True dacă a rescris. Fires o singură dată/comandă (gardă în _do_awb)."""
+    ad = xc.by_id(o.get("orderId")).get("shippingAddress") or {}
+    cid = DPD_COUNTRY_ID.get((ad.get("country") or "").strip().upper())
+    if cid != 642:
+        return False
+    a1 = ad.get("address1") or ""
+    core = _dpd_street_name(a1)
+    if not core or len(re.sub(r"[^a-z]", "", core.lower())) < 4:
+        return False   # n-are nume de stradă (doar bloc/număr) → nu-i cazul
+    zc = (ad.get("zip") or "").strip()
+    site = dpd_site_by_zip(cid, zc) if re.fullmatch(r"\d{6}", zc) else None
+    if not site:
+        site, _why = dpd_site_by_city(cid, (ad.get("city") or "").strip(), (ad.get("province") or "").strip(), a1)
+    if not site or not site.get("id"):
+        return False
+    streets = dpd_find_street(cid, site["id"], core)
+    if not streets:
+        return False   # DPD chiar n-are strada (NO_MATCH real) → CS
+    best = streets[0]
+    canon = best.get("actualName") or best.get("name")
+    if not canon or _fold(canon) == _fold(core):
+        return False   # DPD are exact numele scris → eșecul NU-i strada (nr/tranzitoriu) → nu ating
+    # rescrie a1 = numele canonic DPD + restul (nr/bloc) din a1
+    m = re.search(r"(?i)(\bnr\b|\bno\b|\bbl\b|\bbloc\b|\d)", a1)
+    rest = a1[m.start():].strip(" ,") if m else ""
+    new_a1 = (canon.title() + ((" " + rest) if rest else "")).strip()
+    if _fold(new_a1) == _fold(a1):
+        return False
+    try:
+        intl_correct_write(xc, o, shop_domain, {"address1": new_a1})
+        awb_event(kind="dpd-street-canon", store=shop_domain, order=name, result="ok",
+                  old=core, new=canon, site=site.get("name"))
+        return True
+    except Exception:
+        return False
+
+
 # ── RO: localități pe care DPD NU le indexează sub numele scris de client (oraș-stațiune / comună mică) — coletul
 # se livrează dintr-un SAT satelit pe care DPD ÎL are. Curat + validat LIVE pe DPD (findSite sat = ok, findSite
 # oraș = necunoscut, 2026-08-12). NU e derivabil din nomenclatorul RO (plat, fără arbore comună→sat). Cheie =
 # (oraș_fold, județ_fold) → nume sat livrabil DPD. Crește din log-ul `zip-city-fill result=miss` / CS.
 RO_DPD_LOCALITY_ALIAS = {
-    ("baile olanesti", "valcea"):  "Livadia",         # EST236168 (245300→245304)
+    ("baile olanesti", "valcea"):  "Olanesti",         # EST236168; istoric: Olănești/245306 (4 liv) > Livadia (1)
     ("ocnele mari", "valcea"):     "Gura Suhasului",   # EST236143 (245900→245904)
     ("valea doftanei", "prahova"): "Tesila",           # EST235840 (107640→107645)
     ("baile govora", "valcea"):    "Prajila",          # RED25256  (245200→245203)
     ("aurora", "constanta"):       "Cap Aurora",       # EST235717 (905501; „Aurora" pică pe omonim 227151)
+    # verificate din istoric livrat + held-uri curente (2026-08-12):
+    ("ceptura", "prahova"):        "Ceptura de Jos",   # 71 liv · GRAND22598 (107125→107126)
+    ("jucu", "cluj"):              "Jucu de Sus",      # 57 liv (+31 Mijloc) · NUBRA12816 (407350→407354)
+    ("budeasa", "arges"):          "Budeasa Mare",     # 34 liv · GT55465 (117155→117156)
 }
 
 
@@ -4937,6 +5025,21 @@ def _do_awb(xc, sh, st, cons, con, name, o, notify):
             ok, s, d = _create_label(xc, body, _ctx={"store": sh["shopDomain"], "order": name})
             if ok:
                 awb_event(kind="ro-genzip-fallback", store=sh["shopDomain"], order=name, result="ok")
+                return True, False, None
+            msg = (d.get("errorMessage") if isinstance(d, dict) else str(d)) or ""
+            transient = s in (429, 500, 502, 503, 504) or (s == 422 and "was not created" in msg)
+    # RO: STRADĂ scrisă altfel decât în nomenclatorul DPD → `findStreet` dă numele CANONIC (Rahova→Rahovei,
+    # „doctor Oprescu"→„Dr. Oprescu Dumitru") → rescriu strada → reîncearcă. DPD-AUTORITATIV (nu ghicit, ca genzip-ul
+    # care atingea zip-ul). Dacă DPD are exact numele scris sau n-o are deloc → nu atinge (NO_MATCH real → CS).
+    # O SINGURĂ dată/comandă. Non-tranzitoriu (după genzip, care nu ajută pe stradă).
+    if not _ctry and not transient and name not in _dpd_street_fixed():
+        _stchg = dpd_street_canon(xc, o, sh["shopDomain"], name)
+        dpd_street_fixed_add(name)
+        if _stchg:
+            time.sleep(3.0)
+            ok, s, d = _create_label(xc, body, _ctx={"store": sh["shopDomain"], "order": name})
+            if ok:
+                awb_event(kind="dpd-street-canon-awb", store=sh["shopDomain"], order=name, result="ok")
                 return True, False, None
             msg = (d.get("errorMessage") if isinstance(d, dict) else str(d)) or ""
             transient = s in (429, 500, 502, 503, 504) or (s == 422 and "was not created" in msg)
