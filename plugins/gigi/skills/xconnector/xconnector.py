@@ -4996,6 +4996,77 @@ def sweep_held_orders(xc, sh, st, xmap, cron_giveup, mcur, intl, dfrom, apply):
     return rel, left
 
 
+_SURP_VARIANT_CACHE = {}
+
+
+def surprise_variant(shop, token):
+    """Variant GID al produsului „Parfum surpriză" ($0) al magazinului (cache pe proces). None dacă magazinul
+    n-are produsul `parfum-surpriza` ACTIV. GENERIC — merge pe orice magazin (fiecare cu produsul lui)."""
+    if shop in _SURP_VARIANT_CACHE:
+        return _SURP_VARIANT_CACHE[shop]
+    vid = None
+    try:
+        d = shopify_gql(shop, token, 'query{ productByHandle(handle:"parfum-surpriza"){ status variants(first:1){ edges{ node{ id } } } } }')
+        p = (d.get("data") or {}).get("productByHandle") or {}
+        if p.get("status") == "ACTIVE":
+            edges = (p.get("variants") or {}).get("edges") or []
+            if edges:
+                vid = edges[0]["node"]["id"]
+    except Exception:
+        vid = None
+    _SURP_VARIANT_CACHE[shop] = vid
+    return vid
+
+
+def ensure_surprise_giftbox(shop, token, name, variant):
+    """COMPENSARE 2+1 blocat de CUTIA CADOU: pe Esteban, un Script de checkout scoate discountul nativ 2+1 pe
+    comenzile care conțin o cutie cadou (`cutie-cadou`) — deci comenzi de 3+ parfumuri cu cutie ies la preț ÎNTREG,
+    fără al 3-lea gratis. Compensăm ca la 2 parfumuri (Flow): adăugăm **floor(parf/3) parfumuri surpriză ($0)** via
+    order edit, ÎNAINTE de AWB (ca depozitul să le pună în colet). GENERIC (orice magazin cu cutie + produs surpriză),
+    dar în practică fire doar pe Esteban (singurul cu cutie). Idempotent: sare dacă are deja surpriză / 2+1 / e expediată.
+    Întoarce nr adăugate (0 = nimic)."""
+    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ id displayFulfillmentStatus cancelledAt '
+         'discountApplications(first:5){ edges{ node{ __typename ... on AutomaticDiscountApplication{ title } } } } '
+         'lineItems(first:30){ edges{ node{ sku title quantity } } } } } } }') % (name or "").replace('"', "")
+    try:
+        d = shopify_gql(shop, token, q)
+    except Exception:
+        return 0
+    n = (((d.get("data") or {}).get("orders") or {}).get("edges") or [{}])[0].get("node") or {}
+    if not n or n.get("cancelledAt") or n.get("displayFulfillmentStatus") == "FULFILLED":
+        return 0
+    lis = [li["node"] for li in (n.get("lineItems") or {}).get("edges") or []]
+    if not any((li.get("sku") or "") == "cutie-cadou" for li in lis):
+        return 0
+    if any("surpriz" in (li.get("title") or "").lower() or (li.get("sku") or "").lower().startswith("surpriza") for li in lis):
+        return 0
+    disc = [(e["node"].get("title") or "").lower() for e in (n.get("discountApplications") or {}).get("edges") or []]
+    if any("2+1" in t or "2 plus 1" in t or "gratis" in t for t in disc):
+        return 0
+    perf = sum((li.get("quantity") or 0) for li in lis
+               if (li.get("sku") or "") != "cutie-cadou" and re.match(r"^\d+(-\d+ml)?$", (li.get("sku") or "").strip()))
+    qty = perf // 3
+    if qty < 1:
+        return 0
+    try:
+        beg = shopify_gql(shop, token, "mutation($id:ID!){ orderEditBegin(id:$id){ calculatedOrder{ id } userErrors{ message } } }", {"id": n["id"]})
+        cid = (((beg.get("data") or {}).get("orderEditBegin") or {}).get("calculatedOrder") or {}).get("id")
+        if not cid:
+            return 0
+        av = shopify_gql(shop, token, "mutation($id:ID!,$v:ID!,$q:Int!){ orderEditAddVariant(id:$id, variantId:$v, quantity:$q, allowDuplicates:true){ userErrors{ message } } }",
+                         {"id": cid, "v": variant, "q": qty})
+        if (((av.get("data") or {}).get("orderEditAddVariant") or {}).get("userErrors")):
+            return 0
+        cm = shopify_gql(shop, token, 'mutation($id:ID!,$note:String){ orderEditCommit(id:$id, notifyCustomer:false, staffNote:$note){ order{ name } userErrors{ message } } }',
+                         {"id": cid, "note": "Parfum surpriza x%d (cutie cadou, fara 2+1)" % qty})
+        if (((cm.get("data") or {}).get("orderEditCommit") or {}).get("userErrors")):
+            return 0
+        awb_event(kind="giftbox-surprise", store=shop, order=name, result="ok", detail="qty=%d perf=%d" % (qty, perf))
+        return qty
+    except Exception:
+        return 0
+
+
 def cmd_fulfill(a):
     """Safety-net peste Shopify Flow: comenzi open+unfulfilled mai vechi de --max-age-min (Flow a ratat AWB-ul) →
     VALID → fă AWB (create-shipping-label, DPD default); WRONG/UNKNOWN → corecție conservatoare → dacă devine
@@ -5400,6 +5471,16 @@ def cmd_fulfill(a):
                             print("    ⚠️ %s = DUPLICAT pe TELEFON (nu 100%% identic / card / same-run) ca %s → HOLD (la CS)"
                                   % (name, _psib or "frate din tură"))
                             continue
+                # COMPENSARE 2+1 blocat de CUTIA CADOU (Esteban): ÎNAINTE de AWB, adaug parfum surpriză ($0) la
+                # comenzile cu cutie fără 2+1 = floor(parf/3) (echivalentul celor gratis). Filtru IEFTIN pe SKU-urile
+                # din lista xConnector (fără niciun query dacă n-are cutie). GENERIC pe magazine (produsul surpriză al
+                # fiecăruia); în practică fire doar pe Esteban (singurul cu cutie).
+                if a.apply and "cutie-cadou" in (xmap.get(name, {}).get("skus") or []):
+                    _svar = surprise_variant(st["shopDomain"], st["adminToken"])
+                    if _svar:
+                        _nsurp = ensure_surprise_giftbox(st["shopDomain"], st["adminToken"], name, _svar)
+                        if _nsurp:
+                            print("    🎁 %s = cutie cadou fără 2+1 → adăugat %d parfum surpriză ($0)" % (name, _nsurp))
                 ok, perm, hreason = _do_awb(xc, sh, st, cons, con, name, o, a.notify)
                 if ok:
                     made += 1
