@@ -1038,9 +1038,11 @@ def _city_denoise(city):
     parts = re.split(r",\s*(?:municipality|municipiul|region|regiune|county|okres|kraj|oras(?:ul)?)\b", c, flags=re.IGNORECASE)
     if len(parts) > 1 and parts[0].strip():
         c = parts[0].strip(" ,.-"); why.append("sufix-admin")
-    # 3) nota "sat/com(una) X" lipita dupa localitatea principala ("Curtesti.sat M Doamnei." -> "Curtesti")
-    parts = re.split(r"[.,]\s*(?:sat|com|comuna)\b", c, flags=re.IGNORECASE)
-    if len(parts) > 1 and parts[0].strip():
+    # 3) nota "sat/com(una) X" lipita dupa localitatea principala, cu punct/virgula SAU spatiu
+    #    ("Curtesti.sat M Doamnei."->"Curtesti", "sohodor comuna horesti"->"sohodor", "morteni sat neajlov"->"morteni").
+    #    `\b(sat|com|comuna)\b` = cuvant intreg → NU atinge "Satu Mare"/"Comana" (satu/comana n-au boundary dupa sat/com).
+    parts = re.split(r"[.,\s]+(?:sat(?:ul)?|com|comuna)\b", c, flags=re.IGNORECASE)
+    if len(parts) > 1 and len(parts[0].strip(" ,.-")) >= 3:
         c = parts[0].strip(" ,.-"); why.append("nota-sat")
     # 3b) sufix "Romania/Rominia" lipit în oraș ("Podul Iloaie Rominiao" -> "Podul Iloaie") — junk, țara se știe
     c2 = re.sub(r"(?i)[,\s]+rom[aâîi]ni[aei]o?\.?\s*$", "", c).strip(" ,.-")
@@ -4905,6 +4907,87 @@ def _apply_locality_alias(xc, o, shop_domain, name, cid, city, prov, a1):
         return False
 
 
+def _levenshtein(a, b):
+    """Distanța de editare (iterativ, O(len·len)). Pt fuzzy-match oraș pe typo-uri."""
+    if a == b:
+        return 0
+    lb = len(b)
+    if not a:
+        return lb
+    if not lb:
+        return len(a)
+    prev = list(range(lb + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[lb]
+
+
+_FUZZY_CAND_CACHE = {}
+
+
+def ro_fuzzy_city(city, province):
+    """Typo de ORAȘ → cea mai apropiată localitate REALĂ din nomenclator (`romania_addresses`, ACELAȘI județ),
+    edit-distance MICĂ + UNICĂ la minim. CONSERVATOR: dist ≤ 2 și STRICT mai mică decât a 2-a (fără ambiguu) →
+    nu ghicește. None dacă nu-i clar SAU orașul există ca atare (nu-i typo). Apelantul DPD-verifică rezultatul."""
+    cf = _fold(city).lower().strip()
+    jf = _fold(province).lower().strip()
+    if len(cf) < 5 or not jf:
+        return None
+    cands = _FUZZY_CAND_CACHE.get(jf)
+    if cands is None:
+        cands = []
+        try:
+            cur = metrics_cursor_live()
+            cur.execute("SELECT DISTINCT localitate, localitate_norm FROM public.romania_addresses WHERE judet_norm = %s", (jf,))
+            cands = [(r[0], _fold(r[1] or "").lower()) for r in cur.fetchall()]
+        except Exception:
+            cands = []
+        _FUZZY_CAND_CACHE[jf] = cands
+    best = None
+    best_d = 99
+    second_d = 99
+    for disp, nf in cands:
+        if not nf:
+            continue
+        if nf == cf:
+            return None   # orașul EXISTĂ exact în județ → nu-i typo (poate comună neindexată DPD → alt mecanism)
+        if abs(len(nf) - len(cf)) > 2:
+            continue
+        d = _levenshtein(cf, nf)
+        if d < best_d:
+            second_d, best_d, best = best_d, d, disp
+        elif d < second_d:
+            second_d = d
+    if best is None or best_d > 2 or best_d >= second_d:
+        return None   # prea departe SAU ambiguu (≥2 candidați la minim)
+    return best
+
+
+def _apply_fuzzy_city(xc, o, shop_domain, name, cid, city, prov, a1):
+    """Typo oraș → localitate reală apropiată (fuzzy pe nomenclator, același județ), CONFIRMATĂ pe DPD (by_city).
+    Scrie city + zip DPD. REACTIV-safe (doar pe eșec DPD + match unic + DPD-verificat). True dacă a scris."""
+    if cid != 642:
+        return False
+    fx = ro_fuzzy_city(city, prov)
+    if not fx:
+        return False
+    site, why = dpd_site_by_city(cid, fx, prov, a1)
+    zc = (site or {}).get("postCode")
+    if not zc:
+        return False
+    try:
+        intl_correct_write(xc, o, shop_domain, {"city": (site.get("name") or fx).title(),
+                                                "zip": zc, "address1": _cyr2lat(a1)})
+        awb_event(kind="ro-fuzzy-city", store=shop_domain, order=name, result="ok",
+                  old=city, city=site.get("name"), region=site.get("region"), zip=zc)
+        return True
+    except Exception:
+        return False
+
+
 def dpd_fix_locality(xc, o, shop_domain, name):
     """DPD refuză localitatea → findSite după zip → corectează city la forma canonică DPD + transliterează strada
     (chirilic→latin, ca xConnector/DPD s-o accepte). True dacă a scris corecția.
@@ -4923,6 +5006,9 @@ def dpd_fix_locality(xc, o, shop_domain, name):
         if not zc:
             # oraș/comună neindexat de DPD → încearcă satul satelit din alias (Băile Olănești→Livadia).
             if _apply_locality_alias(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1")):
+                return True
+            # TYPO de oraș → fuzzy pe nomenclator (același județ) + DPD-verificat (bucureati→București, brazov→Brașov).
+            if _apply_fuzzy_city(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1")):
                 return True
             # NU ghicim. Logăm de ce, ca să identificăm cazurile REALE când pică (ex. sat vs comună).
             awb_event(kind="zip-city-fill", store=shop_domain, order=name, result="miss",
@@ -4957,6 +5043,9 @@ def dpd_fix_locality(xc, o, shop_domain, name):
                 return False
         # DPD nu știe NICI zip-ul NICI orașul → alias oraș/comună → sat livrabil (Băile Olănești→Livadia etc.).
         if _apply_locality_alias(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
+            return True
+        # TYPO de oraș → fuzzy pe nomenclator (același județ) + DPD-verificat.
+        if _apply_fuzzy_city(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
             return True
         # oraș neindexat de DPD FĂRĂ alias încă → LOG `miss` (cu zip) ca să apară în worklist-ul
         # `commune_alias_pending.py` → CS confirmă satul o dată → intră în tabel.
