@@ -4863,6 +4863,10 @@ def dpd_fix_locality(xc, o, shop_domain, name):
         # DPD nu știe NICI zip-ul NICI orașul → alias oraș/comună → sat livrabil (Băile Olănești→Livadia etc.).
         if _apply_locality_alias(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
             return True
+        # oraș neindexat de DPD FĂRĂ alias încă → LOG `miss` (cu zip) ca să apară în worklist-ul
+        # `commune_alias_pending.py` → CS confirmă satul o dată → intră în tabel.
+        awb_event(kind="zip-city-fill", store=shop_domain, order=name, result="miss",
+                  city=_city2, region=_prov2, zip=zipc, detail=(why2 or "dpd-reject-zip+city"))
         return False
     try:
         intl_correct_write(xc, o, shop_domain, {"city": canon.title(), "zip": zipc, "address1": _cyr2lat(ad.get("address1"))})
