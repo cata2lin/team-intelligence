@@ -4443,12 +4443,54 @@ def customer_is_newest(shop, token, customer_gid, this_created, since_date):
     return is_newest, newest.get("name")
 
 
+def shopify_compare(shop, token, a, b):
+    """(same_total, same_skus) din SHOPIFY — FALLBACK când `awbprint_compare` dă necomparabil fiindcă o comandă
+    PROASPĂTĂ (keeper-ul abia plasat) nu s-a SINCRONIZAT încă în AWBprint (mirror Frisbo, lag) → dublura veche
+    rămânea pe HOLD degeaba (măsurat: EST235803 vs EST235806). Shopify are AMBELE imediat. Aceeași regulă strictă
+    ca AWBprint: dublură tehnică sigură = ACELEAȘI SKU-uri (set) + ACEEAȘI sumă. (None,None) dacă lipsă o comandă."""
+    q = ('query{ a: orders(first:1, query:"name:%s"){ edges{ node{ totalPriceSet{ shopMoney{ amount } } '
+         'lineItems(first:50){ edges{ node{ sku } } } } } } '
+         'b: orders(first:1, query:"name:%s"){ edges{ node{ totalPriceSet{ shopMoney{ amount } } '
+         'lineItems(first:50){ edges{ node{ sku } } } } } } }') % (
+         (a or "").replace('"', ''), (b or "").replace('"', ''))
+    d = shopify_gql(shop, token, q)
+    data = d.get("data") or {}
+
+    def _one(key):
+        edges = ((data.get(key) or {}).get("edges")) or []
+        if not edges:
+            return None, None
+        nd = edges[0]["node"]
+        tot = ((nd.get("totalPriceSet") or {}).get("shopMoney") or {}).get("amount")
+        skus = frozenset(s for s in ((li["node"].get("sku") or "").strip()
+                         for li in (nd.get("lineItems") or {}).get("edges") or []) if s)
+        return tot, skus
+
+    ta, sa = _one("a"); tb, sb = _one("b")
+    if ta is None or tb is None:
+        return None, None
+    try:
+        same_total = abs(float(ta) - float(tb)) < 0.01
+    except Exception:
+        same_total = None
+    same_skus = (sa == sb) if (sa and sb) else None
+    return same_total, same_skus
+
+
 def resolve_duplicate(sh, xc, o, st, name, keeper, apply):
     """Ce facem cu dublura `name` față de comanda păstrată `keeper`.
     ANULEZ doar dacă are ȘI aceleași produse ȘI aceeași sumă = dublură tehnică sigură. Altfel HOLD:
     alt conținut sau altă valoare poate fi o comandă REALĂ, iar o anulare automată taie o vânzare.
     Întoarce (rezultat, motiv) — rezultat: cancelled | would-cancel | shipped-skip | failed | held."""
     same_total, same_skus = awbprint_compare(name, keeper) if keeper else (None, None)
+    # FALLBACK Shopify: AWBprint poate să nu fi sincronizat încă comanda PROASPĂTĂ (keeper-ul abia plasat) →
+    # necomparabil degeaba, iar dublura VECHE rămânea pe HOLD (măsurat: EST235803 vs EST235806 — keeper card-plătit
+    # nesincronizat în AWBprint la ora dedup-ului). Shopify are AMBELE imediat. Doar când AWBprint n-a putut compara
+    # (same_skus None). Aceeași regulă strictă (SKU-uri + sumă). Garda de card e upstream (paid=keeper, nu ajunge aici).
+    if same_skus is None and keeper:
+        s_total, s_skus = shopify_compare(sh["shopDomain"], st["adminToken"], name, keeper)
+        if s_skus is not None:
+            same_total, same_skus = s_total, s_skus
     if same_total and same_skus:
         return cancel_duplicate(sh, xc, o, st, name, apply), "identice"
     if same_skus is False:
