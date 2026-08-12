@@ -5007,6 +5007,47 @@ def _apply_fuzzy_city(xc, o, shop_domain, name, cid, city, prov, a1):
         return False
 
 
+def _a1_locality(a1):
+    """Localitatea REALĂ pe care clientul a scris-o ÎN address1 sub marker („sat X"/„satul X"/„localitatea X"/„loc X")
+    — când câmpul ORAȘ e o comună/județ, satul e adesea acolo. DETERMINIST (nu ghicește; clientul a spus-o).
+    Întoarce numele sau None. Apelantul îl DPD-verifică."""
+    if not a1:
+        return None
+    m = re.search(r"(?i)\b(?:sat(?:ul)?|localitatea|loc)\.?\s+"
+                  r"([A-Za-zăâîșțĂÂÎȘȚ][A-Za-zăâîșțĂÂÎȘȚ\-]{2,}"
+                  r"(?:\s+(?!(?:str|strada|bd|bdul|nr|no|bl|bloc|sc|scara|ap|apt|et|etaj|comuna|com|jud)\b)"
+                  r"[A-Za-zăâîșțĂÂÎȘȚ][A-Za-zăâîșțĂÂÎȘȚ\-]{2,})?)", a1)
+    if not m:
+        return None
+    v = m.group(1).strip(" ,.-")
+    # nu confunda cu un cuvânt-stradă generic care poate urma după „loc/sat"
+    if re.match(r"(?i)^(principala|principal|noua|noul|nou|mare|mica|de|din|bisericii|scolii|garii|noastra)$", v):
+        return None
+    return v
+
+
+def _apply_a1_locality(xc, o, shop_domain, name, cid, city, prov, a1):
+    """Localitatea din address1 („sat X"/„localitatea X") → CONFIRMATĂ pe DPD (by_city, același județ) → scrie
+    city + zip DPD. DETERMINIST + DPD-verificat → sigur. True dacă a scris. (nicolae balcescu+„sat Predești"→PREDEȘTI.)"""
+    if cid != 642:
+        return False
+    loc = _a1_locality(a1)
+    if not loc or _fold(loc) == _fold(city):
+        return False
+    site, why = dpd_site_by_city(cid, loc, prov, a1)
+    zc = (site or {}).get("postCode")
+    if not zc:
+        return False
+    try:
+        intl_correct_write(xc, o, shop_domain, {"city": (site.get("name") or loc).title(),
+                                                "zip": zc, "address1": _cyr2lat(a1)})
+        awb_event(kind="a1-locality", store=shop_domain, order=name, result="ok",
+                  old=city, city=site.get("name"), region=site.get("region"), zip=zc)
+        return True
+    except Exception:
+        return False
+
+
 def dpd_fix_locality(xc, o, shop_domain, name):
     """DPD refuză localitatea → findSite după zip → corectează city la forma canonică DPD + transliterează strada
     (chirilic→latin, ca xConnector/DPD s-o accepte). True dacă a scris corecția.
@@ -5025,6 +5066,9 @@ def dpd_fix_locality(xc, o, shop_domain, name):
         if not zc:
             # oraș/comună neindexat de DPD → încearcă satul satelit din alias (Băile Olănești→Livadia).
             if _apply_locality_alias(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1")):
+                return True
+            # DETERMINIST: satul e în address1 („sat X"/„localitatea X") → DPD-verificat (nicolae balcescu+„sat Predești"→PREDEȘTI).
+            if _apply_a1_locality(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1")):
                 return True
             # TYPO de oraș → fuzzy pe nomenclator (același județ) + DPD-verificat (bucureati→București, brazov→Brașov).
             if _apply_fuzzy_city(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1")):
@@ -5062,6 +5106,9 @@ def dpd_fix_locality(xc, o, shop_domain, name):
                 return False
         # DPD nu știe NICI zip-ul NICI orașul → alias oraș/comună → sat livrabil (Băile Olănești→Livadia etc.).
         if _apply_locality_alias(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
+            return True
+        # DETERMINIST: satul e în address1 („sat X"/„localitatea X") → DPD-verificat.
+        if _apply_a1_locality(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
             return True
         # TYPO de oraș → fuzzy pe nomenclator (același județ) + DPD-verificat.
         if _apply_fuzzy_city(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
