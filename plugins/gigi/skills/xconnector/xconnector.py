@@ -1029,7 +1029,7 @@ def _city_denoise(city):
         c = c2; why.append("normalizare")
     # 0) prefix admin lipit în față ("com. Roșiile"->"Roșiile", "loc. Hîrlău"->"Hîrlău", "Sat Lipia"->"Lipia").
     #    NU atinge "Satu Mare" (\b după 'sat' → 'satu' n-are boundary) sau orașe curate.
-    m0 = re.match(r"(?i)^\s*(?:comuna|com|satul|sat|localitatea|loc)\.?\s+([A-Za-zăâîșțĂÂÎȘȚ].*)$", c)
+    m0 = re.match(r"(?i)^\s*(?:comuna|com|satul|sat|localitatea|loc|municipiul|municipiu|mun|orasul|oras)\.?\s+([A-Za-zăâîșțĂÂÎȘȚ].*)$", c)
     if m0 and m0.group(1).strip():
         c = m0.group(1).strip(" ,.-"); why.append("prefix-admin")
     # 1) prefix numeric lipit ("11849#zalau" / "11849 zalau" -> "zalau") — numarul e gunoi (strada isi are nr ei)
@@ -5088,6 +5088,61 @@ def _apply_city_prefix(xc, o, shop_domain, name, cid, city, prov, a1):
     return False
 
 
+_RO_JUDETE = frozenset({
+    "alba", "arad", "arges", "bacau", "bihor", "bistrita nasaud", "botosani", "braila", "brasov", "buzau",
+    "caras severin", "calarasi", "cluj", "constanta", "covasna", "dambovita", "dolj", "galati", "giurgiu",
+    "gorj", "harghita", "hunedoara", "ialomita", "iasi", "ilfov", "maramures", "mehedinti", "mures", "neamt",
+    "olt", "prahova", "salaj", "satu mare", "sibiu", "suceava", "teleorman", "timis", "tulcea", "vaslui",
+    "valcea", "vrancea", "bucuresti",
+})
+
+
+def _apply_county_strip(xc, o, shop_domain, name, cid, city, prov, a1):
+    """NUME de JUDEȚ lipit în COADA orașului („ploiestiprahova"→„ploiesti") → taie sufixul-județ (glued) → restul
+    verificat pe DPD. Doar GLUED (spațiat = deja acoperit de prefix-firmă). Nu atinge compuse cu cratimă. True dacă a scris."""
+    if cid != 642:
+        return False
+    cf = _fold(city).lower().strip()
+    for jud in _RO_JUDETE:
+        m = re.search(r"[a-z](" + re.escape(jud) + r")$", cf)   # lipit de o LITERĂ (glued)
+        if m and m.start(1) >= 4:
+            cand = city[:m.start(1)].rstrip(" ,.-")
+            site, why = dpd_site_by_city(cid, cand, prov, a1)
+            zc = (site or {}).get("postCode")
+            if zc:
+                try:
+                    intl_correct_write(xc, o, shop_domain, {"city": (site.get("name") or cand).title(), "zip": zc, "address1": _cyr2lat(a1)})
+                    awb_event(kind="county-suffix-strip", store=shop_domain, order=name, result="ok", old=city, city=site.get("name"), zip=zc)
+                    return True
+                except Exception:
+                    return False
+            return False
+    return False
+
+
+def _apply_satu_variant(xc, o, shop_domain, name, cid, city, prov, a1):
+    """„Satul Nou de Jos" → „Satu Nou de Jos" (localitatea reală; denoise-ul o scurtează greșit la „Nou de Jos").
+    Reconstruiește forma „Satu X" și o verifică pe DPD. True dacă a scris."""
+    if cid != 642:
+        return False
+    m = re.match(r"(?i)^\s*sat(?:ul)?\s+(.+)$", city or "")
+    if not m:
+        return False
+    cand = "Satu " + m.group(1).strip()
+    if _fold(cand) == _fold(city):
+        return False
+    site, why = dpd_site_by_city(cid, cand, prov, a1)
+    zc = (site or {}).get("postCode")
+    if not zc:
+        return False
+    try:
+        intl_correct_write(xc, o, shop_domain, {"city": (site.get("name") or cand).title(), "zip": zc, "address1": _cyr2lat(a1)})
+        awb_event(kind="satu-variant", store=shop_domain, order=name, result="ok", old=city, city=site.get("name"), zip=zc)
+        return True
+    except Exception:
+        return False
+
+
 _COMMUNE_FAMILY_CACHE = {}
 
 
@@ -5263,6 +5318,12 @@ def dpd_fix_locality(xc, o, shop_domain, name):
             # FIRMĂ/POI lipit după localitate („rasnov romacril"→Râșnov) → prefix care rezolvă unic pe DPD.
             if _apply_city_prefix(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1")):
                 return True
+            # „Satul Nou de Jos"→„Satu Nou de Jos" (denoise-ul scurtează greșit) → DPD-verificat.
+            if _apply_satu_variant(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1")):
+                return True
+            # NUME de județ lipit în coada orașului („ploiestiprahova"→„ploiesti") → DPD-verificat.
+            if _apply_county_strip(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1")):
+                return True
             # COMUNĂ neindexată de DPD → un SAT livrabil al ei (toate satele = același oficiu DPD → cosmetic, sigur).
             if _apply_commune_village(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1")):
                 return True
@@ -5311,6 +5372,12 @@ def dpd_fix_locality(xc, o, shop_domain, name):
             return True
         # FIRMĂ/POI lipit după localitate → prefix care rezolvă unic pe DPD.
         if _apply_city_prefix(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
+            return True
+        # „Satul Nou de Jos"→„Satu Nou de Jos" → DPD-verificat.
+        if _apply_satu_variant(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
+            return True
+        # NUME de județ lipit în coada orașului → DPD-verificat.
+        if _apply_county_strip(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
             return True
         # COMUNĂ neindexată de DPD → un SAT livrabil al ei (toate satele = același oficiu DPD → cosmetic, sigur).
         if _apply_commune_village(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
