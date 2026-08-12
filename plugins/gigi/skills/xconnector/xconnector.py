@@ -5088,6 +5088,86 @@ def _apply_city_prefix(xc, o, shop_domain, name, cid, city, prov, a1):
     return False
 
 
+_COMMUNE_FAMILY_CACHE = {}
+
+
+def ro_commune_village(city, province):
+    """Comună/oraș neindexat de DPD → un SAT LIVRABIL al ei din SIRUTA. SIGUR fiindcă TOATE satele unei comune
+    împart ACELAȘI oficiu DPD (`servingOfficeId` — verificat 2026-08-12 pe Ceptura/Jucu/Brebu/Măneciu/Moieciu):
+    coletul ajunge la același oficiu indiferent de satul ales; curierul livrează pe stradă+telefon → alegerea
+    satului e COSMETICĂ, zero risc de misdelivery. Alege satul-reședință (nume conține comuna / „de Jos" /
+    „Pământeni" / cel mai scurt). None dacă comuna n-are familie în SIRUTA. GENERAL — acoperă orice comună (nu doar
+    tabelul curat `RO_DPD_LOCALITY_ALIAS`, care rămâne pt eticheta preferată de CS)."""
+    cf = _fold(city).lower().strip()
+    jf = _fold(province).lower().strip()
+    if not cf or not jf:
+        return None
+    key = (cf, jf)
+    if key in _COMMUNE_FAMILY_CACHE:
+        return _COMMUNE_FAMILY_CACHE[key]
+    village = None
+    try:
+        cur = metrics_cursor_live()
+        # cratimă/spațiu insensibil (SIRUTA are „Predeal Sarari", clientul scrie „Predeal-Sarari").
+        _cfv = list({cf, cf.replace("-", " "), cf.replace(" ", "-")})
+        cur.execute("SELECT cod_siruta, niv, sirsup FROM public.romania_siruta "
+                    "WHERE localitate_norm = ANY(%s) AND judet_norm = %s ORDER BY niv LIMIT 5", (_cfv, jf))
+        rows = cur.fetchall()
+        parent = None
+        for cod, niv, sup in rows:
+            if niv == 3:
+                parent = sup; break
+        if parent is None:
+            for cod, niv, sup in rows:
+                if niv == 2:
+                    parent = cod; break
+        if parent is not None:
+            cur.execute("SELECT denumire, denumire_norm FROM public.romania_siruta "
+                        "WHERE sirsup = %s AND niv = 3 AND cod_postal ~ '^[0-9]{6}$'", (parent,))
+            kids = [(d, _fold(dn or "").lower()) for d, dn in cur.fetchall()]
+            cf0 = cf.split()[0] if cf.split() else cf   # primul cuvânt al comunei (ex „albestii")
+
+            def _score(k):
+                _disp, kf = k
+                s = len(kf)
+                if cf in kf or kf.startswith(cf):
+                    s -= 100                              # reședința = numele comunei
+                elif len(cf0) >= 4 and (kf.startswith(cf0) or (" " + cf0) in (" " + kf)):
+                    s -= 50                               # primul cuvânt al comunei (Albeștii→Albeștii Ungureni)
+                if "de jos" in kf or "pamanteni" in kf or "centru" in kf:
+                    s -= 10
+                return s
+            kids.sort(key=_score)
+            if kids:
+                village = kids[0][0]
+    except Exception:
+        village = None
+    _COMMUNE_FAMILY_CACHE[key] = village
+    return village
+
+
+def _apply_commune_village(xc, o, shop_domain, name, cid, city, prov, a1):
+    """Comună neindexată de DPD, fără alias/a1/fuzzy → un SAT LIVRABIL al comunei (același oficiu DPD → cosmetic),
+    CONFIRMAT pe DPD. Scrie city + zip. Fallback GENERAL pt comune (ultima instanță înainte de worklist). True dacă a scris."""
+    if cid != 642:
+        return False
+    v = ro_commune_village(city, prov)
+    if not v or _fold(v) == _fold(city):
+        return False
+    site, why = dpd_site_by_city(cid, v, prov, a1)
+    zc = (site or {}).get("postCode")
+    if not zc:
+        return False
+    try:
+        intl_correct_write(xc, o, shop_domain, {"city": (site.get("name") or v).title(),
+                                                "zip": zc, "address1": _cyr2lat(a1)})
+        awb_event(kind="commune-village", store=shop_domain, order=name, result="ok",
+                  old=city, city=site.get("name"), region=site.get("region"), zip=zc)
+        return True
+    except Exception:
+        return False
+
+
 def dpd_fix_locality(xc, o, shop_domain, name):
     """DPD refuză localitatea → findSite după zip → corectează city la forma canonică DPD + transliterează strada
     (chirilic→latin, ca xConnector/DPD s-o accepte). True dacă a scris corecția.
@@ -5115,6 +5195,9 @@ def dpd_fix_locality(xc, o, shop_domain, name):
                 return True
             # FIRMĂ/POI lipit după localitate („rasnov romacril"→Râșnov) → prefix care rezolvă unic pe DPD.
             if _apply_city_prefix(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1")):
+                return True
+            # COMUNĂ neindexată de DPD → un SAT livrabil al ei (toate satele = același oficiu DPD → cosmetic, sigur).
+            if _apply_commune_village(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1")):
                 return True
             # NU ghicim. Logăm de ce, ca să identificăm cazurile REALE când pică (ex. sat vs comună).
             awb_event(kind="zip-city-fill", store=shop_domain, order=name, result="miss",
@@ -5158,6 +5241,9 @@ def dpd_fix_locality(xc, o, shop_domain, name):
             return True
         # FIRMĂ/POI lipit după localitate → prefix care rezolvă unic pe DPD.
         if _apply_city_prefix(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
+            return True
+        # COMUNĂ neindexată de DPD → un SAT livrabil al ei (toate satele = același oficiu DPD → cosmetic, sigur).
+        if _apply_commune_village(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
             return True
         # oraș neindexat de DPD FĂRĂ alias încă → LOG `miss` (cu zip) ca să apară în worklist-ul
         # `commune_alias_pending.py` → CS confirmă satul o dată → intră în tabel.
