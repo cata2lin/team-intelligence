@@ -5169,9 +5169,11 @@ def _apply_commune_village(xc, o, shop_domain, name, cid, city, prov, a1):
 
 
 def ro_phone_prior_city(phone, province, order_name):
-    """Comanda LIVRATĂ anterioară a ACELUIAȘI client (telefon, ultimele 9 cifre) → (city, zip) DPD-valid din
-    ACELAȘI județ. DETERMINIST — adresa lui reală care A AJUNS deja. None dacă n-are istoric livrat DPD-valid în
-    județ (gardă anti-mutare/cadou: județul trebuie să coincidă). Pt reziduul de typo/județ-în-oraș/gunoi city."""
+    """O comandă ANTERIOARĂ a ACELUIAȘI client (telefon, ultimele 9 cifre) cu adresă DPD-VALIDĂ din ACELAȘI județ →
+    (city, zip). DETERMINIST — localitatea lui reală. NU cere `delivered`: și in_transit/waiting/back_to_sender au
+    adresa DPD-validă (bounce = refuz client, nu adresă invalidă); poarta reală = zip-ul rezolvă pe DPD (exclude
+    automat comenzile cu adresă proastă). Gardă anti-mutare/cadou: județul trebuie să coincidă. Pt reziduul typo/
+    județ-în-oraș/gunoi city (Bucitrști→București, 886→Bacău, Bfagadiru→Bragadiru)."""
     ph = re.sub(r"\D", "", phone or "")
     if len(ph) < 9:
         return None
@@ -5190,7 +5192,7 @@ def ro_phone_prior_city(phone, province, order_name):
                                        host=u.hostname, port=u.port or 5432, database=u.path.lstrip("/"), ssl_context=True)
         rows = con.run("select shipping_address->>'city', shipping_address->>'zip' from orders "
                        "where regexp_replace(shipping_address->>'phone','[^0-9]','','g') like :p "
-                       "and order_number <> :n and aggregated_status='delivered' order by id desc limit 8",
+                       "and order_number <> :n order by id desc limit 12",
                        p="%" + p9, n=order_name)
         for pc, pz in rows:
             pzc = (pz or "").strip()
