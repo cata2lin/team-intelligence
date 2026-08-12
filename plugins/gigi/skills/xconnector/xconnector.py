@@ -4747,6 +4747,13 @@ def dpd_site_by_city(country_id, city, province, street=None):
     auth = _dpd_auth()
     if not (auth and city):
         return None, "fara-oras"
+    # BUCUREȘTI: DPD numește situl „BUCHAREST" (ENGLEZĂ) → match-ul exact pe „bucuresti"/„bucurești" PICĂ degeaba,
+    # deși e o singură localitate livrabilă. Cel mai mare bucket nerezolvat din sweep-ul de 7 zile (~75 comenzi:
+    # București fără zip + sectoare/cartiere aduse de _city_denoise la „București"). Rezolvă direct situl BUCHAREST
+    # (010011); strada se validează apoi cu findStreet pe același sit. (2026-08-12)
+    if country_id == 642 and _fold(city) in ("bucuresti", "bucharest"):
+        s = dpd_site_by_zip(642, "010011")
+        return (s, "ok-bucuresti") if s else (None, "bucuresti-fail")
     # DPD caută pe nume EXACT, FĂRĂ diacritice: „Buzău" → 0 rezultate, „Buzau" → BUZAU/120001.
     # Măsurat pe cazuri reale (Buzău ×4, Târgu Jiu) care picau ca „necunoscut" degeaba.
     query_name = _fold(city)
