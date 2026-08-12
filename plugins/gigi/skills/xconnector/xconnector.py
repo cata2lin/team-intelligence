@@ -1890,8 +1890,10 @@ def customer_history_addr(order_name, ad):
     _cura1 = ad.get("address1") or ""
     _has_street = _hist_real_street(_cura1)
     _need_number = _has_street and not _hist_has_num(_cura1)   # are stradă dar fără cifră în partea de stradă
-    if _has_street and not _need_number:
-        return None   # adresă completă (stradă + număr) → nu mă bag
+    _cz0 = str(ad.get("zip") or "").strip().strip("-")
+    _zip_ok = bool(re.fullmatch(r"\d{6}", _cz0))
+    if _has_street and not _need_number and _zip_ok:
+        return None   # adresă COMPLETĂ (stradă + număr + zip) → nu mă bag
     try:
         import pg8000.native
         from urllib.parse import urlparse, unquote
@@ -1934,6 +1936,12 @@ def customer_history_addr(order_name, ad):
                          _hist_block(osa.get("address1")), _hist_house_num(osa.get("address1"))))
         if not cand:
             return None
+        # ── CAZUL (0): stradă+număr COMPLETE dar ZIP lipsă/„-” → completez DOAR zip-ul de la o comandă LIVRATĂ pe
+        #    ACEEAȘI stradă. (RED25425: „Strada Băniei Nr 23" fără zip, livrat înainte cu 030186 pe aceeași stradă.)
+        if _has_street and not _need_number and not _zip_ok:
+            _sn = _hist_street_name(_cura1)
+            _zc = next((c[1] for c in cand if c[2] == _sn and c[1] and re.fullmatch(r"\d{6}", str(c[1]).strip())), None)
+            return {"zip": str(_zc).strip()} if _zc else None
         # ── CAZUL (2): are stradă, lipsește NUMĂRUL → completez de la o comandă livrată pe ACEEAȘI stradă ──
         if _need_number:
             cur_sn = _hist_street_name(_cura1)
@@ -4745,9 +4753,53 @@ def dpd_site_by_city(country_id, city, province, street=None):
     return None, "ambiguu (%d judete: %s)" % (len(exact), ",".join(sorted({(s.get("region") or "?") for s in exact})[:4]))
 
 
+# ── RO: localități pe care DPD NU le indexează sub numele scris de client (oraș-stațiune / comună mică) — coletul
+# se livrează dintr-un SAT satelit pe care DPD ÎL are. Curat + validat LIVE pe DPD (findSite sat = ok, findSite
+# oraș = necunoscut, 2026-08-12). NU e derivabil din nomenclatorul RO (plat, fără arbore comună→sat). Cheie =
+# (oraș_fold, județ_fold) → nume sat livrabil DPD. Crește din log-ul `zip-city-fill result=miss` / CS.
+RO_DPD_LOCALITY_ALIAS = {
+    ("baile olanesti", "valcea"):  "Livadia",         # EST236168 (245300→245304)
+    ("ocnele mari", "valcea"):     "Gura Suhasului",   # EST236143 (245900→245904)
+    ("valea doftanei", "prahova"): "Tesila",           # EST235840 (107640→107645)
+    ("baile govora", "valcea"):    "Prajila",          # RED25256  (245200→245203)
+    ("aurora", "constanta"):       "Cap Aurora",       # EST235717 (905501; „Aurora" pică pe omonim 227151)
+}
+
+
+def ro_locality_alias(city, province):
+    """Satul livrabil DPD pt un oraș/comună pe care DPD nu-l indexează sub numele scris (None dacă n-avem alias)."""
+    if not city:
+        return None
+    return RO_DPD_LOCALITY_ALIAS.get((_fold(city), _fold(province or "")))
+
+
+def _apply_locality_alias(xc, o, shop_domain, name, cid, city, prov, a1):
+    """RO oraș/comună neindexat de DPD → sat satelit din alias, CONFIRMAT LIVE pe DPD (findSite → postCode) în
+    același județ. Scrie city=sat + zip canonic DPD. REACTIV-safe: apelat DOAR după ce DPD a respins și zip-ul și
+    orașul (vezi dpd_fix_locality) → zero fals-pozitiv pe adrese bune. True dacă a scris corecția."""
+    if cid != 642:   # doar RO
+        return False
+    alias = ro_locality_alias(city, prov)
+    if not alias:
+        return False
+    site, why = dpd_site_by_city(cid, alias, prov, a1)
+    zc = (site or {}).get("postCode")
+    if not zc:
+        return False
+    try:
+        intl_correct_write(xc, o, shop_domain, {"city": (site.get("name") or alias).title(),
+                                                "zip": zc, "address1": _cyr2lat(a1)})
+        awb_event(kind="dpd-locality-alias", store=shop_domain, order=name, result="ok",
+                  city=site.get("name"), region=site.get("region"), zip=zc, src_city=city, how=why)
+        return True
+    except Exception:
+        return False
+
+
 def dpd_fix_locality(xc, o, shop_domain, name):
     """DPD refuză localitatea → findSite după zip → corectează city la forma canonică DPD + transliterează strada
-    (chirilic→latin, ca xConnector/DPD s-o accepte). True dacă a scris corecția."""
+    (chirilic→latin, ca xConnector/DPD s-o accepte). True dacă a scris corecția.
+    Fallback în cascadă când DPD nu știe nici zip-ul nici orașul: alias oraș/comună → sat livrabil (Băile Olănești→Livadia)."""
     ad = xc.by_id(o.get("orderId")).get("shippingAddress") or {}
     zipc = (ad.get("zip") or "").strip()
     cid = DPD_COUNTRY_ID.get((ad.get("country") or "").strip().upper())
@@ -4760,6 +4812,9 @@ def dpd_fix_locality(xc, o, shop_domain, name):
         site, why = dpd_site_by_city(cid, _city, _prov, ad.get("address1"))
         zc = (site or {}).get("postCode")
         if not zc:
+            # oraș/comună neindexat de DPD → încearcă satul satelit din alias (Băile Olănești→Livadia).
+            if _apply_locality_alias(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1")):
+                return True
             # NU ghicim. Logăm de ce, ca să identificăm cazurile REALE când pică (ex. sat vs comună).
             awb_event(kind="zip-city-fill", store=shop_domain, order=name, result="miss",
                       city=_city, region=_prov, zip="", detail=why)
@@ -4791,6 +4846,9 @@ def dpd_fix_locality(xc, o, shop_domain, name):
                 return True
             except Exception:
                 return False
+        # DPD nu știe NICI zip-ul NICI orașul → alias oraș/comună → sat livrabil (Băile Olănești→Livadia etc.).
+        if _apply_locality_alias(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
+            return True
         return False
     try:
         intl_correct_write(xc, o, shop_domain, {"city": canon.title(), "zip": zipc, "address1": _cyr2lat(ad.get("address1"))})
