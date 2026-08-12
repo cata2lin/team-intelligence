@@ -4732,6 +4732,23 @@ def dpd_fix_locality(xc, o, shop_domain, name):
     site = dpd_site_by_zip(cid, zipc)
     canon = (site or {}).get("name")
     if not canon:
+        # DPD nu RECUNOAȘTE zip-ul (îl respinge `valid-locality-id`, DEȘI validatorul nostru îl acceptă ca perfect —
+        # ex. LAB3255 „Satu Mare 440106", unde 440106 nu-i cod DPD valid dar 440004/440105 sunt). Nomenclatorul RO
+        # NU ajută (omonime „Satu Mare" în Vâlcea/Arad → cod general greșit). Fallback: findSite DUPĂ ORAȘ (STRICT:
+        # nume exact + județ + UNIC → nu ghicește pe omonime) → codul poștal CANONIC al DPD pt localitate → DPD
+        # rezolvă situl pe siteId. O SINGURĂ dată (guard `_dpd_corrected`, ca tot dpd_fix_locality).
+        _city2, _prov2 = (ad.get("city") or "").strip(), (ad.get("province") or "").strip()
+        site2, why2 = dpd_site_by_city(cid, _city2, _prov2, ad.get("address1"))
+        zc2 = (site2 or {}).get("postCode")
+        if zc2 and zc2 != zipc:
+            try:
+                intl_correct_write(xc, o, shop_domain, {"city": (site2.get("name") or "").title(), "zip": zc2,
+                                                        "address1": _cyr2lat(ad.get("address1"))})
+                awb_event(kind="dpd-city-zip", store=shop_domain, order=name, result="ok",
+                          city=site2.get("name"), region=site2.get("region"), zip=zc2, how=why2)
+                return True
+            except Exception:
+                return False
         return False
     try:
         intl_correct_write(xc, o, shop_domain, {"city": canon.title(), "zip": zipc, "address1": _cyr2lat(ad.get("address1"))})
