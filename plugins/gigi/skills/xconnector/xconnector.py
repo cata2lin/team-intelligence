@@ -1082,6 +1082,11 @@ def _city_denoise(city):
     ab = _city_abbrev(c)
     if ab and _fold(ab) != _fold(c):
         c = ab; why.append("abreviere")
+    # 5b) „Tg"/„Tg."/„Tg-" = „Târgu" ca PREFIX (abreviere UNAMBIGUĂ în RO), chiar dacă restul e imperfect
+    #     („tg-mres"→„Târgu mres" → fuzzy prinde „Târgu Mureș"). Doar „tg" (nu abrevieri ambigue ca „M"/„S").
+    m_tg = re.match(r"(?i)^\s*tg[.\-\s]+(.+)$", c)
+    if m_tg and m_tg.group(1).strip():
+        c = "Târgu " + m_tg.group(1).strip(); why.append("abrev-tg")
     # 6) varianta de Bucuresti (unic in RO -> normalizare sigura: "BUCHARSTI"/"Bucuresit"/"Bucharest" -> Bucuresti)
     bu = _city_bucuresti(c)
     if bu and _fold(bu) != _fold(c):
@@ -4967,6 +4972,7 @@ def ro_fuzzy_city(city, province):
     """Typo de ORAȘ → cea mai apropiată localitate REALĂ din nomenclator (`romania_addresses`, ACELAȘI județ),
     edit-distance MICĂ + UNICĂ la minim. CONSERVATOR: dist ≤ 2 și STRICT mai mică decât a 2-a (fără ambiguu) →
     nu ghicește. None dacă nu-i clar SAU orașul există ca atare (nu-i typo). Apelantul DPD-verifică rezultatul."""
+    city = _city_denoise(city)[0]   # normalizează + expandează abrevieri (Tg→Târgu) ÎNAINTE de fuzzy → „tg-mres"→„targu mres"→Târgu Mureș
     cf = _fold(city).lower().strip()
     jf = _fold(province).lower().strip()
     if len(cf) < 5 or not jf:
