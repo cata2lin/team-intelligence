@@ -1020,6 +1020,13 @@ def _city_denoise(city):
     if not city:
         return city, None
     c = city.strip(); orig = c; why = []
+    # 0−) NORMALIZARE: punctuație LIPITĂ (`. _ /`, PĂSTREZ `-`) → spațiu + separă literă↔cifră
+    #     („stejaru.pingarati22"→„stejaru pingarati 22", „Str.bistritei"→„Str bistritei"). Determinist, enabler.
+    c2 = re.sub(r"[._/]+", " ", c)
+    c2 = re.sub(r"(?<=[A-Za-zăâîșțĂÂÎȘȚ])(?=\d)|(?<=\d)(?=[A-Za-zăâîșțĂÂÎȘȚ])", " ", c2)
+    c2 = re.sub(r"\s{2,}", " ", c2).strip()
+    if c2 and c2 != c:
+        c = c2; why.append("normalizare")
     # 0) prefix admin lipit în față ("com. Roșiile"->"Roșiile", "loc. Hîrlău"->"Hîrlău", "Sat Lipia"->"Lipia").
     #    NU atinge "Satu Mare" (\b după 'sat' → 'satu' n-are boundary) sau orașe curate.
     m0 = re.match(r"(?i)^\s*(?:comuna|com|satul|sat|localitatea|loc)\.?\s+([A-Za-zăâîșțĂÂÎȘȚ].*)$", c)
@@ -5017,13 +5024,19 @@ def _a1_locality(a1):
                   r"([A-Za-zăâîșțĂÂÎȘȚ][A-Za-zăâîșțĂÂÎȘȚ\-]{2,}"
                   r"(?:\s+(?!(?:str|strada|bd|bdul|nr|no|bl|bloc|sc|scara|ap|apt|et|etaj|comuna|com|jud)\b)"
                   r"[A-Za-zăâîșțĂÂÎȘȚ][A-Za-zăâîșțĂÂÎȘȚ\-]{2,})?)", a1)
-    if not m:
-        return None
-    v = m.group(1).strip(" ,.-")
-    # nu confunda cu un cuvânt-stradă generic care poate urma după „loc/sat"
-    if re.match(r"(?i)^(principala|principal|noua|noul|nou|mare|mica|de|din|bisericii|scolii|garii|noastra)$", v):
-        return None
-    return v
+    if m:
+        v = m.group(1).strip(" ,.-")
+        # nu confunda cu un cuvânt-stradă generic care poate urma după „loc/sat"
+        if not re.match(r"(?i)^(principala|principal|noua|noul|nou|mare|mica|de|din|bisericii|scolii|garii|noastra)$", v):
+            return v
+    # BARĂ (fără marker): a1 = DOAR localitatea, fără cuvinte-stradă și fără cifre („Morteni", „Baleni Sarbi") →
+    # e localitatea reală (când câmpul oraș e cod/județ/gunoi). Apelantul DPD-verifică → sigur.
+    a = (a1 or "").strip()
+    if a and not re.search(r"(?i)\b(str|strada|bd|bdul|bulevardul|calea|aleea|soseaua|sos|drumul|intrarea|intr|nr|no|bl|bloc|sc|scara|ap|apt|et|etaj|km)\b|\d", a):
+        toks = a.split()
+        if 1 <= len(toks) <= 3 and len(re.sub(r"[^A-Za-zăâîșțĂÂÎȘȚ]", "", a)) >= 4:
+            return a.strip(" ,.-")
+    return None
 
 
 def _apply_a1_locality(xc, o, shop_domain, name, cid, city, prov, a1):
@@ -5046,6 +5059,33 @@ def _apply_a1_locality(xc, o, shop_domain, name, cid, city, prov, a1):
         return True
     except Exception:
         return False
+
+
+def _apply_city_prefix(xc, o, shop_domain, name, cid, city, prov, a1):
+    """Firmă/POI/gunoi LIPIT după localitate în câmpul ORAȘ („rasnov romacril"→„Râșnov"): încearcă prefixe de
+    cuvinte tot mai SCURTE → cel mai LUNG prefix care rezolvă pe DPD (același județ, UNIC). DPD-verificat → sigur.
+    Fires doar dacă orașul-întreg a picat deja (apelat din dpd_fix_locality). True dacă a scris."""
+    if cid != 642:
+        return False
+    toks = re.split(r"\s+", (city or "").strip())
+    if len(toks) < 2:
+        return False   # un cuvânt → n-are ce strip (fuzzy/alias se ocupă)
+    for k in range(len(toks) - 1, 0, -1):
+        cand = " ".join(toks[:k])
+        if len(re.sub(r"[^A-Za-zăâîșțĂÂÎȘȚ]", "", cand)) < 4:
+            continue
+        site, why = dpd_site_by_city(cid, cand, prov, a1)
+        zc = (site or {}).get("postCode")
+        if zc:
+            try:
+                intl_correct_write(xc, o, shop_domain, {"city": (site.get("name") or cand).title(),
+                                                        "zip": zc, "address1": _cyr2lat(a1)})
+                awb_event(kind="city-prefix-strip", store=shop_domain, order=name, result="ok",
+                          old=city, city=site.get("name"), region=site.get("region"), zip=zc)
+                return True
+            except Exception:
+                return False
+    return False
 
 
 def dpd_fix_locality(xc, o, shop_domain, name):
@@ -5072,6 +5112,9 @@ def dpd_fix_locality(xc, o, shop_domain, name):
                 return True
             # TYPO de oraș → fuzzy pe nomenclator (același județ) + DPD-verificat (bucureati→București, brazov→Brașov).
             if _apply_fuzzy_city(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1")):
+                return True
+            # FIRMĂ/POI lipit după localitate („rasnov romacril"→Râșnov) → prefix care rezolvă unic pe DPD.
+            if _apply_city_prefix(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1")):
                 return True
             # NU ghicim. Logăm de ce, ca să identificăm cazurile REALE când pică (ex. sat vs comună).
             awb_event(kind="zip-city-fill", store=shop_domain, order=name, result="miss",
@@ -5112,6 +5155,9 @@ def dpd_fix_locality(xc, o, shop_domain, name):
             return True
         # TYPO de oraș → fuzzy pe nomenclator (același județ) + DPD-verificat.
         if _apply_fuzzy_city(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
+            return True
+        # FIRMĂ/POI lipit după localitate → prefix care rezolvă unic pe DPD.
+        if _apply_city_prefix(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
             return True
         # oraș neindexat de DPD FĂRĂ alias încă → LOG `miss` (cu zip) ca să apară în worklist-ul
         # `commune_alias_pending.py` → CS confirmă satul o dată → intră în tabel.
