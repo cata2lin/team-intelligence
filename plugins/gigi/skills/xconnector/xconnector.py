@@ -5051,6 +5051,21 @@ def cmd_fulfill(a):
         xc = XC(sh["apiKey"])
         mcur = metrics_cursor_live()  # REÎMPROSPĂTEAZĂ per-magazin: conexiunea idle poate muri între magazine pe tura lungă
         xmap = {o.get("orderName"): o for o in xc.orders(dfrom, dto)}
+        # INDEX de dubluri PE SET DE SKU-uri, din lista xConnector (`skus`, BULK + proaspăt — mai fresh decât mirror-ul
+        # Frisbo din AWBprint, fără redactare PCD ca Shopify). Filtru IEFTIN de candidați ca să detectăm dubluri fără
+        # tag-ul `duplicata` din Flow: doar comenzile care ÎMPART setul EXACT de SKU-uri cu alta din fereastră merită
+        # confirmarea scumpă (client Shopify / telefon by_id). Restul sar fără niciun apel.
+        _sku_index = {}
+        for _on, _oo in xmap.items():
+            _sk = frozenset(s for s in (_oo.get("skus") or []) if s)
+            if _sk:
+                _sku_index.setdefault(_sk, set()).add(_on)
+
+        def _dup_candidate(nm):
+            _oo = xmap.get(nm) or {}
+            _sk = frozenset(s for s in (_oo.get("skus") or []) if s)
+            return bool(_sk) and len(_sku_index.get(_sk, ())) >= 2
+
         unf = shopify_unfulfilled(st["shopDomain"], st["adminToken"], dfrom)
         if unf is None:
             print("  %s — Shopify auth FAIL (OAuth-rotation?) → skip" % sh["shopDomain"]); continue
@@ -5186,9 +5201,26 @@ def cmd_fulfill(a):
                         shopify_remove_tags(st["shopDomain"], st["adminToken"], node["id"], list(DUP_TAGS))
                 dup_keep += 1
             else:
-                # NETAG-UIT + non-CS → gardă duplicat INDEPENDENTĂ de tag (cazul BELA34579: tag-ul „duplicata" n-a apucat
-                # înainte de AWB). Dacă același client are o comandă ANTERIOARĂ ≤24h cu ACELEAȘI produse care are DEJA AWB
-                # → NU fac AWB; îl las la CS (nu anulez automat — poate fi comandă reală).
+                # NETAG-UIT: DETECTARE INDEPENDENTĂ de tag-ul Flow (care se scoate → detectăm noi). Candidat = ACELAȘI
+                # set de SKU-uri ca altă comandă din fereastră (index xConnector `skus`, bulk+proaspăt, fără redactare/lag).
+                # Confirmare + rezolvare pe CLIENT ca la calea cu tag: X = dublura VECHE + identică → ANULEZ (nu doar HOLD).
+                # Card = keeper (garda `!= PAID` de aici + upstream). same-SKU-alt-client → customer_is_newest îl ține keeper.
+                if _dup_candidate(name) and (fin or "").upper() != "PAID":
+                    dup_floor = min(since7, (created or "")[:10] or since7)
+                    newest, keeper = customer_is_newest(st["shopDomain"], st["adminToken"], cust, created, dup_floor)
+                    if newest is False and keeper:
+                        res, why = resolve_duplicate(sh, xc, o, st, name, keeper, a.apply)
+                        if res == "shipped-skip":
+                            dup_shipped += 1; continue
+                        elif res in ("cancelled", "would-cancel"):
+                            dup_cancel += 1; continue
+                        elif res == "held":
+                            dup_hold += 1
+                            print("    ⏸️ %s vs %s: %s → HOLD (nu anulez) → CS" % (name, keeper, why)); continue
+                        else:
+                            failed += 1; continue
+                    # X = cea mai nouă (keeper) → cade prin la AWB, FĂRĂ să o tag-uiesc (nu marchez non-dublate).
+                # GARDĂ existentă de non-dublă-expediere (frate ≤24h cu AWB, telefon/lag): rămâne ca backstop.
                 dup_of = awbprint_recent_dup(name)
                 if dup_of:
                     dup_untag += 1
