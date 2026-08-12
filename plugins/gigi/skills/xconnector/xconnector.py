@@ -4758,16 +4758,35 @@ def dpd_site_by_city(country_id, city, province, street=None):
         return (s, "ok-bucuresti") if s else (None, "bucuresti-fail")
     # DPD caută pe nume EXACT, FĂRĂ diacritice: „Buzău" → 0 rezultate, „Buzau" → BUZAU/120001.
     # Măsurat pe cazuri reale (Buzău ×4, Târgu Jiu) care picau ca „necunoscut" degeaba.
-    query_name = _fold(city)
-    try:
-        req = urllib.request.Request("https://api.dpd.ro/v1/location/site/",
-              data=json.dumps({**auth, "countryId": country_id, "name": query_name}).encode(),
-              headers={"Content-Type": "application/json"})
-        sites = json.loads(urllib.request.urlopen(req, timeout=30).read()).get("sites") or []
-    except Exception:
+    # DPD e INCONSECVENT pe cratimă/spațiu: „CLUJ-NAPOCA" e stocat cu cratimă (query „cluj napoca" → 0), dar
+    # „PIATRA NEAMT" cu spațiu (query „piatra-neamt" → 0). Interoghez AMBELE variante (cratimă + spațiu) + compar
+    # insensibil la separator (_nh). Așa „Piatra-Neamț" prinde „PIATRA NEAMT" fără să strice „Cluj-Napoca".
+    def _nh(s):
+        return re.sub(r"[\s\-]+", " ", _fold(s)).strip()
+    _base = _fold(city).strip()
+    _variants = []
+    for _v in (_base, re.sub(r"[\s\-]+", " ", _base).strip(), re.sub(r"[\s\-]+", "-", _base).strip()):
+        if _v and _v not in _variants:
+            _variants.append(_v)
+    sites = []
+    _seen = set()
+    _apierr = False
+    want = _nh(city)
+    for _qn in _variants:
+        try:
+            req = urllib.request.Request("https://api.dpd.ro/v1/location/site/",
+                  data=json.dumps({**auth, "countryId": country_id, "name": _qn}).encode(),
+                  headers={"Content-Type": "application/json"})
+            for _s in (json.loads(urllib.request.urlopen(req, timeout=30).read()).get("sites") or []):
+                if _s.get("id") not in _seen:
+                    _seen.add(_s.get("id")); sites.append(_s)
+        except Exception:
+            _apierr = True
+        if any(_nh(_s.get("name") or "") == want for _s in sites):
+            break   # am deja match exact → nu mai interog variantele
+    if not sites and _apierr:
         return None, "eroare-api"
-    want = _fold(city)
-    exact = [s for s in sites if _fold(s.get("name") or "") == want]
+    exact = [s for s in sites if _nh(s.get("name") or "") == want]
     if not exact:
         # DPD nu are localitatea sub numele ăsta. Cazul tipic: SAT scris de client, DPD indexează COMUNA.
         near = ";".join(sorted({"%s/%s" % (s.get("name"), s.get("region")) for s in sites})[:3])
