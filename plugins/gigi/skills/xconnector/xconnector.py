@@ -1020,10 +1020,19 @@ def _city_denoise(city):
     if not city:
         return city, None
     c = city.strip(); orig = c; why = []
-    # 0−) NORMALIZARE: punctuație LIPITĂ (`. _ /`, PĂSTREZ `-`) → spațiu + separă literă↔cifră
-    #     („stejaru.pingarati22"→„stejaru pingarati 22", „Str.bistritei"→„Str bistritei"). Determinist, enabler.
+    # 0−) NORMALIZARE: punctuație LIPITĂ (`. _ /`, PĂSTREZ `-`) → spațiu + separă litere↔cifre DOAR la MARGINEA
+    #     tokenului (număr lipit): „pingarati22"→„pingarati 22", „11849zalau"→„11849 zalau". NU sparge cifra din
+    #     MIJLOCUL unui cuvânt („crai9va" = typo, rămâne întreg → fuzzy îl prinde „craiova"). Determinist, enabler.
+    def _split_gluenum(tok):
+        m = re.match(r"(?i)^([a-zăâîșț]+)(\d+)$", tok)
+        if m:
+            return m.group(1) + " " + m.group(2)
+        m = re.match(r"(?i)^(\d+)([a-zăâîșț]+)$", tok)
+        if m:
+            return m.group(1) + " " + m.group(2)
+        return tok
     c2 = re.sub(r"[._/]+", " ", c)
-    c2 = re.sub(r"(?<=[A-Za-zăâîșțĂÂÎȘȚ])(?=\d)|(?<=\d)(?=[A-Za-zăâîșțĂÂÎȘȚ])", " ", c2)
+    c2 = " ".join(_split_gluenum(t) for t in c2.split())
     c2 = re.sub(r"\s{2,}", " ", c2).strip()
     if c2 and c2 != c:
         c = c2; why.append("normalizare")
