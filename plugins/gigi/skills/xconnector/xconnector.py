@@ -5168,6 +5168,68 @@ def _apply_commune_village(xc, o, shop_domain, name, cid, city, prov, a1):
         return False
 
 
+def ro_phone_prior_city(phone, province, order_name):
+    """Comanda LIVRATĂ anterioară a ACELUIAȘI client (telefon, ultimele 9 cifre) → (city, zip) DPD-valid din
+    ACELAȘI județ. DETERMINIST — adresa lui reală care A AJUNS deja. None dacă n-are istoric livrat DPD-valid în
+    județ (gardă anti-mutare/cadou: județul trebuie să coincidă). Pt reziduul de typo/județ-în-oraș/gunoi city."""
+    ph = re.sub(r"\D", "", phone or "")
+    if len(ph) < 9:
+        return None
+    try:
+        import pg8000.native
+        from urllib.parse import urlparse, unquote
+    except Exception:
+        return None
+    url = os.environ.get("DATABASE_URL_AWBPRINT") or ""
+    if not url.startswith("postgres"):
+        return None
+    p9 = ph[-9:]; jf = _fold(province).lower()
+    u = urlparse(url); con = None
+    try:
+        con = pg8000.native.Connection(user=unquote(u.username or ""), password=unquote(u.password or ""),
+                                       host=u.hostname, port=u.port or 5432, database=u.path.lstrip("/"), ssl_context=True)
+        rows = con.run("select shipping_address->>'city', shipping_address->>'zip' from orders "
+                       "where regexp_replace(shipping_address->>'phone','[^0-9]','','g') like :p "
+                       "and order_number <> :n and aggregated_status='delivered' order by id desc limit 8",
+                       p="%" + p9, n=order_name)
+        for pc, pz in rows:
+            pzc = (pz or "").strip()
+            if not re.fullmatch(r"\d{6}", pzc):
+                continue
+            site = dpd_site_by_zip(642, pzc)
+            if site and (not jf or _fold(site.get("region") or "") == jf):
+                return (pc or site.get("name"), pzc)
+        return None
+    except Exception:
+        return None
+    finally:
+        if con is not None:
+            try:
+                con.close()
+            except Exception:
+                pass
+
+
+def _apply_phone_prior_city(xc, o, shop_domain, name, cid, city, prov, a1, phone):
+    """Reutilizează LOCALITATEA (city+zip) din comanda livrată anterioară a clientului (telefon), păstrând strada
+    curentă. DETERMINIST + DPD-valid + același județ → sigur. True dacă a scris. (886→Bacău, Alba→Alba Iulia, Pafureni→Padureni.)"""
+    if cid != 642:
+        return False
+    pr = ro_phone_prior_city(phone, prov, name)
+    if not pr:
+        return False
+    pc, pz = pr
+    if _fold(pc) == _fold(city):
+        return False
+    try:
+        intl_correct_write(xc, o, shop_domain, {"city": (pc or "").title(), "zip": pz, "address1": _cyr2lat(a1)})
+        awb_event(kind="phone-prior-city", store=shop_domain, order=name, result="ok",
+                  old=city, city=pc, zip=pz)
+        return True
+    except Exception:
+        return False
+
+
 def dpd_fix_locality(xc, o, shop_domain, name):
     """DPD refuză localitatea → findSite după zip → corectează city la forma canonică DPD + transliterează strada
     (chirilic→latin, ca xConnector/DPD s-o accepte). True dacă a scris corecția.
@@ -5189,6 +5251,9 @@ def dpd_fix_locality(xc, o, shop_domain, name):
                 return True
             # DETERMINIST: satul e în address1 („sat X"/„localitatea X") → DPD-verificat (nicolae balcescu+„sat Predești"→PREDEȘTI).
             if _apply_a1_locality(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1")):
+                return True
+            # REUSE din comanda LIVRATĂ anterioară a clientului (telefon) → localitatea lui reală (886→Bacău, Alba→Alba Iulia).
+            if _apply_phone_prior_city(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1"), ad.get("phone")):
                 return True
             # TYPO de oraș → fuzzy pe nomenclator (același județ) + DPD-verificat (bucureati→București, brazov→Brașov).
             if _apply_fuzzy_city(xc, o, shop_domain, name, cid, _city, _prov, ad.get("address1")):
@@ -5235,6 +5300,9 @@ def dpd_fix_locality(xc, o, shop_domain, name):
             return True
         # DETERMINIST: satul e în address1 („sat X"/„localitatea X") → DPD-verificat.
         if _apply_a1_locality(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
+            return True
+        # REUSE din comanda LIVRATĂ anterioară a clientului (telefon) → localitatea lui reală.
+        if _apply_phone_prior_city(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1"), ad.get("phone")):
             return True
         # TYPO de oraș → fuzzy pe nomenclator (același județ) + DPD-verificat.
         if _apply_fuzzy_city(xc, o, shop_domain, name, cid, _city2, _prov2, ad.get("address1")):
