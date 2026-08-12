@@ -1001,6 +1001,16 @@ def _zip_real(z):
     return _ZIP_CACHE[z]
 
 
+# Cartiere/zone bucureștene scrise GREȘIT în câmpul ORAȘ (checkout: clientul pune cartierul, nu municipiul).
+# DOAR nume FĂRĂ omonim de localitate reală în RO → substituție sigură „→ București". EXCLUSE intenționat:
+# Berceni/Pantelimon/Pipera/Otopeni/Voluntari (= și comune/orașe Ilfov/Prahova) — alea NU-s sigure.
+_BUC_CARTIERE = frozenset({
+    "drumul taberei", "militari", "rahova", "ferentari", "giulesti", "crangasi", "dristor", "vitan",
+    "colentina", "damaroaia", "bucurestii noi", "balta alba", "dudesti", "ghencea", "cotroceni",
+    "aviatiei", "titan", "tei", "floreasca", "obor", "berceni sud", "drumul sarii",
+})
+
+
 def _city_denoise(city):
     """Curata ZGOMOTUL din campul ORAS ca sa reziste la lookup-ul de nomenclator — NU schimba
     localitatea, doar taie gunoiul lipit (observat pe held-backlog: 'Focsani, Jud Vrancea',
@@ -1046,6 +1056,10 @@ def _city_denoise(city):
     #     Prinde și cazul în care tot restul adresei e înghesuit în oraș ('Sector 2 Ion berindei nr 5 bl od21b').
     if re.search(r"(?i)\bsector(?:ul)?\.?\s*[1-6]\b", c) and _fold(c) != "bucuresti":
         c = "București"; why.append("sector→bucurești")
+    # 4c) CARTIER bucureștean scris în câmpul ORAȘ → orașul e București ("Drumul Taberei"->București). DOAR nume
+    #     din `_BUC_CARTIERE` (fără omonim de localitate reală în RO) → sigur, nu atinge Voluntari/Otopeni/Berceni-Ilfov.
+    if _fold(c) in _BUC_CARTIERE:
+        c = "București"; why.append("cartier→bucurești")
     # 5) abreviere NEAMBIGUA de oras ("Dr tr severin"->Drobeta-Turnu Severin, "M ciuc"->Miercurea Ciuc, "Tg Mures"->…)
     ab = _city_abbrev(c)
     if ab and _fold(ab) != _fold(c):
