@@ -115,6 +115,29 @@ def denoise_city(city):
     c = re.sub(r"(?i)^(\d+)([a-zăâîșț])", r"\1 \2", c)
     return c.strip(" ,.-")
 
+def strip_leading_locality(a1, city, prov):
+    """Client a lipit ORAȘUL (uneori + JUDEȚUL) în fața străzii în address1 ('Craiova, str Dr Ioan Cantacuzino',
+    'Ploiesti Prahova Bihorului 20', 'Vaslui,strada castanilor') → poluează matching-ul de stradă (52% din bucket-ul
+    'stradă gunoi + ZIP valid'). Scoate prefixul REDUNDANT de oraș/județ din FAȚA lui a1 (fire DOAR dacă primele cuvinte
+    din a1 sunt exact numele din câmpuri = redundant sigur; păstrează restul = strada reală). Nu atinge a1 dacă n-ar
+    rămâne nicio stradă după strip."""
+    if not a1:
+        return a1
+    parts = re.split(r"([\s,]+)", a1.strip())            # [word, sep, word, sep, …]
+    widx = [i for i in range(0, len(parts), 2) if i < len(parts) and parts[i]]
+    folded = [norm_text(parts[i]) for i in widx]
+    strip_w = 0
+    for name in (city, prov):
+        nw = norm_text(name).split()
+        k = len(nw)
+        if k and folded[strip_w:strip_w + k] == nw:
+            strip_w += k
+    if 0 < strip_w < len(folded):
+        rest = "".join(parts[widx[strip_w]:]).strip(" ,.-")
+        if rest and re.search(r"[A-Za-zăâîșțĂÂÎȘȚ]", rest):   # rămâne o STRADĂ reală (nu doar un număr) → altfel păstrez a1
+            return rest
+    return a1
+
 LOCKER = re.compile(r"(easybox|locker|sameday|fanbox|collect\s*point|pick[\s\-]*up)", re.I)
 HAS_PREFIX_NUM = re.compile(r'(?i)\b(?:nr|no|numar|număr)\.?\s*(\d+[a-zA-Z]?|\d+/\d+)\b')
 TRAILING_NUM   = re.compile(r'(?i)(\d+[a-zA-Z]?|\d+/\d+)\s*($|,|\s+bl|bloc|sc|scara|ap|et)')
@@ -486,6 +509,8 @@ def validate_and_correct(cur, province, city, zip_, address1, address2="", loc_h
     prov, cty, sector = bucharest_fix(prov, cty, a1, a2)
     # 1a) abrevieri de oraș (Tg/Sf/Rm/Drobeta… — CITY_ABBREV) → nume oficial, ÎNAINTE de orice lookup pe localitate
     cty = expand_city_abbrev(cty)
+    # 1a2) oraș/județ lipit în FAȚA străzii în a1 ('Craiova, str X' / 'Ploiesti Prahova Y') → scos (poluează matching-ul de stradă)
+    a1 = strip_leading_locality(a1, cty, prov)
     # 1b) câmpul ORAȘ e de fapt un COD POȘTAL (client a pus zip-ul în oraș: city='305600') → mută-l în ZIP,
     #     localitatea vine din load_by_zip. Doar dacă zip-ul propriu-zis lipsește.
     if not re.sub(r"\D", "", zip_ or "") and re.fullmatch(r"\d{6}", (cty or "").strip()):
