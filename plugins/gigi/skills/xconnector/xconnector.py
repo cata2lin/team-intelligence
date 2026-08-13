@@ -3829,8 +3829,9 @@ def order_parcel_count(shop, token, name):
         if is_split:
             stn = _AR.sku_station(li.get("sku"))
             stations_present.add(stn)
-            if box is not None:
-                per_station[stn] = per_station.get(stn, 0.0) + box * qty
+            # QTY-DRIVEN: fiecare UNITATE = ≥1 colet (× nr_cutii pt produse voluminoase). Ex owner:
+            # produs qty 2 la Uzina + produs qty 1 la Depozit = 2 + 1 = 3 colete. Fără metafield de cutii → 1/unitate.
+            per_station[stn] = per_station.get(stn, 0.0) + (box if box is not None else 1.0) * qty
     # metafield order (total deja calculat de sistem), dacă e setat
     pc_val = None
     pc = (node.get("pc") or {}).get("value")
@@ -3839,9 +3840,9 @@ def order_parcel_count(shop, token, name):
             pc_val = max(1, _ceil_pos(float(pc)))
         except Exception:
             pc_val = None
-    # SPLIT: comandă cu produse pe AMBELE stații → ≥1 colet per stație, ca și Depozit, și Uzina 2 să-și poată
-    # împacheta coletele lor. xConnector face UN AWB cu atâtea colete; fiecare stație ia eticheta coletului ei.
-    # (Respectă un metafield MAI MARE dacă e setat manual.)
+    # SPLIT: comandă cu produse pe AMBELE stații → colete = Σ pe stație de ceil(cutii×qty), fiecare unitate ≥1 colet,
+    # ca și Depozit, și Uzina 2 să-și poată împacheta coletele lor. xConnector face UN AWB cu atâtea colete; fiecare
+    # stație ia etichetele coletelor ei. (Respectă un metafield `xconnector.parcel-count` MAI MARE dacă e setat manual.)
     if is_split and len(stations_present) >= 2:
         split_total = sum(max(1, _ceil_pos(per_station.get(s, 0.0))) for s in stations_present)
         return max(split_total, pc_val or 0, 1)
