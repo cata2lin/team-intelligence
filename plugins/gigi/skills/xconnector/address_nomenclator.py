@@ -91,11 +91,29 @@ def expand_city_abbrev(city):
     f = norm_text(city)
     if f in _AR.CITY_ABBREV:
         return _AR.CITY_ABBREV[f]
-    m = re.match(r"(?i)^\s*(tg|sf|rm)\.?\s+(.+)$", city)
+    # prefix generic de tip-oraș. „Tirgu/Tîrgu" (client scrie i unde oficialul are â) → „Târgu" (altfel norm 'tirgu'≠DB 'targu').
+    m = re.match(r"(?i)^\s*(tg|t[îi]rgu|sf|rm)\.?\s+(.+)$", city)
     if m:
-        full = {"tg": "Târgu", "sf": "Sfântu", "rm": "Râmnicu"}[m.group(1).lower()]
+        g = norm_text(m.group(1))
+        full = "Târgu" if g in ("tg", "tirgu") else ("Sfântu" if g == "sf" else "Râmnicu")
         return "%s %s" % (full, m.group(2).strip())
     return city
+
+def denoise_city(city):
+    """FALLBACK pt 'localitate negăsită': curăță zgomotul din câmpul ORAȘ ca să iasă localitatea reală.
+      - prefix administrativ: 'Orașul/Municipiul/Comuna/Satul/Loc(alitatea)/Mun/Com/Sat X' → X
+      - sufix 'jud(ețul) Y' → scos
+      - stradă LIPITĂ în oraș ('Neajlov Strada Intrarea…' / 'Bacau Str Ion Luca…') → păstrează doar localitatea din față
+      - cifră lipită de literă la început ('2Mai' → '2 Mai', localitate reală)
+    Aplicat DOAR când orașul brut nu se găsește (zero regresie pe orașe valide — alea se rezolvă înainte)."""
+    c = city or ""
+    c = re.sub(r"(?i)^\s*(ora[șs]ul|municipiul|mun|comuna|com|satul|sat|localitatea|loc)\b\.?\s+", "", c)
+    c = re.sub(r"(?i)[,\s]*\bjud(?:e[țt]?)?(?:ul)?\b\.?\s*[A-Za-zăâîșțĂÂÎȘȚ\-]+\s*$", "", c)  # „jud/jude/judet/județ(ul) X"
+    m = ART_MARK_RE.search(c)
+    if m and m.start() > 0:
+        c = c[:m.start()]
+    c = re.sub(r"(?i)^(\d+)([a-zăâîșț])", r"\1 \2", c)
+    return c.strip(" ,.-")
 
 LOCKER = re.compile(r"(easybox|locker|sameday|fanbox|collect\s*point|pick[\s\-]*up)", re.I)
 HAS_PREFIX_NUM = re.compile(r'(?i)\b(?:nr|no|numar|număr)\.?\s*(\d+[a-zA-Z]?|\d+/\d+)\b')
@@ -554,6 +572,12 @@ def validate_and_correct(cur, province, city, zip_, address1, address2="", loc_h
                 return {"status":"corrected","address":{"province":jo2 or prov,"city":lo2 or loc_hint,"zip":z,"address1":a1},
                         "source":"nomenclator","note":"rural din loc-hint (localitate înainte de stradă, ZIP unic)"}
     cands = load_by_locality(cur, prov, cty) or []
+    if not cands:                                  # FALLBACK: denoise oraș (Orașul/Comuna/jud/stradă-lipită/'2Mai') — zero regresie (fire doar când brutul nu iese)
+        dc = expand_city_abbrev(denoise_city(cty))
+        if dc and norm_text(dc) != norm_text(cty):
+            alt = load_by_locality(cur, prov, dc)
+            if alt:
+                cty = dc; cands = alt
     # city GUNOI / județ / placeholder ('Selectează') / număr → NU renunțăm aici: cădem prin rezolvarea
     # Comuna/Sat/bare din ORICE câmp (a1/a2/city/județ, jos). Doar dacă nici acolo nu iese o localitate → final.
     dz = candidate_zip_from_locality(cands, cust, num)
