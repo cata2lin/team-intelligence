@@ -3801,7 +3801,7 @@ def order_parcel_count(shop, token, name):
     # NU folosim `custom.nrproduse` (= nr PRODUSE, există doar pe parfumuri GT/Esteban, care n-au colete multiple → 1).
     q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ '
          'pc: metafield(namespace:"xconnector", key:"parcel-count"){ value } '
-         'lineItems(first:100){ edges{ node{ quantity product{ '
+         'lineItems(first:100){ edges{ node{ quantity sku product{ '
          'k1: metafield(namespace:"custom", key:"nr_cutii"){ value } '
          'k2: metafield(namespace:"custom", key:"nr_produse"){ value } } } } } } } } }') % name.replace('"', "")
     d = shopify_gql(shop, token, q)
@@ -3809,23 +3809,44 @@ def order_parcel_count(shop, token, name):
     if not edges:
         return 1
     node = edges[0]["node"]
-    pc = (node.get("pc") or {}).get("value")
-    if pc not in (None, ""):
-        try:
-            return max(1, _ceil_pos(float(pc)))
-        except Exception:
-            pass
-    total = 0.0
-    found = False
+    # cutii din produs + DEFALCARE PE STAȚIE (Depozit↔Uzina 2) pt magazinele cu stoc împărțit
+    slug = (shop or "").split(".")[0].lower()
+    is_split = slug in _AR.SPLIT_STORE_SLUGS
+    total = 0.0; found = False
+    per_station = {}; stations_present = set()
     for e in ((node.get("lineItems") or {}).get("edges") or []):
-        li = e["node"]; p = li.get("product") or {}
+        li = e["node"]; p = li.get("product") or {}; qty = li.get("quantity") or 1
+        box = None
         for k in ("k1", "k2"):
             v = (p.get(k) or {}).get("value")
             if v not in (None, ""):
                 try:
-                    total += float(v) * (li.get("quantity") or 1); found = True; break
+                    box = float(v); break
                 except Exception:
                     pass
+        if box is not None:
+            total += box * qty; found = True
+        if is_split:
+            stn = _AR.sku_station(li.get("sku"))
+            stations_present.add(stn)
+            if box is not None:
+                per_station[stn] = per_station.get(stn, 0.0) + box * qty
+    # metafield order (total deja calculat de sistem), dacă e setat
+    pc_val = None
+    pc = (node.get("pc") or {}).get("value")
+    if pc not in (None, ""):
+        try:
+            pc_val = max(1, _ceil_pos(float(pc)))
+        except Exception:
+            pc_val = None
+    # SPLIT: comandă cu produse pe AMBELE stații → ≥1 colet per stație, ca și Depozit, și Uzina 2 să-și poată
+    # împacheta coletele lor. xConnector face UN AWB cu atâtea colete; fiecare stație ia eticheta coletului ei.
+    # (Respectă un metafield MAI MARE dacă e setat manual.)
+    if is_split and len(stations_present) >= 2:
+        split_total = sum(max(1, _ceil_pos(per_station.get(s, 0.0))) for s in stations_present)
+        return max(split_total, pc_val or 0, 1)
+    if pc_val is not None:
+        return pc_val
     return max(1, _ceil_pos(total)) if (found and total > 0) else 1
 
 
