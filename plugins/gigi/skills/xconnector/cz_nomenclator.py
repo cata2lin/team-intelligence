@@ -158,11 +158,14 @@ def cz_validate_and_correct(cur, city, zip_, address1, address2=""):
             if spc:
                 return {"status":"corrected","address":{"city":cty,"zip":spc,"address1":a1},
                         "note":"PSČ stradă-specific (localitate cu %d PSČ)"%len(pscs)}
-            if psc:  # PSČ plauzibil (5 cifre) dar nu în lista localității + fără match stradă → PĂSTREZ (nu ghicesc peste)
-                return {"status":"valid","address":None,"note":"localitate reală, PSČ păstrat (livrabil pe loc.+stradă)"}
-            rep=pscs.most_common(1)[0][0]  # PSČ LIPSĂ → completez cu reprezentativul localității
+            # Aici ajungem DOAR dacă load_by_psc(psc) a fost gol (psc lipsă SAU nu e cod RÚIAN real — CZ are
+            # ~2.677 PSČ ≈ toate, deci gol = typo). Curierul intl (WPO) validează STRICT codul poștal și respinge
+            # orice PSČ inexistent (IV107) — NU-l putem păstra „livrabil pe loc.+stradă" ca la DPD-CZ intern.
+            # Derivăm reprezentativul localității. (Dovedit: 20/22 comenzi CZ blocate cu oraș+stradă corecte dar
+            # zip typo → reship după derivare — Příbram 261 00→261 01, Ml.Boleslav 293 03→293 01, Liberec 563 11→463 11.)
+            rep=pscs.most_common(1)[0][0]
             return {"status":"corrected","address":{"city":cty,"zip":rep,"address1":a1},
-                    "note":"localitate reală, PSČ reprezentativ completat"}
+                    "note":"PSČ client %s invalid în RÚIAN (WPO strict) → reprezentativ localitate %s"%(psc or "∅", rep)}
     # localitate negăsită direct → TYPO? fuzzy (Vsetim→Vsetín, Ostrva→Ostrava, prag 0.9)
     fz=cz_locality_fuzzy(cur, cty)
     if fz:

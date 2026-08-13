@@ -3432,12 +3432,14 @@ def here_poi_resolve(a1, city, key):
             "zip": a.get("postalCode"), "poi": title}
 
 
-_ST_TYPE_RE = re.compile(r"(?i)^\s*(strada|str|stra|bulevardul|bdul|b-dul|bd|blvd|calea|cal|[sș]oseaua|sos|aleea|alee|"
-                         r"intrarea|intr|drumul|splaiul|prelungirea|fundatura|pia[țt]a)\.?\s+")
+# NB: NU refolosi numele `_ST_TYPE_RE` aici — ăla e string-ul lazy folosit de `_tok_words` (init `None`→string).
+# O reatribuire la load îl transforma în re.Pattern și rupea `_tok_words` (str + re.Pattern) → toată calea `_valid_fix`.
+_ST_TYPE_STRIP_RE = re.compile(r"(?i)^\s*(strada|str|stra|bulevardul|bdul|b-dul|bd|blvd|calea|cal|[sș]oseaua|sos|aleea|alee|"
+                               r"intrarea|intr|drumul|splaiul|prelungirea|fundatura|pia[țt]a)\.?\s+")
 def _strip_street_type(s):
     """Scoate tipul de arteră din față ('Str/Bd/Aleea/Calea X'→'X') — pt fallback-ul HERE pe NUME când clientul
     a scris tipul GREȘIT (client 'Str Tineretului' dar e 'Aleea Tineretului'; 'STR Brătianu' dar e Bulevard)."""
-    return _ST_TYPE_RE.sub("", s or "").strip()
+    return _ST_TYPE_STRIP_RE.sub("", s or "").strip()
 
 def _here_geocode_q(q, country, key):
     if not q:
