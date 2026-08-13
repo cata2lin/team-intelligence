@@ -3712,6 +3712,17 @@ def ro_genzip_fixed_add(n):
     _here_state_add(RO_GENZIP_FIXED_FILE, n); _ro_genzip_fixed().add(n)
 
 
+INTL_EMAIL_SYNTH_FILE = os.path.join(_HERE_DIR, ".intl_email_synth")   # comenzi INTL cărora le-am pus email placeholder (WPO cere email), o dată
+_INTL_EMAIL_SYNTH = None
+def _intl_email_synthed():
+    global _INTL_EMAIL_SYNTH
+    if _INTL_EMAIL_SYNTH is None:
+        _INTL_EMAIL_SYNTH = _here_state_load(INTL_EMAIL_SYNTH_FILE)
+    return _INTL_EMAIL_SYNTH
+def intl_email_synthed_add(n):
+    _here_state_add(INTL_EMAIL_SYNTH_FILE, n); _intl_email_synthed().add(n)
+
+
 DPD_STREET_FIXED_FILE = os.path.join(_HERE_DIR, ".dpd_street_fixed")   # comenzi RO cărora le-am CANONIZAT strada via DPD findStreet (o dată)
 _DPD_STREET_FIXED = None
 def _dpd_street_fixed():
@@ -5473,6 +5484,22 @@ def _do_awb(xc, sh, st, cons, con, name, o, notify):
         return False, False, None   # sanitizat, dar încă nesincronizat → reîncearcă tura viitoare (NU hold)
     msg = (d.get("errorMessage") if isinstance(d, dict) else str(d)) or ""
     transient = s in (429, 500, 502, 503, 504) or (s == 422 and "was not created" in msg)
+    # INTL: comandă FĂRĂ email → WPO respinge (`receiver.email.not-empty`, uneori confuz `recipient.id_or_client_name`).
+    # Sintetizează email placeholder pe order.email → xConnector (are PCD) îl citește → AWB la tura VIITOARE (după
+    # re-sync xConnector; setarea acum nu apucă să propage). Rulează CHIAR dacă a fost sanitizată (gardă PROPRIE
+    # `_intl_email_synthed`, separată de `_intl_sanitized`). Doar dacă n-are email real (`_order_has_email` pe note-attr
+    # NEredactat → NU suprascriem email real). CONFIRMAT: CZ89078/CZ89054 UNFULFILLED→FULFILLED.
+    if _ctry and name not in _intl_email_synthed() and \
+       ("email" in msg.lower() or "id_or_client_name" in msg.lower() or "recipient" in msg.lower()):
+        intl_email_synthed_add(name)
+        try:
+            if st and st.get("adminToken") and not _order_has_email(st["shopDomain"], st["adminToken"], name):
+                ph = "awb-%s@arona.ro" % (re.sub(r"[^a-z0-9]", "", (name or "x").lower())[:24] or "x")
+                if shopify_set_order_email(st["shopDomain"], st["adminToken"], name, ph):
+                    awb_event(kind="intl-email-synth", store=sh["shopDomain"], order=name, result="ok", email=ph)
+                    return False, False, None   # email pus → AWB tura viitoare după re-sync (NU hold)
+        except Exception:
+            pass
     # RO: telefon in format gresit (bare 9-cifre "751842097" / "+400..." malformat) -> DPD RO il respinge.
     # Normalizeaza la 07xxxxxxxx O SINGURA data -> reincearca. (RO nu trece prin dpd_intl_sanitize.)
     if not _ctry and name not in _ro_phone_fixed():
