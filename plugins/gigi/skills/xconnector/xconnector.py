@@ -2927,6 +2927,24 @@ def shopify_set_order_email(shop, token, name, email):
     return not errs
 
 
+def _order_has_email(shop, token, name):
+    """True dacă comanda are un email VALID — order.email real SAU note-attr `E-mailem`/`Email` valid. Note attrs
+    NU sunt redactate PCD (metadata) → sursă SIGURĂ pt „are/n-are email" (order.email ni se vede redactat=None deși
+    poate fi setat). Gardă la sintetizarea placeholder-ului: NU suprascriem un email real al clientului."""
+    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ email customAttributes{ key value } } } } }') % (name or "").replace('"', "")
+    d = shopify_gql(shop, token, q)
+    node = (((d.get("data") or {}).get("orders") or {}).get("edges") or [{}])[0].get("node") or {}
+    e = (node.get("email") or "").strip()
+    if e and "@" in e and "." in e.split("@")[-1]:
+        return True
+    for a in (node.get("customAttributes") or []):
+        if (a.get("key") or "").strip().lower() in ("e-mailem", "email", "e-mail", "mail", "e-mail address"):
+            v = (a.get("value") or "").strip()
+            if v and "@" in v and "." in v.split("@")[-1]:
+                return True
+    return False
+
+
 def dpd_intl_sanitize(xc, o, shop_domain, name, country, st=None):
     """Repară FORMATUL câmpurilor pentru DPD pe o comandă intl: zip curățat de gunoi (+ city canonic din
     nomenclatorul național), addressLine1>35 împărțit în a1/a2 pe cuvânt, city scurtat la 35.
@@ -2989,9 +3007,18 @@ def dpd_intl_sanitize(xc, o, shop_domain, name, country, st=None):
     if st and st.get("adminToken"):
         try:
             real = _awbprint_customer_email(name)   # emailul REAL din AWBprint (ne-redactat)
-            if real and "@bonhaus." not in real.lower():
+            if real and "@" in real and "@bonhaus." not in real.lower():
                 ok_mail = shopify_set_order_email(st["shopDomain"], st["adminToken"], name, real)
-            # FARA email real in AWBprint -> NU sintetizam (nu suprascriem emailul real al clientului)
+            elif not _order_has_email(st["shopDomain"], st["adminToken"], name):
+                # GENUIN fără email (nici order.email real, nici note-attr) → placeholder valid. WPO cere email
+                # OBLIGATORIU (eroarea `receiver.email.not-empty` / confuz „recipient.id_or_client_name"); xConnector
+                # (are PCD) citește order.email chiar dacă NOI îl vedem redactat → AWB pleacă la următoarea tură (după
+                # re-sync). CONFIRMAT: CZ89078+CZ89054 UNFULFILLED→FULFILLED după set. Clientul NU e afectat (primește
+                # SMS/tracking de la curier, nu emailul WPO). Gardă `_order_has_email` = nu suprascriem email real.
+                ph = "awb-%s@arona.ro" % (re.sub(r"[^a-z0-9]", "", (name or "x").lower())[:24] or "x")
+                ok_mail = shopify_set_order_email(st["shopDomain"], st["adminToken"], name, ph)
+                if ok_mail:
+                    awb_event(kind="intl-email-synth", store=st["shopDomain"], order=name, result="ok", email=ph)
         except Exception:
             ok_mail = False
     return bool(ok_addr or ok_mail)
