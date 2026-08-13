@@ -65,3 +65,38 @@ STREET_FULL = {
 
 # ── Sufixe de DECLINARE/articol RO pt matching stradă (cel mai lung întâi). Sebesi≡Sebeșului, Gara≡Gării. ──
 DECL_SUF = ("urilor", "ilor", "elor", "ului", "lui", "lor", "ale", "uri", "ii", "ei", "ul", "u", "a", "e", "i")
+
+
+# ── SPLIT PE STAȚII FIZICE (Depozit Bartolomeu ↔ Uzina 2) — pt nr. COLETE per stație la AWB ──────────────
+# Stocul e împărțit pe 2 locații fizice, dar NU putem folosi locațiile Shopify (strică Releasit COD form).
+# Deci împărțim la nivel de COLETE: o comandă cu produse pe ambele stații primește ≥1 colet/stație → xConnector
+# face UN AWB cu N colete, iar fiecare stație își ia eticheta coletului ei și îl împachetează.
+# ⚠️ ține în sincron cu `print_stations.py` din AWB Arona (aceeași regulă SKU→stație).
+#
+# Magazine unde produsele pot fi pe AMBELE stații (deals + intl). Restul = o singură stație → NU se face split.
+# Cheia = slug-ul de domeniu myshopify (prefixul înainte de „.myshopify.com").
+SPLIT_STORE_SLUGS = {
+    "covoareauto-ro", "bonhaus", "ofertelezilei", "audusp-rf", "oriceredus",
+    "vthuzq-7j", "f0yrmh-ia", "ux1x6n-n2", "63e901-2f", "16w7xv-0w",
+}
+# Reguli SKU → DEPOZIT (restul din magazinele split → Uzina 2). ⭐ EXTENSIBIL: adaugă tuple aici.
+#   ("prefix", "HA")  · ("contains", "LAVET")  · ("regex", r"\d+-[MS](?:-|$)")
+DEPOZIT_SKU_RULES = [
+    ("prefix", "HA"),
+    ("contains", "LAVET"),
+    ("regex", r"\d+-[MS](?:-|$)"),   # lavete pe mărimi (ex 12-M, 34-S)
+]
+
+
+def sku_station(sku):
+    """Stația fizică a unui SKU pe un magazin split: 'depozit' (HA/lavete + reguli adăugate) sau 'uzina2' (restul)."""
+    import re as _re
+    s = (sku or "").upper()
+    for kind, val in DEPOZIT_SKU_RULES:
+        if kind == "prefix" and s.startswith(val.upper()):
+            return "depozit"
+        if kind == "contains" and val.upper() in s:
+            return "depozit"
+        if kind == "regex" and _re.search(val, s):
+            return "depozit"
+    return "uzina2"
