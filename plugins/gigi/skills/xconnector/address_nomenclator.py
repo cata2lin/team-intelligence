@@ -81,6 +81,22 @@ def apply_aliases(s):
         if k in p: p = p.replace(k,v)
     return p
 
+def expand_city_abbrev(city):
+    """Abrevieri de ORAȘ → nume oficial ('Tg Mureș'→Târgu Mureș, 'Sf Gheorghe'→Sfântu Gheorghe, 'Rm Vâlcea'→Râmnicu
+    Vâlcea). ⚠️ CITY_ABBREV (rulebook) NU era aplicat pe câmpul oraș → abrevierile cădeau pe 'localitate negăsită'
+    (~949/an). Exact-match pe dict (acoperă cazurile speciale: Drobeta/Miercurea/nume maghiare), apoi PREFIX generic
+    de tip-oraș (Tg/Sf/Rm) pt cele neacoperite de dict."""
+    if not city:
+        return city
+    f = norm_text(city)
+    if f in _AR.CITY_ABBREV:
+        return _AR.CITY_ABBREV[f]
+    m = re.match(r"(?i)^\s*(tg|sf|rm)\.?\s+(.+)$", city)
+    if m:
+        full = {"tg": "Târgu", "sf": "Sfântu", "rm": "Râmnicu"}[m.group(1).lower()]
+        return "%s %s" % (full, m.group(2).strip())
+    return city
+
 LOCKER = re.compile(r"(easybox|locker|sameday|fanbox|collect\s*point|pick[\s\-]*up)", re.I)
 HAS_PREFIX_NUM = re.compile(r'(?i)\b(?:nr|no|numar|număr)\.?\s*(\d+[a-zA-Z]?|\d+/\d+)\b')
 TRAILING_NUM   = re.compile(r'(?i)(\d+[a-zA-Z]?|\d+/\d+)\s*($|,|\s+bl|bloc|sc|scara|ap|et)')
@@ -450,6 +466,8 @@ def validate_and_correct(cur, province, city, zip_, address1, address2="", loc_h
         return {"status":"cs","address":None,"source":"easybox","note":"locker fără ZIP valid"}
     # 1) București sector
     prov, cty, sector = bucharest_fix(prov, cty, a1, a2)
+    # 1a) abrevieri de oraș (Tg/Sf/Rm/Drobeta… — CITY_ABBREV) → nume oficial, ÎNAINTE de orice lookup pe localitate
+    cty = expand_city_abbrev(cty)
     # 1b) câmpul ORAȘ e de fapt un COD POȘTAL (client a pus zip-ul în oraș: city='305600') → mută-l în ZIP,
     #     localitatea vine din load_by_zip. Doar dacă zip-ul propriu-zis lipsește.
     if not re.sub(r"\D", "", zip_ or "") and re.fullmatch(r"\d{6}", (cty or "").strip()):
