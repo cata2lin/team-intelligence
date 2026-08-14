@@ -232,12 +232,20 @@ def _strip_leading_number_patterns(s):
         if nxt and nxt[0] not in {"bl","bloc","sc","scara","ap","et","etaj","lot"} and nxt[0] not in MONTHS: s = m.group(2)
     return s
 
+_NUM_WORD = {"unu":"1","una":"1","doi":"2","doua":"2","trei":"3","patru":"4","cinci":"5","sase":"6","sapte":"7",
+             "opt":"8","noua":"9","zece":"10","unsprezece":"11","doisprezece":"12","treisprezece":"13",
+             "paisprezece":"14","cincisprezece":"15","saisprezece":"16","saptesprezece":"17","optsprezece":"18",
+             "nouasprezece":"19","douazeci":"20"}
+_NUM_WORD_RE = re.compile(r"(?:nr|numar|no)\.?\s+(" + "|".join(_NUM_WORD) + r")\b")
 def has_real_house_number(text):
     t = text or ""
     t = re.sub(r"([A-Za-zÀ-ÿ])(\d)", r"\1 \2", t)
     # 'bis'/'ter' după număr = număr de casă valid RO ('2bis', '27 bis', '102 ter') — nu 'fără număr'.
     mb = re.search(r'(?i)(?<![\d/])(\d{1,4})\s*(bis|ter)\b', t)
     if mb: return (mb.group(1) + mb.group(2)).lower()
+    # număr scris ca CUVÂNT după 'nr' ('Nr sase'→6, 'nr cinci'→5) — nu 'fără număr'. Doar cu 'nr' explicit (neambiguu).
+    mw = _NUM_WORD_RE.search(norm_text(t))
+    if mw: return _NUM_WORD[mw.group(1)]
     m = HAS_PREFIX_NUM.search(t)
     if m: return m.group(1).replace(" ","")
     m = TRAILING_NUM.search(t)
