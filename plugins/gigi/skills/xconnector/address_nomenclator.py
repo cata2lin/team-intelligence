@@ -294,8 +294,10 @@ _RANK_RE = re.compile(r"(?i)\b(gen|general|generalul|gral|cpt|cap|capitan|capita
                       r"sf|sfant|sfantu|sfantul|sfanta|prof|profesor|profesorul|inv|invatator|acad|academician|"
                       r"ing|inginer|mitropolit|mitropolitul|patriarh|patriarhul|episcop|preot)\b")
 def street_core(s):
-    # split tip-arteră LIPIT de nume ('SosBucuresti'→'Sos Bucuresti', 'StrEroilor'→'Str Eroilor')
-    s = re.sub(r"(?i)^(sos|str|bd|bdul|blvd|calea|cal|aleea|ale|intr|prel|spl|drumul|drum)([A-ZĂÂÎȘȚ])", r"\1 \2", s or "")
+    # split tip-arteră LIPIT de nume DOAR când numele începe cu MAJUSCULĂ ('SosBucuresti'→'Sos Bucuresti',
+    # 'StrEroilor'→'Str Eroilor'). BUG istoric: `(?i)` făcea `[A-Z]` să prindă și litere mici → 'Strada'→'Str ada',
+    # 'Calea'→'Cal ea', 'Aleea'→'Ale ea' → cust corupt → no-zip nu deriva. Scope (?i) DOAR pe tip; litera 2 case-sensitive.
+    s = re.sub(r"^((?i:sos|str|bd|bdul|blvd|calea|cal|aleea|ale|intr|prel|spl|drumul|drum))([A-ZĂÂÎȘȚ])", r"\1 \2", s or "")
     s = _expand_month_abbr(s)
     s = apply_aliases(s)
     # abrevieri tip-arteră EXTINSE → formă completă (Prel/Intr/Fdc/Spl/P-ța) — apoi se scot ca tip la strip-ul de jos
