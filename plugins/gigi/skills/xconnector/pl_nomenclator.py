@@ -41,13 +41,20 @@ def bldg_number(a2, a1):
 
 # prefixe de tip strada pe care clientii le pun/scapa: ul. al. pl. os. rondo
 _PREF = re.compile(r"^\s*(ul\.?|ulica|al\.?|aleja|aleje|pl\.?|plac|os\.?|osiedle|rondo)\s+", re.I)
+# STRĂZI-DATĂ PL: '1 Maja'/'3 Maja'(3 mai)/'11 Listopada'(11 nov)/'22 Lipca' — numărul din față e parte din NUMELE
+# străzii (zile naționale, foarte comune), NU numărul de casă. Luni în genitiv folosite în nume de străzi.
+_PL_MONTH = r"(?:maja|maj|lipca|listopada|stycznia|lutego|marca|kwietnia|czerwca|sierpnia|wrze[śs]nia|pa[źz]dziernika|grudnia)"
+_PL_DATE_ST = re.compile(r"(?i)^(\d{1,4})\s+" + _PL_MONTH + r"\b")
 def parse_street_number(a1):
-    """din 'ul. Kochanowskiego 30' -> ('Kochanowskiego','30'); din 'os. Tysiaclecia 5/12' -> ('Tysiaclecia','5/12')."""
-    a1 = (a1 or "").strip()
-    m = re.search(r"\b(\d{1,4}[a-zA-Z]?(?:/\d+[a-zA-Z]?)?)\b", a1)
+    """din 'ul. Kochanowskiego 30' -> ('Kochanowskiego','30'); din 'os. Tysiaclecia 5/12' -> ('Tysiaclecia','5/12').
+    Stradă-dată ('1 Maja 7'/'Ul. 11 Listopada 27' -> street='1 Maja'/'11 Listopada', number='7'/'27'): sare peste
+    numărul din față dacă urmează o lună PL (numărul e parte din nume, nu nr de casă)."""
+    core = _PREF.sub("", (a1 or "").strip()).strip(" ,.")     # scoate ul./al./os./pl. din față ÎNTÂI
+    md = _PL_DATE_ST.match(core)
+    start = md.end() if md else 0                             # nr de casă = DUPĂ 'N <Lună>'
+    m = re.search(r"\b(\d{1,4}[a-zA-Z]?(?:/\d+[a-zA-Z]?)?)\b", core[start:])
     number = m.group(1) if m else None
-    street = a1[:m.start()] if m else a1
-    street = _PREF.sub("", street).strip(" ,.")
+    street = (core[:start + m.start()] if m else core).strip(" ,.")
     return street, number
 
 def _dictify(cur):
