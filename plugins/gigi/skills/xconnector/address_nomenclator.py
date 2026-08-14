@@ -372,7 +372,11 @@ def street_is_garbage(cust, city):
     DOAR atunci am voie să completez strada din ZIP; o stradă REALĂ care nu se potrivește = conflict (nu o suprascriu)."""
     if not cust: return True
     nc = norm_text(cust); ncity = norm_text(city)
-    if ncity and (nc == ncity or nc in ncity or ncity in nc): return True
+    if not nc: return True
+    if nc == ncity: return True                     # strada = EXACT numele orașului ('Constanta'/'Cluj Napoca')
+    if nc in set(ncity.split()): return True         # strada = UN cuvânt din numele orașului ('Cluj' în 'Cluj Napoca')
+    # NU mai folosesc substring (`nc in ncity`) — clasa greșit str reale prefix/conținând orașul: 'Timiș'⊂'Timișoara',
+    # 'Calea București' conține 'bucuresti' = străzi REALE, NU gunoi (mergeau greșit la geocoder în loc de valid).
     return len(nc) <= 2
 def detect_easybox(*parts): return bool(LOCKER.search(" ".join(p or "" for p in parts)))
 def detect_sector(*parts):
