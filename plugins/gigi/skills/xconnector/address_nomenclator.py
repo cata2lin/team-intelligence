@@ -192,8 +192,18 @@ def _truncate_after_real_number(text):
             return " ".join(orig[:i]).strip()
     return text
 
+_MONTH_ABBR = {"ian": "ianuarie", "feb": "februarie", "febr": "februarie", "mart": "martie", "apr": "aprilie",
+               "aug": "august", "sep": "septembrie", "sept": "septembrie", "oct": "octombrie",
+               "noi": "noiembrie", "nov": "noiembrie", "dec": "decembrie"}
+_MONTH_ABBR_RE = re.compile(r"(?i)(\b\d+)\s+(ian|febr?|mart|apr|aug|sept?|oct|noi|nov|dec)\.?(?=\s|$)")
+def _expand_month_abbr(s):
+    """Străzi-DATĂ cu lună ABREVIATĂ: '1 dec 1918'→'1 decembrie 1918', '22 dec'→'22 decembrie'. DOAR când e
+    precedată de o cifră (context dată) → fără fals-pozitive. Abrevieri neambigue (fără mar/mai/iun/iul, prea scurte)."""
+    return _MONTH_ABBR_RE.sub(lambda m: "%s %s" % (m.group(1), _MONTH_ABBR[m.group(2).lower()]), s or "")
+
 def street_core(s):
-    s = apply_aliases(s or "")
+    s = _expand_month_abbr(s or "")
+    s = apply_aliases(s)
     s = re.sub(r"\b(str\.)\b","strada",s,flags=re.I); s = re.sub(r"\b(str)\b","strada",s,flags=re.I)
     s = re.sub(r"\b(bd\.?|blvd\.?)\b","bulevardul",s,flags=re.I); s = re.sub(r"\b(sos\.?|soseaua)\b","soseaua",s,flags=re.I)
     s = re.sub(r"\b(alee|aleea)\b","aleea",s,flags=re.I); s = re.sub(r"\b(cal\.?)\b","calea",s,flags=re.I)
@@ -397,13 +407,16 @@ def zip_owner_of(cur, z):
     return zip_owner(rows) if rows else (None, None)
 def rows_for_street(rows, street_raw):
     if not street_raw: return []
-    tip_pref = detect_tip_from_raw(street_raw); out=[]
+    tip_pref = detect_tip_from_raw(street_raw); out=[]; out_notip=[]
     for r in rows:
         full = _cand_street(r)
         if full and same_street(street_raw, full):
+            out_notip.append(r)
             if tip_pref and _tip_canon(r.get("tip_artera")) != tip_pref: continue
             out.append(r)
-    return out
+    # TIP strict n-a dat nimic dar NUMELE se potrivește sub ALT tip (client a scris „Calea" unde e „Șosea"/„Stradă") →
+    # folosește name-only; downstream (candidate_zip) verifică oricum unicitatea ZIP-ului → fără misroute.
+    return out if out else out_notip
 _INF_NUM = 10**9
 def _parse_numar_ranges(numar):
     """Parsează coloana `numar` a nomenclatorului → listă de (lo, hi, paritate) cu paritate ∈ {0 par, 1 impar, None ambele}.
