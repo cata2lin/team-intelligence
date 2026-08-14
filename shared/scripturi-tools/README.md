@@ -44,3 +44,15 @@ Mecanica e identică cu `sku_station()`/`DEPOZIT_SKU_RULES` (rută pe SKU), dar 
 (ex așternut `0.5`=2/colet, geanta/broscuțe `0.05`=20/colet, covor `1`=1/buc); **fără densitate → contribuie 0 = se
 COMBINĂ** (stația primește 1 colet baseline via `max(1,·)`), NU 1 colet/bucată — ca să nu se umfle coletele pe
 articolele mici (regula owner 14-aug-2026, înlocuiește qty-driven-ul de pe 13-aug). Voluminos (`box>1`) → +colete.
+
+**Overlay depozit (AUTORITATIV):** builder-ul citește și `data/parcel_density.db` (input-ul depozitului din pagina
+`/colete`, vezi mai jos) și-l pune PESTE consensul din Shopify — deci ce completează depozitul nu se pierde la rebuild-ul
+de 6:30 (`nr_cutii` din DB câștigă). Pagina scrie și direct în `sku_box_map.json` la fiecare salvare (efect imediat).
+
+## parcel_density_app.py — pagina DEPOZIT „câte bucăți intră într-un colet" (`/colete`)
+App FastAPI (pornit cu `colete_app.sh` → uvicorn `127.0.0.1:8091`, sub **pm2** `colete`; nginx `location /colete` pe
+`scripts.arona.ro` → **https://scripts.arona.ro/colete**). Listă cu produsele fără nr colete (poză+titlu+SKU din
+`data/parcel_products.json`); depozitul scrie câte bucăți/colet → auto-save → `data/parcel_density.db`
+(`sku, per_parcel, nr_cutii=1/per_parcel, updated_by`) + update imediat în `sku_box_map.json`. De acolo `order_parcel_count`
+îl folosește pe toate magazinele. **Deploy:** `scp parcel_density_app.py colete_app.sh $VPS:/root/Scripturi/` + `pm2 restart colete`.
+Regenerarea listei de produse: scanezi magazinele deals (produse fără metafield + fără tag `test`) → `parcel_products.json`.

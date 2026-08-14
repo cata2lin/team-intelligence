@@ -46,6 +46,17 @@ for sku,rs in bysku.items():
         cons=collections.Counter(eff).most_common(1)[0][0]
         if cons > 0:            # box 0/negativ = zgomot, nu-l propaga
             mp[sku]=cons
+# overlay AUTORITATIV: input depozit din parcel_density.db (pagina /colete) peste consensul Shopify
+try:
+    import sqlite3
+    _dbc = sqlite3.connect("/root/Scripturi/data/parcel_density.db")
+    _n = 0
+    for _sku, _nr in _dbc.execute("select sku, nr_cutii from parcel_density where nr_cutii is not null and nr_cutii > 0"):
+        mp[_sku] = _nr; _n += 1
+    _dbc.close()
+    print("overlay parcel_density (depozit): %d SKU-uri" % _n)
+except Exception as _e:
+    print("overlay parcel_density skip:", _e)
 os.makedirs("/root/Scripturi/data", exist_ok=True)
 json.dump(mp, open(MAP_PATH,"w"))
 print("map SKU->box: %d SKU-uri (din %d produse, %d magazine)" % (len(mp), len(rows), len(STORES)))
