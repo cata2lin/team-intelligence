@@ -4674,7 +4674,9 @@ def resolve_duplicate(sh, xc, o, st, name, keeper, apply):
         reason = "dup-suma-diferita"
     else:
         reason = "dup-necomparabil"
-    if has_awb(o) and awbprint_status(name) in PLECATA:
+    # PROTECȚIE LIVRARE (același bug ghost-AWB ca în cancel_duplicate): AWBprint = autoritativ. Dacă a plecat/livrat →
+    # NU pun pe hold, CHIAR dacă AWB-ul e ghost în xConnector (has_awb=False). Altfel o comandă livrată ajunge pe hold la CS.
+    if awbprint_status(name) in PLECATA:
         return "shipped-skip", reason
     hold_and_log(st, sh["shopDomain"], name, reason, apply)
     if apply:
