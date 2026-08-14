@@ -176,6 +176,21 @@ def strip_landmark(a1):
         return head
     return a1
 
+# STRADĂ după BLOC/CARTIER — clientul scrie întâi blocul/cartierul, apoi strada reală cu marcaj („Bl D sc J ap 156,
+# Strada Republicii nr 8" / „Cartier Valea Rosie, Strada Revolutiei"). Extractorul de stradă ia zona blocului și pică.
+# → mutăm partea cu marcaj de stradă în FAȚĂ (blocul rămâne la coadă → block_meta îl găsește tot). ~460 comenzi/an.
+_STREET_MARK_RE = re.compile(r"(?i)\b(str(?:\.|ada)?|b[-\.]?dul|bd\.?|blvd\.?|bulevard(?:ul)?|calea|soseaua|sos\.?|"
+                             r"aleea|intrarea|intr\.?|drumul|prelungirea|prel\.?|splaiul|spl\.?|fundatura|fdc\.?|piata|p-?ta)\b")
+def hoist_street_over_block(a1):
+    if not a1: return a1
+    m = _STREET_MARK_RE.search(a1)
+    if not m or m.start() == 0:
+        return a1                                  # strada e deja în față (sau lipsește marcajul)
+    head = a1[:m.start()]
+    if re.search(r"(?i)\b(bl|bloc|sc|scara|ap|apartament|et|etaj|parter|cartier|cart|zona)\b", head):
+        return (a1[m.start():].rstrip(" ,.-") + ", " + head.strip(" ,.-")).strip(" ,.-")
+    return a1
+
 # DRUMURI naționale/județene/comunale/europene cu bornă km — „DN 1 km 5", „DJ106 km12+300", „DE 70".
 # În aceste adrese punctul livrabil = borna km (nu există număr de casă clasic) → tratează ca RURAL (localitate+zip).
 ROAD_KM_RE = re.compile(r"(?i)\b(dn|dj|dc|de|dn\.?)\s*\.?\s*\d+[a-z]?\b.*\bkm\b|\bkm\s*\.?\s*\d")
@@ -597,6 +612,8 @@ def validate_and_correct(cur, province, city, zip_, address1, address2="", loc_h
     # 1a3) REPER lipit în COADĂ ('...vis-a-vis de Kaufland', '...langa scoala nr 5') → scos ÎNAINTE de detecția
     #      numărului (altfel cifra reperului = nr casă fals). Doar dacă rămâne un nume de stradă.
     a1 = strip_landmark(a1)
+    # 1a4) STRADĂ după BLOC/CARTIER ('Bl D sc J ap 156, Strada Republicii' / 'Cartier X, Strada Y') → mut strada în față
+    a1 = hoist_street_over_block(a1)
     # 1b) câmpul ORAȘ e de fapt un COD POȘTAL (client a pus zip-ul în oraș: city='305600') → mută-l în ZIP,
     #     localitatea vine din load_by_zip. Doar dacă zip-ul propriu-zis lipsește.
     if not re.sub(r"\D", "", zip_ or "") and re.fullmatch(r"\d{6}", (cty or "").strip()):
