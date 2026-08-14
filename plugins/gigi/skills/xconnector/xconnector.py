@@ -1926,7 +1926,9 @@ def customer_history_addr(order_name, ad):
     sau None. SIGUR: același telefon + același oraș + LIVRATĂ + aceeași stradă."""
     _cura1 = ad.get("address1") or ""
     _has_street = _hist_real_street(_cura1)
-    _need_number = _has_street and not _hist_has_num(_cura1)   # are stradă dar fără cifră în partea de stradă
+    # numărul de casă poate fi în a2 ('Johan Sebastian Bach' + a2 'parter Nr 5') → NU cere completare de număr dacă
+    # a2 îl are; altfel s-ar ruta greșit la cazul-2 și n-am completa ZIP-ul din istoricul aceleiași străzi livrate.
+    _need_number = _has_street and not _hist_has_num(_cura1) and not _hist_has_num(ad.get("address2") or "")
     _cz0 = str(ad.get("zip") or "").strip().strip("-")
     _zip_ok = bool(re.fullmatch(r"\d{6}", _cz0))
     if _has_street and not _need_number and _zip_ok:
@@ -1978,7 +1980,14 @@ def customer_history_addr(order_name, ad):
         if _has_street and not _need_number and not _zip_ok:
             _sn = _hist_street_name(_cura1)
             _zc = next((c[1] for c in cand if c[2] == _sn and c[1] and re.fullmatch(r"\d{6}", str(c[1]).strip())), None)
-            return {"zip": str(_zc).strip()} if _zc else None
+            if _zc:
+                return {"zip": str(_zc).strip()}
+            # FALLBACK: aceeași stradă n-are match, dar clientul are livrări pe ACELAȘI ORAȘ cu ZIP UNIC → e zip-ul
+            # lui real de acasă (client repetitiv livrat). Sigur DOAR dacă e neambiguu (un singur zip în tot istoricul).
+            _czips = {str(c[1]).strip() for c in cand if c[1] and re.fullmatch(r"\d{6}", str(c[1]).strip())}
+            if len(_czips) == 1:
+                return {"zip": _czips.pop()}
+            return None
         # ── CAZUL (2): are stradă, lipsește NUMĂRUL → completez de la o comandă livrată pe ACEEAȘI stradă ──
         if _need_number:
             cur_sn = _hist_street_name(_cura1)
