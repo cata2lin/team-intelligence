@@ -113,6 +113,7 @@ def denoise_city(city):
     if m and m.start() > 0:
         c = c[:m.start()]
     c = re.sub(r"(?i)^(\d+)([a-zăâîșț])", r"\1 \2", c)
+    c = re.sub(r"[,\s]+\d{3,}\s*$", "", c)   # cifre-gunoi/zip lipite la COADA orașului ('Cluj Napoca 123456' → 'Cluj Napoca')
     return c.strip(" ,.-")
 
 def strip_leading_locality(a1, city, prov):
@@ -195,6 +196,9 @@ def _strip_leading_number_patterns(s):
 def has_real_house_number(text):
     t = text or ""
     t = re.sub(r"([A-Za-zÀ-ÿ])(\d)", r"\1 \2", t)
+    # 'bis'/'ter' după număr = număr de casă valid RO ('2bis', '27 bis', '102 ter') — nu 'fără număr'.
+    mb = re.search(r'(?i)(?<![\d/])(\d{1,4})\s*(bis|ter)\b', t)
+    if mb: return (mb.group(1) + mb.group(2)).lower()
     m = HAS_PREFIX_NUM.search(t)
     if m: return m.group(1).replace(" ","")
     m = TRAILING_NUM.search(t)
@@ -758,5 +762,18 @@ def validate_and_correct(cur, province, city, zip_, address1, address2="", loc_h
                         z = next(iter(vz)); jo2, lo2 = zip_owner_of(cur, z)
                         return {"status":"corrected","address":{"province":jo2 or prov,"city":lo2 or bare,"zip":z,"address1":a1},
                                 "source":"nomenclator","note":"rural din a1 (nume localitate bare — nu e stradă în oraș, ZIP unic pe județ)"}
+    # RULE D (last-resort): oraș MIC (≤3 coduri poștale/localitate) găsit din câmpul oraș, dar zip invalid/lipsă și
+    # strada nederivabilă → livrabil pe zip-ul DOMINANT al localității (curierul rutează pe localitate+zip). Analog
+    # regulii C pt calea fără-zip. Firește DUPĂ resolver-ele Sat/Comuna/bare (alea sunt mai precise). Orașe mari (multe
+    # zip-uri) → rămân geocoder. Strada clientului păstrată.
+    if cands:
+        zc = {}
+        for r in cands:
+            z = str(r.get("cod_postal") or "")
+            if re.fullmatch(r"\d{6}", z): zc[z] = zc.get(z, 0) + 1
+        if 0 < len(zc) <= _SMALL_LOC_MAX_ZIPS:
+            z = max(zc, key=zc.get); jo2, lo2 = zip_owner_of(cur, z)
+            return {"status":"corrected","address":{"province":jo2 or prov,"city":lo2 or cty,"zip":z,"address1":a1},
+                    "source":"nomenclator","note":"oraș mic (≤3 zip) fără zip valid → zip localității (livrabil)"}
     return {"status":"needs_geocoder","address":None,"source":"nomenclator",
             "note":("localitate OK dar ZIP nederivabil" if cands else "localitate negăsită în nomenclator")}
