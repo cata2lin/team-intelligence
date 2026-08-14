@@ -201,16 +201,33 @@ def _expand_month_abbr(s):
     precedată de o cifră (context dată) → fără fals-pozitive. Abrevieri neambigue (fără mar/mai/iun/iul, prea scurte)."""
     return _MONTH_ABBR_RE.sub(lambda m: "%s %s" % (m.group(1), _MONTH_ABBR[m.group(2).lower()]), s or "")
 
+# RANGURI/TITLURI antroponimice — nomenclatorul le OMITE des sau le pune la coadă cu numele INVERSAT
+# ('Str. Gen. Eremia Grigorescu' ↔ DB 'Eremia Grigorescu'; 'Sergent Constantin Popescu' ↔ 'Popescu Constantin, sergent').
+# Le scoatem din AMBELE părți (aplicat pe customer ȘI pe rândul DB în same_street) → matching pe NUME. Fără 'dr'
+# (=Drumul, deja mapat), fără tokeni prea scurți ambigui.
+_RANK_RE = re.compile(r"(?i)\b(gen|general|generalul|gral|cpt|cap|capitan|capitanul|locotenent|col|colonel|colonelul|"
+                      r"maior|plt|plutonier|sgt|serg|sergent|sergentul|cdor|comandor|amiral|mares|maresal|"
+                      r"sf|sfant|sfantu|sfantul|sfanta|prof|profesor|profesorul|inv|invatator|acad|academician|"
+                      r"ing|inginer|mitropolit|mitropolitul|patriarh|patriarhul|episcop|preot)\b")
 def street_core(s):
-    s = _expand_month_abbr(s or "")
+    # split tip-arteră LIPIT de nume ('SosBucuresti'→'Sos Bucuresti', 'StrEroilor'→'Str Eroilor')
+    s = re.sub(r"(?i)^(sos|str|bd|bdul|blvd|calea|cal|aleea|ale|intr|prel|spl|drumul|drum)([A-ZĂÂÎȘȚ])", r"\1 \2", s or "")
+    s = _expand_month_abbr(s)
     s = apply_aliases(s)
+    # abrevieri tip-arteră EXTINSE → formă completă (Prel/Intr/Fdc/Spl/P-ța) — apoi se scot ca tip la strip-ul de jos
+    s = re.sub(r"(?i)\b(prel|prelung)\.?\b", "prelungirea", s); s = re.sub(r"(?i)\bintr\.?\b", "intrarea", s)
+    s = re.sub(r"(?i)\b(fdc|fdt|fnd)\.?\b", "fundatura", s); s = re.sub(r"(?i)\bspl\.?\b", "splaiul", s)
+    s = re.sub(r"(?i)\bp[-\s]?[tț]a\b", "piata", s)
     s = re.sub(r"\b(str\.)\b","strada",s,flags=re.I); s = re.sub(r"\b(str)\b","strada",s,flags=re.I)
     s = re.sub(r"\b(bd\.?|blvd\.?)\b","bulevardul",s,flags=re.I); s = re.sub(r"\b(sos\.?|soseaua)\b","soseaua",s,flags=re.I)
     s = re.sub(r"\b(alee|aleea)\b","aleea",s,flags=re.I); s = re.sub(r"\b(cal\.?)\b","calea",s,flags=re.I)
     s = re.sub(r"\b(drumul?|dr)\b","drum",s,flags=re.I)
     s = norm_text(_truncate_after_real_number(s))
-    s = re.sub(r"^\b(strada|bulevardul|calea|aleea|soseaua|sos|drum)\b","",s).strip()
+    s = re.sub(r"^\b(strada|bulevardul|calea|aleea|soseaua|sos|drum|prelungirea|intrarea|fundatura|splaiul|piata)\b","",s).strip()
     s = re.sub(r"\b(bloc|bl|scara|sc|ap|ap\.|et|etaj|sector|jud|cartier|lot|sc\.)\b.*","",s).strip()
+    _r = _RANK_RE.sub(" ", s).strip()          # scoate ranguri/titluri (dacă rămâne un nume real)
+    if _r:
+        s = _r
     return re.sub(r"\s+"," ",s)
 
 _DECL_SUF = _AR.DECL_SUF   # → address_rules.py (RULEBOOK)
