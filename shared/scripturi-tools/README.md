@@ -14,6 +14,7 @@ Tool-uri **standalone** (rulabile, au `__main__`) din aplicația Scripturi de pe
 | `shopify_tag_orders_parallel.py` | Tag comenzi Shopify în paralel (workers + throttling, GraphQL `tagsAdd`). |
 | `sku_to_url.py` | Mapare SKU → URL produs (folosește `core.stores`, fallback CSV). |
 | `upload_shopify_img.py` | Upload imagini în Shopify (folosește `core.stores`, fallback CSV). |
+| `sku_box_map_build.py` (+`.sh`) | Construiește **map-ul central SKU→nr colete** (`data/sku_box_map.json`) din metafield-urile `custom.nr_cutii`/`nr_produse` de pe cele 9 magazine deals (consensus per SKU, exclude ≤0). Folosit ca **fallback** de `xconnector.order_parcel_count` → setezi metafield-ul o dată pe orice magazin, cronul de AWB îl aplică pe TOATE (ca `sku_station`/DEPOZIT_SKU_RULES la depozite). **Cron `30 6 * * *`** (map-only). `--fill` completează și metafield-ul `nr_produse` pe magazinele unde lipsește (vizibilitate; one-time). |
 
 ## Reguli (ca să NU divergă de VPS)
 - **Editezi AICI (git)**, apoi deployezi: `scp shared/scripturi-tools/<x>.py $VPS:/root/Scripturi/<x>.py`.
@@ -27,3 +28,19 @@ Module importate de FastAPI (fără `__main__`): `serial_refuser.py`, `shipment.
 
 ## gads_upload_conversions.py — server-side Enhanced Conversions (Data Manager API)
 Trimite conversii server-side la Google Ads din comenzile AWBprint (email hash SHA-256), via `datamanager.googleapis.com/v1/events:ingest` (ConversionUploadService e deprecat pt integrări noi). Auth: `DATAMANAGER_REFRESH_TOKEN` + `YOUTUBE_OAUTH_CLIENT_ID/SECRET` (scope `datamanager`). Mod `delivered` (venit real) / `placed`. Idempotent (SQLite), dry-run by default, `--validate-only`. OMITE `--login-customer` dacă ai acces direct pe operating account. Cron VPS: `40 */3 * * *` pe Grandia (conv observation-only 7666059809). Vezi memoria [[grandia-takeover-google]].
+
+## sku_box_map_build.py — nr colete central pe SKU (pt cronul de AWB)
+Rezolvă „setezi nr colete pe UN magazin, dar produsul fan-out e pe multe": construiește un **map SKU→nr_cutii**
+(`/root/Scripturi/data/sku_box_map.json`) din metafield-urile setate pe cele 9 magazine deals (ofertelezilei,
+audusp-rf, bonhaus, covoareauto-ro, oriceredus, ux1x6n-n2, vthuzq-7j, 63e901-2f, 16w7xv-0w), consensus per SKU
+(`nr_cutii` preferat, altfel `nr_produse`; exclude valorile ≤0 = zgomot). `xconnector.order_parcel_count` îl citește
+prin `_sku_box_map_get(sku)` ca **fallback** când produsul local n-are metafield → **setezi o dată, merge pe toate**.
+Mecanica e identică cu `sku_station()`/`DEPOZIT_SKU_RULES` (rută pe SKU), dar pentru nr colete.
+
+**Deploy:** `scp shared/scripturi-tools/sku_box_map_build.{py,sh} $VPS:/root/Scripturi/`.
+**Cron (pe crontab VPS, nu în git):** `30 6 * * * /usr/bin/flock -n /tmp/sku_box_map.lock /root/Scripturi/sku_box_map_build.sh >> /root/Scripturi/logs/sku_box_map.log 2>&1` (map-only; `--fill` doar manual, pt propagarea metafield-urilor).
+
+**Regula de colete în `order_parcel_count`** (magazine split pe stații): densitate setată (`nr_cutii`/map) → `box×qty`
+(ex așternut `0.5`=2/colet, geanta/broscuțe `0.05`=20/colet, covor `1`=1/buc); **fără densitate → contribuie 0 = se
+COMBINĂ** (stația primește 1 colet baseline via `max(1,·)`), NU 1 colet/bucată — ca să nu se umfle coletele pe
+articolele mici (regula owner 14-aug-2026, înlocuiește qty-driven-ul de pe 13-aug). Voluminos (`box>1`) → +colete.
