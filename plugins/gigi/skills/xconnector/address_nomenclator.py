@@ -126,14 +126,27 @@ def strip_leading_locality(a1, city, prov):
     parts = re.split(r"([\s,]+)", a1.strip())            # [word, sep, word, sep, …]
     widx = [i for i in range(0, len(parts), 2) if i < len(parts) and parts[i]]
     folded = [norm_text(parts[i]) for i in widx]
-    strip_w = 0
-    for name in (city, prov):
-        nw = norm_text(name).split()
-        k = len(nw)
-        if k and folded[strip_w:strip_w + k] == nw:
-            strip_w += k
-    if 0 < strip_w < len(folded):
-        rest = "".join(parts[widx[strip_w]:]).strip(" ,.-")
+    cw = norm_text(city).split(); pw = norm_text(prov).split()
+    _ADMIN = {"mun", "municipiul", "municipiu", "oras", "orasul", "orasu", "loc", "localitatea", "localitate"}
+    _JUD = {"jud", "jud.", "judet", "judetul", "judetului"}
+    # ITERATIV: scoate din față oraș / județ / 'jud X' / marker administrativ (Mun/Oraș) — repetat, în ORICE ordine,
+    # până dăm de stradă. NU atinge Comuna/Sat (le citește resolver-ul rural din a1 mai jos). Ex: 'Iasi jud Iasi strada
+    # Calea Chisinaului' / 'Prahova, Ploiesti, Str X' / 'Mun. Hunedoara,str.BRAZILOR'.
+    i = 0; guard = 0
+    while i < len(folded) and guard < 12:
+        guard += 1
+        t = folded[i]
+        if t in _JUD and i + 1 < len(folded):             # 'jud X' → scoate marker + numele județului (mereu 1 token)
+            i += 2; continue
+        if t in _ADMIN:
+            i += 1; continue
+        if cw and folded[i:i + len(cw)] == cw:            # numele orașului (multi-cuvânt)
+            i += len(cw); continue
+        if pw and folded[i:i + len(pw)] == pw:            # numele județului
+            i += len(pw); continue
+        break
+    if 0 < i < len(folded):
+        rest = "".join(parts[widx[i]:]).strip(" ,.-")
         if rest and re.search(r"[A-Za-zăâîșțĂÂÎȘȚ]", rest):   # rămâne o STRADĂ reală (nu doar un număr) → altfel păstrez a1
             return rest
     return a1
@@ -517,34 +530,47 @@ def _rural_principala(a1, num):
     return ("Principală Nr. %s%s" % (num, block_meta(a1))).strip()
 
 
+_SMALL_LOC_MAX_ZIPS = 3   # localitate cu ≤3 coduri poștale distincte = sat/oraș mic → nr. casă OPȚIONAL (curierul livrează pe localitate+zip)
+
+def _distinct_zips(rows):
+    return {str(r.get("cod_postal")) for r in (rows or []) if re.fullmatch(r"\d{6}", str(r.get("cod_postal") or ""))}
+
 def _rural_no_number(cur, prov, cty, a1, a2, zip_):
-    """RURAL FĂRĂ număr → livrabil (DOAR rural sat-pur: fără străzi denumite). Istoric: 77% livrate (refuz 22,7%).
-    ZIP-ul e SCRIS sau DERIVAT din localitate+JUDEȚ (owner: 'ai și județul → găsești zip-ul satului'). La urban
-    (are străzi denumite) → None (număr necesar). Returnează result-dict sau None."""
-    def _ship(jo, lo, z):
-        return {"status": "corrected", "address": {"province": jo, "city": lo, "zip": z, "address1": "Principală"},
-                "source": "nomenclator", "note": "rural fără număr (sat-pur → localitate; drum principal, livrabil)"}
-    # 1) ZIP SCRIS + sat-pur
+    """RURAL / ORAȘ MIC fără număr → livrabil pe localitate+zip. Istoric: 77% livrate. Gate = localitatea are
+    ≤3 coduri poștale distincte (sat/comună/oraș mic sub 50k, UN cod pe localitate) — atunci zip-ul e destul de
+    specific, nr. casei nu blochează. Orașele mari (multe zip-uri street-level) → None (număr necesar). Păstrează
+    strada denumită dacă există (drumul principal are nume). Returnează result-dict sau None."""
+    street = street_core(a1) or street_core(a2)
+    has_name = bool(street and re.search(r"[a-zăâîșț]{3,}", street, re.I))
+    def _ship(jo, lo, z, note):
+        return {"status": "corrected",
+                "address": {"province": jo, "city": lo, "zip": z, "address1": street if has_name else "Principală"},
+                "source": "nomenclator", "note": note}
+    # 1) ZIP SCRIS valid → dacă localitatea lui e MICĂ (≤3 zip-uri) SAU sat-pur → livrabil
     z6 = re.sub(r"\D", "", zip_ or "").zfill(6)
     if re.fullmatch(r"\d{6}", z6) and z6 != "000000":
         zr = load_by_zip(cur, z6)
-        if zr and not any(_cand_street(r) for r in zr):
+        if zr:
             jo, lo = zip_owner(zr)
             if jo and lo:
-                return _ship(jo, lo, z6)
-    # 2) FĂRĂ zip scris: derivă din localitate (city SAU comuna/sat din a1/a2), în JUDEȚ, dacă e sat-pur cu ZIP UNIC
+                sat_pur = not any(_cand_street(r) for r in zr)
+                small = len(_distinct_zips(load_by_locality(cur, jo, lo))) <= _SMALL_LOC_MAX_ZIPS
+                if sat_pur or small:
+                    return _ship(jo, lo, z6, "rural/oraș mic fără număr (zip scris → localitate, livrabil)")
+    # 2) FĂRĂ zip scris: derivă din localitate (city SAU comuna/sat din a1/a2), dacă e localitate MICĂ cu ZIP UNIC
     locs = [cty] if cty else []
     for mk in re.finditer(r"(?i)\b(comuna|com|satul|sat)(?:\.\s*|\s+)([A-Za-zăâîșțĂÂÎȘȚ][\w-]*(?:\s+[A-Za-zăâîșțĂÂÎȘȚ][\w-]*){0,2})",
                           " ".join([a1 or "", a2 or ""])):
         locs.append(mk.group(2))
     for loc in locs:
         cands = load_by_locality(cur, prov, loc)
-        if not cands or any(_cand_street(r) for r in cands):   # are străzi denumite → NU e sat-pur → skip
+        if not cands:
             continue
-        zips = {str(r.get("cod_postal")) for r in cands if re.fullmatch(r"\d{6}", str(r.get("cod_postal") or ""))}
+        zips = _distinct_zips(cands)
+        # UN singur zip pe localitate → destul de specific chiar dacă are străzi denumite (oraș mic sub-50k)
         if len(zips) == 1:
             z = next(iter(zips)); jo, lo = zip_owner_of(cur, z)
-            return _ship(jo or prov, lo or loc, z)
+            return _ship(jo or prov, lo or loc, z, "rural/oraș mic fără număr (zip derivat din localitate)")
     return None
 
 
@@ -638,6 +664,13 @@ def validate_and_correct(cur, province, city, zip_, address1, address2="", loc_h
             return {"status":"corrected" if changed else "valid",
                     "address":{"province":out_prov,"city":out_city,"zip":z6,"address1":new_a1} if changed else None,
                     "source":"nomenclator","note":"stradă completată din ZIP (unic)" + (" +fix jud/loc" if jl_fixed else "")}
+        # ORAȘ MIC (≤3 coduri poștale pe TOATĂ localitatea, ex Făgăraș/Târnăveni/Petrila = 1 zip, deși are zeci de
+        # străzi) → zip-ul e destul de specific pt tot orașul; strada negăsibilă NU blochează (curierul rutează pe
+        # zip+localitate). Discriminator = nr. ZIP-uri pe localitate, NU nr. străzi pe zip. Orașe mari (multe zip-uri
+        # street-level) → cad mai jos la HERE. Rezolvă clasa mare „multi-stradă (N)" pt sub-50k.
+        if len(_distinct_zips(load_by_locality(cur, out_prov, out_city))) <= _SMALL_LOC_MAX_ZIPS:
+            return {"status":"corrected","address":{"province":out_prov,"city":out_city,"zip":z6,"address1":a1},
+                    "source":"nomenclator","note":"oraș mic (≤3 zip/localitate) — livrabil pe zip+localitate, stradă păstrată"}
         # gunoi + ZIP cu MAI MULTE străzi → NU ghicesc care e → HERE (nu pun altă stradă)
         return {"status":"needs_geocoder","address":None,"source":"nomenclator",
                 "note":f"stradă gunoi + ZIP multi-stradă ({len(streets)})"}
