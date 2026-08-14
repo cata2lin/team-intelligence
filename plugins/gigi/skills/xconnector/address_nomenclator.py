@@ -28,7 +28,10 @@ def strip_diacritics(s):
     return (s.replace("ș","s").replace("ş","s").replace("ț","t").replace("ţ","t")
              .replace("ă","a").replace("â","a").replace("î","i"))
 def norm_text(s):
-    s = strip_diacritics(s or "").lower()
+    # NFKC: pliază literele Unicode „fancy" (matematice/monospace '𝚂𝚕𝚊𝚝𝚒𝚗𝚊'→'Slatina', fullwidth 'Ａｂｒｕｄ'→'Abrud',
+    # ligaturi) la ASCII — altfel `[^a-z0-9]` le ștergea la gunoi → localitate/stradă „negăsită".
+    s = unicodedata.normalize("NFKC", s or "")
+    s = strip_diacritics(s).lower()
     s = re.sub(r"[',’`\"“”]", " ", s)
     s = re.sub(r"[,.;:()_/\\\-]+", " ", s)
     s = re.sub(r"[^a-z0-9 ]+", " ", s)
@@ -36,6 +39,12 @@ def norm_text(s):
 def same_locality(a, b):
     na, nb = norm_text(a), norm_text(b)
     return bool(na and nb and (na == nb or na in nb or nb in na))
+
+# cele 41 județe (formă normalizată) — pt strip „județ lipit la coada orașului" ('Abrud Alba'→'Abrud')
+COUNTIES = {"alba","arad","arges","bacau","bihor","bistrita nasaud","botosani","braila","brasov","buzau","calarasi",
+            "caras severin","cluj","constanta","covasna","dambovita","dolj","galati","giurgiu","gorj","harghita",
+            "hunedoara","ialomita","iasi","ilfov","maramures","mehedinti","mures","neamt","olt","prahova","salaj",
+            "satu mare","sibiu","suceava","teleorman","timis","tulcea","valcea","vaslui","vrancea","bucuresti"}
 
 def _lev1(a, b):
     """True dacă distanța de editare între a și b e ≤1 (1 substituție/inserție/ștergere). Rapid, fără matrice."""
@@ -723,6 +732,13 @@ def validate_and_correct(cur, province, city, zip_, address1, address2="", loc_h
         if mp:
             alt = load_by_locality(cur, prov, mp.group(1))
             if alt: cty = mp.group(1); cands = alt
+    if not cands:                                  # JUDEȚ lipit la coada orașului ('Abrud Alba'→'Abrud', 'Sansimion Harghita'→'Sansimion') — testat cu DB
+        ctoks = (cty or "").split()
+        for k in (2, 1):                           # ultimele 2 apoi 1 cuvinte = județ (Satu Mare/Caraș-Severin = 2 cuvinte)
+            if len(ctoks) > k and norm_text(" ".join(ctoks[-k:])) in COUNTIES:
+                head = " ".join(ctoks[:-k]).strip(" ,.-")
+                alt = load_by_locality(cur, prov, head) if head else None
+                if alt: cty = head; cands = alt; break
     if not cands:                                  # localitatea e în address1 ca 'Oraș/Municipiul/Comuna X' iar câmpul oraș e gunoi ('IrasSibiu' + a1 'Oras Sibiu str…')
         ma = re.search(r"(?i)\b(?:ora[șs](?:ul)?|municipiul|mun|comuna|com|satul|sat|loc)\.?\s+([A-Za-zăâîșțĂÂÎȘȚ][\w-]+(?:\s+[A-Za-zăâîșțĂÂÎȘȚ][\w-]+)?)", address1 or "")
         if ma:
