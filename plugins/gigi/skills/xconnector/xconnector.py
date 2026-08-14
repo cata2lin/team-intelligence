@@ -4732,7 +4732,11 @@ def blocklist_gid_sweep(sh, st, xc, xmap, shop_block, since_date, apply):
 def cancel_duplicate(sh, xc, o, st, name, apply):
     """Anulează un duplicat VECHI (protecție livrare: NU anulez ce a plecat). reason OTHER, fără refund/restock/notify.
     Întoarce: would-cancel | cancelled | shipped-skip | failed."""
-    if has_awb(o) and awbprint_status(name) in PLECATA:
+    # PROTECȚIE LIVRARE: AWBprint = sursa de adevăr curier (autoritativ). Dacă a plecat/livrat → NU anulez, CHIAR
+    # DACĂ AWB-ul nu apare în xConnector (ghost/lag de sync). Bug fix (GRAND18303 livrat dar anulat): condiția veche
+    # `has_awb(o) and ...` scurtcircuita pe AWB-ul invizibil în xConnector → anula comenzi DEJA LIVRATE. `has_awb`
+    # rămâne DOAR pentru a decide dacă mai încerc anularea AWB-ului la xConnector (jos), nu ca gate de protecție.
+    if awbprint_status(name) in PLECATA:
         return "shipped-skip"
     if not apply:
         return "would-cancel"
