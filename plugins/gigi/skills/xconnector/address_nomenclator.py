@@ -190,6 +190,20 @@ def strip_landmark(a1):
 # → mutăm partea cu marcaj de stradă în FAȚĂ (blocul rămâne la coadă → block_meta îl găsește tot). ~460 comenzi/an.
 _STREET_MARK_RE = re.compile(r"(?i)\b(str(?:\.|ada)?|b[-\.]?dul|bd\.?|blvd\.?|bulevard(?:ul)?|calea|soseaua|sos\.?|"
                              r"aleea|intrarea|intr\.?|drumul|prelungirea|prel\.?|splaiul|spl\.?|fundatura|fdc\.?|piata|p-?ta)\b")
+def split_city_street(city, a1):
+    """Câmpul ORAȘ conține ȘI strada ('București str Măriuca nr4' / 'Pitești Str Alunului 23') → localitatea =
+    partea din FAȚA marcajului de stradă. a1 câștigă DOAR dacă are propriul marcaj de stradă; altfel (a1 = bloc /
+    localitate / gunoi) ia strada din câmpul oraș. Un oraș legit N-ARE marcaj de stradă → nu se atinge. → (city, a1)."""
+    if not city: return city, a1
+    m = _STREET_MARK_RE.search(city)
+    if not m or m.start() == 0:
+        return city, a1
+    loc = city[:m.start()].strip(" ,.-")
+    if not re.search(r"[A-Za-zăâîșțĂÂÎȘŞȚŢ]{3}", loc):
+        return city, a1
+    street = city[m.start():].strip(" ,.-")
+    return loc, (a1 if _STREET_MARK_RE.search(a1 or "") else street)
+
 def hoist_street_over_block(a1):
     if not a1: return a1
     m = _STREET_MARK_RE.search(a1)
@@ -616,6 +630,8 @@ def validate_and_correct(cur, province, city, zip_, address1, address2="", loc_h
     prov, cty, sector = bucharest_fix(prov, cty, a1, a2)
     # 1a) abrevieri de oraș (Tg/Sf/Rm/Drobeta… — CITY_ABBREV) → nume oficial, ÎNAINTE de orice lookup pe localitate
     cty = expand_city_abbrev(cty)
+    # 1a1b) câmpul ORAȘ conține ȘI strada ('București str Măriuca nr4', a1='Bucuresti') → separă localitatea + mută strada în a1 dacă a1 e slab
+    cty, a1 = split_city_street(cty, a1)
     # 1a2) oraș/județ lipit în FAȚA străzii în a1 ('Craiova, str X' / 'Ploiesti Prahova Y') → scos (poluează matching-ul de stradă)
     a1 = strip_leading_locality(a1, cty, prov)
     # 1a3) REPER lipit în COADĂ ('...vis-a-vis de Kaufland', '...langa scoala nr 5') → scos ÎNAINTE de detecția
