@@ -3794,6 +3794,38 @@ def _ceil_pos(x):
     return i + 1 if x > i else i
 
 
+_SKU_BOX_MAP_PATH = os.environ.get("SKU_BOX_MAP_PATH", "/root/Scripturi/data/sku_box_map.json")
+_SKU_BOX_MAP_CACHE = {"data": None, "mtime": None}
+
+
+def _sku_box_map_get(sku):
+    """Fallback nr colete/unitate din map-ul CENTRAL SKU->nr_cutii (construit zilnic de sku_box_map_build.py din
+    metafield-urile setate pe ORICE magazin deals). Setezi metafield-ul o SINGURA data pe un magazin -> merge pe toate,
+    fara copiere per magazin. Ca `sku_station`/DEPOZIT_SKU_RULES la depozite, dar pentru nr colete. Fail-safe: fara
+    fisier/eroare -> None -> order_parcel_count cade pe default (1). Cache pe mtime (se reincarca cand cronul rescrie)."""
+    if not sku:
+        return None
+    try:
+        mt = os.stat(_SKU_BOX_MAP_PATH).st_mtime
+    except OSError:
+        return None
+    if _SKU_BOX_MAP_CACHE["mtime"] != mt:
+        try:
+            with open(_SKU_BOX_MAP_PATH, encoding="utf-8") as f:
+                _SKU_BOX_MAP_CACHE["data"] = json.load(f)
+            _SKU_BOX_MAP_CACHE["mtime"] = mt
+        except Exception:
+            if _SKU_BOX_MAP_CACHE["data"] is None:
+                _SKU_BOX_MAP_CACHE["data"] = {}
+    v = (_SKU_BOX_MAP_CACHE["data"] or {}).get(sku)
+    if v in (None, ""):
+        return None
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+
 def order_parcel_count(shop, token, name):
     if not shop or not token or not name:
         return 1
@@ -3827,12 +3859,19 @@ def order_parcel_count(shop, token, name):
                     box = float(v); break
                 except Exception:
                     pass
+        if box is None:                     # fallback CENTRAL SKU->nr colete (map zilnic din metafield-urile de pe orice magazin deals; setezi o data, merge peste tot -- ca DEPOZIT_SKU_RULES)
+            mb = _sku_box_map_get(sku)
+            if mb is not None:
+                box = mb
+        if box is not None and box <= 0:    # '0'/negativ (zgomot metafield, ex MagDeal) = fara colete definite -> qty-driven 1/unitate
+            box = None
         if box is not None:
             total += box * qty; found = True
         if is_split:
-            # QTY-DRIVEN: fiecare UNITATE = ≥1 colet (× nr_cutii pt produse voluminoase). Ex owner:
-            # produs qty 2 la Uzina + produs qty 1 la Depozit = 2 + 1 = 3 colete. Fără metafield de cutii → 1/unitate.
-            per_station[_AR.sku_station(sku)] = per_station.get(_AR.sku_station(sku), 0.0) + (box if box is not None else 1.0) * qty
+            # COMBINĂ (regula owner 14-aug): produs FĂRĂ densitate setată → NU inflatează coletele (contribuie 0 →
+            # stația primește 1 colet baseline via max(1,..)). Densitate setată (nr_cutii local/map) → box×qty
+            # (broscuțe 0.05, așternut 0.5, covor 1); voluminos (box>1) → +colete. Înlocuiește qty-driven-ul de pe 13-aug.
+            per_station[_AR.sku_station(sku)] = per_station.get(_AR.sku_station(sku), 0.0) + (box if box is not None else 0.0) * qty
     # metafield order (total deja calculat de sistem), dacă e setat
     pc_val = None
     pc = (node.get("pc") or {}).get("value")
@@ -4205,10 +4244,17 @@ def cmd_awb_regen(a):
         print("  void: %s" % ("✅" if voided else "❌ %s: %s" % (sv, dv)))
         if not voided:
             print("  ⛔ void eșuat → NU recreez (risc 2 AWB-uri). Rezolvă manual."); return
-        time.sleep(1.5)
+        time.sleep(8)   # fulfillment order-ul Shopify are nevoie de timp să se REDESCHIDĂ după void (1.5s era prea puțin → 422)
     mbody = {"orderId": o.get("orderId"), "connectorId": con["id"], "parcelCount": parcels,
              "parcelType": a.type, "notifyCustomer": bool(a.notify)}
-    _label_result(*xc.post("/api/actions/create-shipping-label", mbody))
+    s, d = xc.post("/api/actions/create-shipping-label", mbody)
+    msg = (d.get("errorMessage") if isinstance(d, dict) else str(d)) or ""
+    ok = s == 200 and isinstance(d, dict) and d.get("accepted") and any(L.get("success") for L in (d.get("shippingLabels") or []))
+    if not ok and doc and ("fulfillment" in msg.lower() or "was not created" in msg.lower()):
+        print("  \u23f3 fulfillment order incă se redeschide dupa void — reincerc in 12s")
+        time.sleep(12)
+        s, d = xc.post("/api/actions/create-shipping-label", mbody)
+    _label_result(s, d)
 
 
 def cmd_awb_label(a):
@@ -4634,19 +4680,28 @@ def blocklist_gid_sweep(sh, st, xc, xmap, shop_block, since_date, apply):
     Le prindem interogand DUPA customer_id (orice status fulfillment, necancelate) si le anulam daca NU
     au plecat (cancel_duplicate voideaza AWB-ul + anuleaza comanda; sare peste cele deja plecate)."""
     n = 0
-    for gid in (shop_block or set()):
-        num = str(gid).split("/")[-1]
-        if not num.isdigit():
-            continue
-        q = ('query{ orders(first:20, query:"customer_id:%s AND -status:cancelled AND created_at:>=%s"){ '
-             'edges{ node{ name displayFulfillmentStatus } } } }') % (num, since_date)
+    if not shop_block:
+        return n
+    # ⚠️ Filtrul `customer_id:` NU merge pe magazinele PII-blocate (plan Basic → returneaza GOL, fara eroare).
+    # Deci luam comenzile recente si citim `customer{ id }` per comanda (GID = non-PII, permis) + filtram in cod.
+    block_nums = {str(g).split("/")[-1] for g in shop_block if str(g).split("/")[-1].isdigit()}
+    if not block_nums:
+        return n
+    cursor = None
+    for _page in range(8):
+        after = (', after:"%s"' % cursor) if cursor else ""
+        q = ('query{ orders(first:250%s, query:"-status:cancelled AND created_at:>=%s"){ '
+             'pageInfo{ hasNextPage endCursor } edges{ node{ name customer{ id } displayFulfillmentStatus } } } }') % (after, since_date)
         try:
             d = shopify_gql(st["shopDomain"], st["adminToken"], q)
         except Exception:
-            continue
-        edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
-        for e in edges:
-            name = e["node"]["name"]
+            break
+        conn = ((d.get("data") or {}).get("orders")) or {}
+        for e in (conn.get("edges") or []):
+            nd = e["node"]; cg = (nd.get("customer") or {}).get("id")
+            if not cg or str(cg).split("/")[-1] not in block_nums:
+                continue
+            name = nd["name"]
             o = xmap.get(name)
             if not o:
                 oid = shopify_order_id(name, st)
@@ -4657,7 +4712,11 @@ def blocklist_gid_sweep(sh, st, xc, xmap, shop_block, since_date, apply):
             if res in ("cancelled", "would-cancel"):
                 n += 1
                 awb_event(kind="blocklist-gid-sweep", store=sh["shopDomain"], order=name, result=res)
-                print("    ⛔ SWEEP %s = BLOCKLIST GID %s (fulfilled dar neplecat) → %s" % (name, gid, res))
+                print("    ⛔ SWEEP %s = BLOCKLIST GID %s (fulfilled dar neplecat) → %s" % (name, cg, res))
+        pi = conn.get("pageInfo") or {}
+        if not pi.get("hasNextPage"):
+            break
+        cursor = pi.get("endCursor")
     return n
 
 
