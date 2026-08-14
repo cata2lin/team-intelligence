@@ -145,6 +145,26 @@ SECTOR_RE = re.compile(r"\bsec(?:tor(?:ul)?|t)?\.?\s*([1-6])(?![0-9])", re.I)  #
 MONTHS = {"ianuarie","februarie","martie","aprilie","mai","iunie","iulie","august","septembrie","octombrie","noiembrie","decembrie"}
 NO_NUM_RE = re.compile(r"\b(f\.?\s*n\.?|fara\s+nr\.?|fara\s+numar|fără\s+număr)\b", re.I)
 
+# REPERE (landmark) — „vis-a-vis de Kaufland", „lângă școală", „în spatele bisericii" — NU fac parte din adresa
+# livrabilă și cel mai periculos: conțin CIFRE (ex „vis-a-vis de scoala nr 5") care ar fi luate greșit drept nr casă.
+# Tăiem de la trigger până la coadă, DAR doar dacă rămâne un nume de stradă (altfel landmark-ul e tot ce avem → CS).
+LANDMARK_RE = re.compile(
+    r"(?i)[,;]?\s*\b(vis[\s\-]?a[\s\-]?vis|viza?vi|l[aâ]ng[aă]|langa|"
+    r"[iî]n\s+spatele|[iî]n\s+fa[țt]a|[iî]n\s+incinta|[iî]n\s+curtea|"
+    r"peste\s+drum(?:\s+de)?|fost(?:ul|a|ei)|aproape\s+de|deasupra\s+la|colt\s+cu|col[țt]\s+cu)\b.*$")
+def strip_landmark(a1):
+    if not a1: return a1
+    m = LANDMARK_RE.search(a1)
+    if not m: return a1
+    head = a1[:m.start()].strip(" ,;.-")
+    if re.search(r"[A-Za-zĂÂÎȘŞȚŢăâîșşțţ]{3}", head):   # rămâne un nume de stradă → landmark-ul e pur zgomot
+        return head
+    return a1
+
+# DRUMURI naționale/județene/comunale/europene cu bornă km — „DN 1 km 5", „DJ106 km12+300", „DE 70".
+# În aceste adrese punctul livrabil = borna km (nu există număr de casă clasic) → tratează ca RURAL (localitate+zip).
+ROAD_KM_RE = re.compile(r"(?i)\b(dn|dj|dc|de|dn\.?)\s*\.?\s*\d+[a-z]?\b.*\bkm\b|\bkm\s*\.?\s*\d")
+
 def _strip_leading_number_patterns(s):
     if not s: return s
     s = re.sub(r'^\s*(?:nr|no|numar|număr)\.?\s*(\d+[a-z]?|\d+/\d+)\s*[,/ \-]*'
@@ -543,6 +563,9 @@ def validate_and_correct(cur, province, city, zip_, address1, address2="", loc_h
     cty = expand_city_abbrev(cty)
     # 1a2) oraș/județ lipit în FAȚA străzii în a1 ('Craiova, str X' / 'Ploiesti Prahova Y') → scos (poluează matching-ul de stradă)
     a1 = strip_leading_locality(a1, cty, prov)
+    # 1a3) REPER lipit în COADĂ ('...vis-a-vis de Kaufland', '...langa scoala nr 5') → scos ÎNAINTE de detecția
+    #      numărului (altfel cifra reperului = nr casă fals). Doar dacă rămâne un nume de stradă.
+    a1 = strip_landmark(a1)
     # 1b) câmpul ORAȘ e de fapt un COD POȘTAL (client a pus zip-ul în oraș: city='305600') → mută-l în ZIP,
     #     localitatea vine din load_by_zip. Doar dacă zip-ul propriu-zis lipsește.
     if not re.sub(r"\D", "", zip_ or "") and re.fullmatch(r"\d{6}", (cty or "").strip()):
@@ -556,6 +579,11 @@ def validate_and_correct(cur, province, city, zip_, address1, address2="", loc_h
     # 2) număr obligatoriu
     if NO_NUM_RE.search(a1+" "+a2): num = None
     else: num = has_real_house_number(a1) or has_real_house_number(a2)
+    if not num and ROAD_KM_RE.search(a1+" "+a2):
+        # drum DN/DJ/DC/DE cu bornă km → punctul livrabil e borna, nu un nr clasic → validare rural (localitate+zip)
+        rr = _rural_no_number(cur, prov, cty, a1, a2, zip_)
+        if rr:
+            rr["note"] = "drum+km (livrabil pe localitate)"; return rr
     if not num:
         rr = _rural_no_number(cur, prov, cty, a1, a2, zip_)   # rural sat-pur → livrabil fără număr (zip scris sau derivat din localitate+județ)
         if rr:
