@@ -114,6 +114,7 @@ def denoise_city(city):
         c = c[:m.start()]
     c = re.sub(r"(?i)^(\d+)([a-zăâîșț])", r"\1 \2", c)
     c = re.sub(r"[,\s]+\d{3,}\s*$", "", c)   # cifre-gunoi/zip lipite la COADA orașului ('Cluj Napoca 123456' → 'Cluj Napoca')
+    c = re.sub(r"(?i)^([a-zăâîșțĂÂÎȘȚ][\w-]+(?:\s+[a-zăâîșțĂÂÎȘȚ][\w-]+)?)\s+\1\b", r"\1", c)  # nume DUBLAT ('Bacău Bacău'→'Bacău', 'Vaslui Vaslui'→'Vaslui')
     return c.strip(" ,.-")
 
 def strip_leading_locality(a1, city, prov):
@@ -694,12 +695,24 @@ def validate_and_correct(cur, province, city, zip_, address1, address2="", loc_h
                 return {"status":"corrected","address":{"province":jo2 or prov,"city":lo2 or loc_hint,"zip":z,"address1":a1},
                         "source":"nomenclator","note":"rural din loc-hint (localitate înainte de stradă, ZIP unic)"}
     cands = load_by_locality(cur, prov, cty) or []
-    if not cands:                                  # FALLBACK: denoise oraș (Orașul/Comuna/jud/stradă-lipită/'2Mai') — zero regresie (fire doar când brutul nu iese)
+    if not cands:                                  # FALLBACK: denoise oraș (Orașul/Comuna/jud/stradă-lipită/'2Mai'/dublat) — zero regresie (fire doar când brutul nu iese)
         dc = expand_city_abbrev(denoise_city(cty))
         if dc and norm_text(dc) != norm_text(cty):
             alt = load_by_locality(cur, prov, dc)
             if alt:
                 cty = dc; cands = alt
+    if not cands:                                  # oraș prefixat cu junk scurt+punct ('Rd.Vaslui'→'Vaslui') — testează cu DB
+        mp = re.match(r"(?i)^[a-zăâîșț]{2,4}[.\-]\s*([A-Za-zăâîșțĂÂÎȘȚ].+)$", cty or "")
+        if mp:
+            alt = load_by_locality(cur, prov, mp.group(1))
+            if alt: cty = mp.group(1); cands = alt
+    if not cands:                                  # localitatea e în address1 ca 'Oraș/Municipiul/Comuna X' iar câmpul oraș e gunoi ('IrasSibiu' + a1 'Oras Sibiu str…')
+        ma = re.search(r"(?i)\b(?:ora[șs](?:ul)?|municipiul|mun|comuna|com|satul|sat|loc)\.?\s+([A-Za-zăâîșțĂÂÎȘȚ][\w-]+(?:\s+[A-Za-zăâîșțĂÂÎȘȚ][\w-]+)?)", address1 or "")
+        if ma:
+            ph = ma.group(1).split()
+            for k in (len(ph), 1):                 # 2 cuvinte apoi 1 ('Baia Mare' vs 'Sibiu str' → 'Sibiu')
+                alt = load_by_locality(cur, prov, " ".join(ph[:k]))
+                if alt: cty = " ".join(ph[:k]); cands = alt; break
     # city GUNOI / județ / placeholder ('Selectează') / număr → NU renunțăm aici: cădem prin rezolvarea
     # Comuna/Sat/bare din ORICE câmp (a1/a2/city/județ, jos). Doar dacă nici acolo nu iese o localitate → final.
     dz = candidate_zip_from_locality(cands, cust, num)
