@@ -154,7 +154,9 @@ def _strip_leading_number_patterns(s):
     m = re.match(r'^\s*(?:nr|no|numar|număr)?\.?\s*(\d+[a-z]?|\d+/\d+)\s+([A-Za-zĂÂÎȘŞȚŢăâîșşțţ].+)$', s)
     if m:
         nxt = norm_text(m.group(2)).split()[:1]
-        if nxt and nxt[0] not in {"bl","bloc","sc","scara","ap","et","etaj","lot"}: s = m.group(2)
+        # NU tăia numărul din față dacă urmează o LUNĂ → e stradă-DATĂ ('22 Decembrie', '1 Mai', '8 Martie',
+        # '1 Decembrie 1918'), nu 'nr + stradă'. Altfel '22 decembrie'→'decembrie' și nu mai matchează DB.
+        if nxt and nxt[0] not in {"bl","bloc","sc","scara","ap","et","etaj","lot"} and nxt[0] not in MONTHS: s = m.group(2)
     return s
 
 def has_real_house_number(text):
