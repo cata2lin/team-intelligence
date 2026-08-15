@@ -2044,6 +2044,24 @@ def correct_address(xc, o, shop_domain, apply=False):
     # o adresa CZ/PL/BG intr-una "romaneasca". Intl are propria cale (HERE + nomenclatoare intl).
     if shop_domain in HERE_COUNTRY or _fold(ad.get("country") or "romania") not in ("", "romania", "ro", "rou"):
         return "manual", None, "non-RO (intl are cale proprie)"
+    # GARDĂ ZIP-CLIENT (omonime, DOAR RURAL/oraș mic): dacă clientul a pus un ZIP VALID de 6 cifre care se POTRIVEȘTE
+    # cu orașul lui (nomenclatorul RO îl declară 'valid') ȘI localitatea e MICĂ (≤3 zip-uri = zip pe localitate,
+    # neambiguu) → NU corecta, respectă zip-ul. La ORAȘE MARI (multe zip-uri/interval) NU sărim — zip-ul poate fi
+    # intervalul greșit → corecția e justificată. Rezolvă over-corecția pe omonime rurale (ex 2× Popești/Vâlcea).
+    _cz = re.sub(r"\D", "", ad.get("zip") or "")
+    if len(_cz) == 6 and _cz != "000000":
+        try:
+            import address_nomenclator as N
+            _gcur = metrics_cursor()
+            if _gcur:
+                _gvr = N.validate_and_correct(_gcur, ad.get("province") or "", ad.get("city") or "", _cz,
+                                              ad.get("address1") or "", ad.get("address2") or "")
+                if _gvr and _gvr.get("status") == "valid":
+                    _lr = N.load_by_locality(_gcur, ad.get("province") or "", ad.get("city") or "")
+                    if len(N._distinct_zips(_lr)) <= N._SMALL_LOC_MAX_ZIPS:
+                        return "manual", None, "zip client valid + localitate rurală (≤3 zip) → respect (nu suprascriu omonim)"
+        except Exception:
+            pass
     ms = xc.match({"country": "Romania", "zipCode": ad.get("zip") or "", "county": ad.get("province") or "",
                    "city": ad.get("city") or "", "address1": ad.get("address1") or "", "address2": ad.get("address2") or ""})
     msl = ms if isinstance(ms, list) else (ms.get("matchers") or ms.get("matches") or [])
