@@ -3047,7 +3047,7 @@ def cmd_correct(a):
             continue
         xc = XC(sh["apiKey"])
         bad = [o for o in xc.orders(dfrom, dto) if not has_awb(o) and o.get("addressStatus") in ("WRONG", "UNKNOWN")]
-        corrected = dup = cs = fresh = 0
+        corrected = dup = cs = fresh = ghost = 0
         min_age = getattr(a, "min_age_hours", 0) or 0
         cs_rows = []
         print("═" * 74)
@@ -3056,6 +3056,12 @@ def cmd_correct(a):
                  "  [min-age %dh]" % min_age if min_age else ""))
         for o in bad:
             name = o.get("orderName")
+            if awbprint_has_awb(name):
+                # GHOST-AWB: AWBprint are AWB (tracking) dar xConnector nu-l vede → NU corecta (are deja etichetă;
+                # corecția ar oscila zip-ul la infinit la fiecare rulare de cron). Sursa de adevăr = AWBprint.
+                ghost += 1
+                print("  %s  ⏭ are AWB în AWBprint (ghost în xConnector) → NU corectez (evit loop)" % name)
+                continue
             if min_age:
                 age = order_age_hours(xc, o.get("orderId"))
                 if age is not None and age < min_age:
@@ -4365,6 +4371,34 @@ def cmd_links(a):
 PLECATA = {"in_transit", "delivered", "back_to_sender", "returning_to_sender", "customer_pickup",
            "unsuccessful_delivery", "refused", "deferred_delivery", "redirected", "lost", "lost_in_transit"}
 ALREADY_CANCELLED = {"cancelled"}
+
+
+def awbprint_has_awb(order_name):
+    """True dacă AWBprint arată un AWB (tracking) pt comandă — CHIAR DACĂ xConnector nu-l vede (ghost). Folosit ca gardă
+    în fluxul de CORECȚIE: o comandă cu AWB deja făcut NU se mai corectează (altfel loop infinit pe ghost-AWB, zip-ul
+    oscilând). None/False dacă lipsește DB/order."""
+    try:
+        import pg8000.native
+        from urllib.parse import urlparse, unquote
+    except Exception:
+        return False
+    url = os.environ.get("DATABASE_URL_AWBPRINT") or ""
+    if not url.startswith("postgres"):
+        return False
+    u = urlparse(url); con = None
+    try:
+        con = pg8000.native.Connection(user=unquote(u.username or ""), password=unquote(u.password or ""),
+                                       host=u.hostname, port=u.port or 5432, database=u.path.lstrip("/"), ssl_context=True)
+        rows = con.run("select tracking_number, awb_count from orders where order_number = :n order by id desc limit 1", n=order_name)
+        if not rows: return False
+        trk, cnt = rows[0]
+        return bool((trk and str(trk).strip()) or (cnt and int(cnt) > 0))
+    except Exception:
+        return False
+    finally:
+        if con is not None:
+            try: con.close()
+            except Exception: pass
 
 
 def awbprint_status(order_name):
