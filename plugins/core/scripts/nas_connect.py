@@ -56,6 +56,18 @@ def ensure_dirs(root, sep):
             sys.stderr.write(f"[nas] could not create {p}: {exc}\n")
 
 
+def _nas_reachable(host, port=445, timeout=2.5):
+    """Fast TCP probe on the SMB port so an unreachable NAS (off the office network) doesn't hang
+    the mount. mount_smbfs/mount.cifs can block far longer than the SessionStart hook timeout, and
+    the VS Code extension aborts session init after 60s of blocked subprocess startup."""
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def main():
     cfg, handle, user, pw = fetch()
     host = cfg.get("NAS_HOST"); share = cfg.get("NAS_SHARE"); base = cfg.get("NAS_BASE") or "ClaudeShared"
@@ -65,6 +77,11 @@ def main():
     if not user or not pw:
         sys.stderr.write(f"[nas] no NAS login stored for '{handle}'. Re-run onboarding to add it.\n")
         sys.exit(1)
+
+    # Off-network guard: skip fast instead of hanging the SMB mount (and blocking Claude Code startup).
+    if not _nas_reachable(host):
+        sys.stderr.write(f"[nas] {host} not reachable (off-network?) — skipping mount so startup isn't blocked.\n")
+        sys.exit(0)
 
     if os.name == "nt":
         # Persist the credential so UNC access is non-interactive across reboots.
