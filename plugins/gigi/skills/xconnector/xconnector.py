@@ -2054,12 +2054,15 @@ def correct_address(xc, o, shop_domain, apply=False):
             import address_nomenclator as N
             _gcur = metrics_cursor()
             if _gcur:
-                _gvr = N.validate_and_correct(_gcur, ad.get("province") or "", ad.get("city") or "", _cz,
-                                              ad.get("address1") or "", ad.get("address2") or "")
-                if _gvr and _gvr.get("status") == "valid":
-                    _lr = N.load_by_locality(_gcur, ad.get("province") or "", ad.get("city") or "")
-                    if len(N._distinct_zips(_lr)) <= N._SMALL_LOC_MAX_ZIPS:
-                        return "manual", None, "zip client valid + localitate rurală (≤3 zip) → respect (nu suprascriu omonim)"
+                _zr = N.load_by_zip(_gcur, _cz)           # zip-ul clientului aparține unei localități reale?
+                if _zr:
+                    _jo, _lo = N.zip_owner(_zr)
+                    # zip-ul e AL localității clientului (owner == orașul) ȘI localitatea e MICĂ (≤3 zip = rural,
+                    # zip pe localitate, neambiguu) → respectă-l, NU corecta (evită over-corecția pe omonime rurale).
+                    if _lo and N.same_locality(_lo, ad.get("city") or ""):
+                        _lr = N.load_by_locality(_gcur, _jo or ad.get("province") or "", _lo)
+                        if len(N._distinct_zips(_lr)) <= N._SMALL_LOC_MAX_ZIPS:
+                            return "manual", None, "zip client pe localitatea lui (rural ≤3 zip) → respect (nu suprascriu omonim)"
         except Exception:
             pass
     ms = xc.match({"country": "Romania", "zipCode": ad.get("zip") or "", "county": ad.get("province") or "",
