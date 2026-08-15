@@ -5852,14 +5852,14 @@ def surprise_variant(shop, token):
     return vid
 
 
-def ensure_surprise_giftbox(shop, token, name, variant):
+def ensure_surprise_giftbox(shop, token, name, variant, dry=False):
     """COMPENSARE 2+1 blocat de CUTIA CADOU: pe Esteban, un Script de checkout scoate discountul nativ 2+1 pe
     comenzile care conțin o cutie cadou (`cutie-cadou`) — deci comenzi de 3+ parfumuri cu cutie ies la preț ÎNTREG,
     fără al 3-lea gratis. Compensăm ca la 2 parfumuri (Flow): adăugăm **floor(parf/3) parfumuri surpriză ($0)** via
     order edit, ÎNAINTE de AWB (ca depozitul să le pună în colet). GENERIC (orice magazin cu cutie + produs surpriză),
     dar în practică fire doar pe Esteban (singurul cu cutie). Idempotent: sare dacă are deja surpriză / 2+1 / e expediată.
     Întoarce nr adăugate (0 = nimic)."""
-    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ id displayFulfillmentStatus cancelledAt '
+    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ id displayFulfillmentStatus cancelledAt sourceName '
          'discountApplications(first:5){ edges{ node{ __typename ... on AutomaticDiscountApplication{ title } } } } '
          'lineItems(first:30){ edges{ node{ sku title quantity } } } } } } }') % (name or "").replace('"', "")
     try:
@@ -5868,6 +5868,8 @@ def ensure_surprise_giftbox(shop, token, name, variant):
         return 0
     n = (((d.get("data") or {}).get("orders") or {}).get("edges") or [{}])[0].get("node") or {}
     if not n or n.get("cancelledAt") or n.get("displayFulfillmentStatus") == "FULFILLED":
+        return 0
+    if (n.get("sourceName") or "") == "shopify_draft_order":   # regula owner: pe comenzi DRAFT (CS) NU adăugăm surpriză
         return 0
     lis = [li["node"] for li in (n.get("lineItems") or {}).get("edges") or []]
     if not any((li.get("sku") or "") == "cutie-cadou" for li in lis):
@@ -5882,6 +5884,8 @@ def ensure_surprise_giftbox(shop, token, name, variant):
     qty = perf // 3
     if qty < 1:
         return 0
+    if dry:
+        return qty
     try:
         beg = shopify_gql(shop, token, "mutation($id:ID!){ orderEditBegin(id:$id){ calculatedOrder{ id } userErrors{ message } } }", {"id": n["id"]})
         cid = (((beg.get("data") or {}).get("orderEditBegin") or {}).get("calculatedOrder") or {}).get("id")
@@ -5899,6 +5903,92 @@ def ensure_surprise_giftbox(shop, token, name, variant):
         return qty
     except Exception:
         return 0
+
+
+def _surprise_candidates(shop, token, since, max_pages=8):
+    """Nume comenzi ELIGIBILE pt surpriza-cutie, într-UN query paginat (fără N citiri/comandă): open + unfulfilled +
+    FĂRĂ tracking (AWB nefăcut încă) + are `cutie-cadou` + fără surpriză + fără 2+1 nativ + NU draft + fără `farasurpriza`.
+    Pre-filtru ieftin; `ensure_surprise_giftbox` rămâne poarta autoritară (re-verifică + calculează qty)."""
+    out, cursor = [], None
+    for _ in range(max_pages):
+        after = ', after:"%s"' % cursor if cursor else ""
+        q = ('query{ orders(first:60%s, query:"fulfillment_status:unfulfilled AND status:open AND created_at:>=%s"){ '
+             'edges{ cursor node{ name sourceName tags cancelledAt '
+             'fulfillments(first:5){ trackingInfo{ number } } '
+             'discountApplications(first:5){ edges{ node{ __typename ... on AutomaticDiscountApplication{ title } } } } '
+             'lineItems(first:30){ edges{ node{ sku title } } } } } pageInfo{ hasNextPage } } }') % (after, since)
+        d = shopify_gql(shop, token, q)
+        edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
+        for e in edges:
+            n = e["node"]
+            if n.get("cancelledAt"):
+                continue
+            if (n.get("sourceName") or "") == "shopify_draft_order":
+                continue
+            if "farasurpriza" in [str(t).lower() for t in (n.get("tags") or [])]:
+                continue
+            if any((t or {}).get("number") for f in (n.get("fulfillments") or []) for t in (f.get("trackingInfo") or [])):
+                continue   # are tracking = AWB deja făcut → prea târziu (evită partial-după-AWB)
+            lis = [x["node"] for x in (n.get("lineItems") or {}).get("edges") or []]
+            if not any((li.get("sku") or "") == "cutie-cadou" for li in lis):
+                continue
+            if any("surpriz" in (li.get("title") or "").lower() or (li.get("sku") or "").lower().startswith("surpriza") for li in lis):
+                continue
+            disc = [(x["node"].get("title") or "").lower() for x in (n.get("discountApplications") or {}).get("edges") or []]
+            if any("2+1" in t or "2 plus 1" in t or "gratis" in t for t in disc):
+                continue
+            out.append(n.get("name"))
+        pi = (((d.get("data") or {}).get("orders") or {}).get("pageInfo")) or {}
+        if not pi.get("hasNextPage") or not edges:
+            break
+        cursor = edges[-1]["cursor"]
+    return out
+
+
+def cmd_surprise(a):
+    """Reconciler PROACTIV pt surpriza-cutie (Esteban): adaugă parfumul surpriză ($0) DEVREME — ÎNAINTE ca
+    xConnector să facă AWB pe calea rapidă — ca surpriza să intre în COLET și comanda să NU rămână
+    PARTIALLY_FULFILLED. Fără el, Flow-ul/„Inventar" o adaugă la momentul fulfillment-ului (cursă de 1 secundă,
+    ex EST237394) → linia surpriză rămâne neonorată + lipsește de pe etichetă. Idempotent: `ensure_surprise_giftbox`
+    sare dacă are deja surpriză / 2+1 nativ / e FULFILLED / e DRAFT → zero risc de dublă-adăugare (măsurat: nicio
+    comandă nu are surpriză peste regulă). Sare comenzile cu AWB deja făcut (shipped) și DRAFT (CS). Fereastră mică
+    (--days, default 2). Dry-run by default (--apply scrie). Țintă implicită = Esteban (are cutie); --shop pt altul."""
+    import datetime
+    now = datetime.datetime.now(datetime.timezone.utc)
+    days = max(1, min(a.days or 2, 5))
+    since = (now - datetime.timedelta(days=days)).date().isoformat()
+    want = (a.shop or "").lower()
+    toks = [t for t in load_shopify_tokens()
+            if (want and (want in (t.get("shopDomain") or "").lower() or want == (t.get("prefix") or "").lower()))
+            or (not want and (t.get("prefix") == "EST"))]
+    if not toks:
+        print("  fără magazin țintă (default = EST, singurul cu cutie cadou). Dă --shop <domeniu|prefix>."); return
+    tot_seen = tot_added = 0
+    for st in toks:
+        dom = st["shopDomain"]
+        svar = surprise_variant(dom, st["adminToken"])
+        if not svar:
+            print("  %s — fără produs `parfum-surpriza` ACTIV → skip" % dom); continue
+        cands = _surprise_candidates(dom, st["adminToken"], since)
+        tot_seen += len(cands)
+        added = 0
+        for name in cands:
+            q = ensure_surprise_giftbox(dom, st["adminToken"], name, svar, dry=(not a.apply))
+            if not q:
+                continue   # poarta autoritară a respins (deja surpriză/2+1/draft/fulfilled în timpul cursei)
+            if a.apply:
+                added += 1
+                awb_event(kind="surprise-proactive", store=dom, order=name, result="ok", detail="qty=%d" % q)
+                print("    🎁 %s → +%d parfum surpriză ($0) ÎNAINTE de AWB" % (name, q))
+            else:
+                print("    🎁 %s → AR ADĂUGA %d parfum surpriză ($0)" % (name, q))
+        tot_added += added
+        print("  %s %s — candidați cutie-fără-surpriză: %d · surprize %s: %d"
+              % (dom, "APLICAT" if a.apply else "[DRY-RUN]", len(cands),
+                 "adăugate" if a.apply else "de adăugat", added if a.apply else len(cands)))
+    print("  → %s: %d candidați, %d surprize %s (fereastră %d zile)"
+          % ("APLICAT" if a.apply else "[DRY-RUN]", tot_seen, tot_added if a.apply else tot_seen,
+             "adăugate" if a.apply else "de adăugat", days))
 
 
 def cmd_fulfill(a):
@@ -7715,7 +7805,7 @@ def main():
                                     "not-downloaded", "orders", "links", "print-batch",
                                     "awb-make", "awb-void", "awb-regen", "awb-label", "order-cancel",
                                     "inv-make", "inv-cancel", "inv-storno", "inv-regen", "inv-doc", "inv-bulk", "capture", "addr-set",
-                                    "awb-create", "awb-cancel", "awb-hold", "awb-auto"])
+                                    "awb-create", "awb-cancel", "awb-hold", "awb-auto", "surprise"])
     ap.add_argument("--shop"); ap.add_argument("--order"); ap.add_argument("--days", type=int, default=60)
     ap.add_argument("--apply", action="store_true"); ap.add_argument("--json", action="store_true")
     ap.add_argument("--min-age-hours", type=int, default=0, dest="min_age_hours",
@@ -7787,6 +7877,8 @@ def main():
         cmd_correct(a); return
     if a.cmd == "fulfill":
         cmd_fulfill(a); return
+    if a.cmd == "surprise":
+        cmd_surprise(a); return
     if a.cmd == "not-downloaded":
         cmd_not_downloaded(a); return
     if a.cmd == "orders":
