@@ -1,11 +1,19 @@
 ---
 name: awb-track
-description: Live multi-courier AWB status tracker — paste one or many AWB numbers and get the current status across DPD, Sameday, Econt, Packeta and Dragon Star (DSC), with auto-detection of which courier an AWB belongs to. Returns delivered / in-transit / returned / refused per parcel and flags problem shipments. Use for "track this AWB", "status colet", "unde e coletul", "is this delivered", "check these tracking numbers", "bulk AWB status", "ce colete sunt returnate". Read-only.
+description: Live multi-courier AWB status tracker — paste one or many AWB numbers and get the current status across DPD, Sameday, Econt, Packeta and Dragon Star (DSC), with auto-detection of which courier an AWB belongs to. Returns delivered / in-transit / returned / refused / CANCELED per parcel and flags problem shipments (a voided AWB is reported as ANULAT, not as a parcel in transit). Use for "track this AWB", "status colet", "unde e coletul", "is this delivered", "check these tracking numbers", "bulk AWB status", "ce colete sunt returnate". Read-only.
 ---
 
 # AWB tracker live (DPD / Sameday / Econt / Packeta / Dragon Star)
 
-Tracking live multi-curier. Lipești unul sau mai multe AWB-uri și primești statusul curent normalizat (livrat / în tranzit / returnat / refuzat), cu auto-detecția curierului după pattern-ul AWB-ului. Reutilizează logica testată din aplicația AWB (awb.arona.ro / Scripturi `bulk_tracker.py`).
+Tracking live multi-curier. Lipești unul sau mai multe AWB-uri și primești statusul curent normalizat (livrat / în tranzit / returnat / refuzat / **anulat**), cu auto-detecția curierului după pattern-ul AWB-ului.
+
+> ⚠️ **AWB ANULAT** (fix 2026-08-18): un AWB void raporta înainte **`IN TRANZIT`** — textul brut „Canceled" de la
+> DPD nu se potrivea cu nicio listă de cuvinte și cădea pe fallback-ul implicit. Efect: CS credea că un colet
+> anulat e pe drum, iar rezumatul zicea „✓ Niciun colet cu probleme". Măsurat pe **EST240256** (comandă refăcută
+> de 4 ori de CS → 4 etichete anulate + 1 activă). Acum: **`⊘ ANULAT`** în tabel + numărat separat în rezumat.
+> Anulatele **NU** intră în `--problems` — void-ul e flux normal (regenerare AWB cu alt nr de colete), altfel
+> ar umple lista de „probleme" cu zgomot. Precedență: refuzat/returnat/livrat (ce s-a întâmplat FIZIC) se
+> verifică ÎNAINTEA anulării, deci „Returnat expeditorului, comanda anulata" rămâne **returnat**. Reutilizează logica testată din aplicația AWB (awb.arona.ro / Scripturi `bulk_tracker.py`).
 
 ## Cum rulezi
 ```bash

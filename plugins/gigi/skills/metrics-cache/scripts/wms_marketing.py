@@ -90,6 +90,43 @@ def wms_sku_to_group(pf_conn):
 # grup-BRAND (single-categorie, nu-s în Product Group sheet) -> prefix magazin. Restul = grup-TIP (sheet).
 # Magdeal NU e aici (Esteban 3/Reflexino = per-produs via keyword). {HA}/{HAA} în campanii = tag AGENȚIE.
 PREFIX_GROUP = {"NUB": "Nubra", "CZ": "Bonhaus CZ", "PL": "Bonhaus PL", "BON": "Bonhaus RO", "ROSSI": "Rossi"}
+
+# Grup special „DAY:<PREFIX>" = campanie MULTI-PRODUS (catalog / „ALL PRODUCT" / cont devenit deals):
+# spend-ul fiecărei ZILE se împarte pe produsele care au avut comenzi ÎN ZIUA ACEEA, în magazinul <PREFIX>.
+# De ce zilnic și nu lunar: magazinele deals rotesc produsele des, iar o medie lunară pune spend pe
+# produse care nici nu rulau în ziua aia. Greutatea = nr. de COMENZI (o comandă = 1 achiziție), ca
+# în restul motorului. NB: `profit_order_lines` n-are dată (doar lună) ⇒ sursa zilnică e `profit_orders`.
+# `DAY:AUTO` = același lucru, dar magazinul se deduce din CONT (harta `wms_account_store`, seed-uită
+# o dată din maparea autoritativă). Necesar fiindcă ACEEAȘI campanie catalog („PRODUCT LAUNCH ALL
+# PRODUCT") rulează pe 4 conturi = 4 magazine, iar un keyword duce la un singur grup.
+DAY_PREFIX = "DAY:"
+DAY_AUTO = "DAY:AUTO"
+
+
+def _account_store_map(pf_conn):
+    """{(platform, cont_lower, campanie): prefix} — harta noastră în DB, FĂRĂ dependență de sheet.
+    Cheia include CAMPANIA fiindcă există conturi PARTAJATE între magazine (ex. 'ROSSI Nails Romania'
+    = GT + Magdeal + Reduceri + Covoria): o hartă doar per cont ar atribui tot contul magazinului
+    dominant. Rândul cu campanie='' e fallback și e scris DOAR pentru conturile dedicate."""
+    try:
+        return {(p, a, c): pfx for p, a, c, pfx in pf_conn.execute(
+            "SELECT platform, account, campaign, prefix FROM wms_account_store")}
+    except Exception:
+        return {}
+
+
+def _daily_order_weights(pf_conn, lo, hi):
+    """{(zi, prefix): {SKU: nr_comenzi}} — produsele cu comenzi în ziua respectivă, per magazin."""
+    from collections import defaultdict
+    w = defaultdict(lambda: defaultdict(float))
+    for d, prefix, skus in pf_conn.execute(
+            "SELECT substr(created_at,1,10), prefix, skus FROM profit_orders "
+            "WHERE substr(created_at,1,10)>=? AND substr(created_at,1,10)<=?", (lo, hi)):
+        if not skus:
+            continue
+        for s in {x.strip().upper() for x in str(skus).split(",") if x.strip()}:
+            w[(d, (prefix or "").strip())][s] += 1
+    return w
 import re as _re
 _SKU_IN_CAMP = _re.compile(r"HA-\d{3,5}")   # cod SKU HA-#### în numele campaniei (ex. „...ROATA ABDOMINALĂ HA-0420-")
 
@@ -108,7 +145,9 @@ def wms_sku_marketing(pf_conn, metrics_cur, lo, hi):
         s = (sku or "").strip().upper()
         qps[((prefix or "").strip(), s)] += (qty or 0); qtot[s] += (qty or 0)
     ha_skus = set(s.strip().upper() for (s,) in pf_conn.execute("SELECT DISTINCT sku FROM profit_order_lines WHERE sku LIKE 'HA-%'"))
-    out = defaultdict(float); group_spend = defaultdict(float)
+    dayw = _daily_order_weights(pf_conn, lo, hi)
+    acct_store = _account_store_map(pf_conn)
+    out = defaultdict(float); group_spend = defaultdict(float); unspread = defaultdict(float)
     for src, date, account, campaign, ad, spend in pf_conn.execute(
         "SELECT source,date,account,campaign,ad_name,spend_usd FROM wms_ad_spend WHERE date>=? AND date<=?", (lo, hi)):
         ron = (spend or 0) * _usd_ron(fx, date)
@@ -119,8 +158,29 @@ def wms_sku_marketing(pf_conn, metrics_cur, lo, hi):
             out[exact] += ron
             continue
         g = _group_of(acc, key, src, account, campaign, ad)
-        if g and g.strip().lower() != "test":           # (1) keyword / (2) cont → grup
-            group_spend[g] += ron
+        if not g or g.strip().lower() == "test":
+            continue
+        if g.startswith(DAY_PREFIX):                    # multi-produs → împarte pe comenzile ZILEI
+            if g.strip().upper() == DAY_AUTO:           # magazinul vine din CONT+CAMPANIE
+                a_l = (account or "").strip().lower()
+                pfx = (acct_store.get((src, a_l, (campaign or "").strip()))
+                       or acct_store.get((src, a_l, "")) or "")
+                if not pfx:                             # cont partajat/necunoscut → NU ghicim
+                    unspread["DAY:AUTO(nerezolvat: %s)" % (account or "?")] += ron
+                    continue
+            else:
+                pfx = g[len(DAY_PREFIX):].strip()
+            wts = dict(dayw.get((date, pfx)) or {})
+            if not wts:                                 # ziua n-are comenzi în magazin → cade pe luna
+                wts = {s: q for (p, s), q in qps.items() if p == pfx and q > 0}
+            tw = sum(wts.values())
+            if tw <= 0:                                 # nici lunar nimic → NU pierdem tăcut
+                unspread[g] += ron
+                continue
+            for sku, w in wts.items():
+                out[sku] += ron * w / tw
+            continue
+        group_spend[g] += ron                           # (1) keyword / (2) cont → grup
     # alocare grup → SKU pe comenzi
     brand_groups = set(PREFIX_GROUP.values())
     members = defaultdict(list)
@@ -147,6 +207,10 @@ def wms_sku_marketing(pf_conn, metrics_cur, lo, hi):
             continue
         for sku, w in mm:
             out[sku] += S * w / tw
+    if unspread:
+        import sys as _sys
+        _sys.stderr.write("[wms_marketing] ⚠ %.0f RON NEîmprăștiați (zile fără comenzi în magazin): %s\n"
+                          % (sum(unspread.values()), ", ".join(sorted(unspread))))
     return dict(out)
 
 

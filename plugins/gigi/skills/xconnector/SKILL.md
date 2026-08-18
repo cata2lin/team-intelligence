@@ -211,6 +211,36 @@ Bratislava+„Hlavná" → **83101**. Verificat pe **comenzi reale**: Bonhaus HU
 SK 800 → **99% rescue** (412 confirmate; 3 reziduu = garbage real: adresă PL pe magazin SK, zip invalid+typo). Rebuild nomenclator:
 `uv run geonames_streets_build.py HU hungary.osm.pbf` (idempotent, DELETE per-country + COPY). Tabelele-s în `metrics.public` (central → cronul VPS le citește).
 
+## Erori de CURIER care NU-s de adresă (le repară cronul singur)
+Trei clase de eșec 422 la `create-shipping-label` arată ca „adresă proastă", dar n-au nicio legătură cu adresa.
+Le rezolvă `fulfill` automat, fiecare O SINGURĂ dată per comandă (marker în `.name_fixed` / `.ro_phone_fixed` /
+`.intl_email_synthed`), apoi reîncearcă AWB-ul pe loc; dacă xConnector n-a resincronizat încă → tura următoare.
+
+| Eroare DPD | Cauză reală | Ce face cronul |
+|---|---|---|
+| `receiver.name.client_name_validator.invalid-name` („cel puțin 2 cuvinte") | clientul a scris **un singur nume** în formularul COD (`Kaló`, `Edit`, `Csabi`), al doilea câmp rămâne `-` | **REGULA (owner, 2026-08-18): dacă există UN SINGUR nume, pune-l de DOUĂ ORI** — `Kaló` → `Kaló Kaló`. `dup_single_name()` + event `name-dup`. NU inventăm un nume de familie inexistent; coletul pleacă, curierul sună oricum pe telefon. **Excepție deliberată:** nume FĂRĂ nicio literă (clientul a scris telefonul în loc de nume, ex. `0759672542 -`) → funcția întoarce `(None, None)` = **NU se repară automat**, rămâne la om (dublarea ar da tot cifre → DPD respinge din nou). |
+| `receiver.email.not-empty` (uneori confuz `recipient.id_or_client_name`) | comandă intl fără email; WPO cere email obligatoriu | sintetizează `awb-<comanda>@arona.ro` pe `order.email` (event `intl-email-synth`), doar dacă nu există email real |
+| telefon RO malformat (`751842097`, `+400…`) | format greșit din formular | `ro_phone_fix` → normalizează la `07xxxxxxxx` (event `ro-phone-fix`) |
+
+**Limite HARD ale curierului (NU se repară din cod — cer schimbare de configurare):**
+- `sla.insurance.insBaseAmount.lesser-or-equal` — valoarea declarată depășește maximul asigurabil al serviciului
+  (**HU: max 26.250 HUF**). O comandă de 31.660 HUF NU poate primi AWB până nu se scoate/plafonează „extinderea de
+  răspundere" pe connectorul DPD din xConnector (sau se activează un al doilea curier — pe HU e inactiv `PACKETERY
+  HU Home Delivery HD [20320]`). Măsurat 2026-08-18: HU1924/HU1937/HU1939 blocate din cauza asta.
+- `content.parcelsCount.parcel-count-out-of-range` — serviciul acceptă **[1, 1]** colete (măsurat pe SK). Comandă cu
+  3 produse → `parcelCount` auto = 3 → respinsă. Se face cu `awb-make --parcels 1`.
+- `receiver.address.addressLine2.max-length` — max **35 caractere** pe adresa 2 (SK2315: stradă de 37 → prescurtat
+  `českého`→`čes.` și mutat în `address1`).
+
+## Magazine FĂRĂ Customer Service — cronul rezolvă TOT, zero HOLD
+`NO_CS_DOMAINS` = **SK `16w7xv-0w`, HU `63e901-2f`, Orice Redus `oriceredus`** (decizie owner, 2026-08-18).
+Pe magazinele cu CS, o comandă tag-uită `duplicata` al cărei conținut DIFERĂ de „geamăna" ei se pune pe **HOLD**
+ca s-o judece un om. Pe magazinele de mai sus **nu lucrează nimeni coada**, deci HOLD-ul = comandă moartă pe veci:
+măsurat **SK2287 (84,37 €) blocată din 16-aug**, SK2270 (26,98 €) din 14-aug — ambele aveau ALTE produse decât
+comanda „geamănă", deci erau comenzi REALE, nu dubluri. → pe `NO_CS_DOMAINS`, `resolve_duplicate` întoarce **`ship`**
+(fă AWB) în loc de `held`. **Anularea automată rămâne NESCHIMBATĂ peste tot**: doar dublura TEHNICĂ (aceleași SKU-uri
+ȘI aceeași sumă) se anulează. Magazinele cu CS (Esteban etc.) păstrează HOLD-ul — verificat A/B că nu s-a schimbat nimic.
+
 ## Siguranță (corecția de adrese)
 Corecția urmează porțile skill-ului oficial xConnector **aac** (`/agentic-address-correction`), conservator:
 **un singur candidat** (fără competitor) + scoruri pe câmpuri (zip/oraș/județ ≥0.95, stradă ≥0.90) +
