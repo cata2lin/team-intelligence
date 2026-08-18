@@ -2960,6 +2960,23 @@ def shopify_set_order_email(shop, token, name, email):
     return not errs
 
 
+def _order_email_value(shop, token, name):
+    """Emailul REAL al clientului: `order.email` sau note-attr (`E-mailem`/`Email`, NEredactate PCD).
+    Întoarce string sau None. Perechea lui `_order_has_email`, dar dă VALOAREA, nu doar existența."""
+    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ email customAttributes{ key value } } } } }') % (name or "").replace('"', "")
+    d = shopify_gql(shop, token, q)
+    node = (((d.get("data") or {}).get("orders") or {}).get("edges") or [{}])[0].get("node") or {}
+    e = (node.get("email") or "").strip()
+    if e and "@" in e and "." in e.split("@")[-1]:
+        return e
+    for a in (node.get("customAttributes") or []):
+        if (a.get("key") or "").strip().lower() in ("e-mailem", "email", "e-mail", "mail", "e-mail address"):
+            v = (a.get("value") or "").strip()
+            if v and "@" in v and "." in v.split("@")[-1]:
+                return v
+    return None
+
+
 def _order_has_email(shop, token, name):
     """True dacă comanda are un email VALID — order.email real SAU note-attr `E-mailem`/`Email` valid. Note attrs
     NU sunt redactate PCD (metadata) → sursă SIGURĂ pt „are/n-are email" (order.email ni se vede redactat=None deși
@@ -5801,11 +5818,22 @@ def _do_awb(xc, sh, st, cons, con, name, o, notify):
     if _ctry and ("email" in msg.lower() or "id_or_client_name" in msg.lower() or "recipient" in msg.lower()) \
        and _repair_due(_intl_email_synthed(), intl_email_synthed_add, name):
         try:
-            if st and st.get("adminToken") and not _order_has_email(st["shopDomain"], st["adminToken"], name):
-                ph = "awb-%s@arona.ro" % (re.sub(r"[^a-z0-9]", "", (name or "x").lower())[:24] or "x")
-                if shopify_set_order_email(st["shopDomain"], st["adminToken"], name, ph):
-                    awb_event(kind="intl-email-synth", store=sh["shopDomain"], order=name, result="ok", email=ph)
-                    return False, False, None   # email pus → AWB tura viitoare după re-sync (NU hold)
+            if st and st.get("adminToken"):
+                # SURSA DE ADEVĂR = xConnector, nu Shopify. Garda veche sărea când Shopify „avea email" — dar
+                # emailul stătea DOAR în note-attribute (formularul COD), NU în câmpul `order.email`, iar
+                # xConnector citește doar câmpul. Rezultat: 10 comenzi CZ blocate la nesfârșit pe
+                # `receiver.email.not-empty`, deși clientul își scrisese emailul. Verificăm ce are CHIAR
+                # xConnector (el trimite la curier) și, dacă n-are, îi punem emailul REAL al clientului —
+                # placeholderul sintetic rămâne doar pt comenzile care chiar n-au niciun email.
+                _xd = xc.by_id(o.get("orderId")) or {}
+                _xmail = (_xd.get("email") or ((_xd.get("shippingAddress") or {}).get("email")) or "").strip()
+                if not _xmail:
+                    _real = _order_email_value(st["shopDomain"], st["adminToken"], name)
+                    ph = _real or ("awb-%s@arona.ro" % (re.sub(r"[^a-z0-9]", "", (name or "x").lower())[:24] or "x"))
+                    if shopify_set_order_email(st["shopDomain"], st["adminToken"], name, ph):
+                        awb_event(kind="intl-email-synth", store=sh["shopDomain"], order=name, result="ok",
+                                  email=ph, detail="real" if _real else "placeholder")
+                        return False, False, None   # email pus → AWB tura viitoare după re-sync (NU hold)
         except Exception:
             pass
     # NUME cu UN SINGUR cuvant -> DPD respinge (`client_name_validator.invalid-name`, "cel putin 2 cuvinte").
