@@ -3401,7 +3401,13 @@ HERE_COUNTRY = {"vthuzq-7j.myshopify.com": "CZE", "f0yrmh-ia.myshopify.com": "PO
 # + aceeași sumă) se anulează în continuare, la fel ca pe magazinele cu CS.
 NO_CS_DOMAINS = {"16w7xv-0w.myshopify.com",   # SK
                  "63e901-2f.myshopify.com",   # HU
-                 "oriceredus.myshopify.com"}  # Orice Redus
+                 "oriceredus.myshopify.com",  # Orice Redus
+                 # + externele Bonhaus (owner, 2026-08-18): măsurat pe CZ = 138 comenzi înțepenite pe HOLD
+                 # din 17-iunie (63.484 CZK ≈ 2.540 €), din care 128 erau blocaje de DEDUP, nu adrese proaste.
+                 # Nimeni nu lucrează coada pe piețele astea → HOLD-ul = comandă moartă, nu triaj.
+                 "vthuzq-7j.myshopify.com",   # Bonhaus CZ
+                 "f0yrmh-ia.myshopify.com",   # Bonhaus PL
+                 "ux1x6n-n2.myshopify.com"}   # Bonhaus BG
 HERE_MIN_SCORE = 0.9  # curierul pt CZ/PL/BG = DPD Romania (livrează cross-border), via pick_connector default
 
 
@@ -3751,7 +3757,7 @@ def name_fixed_add(n):
     _here_state_add(NAME_FIXED_FILE, n); _name_fixed().add(n)
 
 
-def dup_single_name(first, last):
+def dup_single_name(first, last, city=None):
     """DPD cere ca numele unui client PERSOANA FIZICA sa aiba CEL PUTIN 2 CUVINTE
     (`receiver.name.client_name_validator.invalid-name`). Multi clienti scriu un singur cuvant in formularul COD
     ('Kalo', 'Edit', 'Csabi') sau lasa al doilea camp '-'. REGULA (owner, 2026-08-18): daca exista UN SINGUR nume,
@@ -3761,9 +3767,19 @@ def dup_single_name(first, last):
     NU repara numele fara nicio litera (ex. clientul a scris telefonul in loc de nume) — ala ramane la om."""
     toks = [t for t in ((first or "").strip() + " " + (last or "").strip()).split()
             if t and t.strip("-.,") and any(ch.isalpha() for ch in t)]
-    if len(toks) != 1:
-        return None, None      # 0 cuvinte utile (nume = telefon/gunoi) sau deja >=2 => nu ma bag
-    return toks[0], toks[0]
+    if len(toks) == 1:
+        return toks[0], toks[0]
+    if toks:
+        return None, None          # deja >=2 cuvinte utile => nu ma bag
+    # ZERO litere = clientul a scris TELEFONUL in campul de nume ("0752 109 578", "0759672542 -").
+    # Dublarea n-ar ajuta (tot cifre => DPD respinge la fel), deci pun un placeholder NEUTRU cu orasul.
+    # NU inventam identitatea nimanui: eticheta poarta un nume evident generic, iar curierul suna oricum
+    # pe telefonul de pe colet. Alternativa era ca vanzarea sa stea blocata la infinit (masurat: ~8 comenzi
+    # blocate / 90 zile pe magazinele RO, gasite abia cand a intrebat un om).
+    # ⚠️ NU se declanseaza pe nume valide scrise cu alt alfabet: "Марияна" are litere => intra pe ramura de sus.
+    c = (city or "").strip()
+    c = re.sub(r"[^\w\s-]", "", c, flags=re.UNICODE).strip() or "Nou"
+    return "Client", c[:30]
 
 RO_PHONE_FIXED_FILE = os.path.join(_HERE_DIR, ".ro_phone_fixed")
 _RO_PHONE_FIXED = None
@@ -5703,7 +5719,7 @@ def _do_awb(xc, sh, st, cons, con, name, o, notify):
         try:
             if st and st.get("adminToken"):
                 gid, cur = shopify_order_address(st["shopDomain"], st["adminToken"], name)
-                nf, nl = dup_single_name(cur.get("firstName"), cur.get("lastName"))
+                nf, nl = dup_single_name(cur.get("firstName"), cur.get("lastName"), cur.get("city"))
                 if gid and nf:
                     upd = {"countryCode": cur.get("countryCodeV2") or "RO", "firstName": nf, "lastName": nl}
                     for k in ("address1", "address2", "city", "zip", "province", "phone", "company"):
