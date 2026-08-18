@@ -7,8 +7,14 @@ awb_track.py — Tracker live multi-curier pentru AWB-uri (DPD, Sameday, Econt, 
 
 Lipești unul sau mai multe numere AWB și primești statusul curent al fiecărui colet,
 cu auto-detectare a curierului din forma AWB-ului. Statusul brut de la curier este
-normalizat în 4 stări: delivered / in_transit / returned / refused (+ unknown/error),
-iar coletele cu probleme (returnate/refuzate/eroare) sunt marcate.
+normalizat în 5 stări: delivered / in_transit / returned / refused / canceled (+ generated/
+unknown/error), iar coletele cu probleme (returnate/refuzate/eroare) sunt marcate.
+
+⚠️ `canceled` (AWB anulat/void) a fost ADĂUGAT 2026-08-18 — până atunci textul brut „Canceled" nu se
+potrivea cu nicio listă și cădea pe fallback-ul `in_transit`, deci o etichetă ANULATĂ se raporta ca
+un colet ÎN TRANZIT (măsurat pe EST240256: 4 AWB-uri anulate afișate „IN TRANZIT", cu rezumatul
+„✓ Niciun colet cu probleme"). Anulatele NU intră în `--problems` (void-ul e adesea normal: CS reface
+eticheta cu alt nr de colete), dar apar cu ⊘ ANULAT în tabel și sunt numărate explicit în rezumat.
 
 Read-only: doar interogări de tracking, nu scrie nicăieri.
 
@@ -145,6 +151,14 @@ _NOT_DELIVERED = [
     "ridicarea nu a avut loc", "nu a fost predat", "nu a fost preluat",
     "nu a putut fi livrat", "livrare esuata", "livrarea a esuat",
 ]
+# AWB ANULAT (void). LIPSEA COMPLET → textul brut „Canceled" nu se potrivea cu nicio listă și cădea pe
+# `return "in_transit"` implicit, adică o etichetă ANULATĂ se raporta ca un colet ÎN TRANZIT. Măsurat
+# 2026-08-18 pe EST240256: 4 AWB-uri anulate (regenerate de CS) afișate toate „IN TRANZIT", iar rezumatul
+# spunea „✓ Niciun colet cu probleme". CS ar fi crezut că 4 colete sunt pe drum.
+_CANCELED = [
+    "canceled", "cancelled", "anulat", "anulata", "anulare", "voided",
+    "shipment canceled", "shipment cancelled", "awb anulat", "storno",
+]
 _GENERATED = [
     "awb generat", "shipment data received", "shipment registered",
     "order received", "registered", "awb creat", "data received",
@@ -153,7 +167,7 @@ _GENERATED = [
 
 
 def normalize_status(raw: str) -> str:
-    """Întoarce: delivered / returned / refused / in_transit / generated / unknown / error."""
+    """Întoarce: delivered / returned / refused / canceled / in_transit / generated / unknown / error."""
     s = _deacc((raw or "").strip().lower())
     if not s:
         return "unknown"
@@ -168,6 +182,11 @@ def normalize_status(raw: str) -> str:
         return "returned"
     if any(k in s for k in _DELIVERED):
         return "delivered"
+    # ANULAT se verifică DUPĂ refuzat/returnat/livrat (alea descriu ce s-a întâmplat FIZIC cu un colet real
+    # și au prioritate), dar ÎNAINTE de „generat" și de fallback — o etichetă void are de regulă DOAR textul
+    # „Canceled", iar fără asta ajungea „in_transit".
+    if any(k in s for k in _CANCELED):
+        return "canceled"
     if any(k in s for k in _GENERATED):
         return "generated"
     return "in_transit"
@@ -422,9 +441,11 @@ def parse_awbs(text: str):
 _NORM_RO = {
     "delivered": "LIVRAT", "in_transit": "IN TRANZIT", "returned": "RETURNAT",
     "refused": "REFUZAT", "generated": "AWB GENERAT", "unknown": "NECUNOSCUT",
-    "error": "EROARE", "invalid": "AWB INVALID",
+    "error": "EROARE", "invalid": "AWB INVALID", "canceled": "ANULAT",
 }
-_FLAG = {"refused": "⚠", "returned": "⚠", "error": "✗", "invalid": "✗"}
+# ANULAT primește flag vizibil, dar NU intră în `_PROBLEM`: void-ul e adesea normal (CS reface eticheta cu
+# alt nr de colete → vechea se anulează). Ar umple `--problems` cu zgomot. Se vede în coloană + în rezumat.
+_FLAG = {"refused": "⚠", "returned": "⚠", "error": "✗", "invalid": "✗", "canceled": "⊘"}
 
 
 def build_rows(items, status_map):
@@ -473,7 +494,12 @@ def print_table(rows):
             print("   - %s [%s] -> %s (%s)" % (r["awb"], r["courier"],
                                                r["status_ro"], r["status_raw"]))
     else:
-        print("✓ Niciun colet cu probleme (returnat/refuzat/eroare).")
+        n_canc = by.get("canceled", 0)
+        if n_canc:
+            print("✓ Niciun colet cu probleme (returnat/refuzat/eroare) — dar %d AWB ANULAT(E), "
+                  "coletul NU e pe drum." % n_canc)
+        else:
+            print("✓ Niciun colet cu probleme (returnat/refuzat/eroare).")
 
 
 def main():
