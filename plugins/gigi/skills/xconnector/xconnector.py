@@ -3008,19 +3008,34 @@ def shopify_set_order_email(shop, token, name, email):
     return not errs
 
 
+def _email_clean(e):
+    """Curăță emailul tastat de client ca să treacă validarea Shopify/curier, fără să-l falsifice:
+    puncte consecutive („horakova..lidus@seznam.cz" — RFC nu le permite în partea locală), punct la
+    început/sfârșit, spații. Măsurat pe CZ88900: Shopify refuza scrierea, deci comanda rămânea fără email
+    și DPD o respingea cu `receiver.email.not-empty`. Dacă după curățare nu mai e un email valid → None."""
+    e = (e or "").strip().replace(" ", "")
+    if e.count("@") != 1:
+        return None
+    loc, dom = e.split("@")
+    loc = re.sub(r"\.{2,}", ".", loc).strip(".")
+    dom = re.sub(r"\.{2,}", ".", dom).strip(".")
+    out = "%s@%s" % (loc, dom)
+    return out if (loc and "." in dom and len(dom.split(".")[-1]) >= 2) else None
+
+
 def _order_email_value(shop, token, name):
     """Emailul REAL al clientului: `order.email` sau note-attr (`E-mailem`/`Email`, NEredactate PCD).
     Întoarce string sau None. Perechea lui `_order_has_email`, dar dă VALOAREA, nu doar existența."""
     q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ email customAttributes{ key value } } } } }') % (name or "").replace('"', "")
     d = shopify_gql(shop, token, q)
     node = (((d.get("data") or {}).get("orders") or {}).get("edges") or [{}])[0].get("node") or {}
-    e = (node.get("email") or "").strip()
-    if e and "@" in e and "." in e.split("@")[-1]:
+    e = _email_clean(node.get("email"))
+    if e:
         return e
     for a in (node.get("customAttributes") or []):
         if (a.get("key") or "").strip().lower() in ("e-mailem", "email", "e-mail", "mail", "e-mail address"):
-            v = (a.get("value") or "").strip()
-            if v and "@" in v and "." in v.split("@")[-1]:
+            v = _email_clean(a.get("value"))
+            if v:
                 return v
     return None
 

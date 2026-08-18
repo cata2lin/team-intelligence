@@ -222,6 +222,20 @@ Le rezolvă `fulfill` automat, fiecare O SINGURĂ dată per comandă (marker în
 | `receiver.email.not-empty` (uneori confuz `recipient.id_or_client_name`) | comandă intl fără email; WPO cere email obligatoriu | sintetizează `awb-<comanda>@arona.ro` pe `order.email` (event `intl-email-synth`), doar dacă nu există email real |
 | telefon RO malformat (`751842097`, `+400…`) | format greșit din formular | `ro_phone_fix` → normalizează la `07xxxxxxxx` (event `ro-phone-fix`) |
 
+**Ce tastează clientul greșit — reparat automat, cu gardă să nu strice datele bune:**
+
+| Tipar | Exemplu real | Regulă |
+|---|---|---|
+| decor la coada adresei | `Záhumenice 986------------` | `strip_junk` — rulaje INTERNE se taie de la 3+ (`10-12`, `1104/16` rămân intacte), la coadă 2+; dacă n-ar rămâne literă/cifră → las originalul |
+| cifră exponent în cod poștal | `3734²` = **37342** | `ascii_digits` — ²³ etc. → cifre normale. Fără el codul se citea cu 4 cifre și pica din START, nomenclatorul nici nu apuca să corecteze |
+| separator de cod poștal | `98.200Sieradz`, `763,361` | acceptăm spațiu/cratimă/punct/virgulă; forma canonică o impunem la scriere |
+| cod poștal cu orașul lipit | `76701kroměříž` | prins de același tipar |
+| telefon cu prefix fără `+` | `420725787905` | `_phone_norm` — prefix ȘI exact lungimea națională (nu inventăm cifre) |
+| **email cu puncte consecutive** | `horakova..lidus@seznam.cz` | `_email_clean` — RFC nu permite `..` în partea locală, iar Shopify REFUZĂ scrierea → comanda rămânea fără email și DPD o respingea. Curățăm `..`→`.`, punct la capete, spații. Dacă nu iese email valid → None (nu inventăm) |
+
+⚠️ **Toate au aceeași filozofie:** reparăm FORMA, niciodată conținutul. Dacă după curățare nu mai rămâne
+ceva valid, întoarcem originalul / None — comanda merge la om, nu pleacă cu date inventate.
+
 **Limite HARD ale curierului (NU se repară din cod — cer schimbare de configurare):**
 - `sla.insurance.insBaseAmount.lesser-or-equal` — valoarea declarată depășește maximul asigurabil al serviciului
   (**HU: max 26.250 HUF**). O comandă de 31.660 HUF NU poate primi AWB până nu se scoate/plafonează „extinderea de
