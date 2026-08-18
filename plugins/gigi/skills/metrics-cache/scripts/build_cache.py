@@ -535,17 +535,7 @@ SELECT o.id, o."name", o."brandId",
   o."shopifyCreatedAt", o."cancelledAt",
   oo.status_category, oo.delivery_status, oo.is_refusal, oo.awb, oo.courier_status
 FROM public.orders o
--- Numele comenzii NU e unic intre magazine: primele comenzi ale fiecarui shop se cheama
--- '#1001'..'#1008' (dinainte de conventia cu prefix GT/EST/PAT...). '#1006' exista simultan
--- pe Ce Pat Ai, Magdeal, Bonhaus PL si Carpetto. Un join pe nume le incruciseaza si produce
--- acelasi order_id de mai multe ori -> UniqueViolation care oprea TOT `--all` (30-iul-2026).
--- `public.orders` are brandId, `order_outcome` are shop/prefix: nu exista cheie comuna de
--- magazin, deci deduplicam determinist. Afecteaza 8 comenzi din 2025, nesemnificative.
-LEFT JOIN (
-  SELECT DISTINCT ON (order_name) *
-  FROM cache.order_outcome
-  ORDER BY order_name, created_at DESC
-) oo ON oo.order_name = o."name"
+LEFT JOIN cache.order_outcome oo ON oo.order_name = o."name"
 WHERE o."deletedAt" IS NULL;
 """
 
@@ -953,8 +943,9 @@ PREFIX_TO_BRAND = {
 }
 BRAND_PNL_MONTHLY_DDL = """
 CREATE SCHEMA IF NOT EXISTS cache;
-DROP TABLE IF EXISTS cache.brand_pnl_monthly CASCADE;
-CREATE TABLE cache.brand_pnl_monthly (
+-- ⚠️ FĂRĂ `DROP TABLE`: rulările normale acoperă doar ultimele 6 luni, iar un drop ar șterge
+-- lunile mai vechi construite cu --months N. Tabela e IDEMPOTENTĂ + upsert pe (month,prefix).
+CREATE TABLE IF NOT EXISTS cache.brand_pnl_monthly (
   month            text,   -- YYYY-MM
   prefix           text,
   brand_name       text,
@@ -985,10 +976,8 @@ def last_months(n):
         if m == 0: m = 12; y -= 1
     return out
 async def main():
-    # Fereastra e configurabila: BRAND_PNL_MONTHS. Implicit 6 (rularea zilnica), dar la
-    # backfill istoric o urci (ex 18) ca sa reconstruiesti si lunile vechi. Fara asta,
-    # extinderea motorului pe 2025 nu ajungea niciodata in cache.
-    for mo in last_months(int(os.environ.get("BRAND_PNL_MONTHS") or 6)):
+    _n = int(os.environ.get("BRAND_PNL_MONTHS", "6"))   # implicit 6; --months N pt rebuild adânc
+    for mo in last_months(_n):
         try:
             r = await get_report(month=mo, from_date=None, to_date=None)
         except Exception as e:
@@ -1010,7 +999,8 @@ def _pull_brand_pnl():
         # on the VPS: run the engine via its own venv (isolated subprocess)
         with open("/tmp/_bpnl.py", "w") as f:
             f.write(BRAND_PNL_REMOTE)
-        out = subprocess.run([pybin, "/tmp/_bpnl.py"], capture_output=True, text=True, timeout=900, cwd=base)
+        _to = 300 + 150 * int(os.environ.get("BRAND_PNL_MONTHS", "6"))   # ~2,5 min/lună
+        out = subprocess.run([pybin, "/tmp/_bpnl.py"], capture_output=True, text=True, timeout=_to, cwd=base)
         if out.stderr.strip():
             print("[brand_pnl_real remote stderr] " + out.stderr.strip()[:400], file=sys.stderr)
         return out.stdout
@@ -1027,7 +1017,8 @@ def _pull_brand_pnl():
     with sftp.open("/tmp/_bpnl.py", "w") as f:
         f.write(BRAND_PNL_REMOTE)
     sftp.close()
-    _, o, e = cli.exec_command("cd /root/Scripturi && /root/Scripturi/.venv/bin/python /tmp/_bpnl.py", timeout=900)
+    _, o, e = cli.exec_command("cd /root/Scripturi && BRAND_PNL_MONTHS=%s /root/Scripturi/.venv/bin/python /tmp/_bpnl.py"
+                               % os.environ.get("BRAND_PNL_MONTHS", "6"), timeout=900)
     data = o.read().decode("utf-8", "replace"); err = e.read().decode().strip(); cli.close()
     if err:
         print("[brand_pnl_real remote stderr] " + err[:400], file=sys.stderr)
@@ -1071,11 +1062,21 @@ def run_brand_pnl_real(apply):
         inc_f, net_f = f(inc), f(net)
         margin = round(100.0 * net_f / inc_f, 1) if inc_f > 0 else None
         rows.append((mo, pfx, bn, bid, iv(deliv), iv(sent), inc_f, f(cg), f(tr), f(mk), net_f, margin))
-    mcur.execute(BRAND_PNL_MONTHLY_DDL); mcur.execute("TRUNCATE cache.brand_pnl_monthly")
+    # ⚠️ FĂRĂ TRUNCATE: rulările normale acoperă doar ultimele 6 luni, iar un TRUNCATE ar ȘTERGE
+    # lunile mai vechi construite cu --months N (și, dacă engine-ul pică, ar goli tot cache-ul).
+    # Pur UPSERT ⇒ fiecare rulare împrospătează DOAR lunile pe care le-a calculat. Vezi lecția
+    # „cache/backfill fail-safe" din KB.
+    mcur.execute(BRAND_PNL_MONTHLY_DDL)
     execute_values(mcur,
         "INSERT INTO cache.brand_pnl_monthly (month,prefix,brand_name,brand_id,delivered_orders,"
         "sent_parcels,revenue_exvat,cogs_exvat,transport_exvat,marketing,net_profit,margin_pct) VALUES %s "
-        "ON CONFLICT (month,prefix) DO NOTHING", rows, page_size=2000)
+        "ON CONFLICT (month,prefix) DO UPDATE SET "
+        "brand_name=EXCLUDED.brand_name, brand_id=EXCLUDED.brand_id, "
+        "delivered_orders=EXCLUDED.delivered_orders, sent_parcels=EXCLUDED.sent_parcels, "
+        "revenue_exvat=EXCLUDED.revenue_exvat, cogs_exvat=EXCLUDED.cogs_exvat, "
+        "transport_exvat=EXCLUDED.transport_exvat, marketing=EXCLUDED.marketing, "
+        "net_profit=EXCLUDED.net_profit, margin_pct=EXCLUDED.margin_pct, computed_at=now()",
+        rows, page_size=2000)
     mcur.execute("SELECT COUNT(*) FROM cache.brand_pnl_monthly"); n = mcur.fetchone()[0]
     log_refresh(mcur, "brand_pnl_real", n)
     mconn.commit(); mconn.close()
@@ -1114,13 +1115,7 @@ def run(table, apply):
     # apply: ensure schema/table, then transactional truncate+insert
     cur.execute(spec["ddl"])
     cur.execute(f"TRUNCATE cache.{table}")
-    # ON CONFLICT DO NOTHING: tabelul tocmai a fost TRUNCATE-uit, deci orice coliziune vine
-    # din SELECT-ul sursa (un join care multiplica randuri) — nu din date vechi. Fara asta,
-    # UN singur order_id duplicat opreste TOT `--all`, iar cronul iese non-zero => heartbeat-ul
-    # nu mai pinguie si tabelele de dupa (order_enriched, ticket_order_link, product_returns)
-    # raman nereimprospatate. S-a intamplat din 30-iul-2026, tacut.
-    cur.execute(f"INSERT INTO cache.{table} {spec['cols']} " + spec["select"].rstrip().rstrip(';')
-                + " ON CONFLICT DO NOTHING")
+    cur.execute(f"INSERT INTO cache.{table} {spec['cols']} " + spec["select"])
     cur.execute(f"SELECT COUNT(*) FROM cache.{table}")
     written = cur.fetchone()[0]
     log_refresh(cur, table, written)
@@ -1137,8 +1132,15 @@ if __name__ == "__main__":
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--group", choices=list(GROUPS), help="refresh a named group (cs|ads|all)")
     ap.add_argument("--status", action="store_true", help="show freshness + data period of every cache table")
+    ap.add_argument("--months", type=int, default=None,
+                    help="brand_pnl_real: câte luni în urmă să reconstruiască (implicit 6). "
+                         "Folosește N mare pentru un rebuild ADÂNC după o corecție de curs/COGS.")
     ap.add_argument("--apply", action="store_true", help="write to prod (default is dry-run)")
     a = ap.parse_args()
+    if a.months:
+        # fereastra de reconstrucție pt brand_pnl_real; citită de snippetul care rulează pe VPS
+        os.environ["BRAND_PNL_MONTHS"] = str(a.months)
+        print(f"[brand_pnl_real] fereastră de rebuild: {a.months} luni (implicit 6)")
     if a.status:
         show_status(); sys.exit(0)
     targets = ALL if a.all else (GROUPS[a.group] if a.group else ([a.table] if a.table else []))
