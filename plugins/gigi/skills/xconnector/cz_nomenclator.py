@@ -40,6 +40,57 @@ def load_by_locality(cur, obec):
     cur.execute("SELECT obec,district,cast_obce,ulice,psc,num_min,num_max,cnt,obec_norm,ulice_norm FROM public.cz_addresses WHERE obec_norm=%s",(on,))
     return _dictify(cur)
 
+def load_by_cast_obce(cur, name):
+    """SATE COMPONENTE (`cast_obce`). RÚIAN are 5.344 de COMUNE (`obec`) dar 10.926 de sate componente, din care
+    **5.737 NU sunt și comune** — adică peste jumătate din numele de localități din Cehia erau INVIZIBILE pentru
+    validator, fiindcă se căuta doar în `obec`. Un client care-și scrie SATUL (normal la țară), nu comuna, pica
+    pe „localitate negăsită" → hold pe veci. Măsurat pe Bonhaus CZ (2026-08-18): „Mizkolezy" = satul `Miskolezy`,
+    parte din comuna Chvalkovice, PSČ 55204 — negăsibil înainte."""
+    n = norm(name)
+    if not n:
+        return []
+    cur.execute("SELECT obec,district,cast_obce,ulice,psc,num_min,num_max,cnt,obec_norm,ulice_norm "
+                "FROM public.cz_addresses WHERE lower(regexp_replace(translate(cast_obce,"
+                "'áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ','acdeeinorstuuyzACDEEINORSTUUYZ'),'[^a-zA-Z0-9 ]+',' ','g'))"
+                " = %s", (n,))
+    return _dictify(cur)
+
+
+_CZ_PARTS = None
+def cz_cast_obce_fuzzy(cur, name):
+    """Ca `cz_locality_fuzzy`, dar pe SATE COMPONENTE și cu prag mai permisiv (0.82): numele de sate sunt lungi
+    și clienții le scriu cu typo-uri de transliterare („Mizkolezy" vs „Miskolezy" = o literă). Întoarce (cast, rows)."""
+    global _CZ_PARTS
+    n = norm(name)
+    if len(n) < 5:
+        return None
+    if _CZ_PARTS is None:
+        cur.execute("SELECT DISTINCT cast_obce FROM public.cz_addresses WHERE cast_obce IS NOT NULL AND cast_obce<>''")
+        _CZ_PARTS = [(c[0], norm(c[0])) for c in cur.fetchall()]
+    best = None; bestr = 0.0
+    for orig, cn in _CZ_PARTS:
+        if not cn:
+            continue
+        rr = SequenceMatcher(None, n, cn).ratio()
+        if rr > bestr:
+            bestr = rr; best = orig
+    if bestr >= 0.82 and best:
+        return best, load_by_cast_obce(cur, best)
+    return None
+
+
+_POSTA = re.compile(r"(?i)\b(?:po[sš]ta|p\.?\s*o[sš]ta)\s+(.+)$")
+def cz_posta_hint(city):
+    """Clientul scrie ADESEA oficiul poștal în câmpul oraș: „Mizkolezy pošta Chvalkovice v Cechach".
+    Oficiul E cel care determină PSČ-ul, deci e un indiciu mai bun decât satul scris greșit.
+    Întoarce (sat_scris, oficiu) — ambele de încercat, oficiul are prioritate la PSČ."""
+    m = _POSTA.search(city or "")
+    if not m:
+        return (city or "").strip(), None
+    sat = _POSTA.sub("", city).strip(" ,.-")
+    return sat, m.group(1).strip(" ,.-")
+
+
 def psc_localities(rows):
     """localitățile unui PSČ, sortate după nr de adrese (cea mai mare = principală)."""
     c=Counter()
@@ -177,6 +228,38 @@ def cz_validate_and_correct(cur, city, zip_, address1, address2=""):
                     "note":"localitate corectată (typo→%s) + PSČ"%fobec}
         return {"status":"corrected","address":{"city":fobec,"address1":a1},
                 "note":"localitate corectată (typo→%s)"%fobec}
+    # ── R1+R3 (2026-08-18): SATE COMPONENTE + „pošta X". Înainte de a declara localitatea negăsită, mai
+    # încercăm două lucruri pe care validatorul le ignora complet:
+    #   R1: numele scris poate fi un SAT COMPONENT (`cast_obce`), nu o comună — 5.737 de sate cehești nu erau
+    #       căutate NICĂIERI. Exact/fuzzy 0.82 (typo-uri de transliterare: „Mizkolezy" → „Miskolezy").
+    #   R3: clientul scrie adesea OFICIUL POȘTAL în câmpul oraș („… pošta Chvalkovice v Cechach"). Oficiul
+    #       determină PSČ-ul, deci e un indiciu mai bun decât satul scris greșit. Îl încercăm ca localitate.
+    _sat, _posta = cz_posta_hint(city)
+    # „Krupka Maršov" = COMUNĂ + SAT lipite (tipar frecvent). Încercăm și cuvintele separat, altfel șirul
+    # întreg nu se potrivește cu nimic și cădem pe regula de prefix PSČ, care poate nimeri ALT oraș
+    # (măsurat: „Krupka Maršov" → Litoměřice, deși Krupka e în Teplice).
+    _cuv = [w for w in (_sat or "").split() if len(w) >= 4]
+    _cands = [(_sat, "sat"), (_posta, "oficiu poștal")] + [(w, "cuvânt „%s”" % w) for w in _cuv]
+    for _cand, _how in _cands:
+        if not _cand:
+            continue
+        _rows = load_by_cast_obce(cur, _cand) or load_by_locality(cur, _cand)
+        _how2 = _how
+        if not _rows:
+            _fz2 = cz_cast_obce_fuzzy(cur, _cand)
+            if _fz2:
+                _rows = _fz2[1]; _how2 = "%s (typo→%s)" % (_how, _fz2[0])
+        if not _rows:
+            continue
+        _pscs = Counter(r["psc"] for r in _rows if r.get("psc"))
+        if not _pscs:
+            continue
+        # comuna reală de livrare (curierul rutează pe comună+PSČ, satul rămâne în adresă)
+        _obec = Counter(r["obec"] for r in _rows if r.get("obec")).most_common(1)[0][0]
+        _z = psc if (psc and psc in _pscs) else (cz_street_psc(_rows, a1) or _pscs.most_common(1)[0][0])
+        return {"status": "corrected", "address": {"city": _obec, "zip": _z, "address1": a1},
+                "note": "%s recunoscut(ă) în RÚIAN → comuna %s, PSČ %s%s" % (
+                    _how2, _obec, _z, "" if num else " (adresă de sat: localitate+număr, fără stradă)")}
     # ── DERIVĂ ORAȘUL DIN PSČ (insight owner): oraș scris nesigur (typo/garbled, negăsit prin niciun lookup)
     # DAR PSČ valid → localitatea din PREFIXUL PSČ (primele 3 cifre = districtul poștal CZ; tabelul ține doar
     # PSČ-ul principal per obec, ex 71000, deci 710 42 exact pică → cad pe prefix). Localitatea dominantă a
