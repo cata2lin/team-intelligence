@@ -2778,7 +2778,28 @@ def intl_correct_write(xc, o, shop_domain, corr):
 # pastează adrese de 100+ caractere → ~85% din eșecurile CZ și ~100% din cele PL sunt DOAR format, nu adrese rele.
 DPD_MAX_ADDR = 35
 DPD_MAX_CITY = 35
-_ZIP_PAT = {"CZE": r"(\d{3})\s*(\d{2})", "POL": r"(\d{2})\s*-?\s*(\d{3})", "BGR": r"(\d{4})", "HUN": r"(\d{4})", "SVK": r"(\d{3})\s*(\d{2})"}
+# Separatorul dintre grupe: clientul tastează ce-i vine — spațiu, cratimă, PUNCT sau virgulă („98.200Sieradz",
+# „763,361"). Îl acceptăm pe toate; forma canonică o impunem noi la scriere. Fără punct/virgulă, „98.200Sieradz"
+# nu se potrivea cu NIMIC → zero candidați → comanda PL29130 respinsă de curier pe lungimea codului.
+_ZIP_SEP = r"\s*[-.,]?\s*"
+_ZIP_PAT = {"CZE": r"(\d{3})" + _ZIP_SEP + r"(\d{2})", "POL": r"(\d{2})" + _ZIP_SEP + r"(\d{3})",
+            "BGR": r"(\d{4})", "HUN": r"(\d{4})", "SVK": r"(\d{3})" + _ZIP_SEP + r"(\d{2})"}
+
+
+_UNI_DIG = {"\u2070": "0", "\u00b9": "1", "\u00b2": "2", "\u00b3": "3", "\u2074": "4", "\u2075": "5",
+            "\u2076": "6", "\u2077": "7", "\u2078": "8", "\u2079": "9",
+            "\u2080": "0", "\u2081": "1", "\u2082": "2", "\u2083": "3", "\u2084": "4", "\u2085": "5",
+            "\u2086": "6", "\u2087": "7", "\u2088": "8", "\u2089": "9",
+            "\uff10": "0", "\uff11": "1", "\uff12": "2", "\uff13": "3", "\uff14": "4", "\uff15": "5",
+            "\uff16": "6", "\uff17": "7", "\uff18": "8", "\uff19": "9"}
+
+
+def ascii_digits(z):
+    """Cifre EXPONENT/INDICE și full-width → cifre normale. „3734²" e „37342", nu „3734": clientul a apăsat
+    din greșeală o tastă cu exponent (frecvent pe layout-urile est-europene, unde ² și ³ stau pe rândul de sus).
+    Fără asta, codul se citea cu 4 cifre, pica validarea de format din start și nici nomenclatorul nu apuca
+    să-l corecteze. Măsurat pe CZ88577 — comandă blocată din 10-august pentru un singur caracter."""
+    return "".join(_UNI_DIG.get(ch, ch) for ch in str(z or ""))
 
 
 def _zip_candidates(country, z):
@@ -2787,6 +2808,7 @@ def _zip_candidates(country, z):
     pat = _ZIP_PAT.get(country or "")
     if not pat or not z:
         return []
+    z = ascii_digits(z)          # „3734²" → „37342" ÎNAINTE de a căuta tiparul
     out = []
     for m in re.finditer(pat, str(z)):
         if country in ("CZE", "SVK"):
@@ -2798,6 +2820,27 @@ def _zip_candidates(country, z):
         if c not in out:
             out.append(c)
     return out
+
+
+_JUNK_TAIL = re.compile(r"[\s\-_.,;:*/\\|~=+#]{2,}$")
+_JUNK_RUN = re.compile(r"[\-_.*~=]{3,}")
+
+
+def strip_junk(a):
+    """Taie „decorul" tastat de client la coada adresei: „Záhumenice 986------------" → „Záhumenice 986".
+    Clienții umplu câmpul cu liniuțe/puncte (ca să treacă de un `required`, sau din obișnuință), iar DPD
+    respinge apoi adresa pe LUNGIME (`addressLine1.max-length`), deși adresa reală încape lejer.
+
+    Prudent — NU stric adrese valide:
+      • rulaje INTERNE se taie doar de la 3+ caractere („10-12" și „1104/16" rămân intacte);
+      • la coadă e destul 2+ („str. Lunga ..");
+      • dacă după curățare n-ar mai rămâne nicio literă sau cifră, întorc originalul (nu golesc câmpul)."""
+    t = (a or "").strip()
+    if not t:
+        return a
+    out = _JUNK_TAIL.sub("", _JUNK_RUN.sub(" ", t)).strip()
+    out = re.sub(r"\s{2,}", " ", out)
+    return out if re.search(r"[0-9A-Za-zÀ-ž]", out) else a
 
 
 def _split_addr(a1, a2):
@@ -3067,7 +3110,9 @@ def dpd_intl_sanitize(xc, o, shop_domain, name, country, st=None):
     if len(ccity) > DPD_MAX_CITY:
         corr["city"] = ccity[:DPD_MAX_CITY].strip()
     # 3) ADRESĂ — >35 → împarte pe cuvânt în a1/a2, DAR doar dacă nu se pierde text
-    na1, na2, lost = _split_addr(ad.get("address1"), ad.get("address2"))
+    # întâi scot decorul („986------------"), abia apoi decid dacă mai trebuie împărțit pe 2 linii
+    _ja1, _ja2 = strip_junk(ad.get("address1")), strip_junk(ad.get("address2"))
+    na1, na2, lost = _split_addr(_ja1, _ja2)
     if not lost:
         if na1 != (ad.get("address1") or "").strip():
             corr["address1"] = na1
