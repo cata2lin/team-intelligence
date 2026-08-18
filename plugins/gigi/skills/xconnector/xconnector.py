@@ -3003,10 +3003,25 @@ def dpd_intl_sanitize(xc, o, shop_domain, name, country, st=None):
             except Exception:
                 continue
             if (nres or {}).get("status") in ("valid", "corrected"):
-                if cand != z0:
-                    corr["zip"] = cand
+                # BUG REPARAT 2026-08-18: scriam `cand` — adică zip-ul CLIENTULUI doar curățat de spații —
+                # chiar și când nomenclatorul întorcea `corrected` cu ALT cod. Rezultat: „797 03" → „79703",
+                # care e tot inexistent în RÚIAN, iar WPO îl respinge cu IV107 („postal code is not valid"),
+                # mascat sub mesajul generic „WPO Integration error". Comanda intra pe hold pe veci deși
+                # nomenclatorul ȘTIA răspunsul. Măsurat pe CZ: Prostějov 79703→79603, Hluk 68225→68725,
+                # Nová Role 36220→36225. Acum preferăm codul CORECTAT întors de nomenclator.
+                _nz = ((nres or {}).get("address") or {}).get("zip")
                 cnl = ((nres or {}).get("address") or {}).get("city")
-                if cnl and _fold(cnl) != _fold(city):
+                _city_schimbat = bool(cnl and _fold(cnl) != _fold(city))
+                if _nz and _nz != cand and not _city_schimbat:
+                    # corecție PURĂ de cod poștal (aceeași localitate) → sigură
+                    corr["zip"] = _nz
+                elif _nz and _nz != cand and _city_schimbat:
+                    # ⚠️ nomenclatorul propune ȘI altă localitate (ex. „Město Albrechtice" → „Albrechtice",
+                    # două orașe DIFERITE). Nu ghicim orașul clientului: lăsăm comanda la om.
+                    break
+                elif cand != z0:
+                    corr["zip"] = cand
+                if cnl and _city_schimbat and "zip" in corr:
                     corr["city"] = cnl          # numele canonic e și mai scurt, și corect
                 break
     # 2) CITY — dacă tot e peste limita DPD, scurtează
@@ -5683,10 +5698,19 @@ def _do_awb(xc, sh, st, cons, con, name, o, notify):
             return True, False, None
         return False, False, None   # corectat, dar încă nesincronizat → reîncearcă tura viitoare (NU hold)
     # INTL (CZ/PL/BG): adresa e VALIDĂ dar DPD o respinge pe FORMAT (addressLine1>35, zip cu gunoi lipit, city>35).
-    # Sanitizează câmpurile O SINGURĂ dată → reîncearcă. Măsurat: ~85% din eșecurile CZ, ~100% din PL sunt format.
+    # Sanitizează câmpurile → reîncearcă. Măsurat: ~85% din eșecurile CZ, ~100% din PL sunt format.
+    #
+    # ⚠️ MARKERUL E PE (comandă + MOTIV), nu doar pe comandă (schimbat 2026-08-18). Înainte era „o dată pe
+    # VIAȚĂ": o comandă sanitizată cândva nu mai era atinsă NICIODATĂ, nici când curierul o respingea pentru
+    # ALT motiv, nici după ce sanitizerul învăța reguli noi. Efect măsurat pe Bonhaus CZ: **22 din 28** de
+    # comenzi blocate erau deja în `.intl_sanitized` → sanitizerul le sărea, deși avea exact regulile care
+    # le-ar fi reparat. Un marker permanent transformă orice regulă nouă în cod mort pentru vechiul backlog.
     _ctry = HERE_COUNTRY.get(sh["shopDomain"])
-    if _ctry and name not in _intl_sanitized() and dpd_intl_sanitize(xc, o, sh["shopDomain"], name, _ctry, st):
-        intl_sanitized_add(name)
+    _prev_msg = (d.get("errorMessage") if isinstance(d, dict) else str(d)) or ""
+    _m = re.search(r"Courier API error:\s*([a-zA-Z0-9_.\-]+)", _prev_msg)
+    _sig = "%s|%s" % (name, (_m.group(1) if _m else _prev_msg[:40]).strip())
+    if _ctry and _sig not in _intl_sanitized() and dpd_intl_sanitize(xc, o, sh["shopDomain"], name, _ctry, st):
+        intl_sanitized_add(_sig)
         time.sleep(3.0)
         ok, s, d = _create_label(xc, body, _ctx={"store": sh["shopDomain"], "order": name})
         if ok:
