@@ -2828,8 +2828,13 @@ def _phone_norm(country, ph):
     raw = str(ph).strip()
     keep = "+" if raw.startswith("+") else ""
     digits = re.sub(r"\D", "", raw)
+    if keep != "+" and digits.startswith(cc[0].lstrip("+")) and len(digits) == cc[1] + len(cc[0].lstrip("+")):
+        # PREFIX DE ȚARĂ FĂRĂ „+" — „420725787905" în loc de „+420725787905". Arăta „cu prefix", deci vechea
+        # gardă îl lăsa neatins, dar DPD cere formatul internațional și-l respinge (`receiver.phone-1.num.match`).
+        # Măsurat pe CZ80973: comandă blocată din 30-iunie doar din cauza semnului „+" lipsă.
+        return cc[0] + digits[len(cc[0].lstrip("+")):]
     if keep == "+" or digits.startswith(cc[0].lstrip("+")):
-        return None                                   # are deja prefix → nu-l atingem
+        return None                                   # are deja prefix corect → nu-l atingem
     if len(digits) == cc[1]:
         return cc[0] + digits                         # „774822669" (CZ) → „+420774822669"
     if digits.startswith("0") and len(digits) == cc[1] + 1:
