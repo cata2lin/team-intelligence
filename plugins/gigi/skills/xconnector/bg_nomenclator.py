@@ -87,6 +87,49 @@ def city_candidates(city):
         if len(toks) >= k: add(" ".join(toks[:k]))
     return out
 
+_LAT_VAR = [("x", "h"), ("kh", "h"), ("ck", "k"), ("cz", "ch"), ("sch", "sh"), ("j", "y"), ("w", "v"), ("q", "k")]
+_DEVOICE = {"t": "d", "p": "b", "k": "g", "s": "z", "f": "v", "sh": "zh"}
+
+
+def fold_lat(s):
+    """Pliază variantele cu care bulgarii scriu LATINIZAT același nume — sursa reală de „localitate negăsită".
+    Două tipare măsurate pe comenzi blocate (2026-08-18):
+      • „Xaskovo" = Хасково — X folosit pentru Х (Х seamănă cu X pe tastatură);
+      • „Asenovgrat" = Асеновград — T final în loc de D, fiindcă AȘA SE AUDE (consoanele finale se
+        devocalizează în bulgară). La fel: -p/-b, -k/-g, -s/-z, -f/-v.
+    Nu inventăm nimic: pliem AMBELE părți la aceeași formă și comparăm. O localitate inexistentă tot nu se leagă."""
+    t = norm_lat(s)
+    for a, b in _LAT_VAR:
+        t = t.replace(a, b)
+    out = []
+    for w in t.split():
+        if len(w) > 3 and w[-1] in _DEVOICE:
+            w = w[:-1] + _DEVOICE[w[-1]]
+        out.append(w)
+    return " ".join(out)
+
+
+def find_locality_folded(cur, cands):
+    """Ultima plasă înainte de „negăsit": compară forma PLIATĂ a numelui scris de client cu forma pliată a
+    fiecărei localități. Cache pe proces (~11k localități, o singură interogare)."""
+    global _ALL_LOC
+    try:
+        _ALL_LOC
+    except NameError:
+        _ALL_LOC = None
+    if _ALL_LOC is None:
+        cur.execute("SELECT name, name_lat, postcode FROM public.bg_localities WHERE name_lat<>'' AND postcode IS NOT NULL")
+        _ALL_LOC = [(n, fold_lat(nl), pc) for n, nl, pc in cur.fetchall()]
+    for c in cands:
+        if not c or len(c) < 4:
+            continue
+        f = fold_lat(c)
+        for name, fl, pc in _ALL_LOC:
+            if fl == f:
+                return name, pc
+    return None
+
+
 def find_locality(cur, cands):
     """intoarce (name, postcode) daca vreo varianta se potriveste (cirilic sau transliterat latin)."""
     for c in cands:
@@ -147,6 +190,22 @@ def bg_validate_and_correct(cur, city, zip_, address1, address2=""):
     #     → status „cs": contact client pt stradă. (Distinct de needs_geocoder ca CS să știe EXACT ce lipsește.)
     _core = _bg_street_core(a1)
     if len(_core) < 2 or _NOSTREET.search(_core):
+        # EXCEPȚIA SATULUI (regulă owner, 2026-08-18): la SAT adresa ESTE „localitate + număr" — strada nu
+        # există prin construcție. Clientul care scrie „Няма" („niciuna"), „." sau doar numărul casei NU are
+        # adresă incompletă; așa arată o adresă rurală. Măsurat: BONBG28212 = satul Добра поляна, cod 8580
+        # UNIC → perfect livrabilă, dar stătea pe hold ca „fără stradă".
+        # Condiție strictă: localitatea să fie `village` ȘI să aibă cod poștal. La ORAȘ strada rămâne
+        # obligatorie (acolo „număr fără stradă" chiar e ambiguu) → rămâne „cs".
+        _loc = find_locality(cur, city_candidates(cty)) or find_locality_folded(cur, city_candidates(cty))
+        if _loc and _loc[1]:
+            cur.execute("SELECT place_type FROM public.bg_localities WHERE name=%s AND postcode=%s LIMIT 1",
+                        (_loc[0], _loc[1]))
+            _r = cur.fetchone()
+            if _r and (_r[0] or "") == "village":
+                _nr = re.sub(r"\D", "", a1 or "") or re.sub(r"\D", "", a2 or "")
+                return {"status": "corrected",
+                        "address": {"city": _loc[0], "zip": _loc[1], "address1": (a1 or "").strip() or _nr},
+                        "note": "adresă de SAT (%s, cod unic %s): localitate+număr, strada nu există" % (_loc[0], _loc[1])}
         return {"status": "cs", "address": None, "note": "fără stradă reală (%s) → contact client pt adresă" % ((a1 or "gol")[:20])}
 
     # 2) localitatea clientului e reala -> valid (BG locality-driven; strada/numar optionale).
@@ -170,6 +229,10 @@ def bg_validate_and_correct(cur, city, zip_, address1, address2=""):
                     "note": "oras corectat din cod postal"}
 
     # 3b) typo de oraș MARE ('Стара затора'->'Стара Загора') -- prag mare, doar orașe mari = sigur
+    fd = find_locality_folded(cur, cands)
+    if fd:
+        return {"status": "corrected", "address": {"city": fd[0], "zip": fd[1] or pc, "address1": a1},
+                "note": "localitate recunoscută prin transliterare pliată (%s → %s)" % (city, fd[0])}
     fz = find_major_fuzzy(cur, cands)
     if fz:
         return {"status": "corrected", "address": {"city": fz}, "note": "oras major corectat (typo)"}
