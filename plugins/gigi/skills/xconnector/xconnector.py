@@ -2474,7 +2474,10 @@ def nomenclator_correct(xc, o, shop_domain, mcur, apply=False):
         time.sleep(3); d = xc.by_id(oid) or {}
     ad = d.get("shippingAddress") or {}
     # ── PRE-CLEAN determinist: delabel → câmpuri inversate → prefix localitate → deglue → canon oraș ──
-    _a1dl = _delabel(_translate_hungarian(ad.get("address1")))  # HU→RO ('Palás köz 7 szám'→'Aleea Palás nr 7'), apoi delabel
+    # `or ""` = comanda cu address1 NULL (clientul lasa strada goala in formularul COD). Fara el, None curge prin
+    # toata cascada de pre-clean si crapa in `re.sub` de mai jos cu TypeError -- ceea ce OMORA INTREAGA bucla a
+    # magazinului (masurat 2026-08-18: Esteban/Apreciat/ReduceriBune/OferteleZilei = 0 AWB/zi, fata de 414 ieri).
+    _a1dl = _delabel(_translate_hungarian(ad.get("address1") or ""))  # HU→RO ('Palás köz 7 szám'→'Aleea Palás nr 7'), apoi delabel
     _a1z, _a2z = _street_from_a2(_a1dl, ad.get("address2"))  # strada e în a2, a1=gunoi/landmark → promovează a2 la stradă
     _a1s, _citys, _swapped = _maybe_swap_fields(_a1z, ad.get("city"))
     _a1p = _strip_loc_prefix(_a1s, _citys)                # 'București sector 2 Ion Berindei…' → 'Ion Berindei…' (folosește orașul BRUT)
@@ -2490,7 +2493,7 @@ def nomenclator_correct(xc, o, shop_domain, mcur, apply=False):
             and not _ST_MARK.search(_fold(_loc_hint))):
         _loc_hint = ""
     _a1L, _a2L = _pull_landmark(_a1ap, _a2ap)             # mută nota-landmark '(magazin Profi)' din a1 în a2
-    _a1t = _street_tail(_a1L)                             # coadă: sufix Google ', ZIP City, Romania' + segment duplicat
+    _a1t = _street_tail(_a1L) or ""                           # coadă: sufix Google ', ZIP City, Romania' + segment duplicat
     _a1typo = re.sub(r"(?i)\bstada\b", "Strada", _a1t)   # typo frecvent 'Stada'→'Strada' (altfel tipul arterei nu se prinde)
     _a1e = _expand_street_initial(_expand_fullname(_expand_street_abbrev(_numword_nr(_street_deglue(_a1typo)))))  # deglue + nr-în-litere (nr opt→nr 8) + abrevieri (ctin→Constantin) + nume complet (A.I.Cuza / 'N Titulescu'→Nicolae Titulescu)
     _a1c, _a2L = _pull_block_details(_a1e, _a2L)          # bloc/scară/etaj/ap din stradă → address2 (păstrate pt curier): 'Bd Gării nr 10 bl 3 ap 2 sc b'→a1='Bd Gării nr 10'
@@ -3392,6 +3395,13 @@ def route_connector(sh, st, order_name, cons, default_con):
 # KPI = AWB făcut. Externe au adrese bune; HERE le validează → AWB cu curierul local (home delivery, ~100% din ele).
 HERE_COUNTRY = {"vthuzq-7j.myshopify.com": "CZE", "f0yrmh-ia.myshopify.com": "POL", "ux1x6n-n2.myshopify.com": "BGR",
                 "63e901-2f.myshopify.com": "HUN", "16w7xv-0w.myshopify.com": "SVK"}
+# Magazine FĂRĂ Customer Service (decizie owner 2026-08-18): nimeni nu lucrează coada de HOLD, deci cronul
+# trebuie să REZOLVE singur totul. Efect: la dedup, o comandă cu ALT conținut decât „geamăna" ei NU mai stă
+# pe HOLD la infinit (SK2287 = 84,37 € blocată din 16-aug), ci se EXPEDIAZĂ. Dublura TEHNICĂ (aceleași SKU-uri
+# + aceeași sumă) se anulează în continuare, la fel ca pe magazinele cu CS.
+NO_CS_DOMAINS = {"16w7xv-0w.myshopify.com",   # SK
+                 "63e901-2f.myshopify.com",   # HU
+                 "oriceredus.myshopify.com"}  # Orice Redus
 HERE_MIN_SCORE = 0.9  # curierul pt CZ/PL/BG = DPD Romania (livrează cross-border), via pick_connector default
 
 
@@ -3728,6 +3738,33 @@ def _intl_sanitized():
     return _INTL_SANITIZED
 def intl_sanitized_add(n):
     _here_state_add(INTL_SANITIZED_FILE, n); _intl_sanitized().add(n)
+NAME_FIXED_FILE = os.path.join(_HERE_DIR, ".name_fixed")   # nume destinatar reparat (o singura data/comanda)
+_NAME_FIXED = None
+
+def _name_fixed():
+    global _NAME_FIXED
+    if _NAME_FIXED is None:
+        _NAME_FIXED = _here_state_load(NAME_FIXED_FILE)
+    return _NAME_FIXED
+
+def name_fixed_add(n):
+    _here_state_add(NAME_FIXED_FILE, n); _name_fixed().add(n)
+
+
+def dup_single_name(first, last):
+    """DPD cere ca numele unui client PERSOANA FIZICA sa aiba CEL PUTIN 2 CUVINTE
+    (`receiver.name.client_name_validator.invalid-name`). Multi clienti scriu un singur cuvant in formularul COD
+    ('Kalo', 'Edit', 'Csabi') sau lasa al doilea camp '-'. REGULA (owner, 2026-08-18): daca exista UN SINGUR nume,
+    pune-l de DOUA ORI ('Kalo Kalo') — nu inventam un nume de familie care nu exista, dar trecem validarea si
+    coletul pleaca (curierul suna oricum pe telefon).
+    Intoarce (first, last) noi, sau (None, None) daca nu e cazul / nu se poate repara.
+    NU repara numele fara nicio litera (ex. clientul a scris telefonul in loc de nume) — ala ramane la om."""
+    toks = [t for t in ((first or "").strip() + " " + (last or "").strip()).split()
+            if t and t.strip("-.,") and any(ch.isalpha() for ch in t)]
+    if len(toks) != 1:
+        return None, None      # 0 cuvinte utile (nume = telefon/gunoi) sau deja >=2 => nu ma bag
+    return toks[0], toks[0]
+
 RO_PHONE_FIXED_FILE = os.path.join(_HERE_DIR, ".ro_phone_fixed")
 _RO_PHONE_FIXED = None
 def _ro_phone_fixed():
@@ -4733,6 +4770,9 @@ def resolve_duplicate(sh, xc, o, st, name, keeper, apply):
     # NU pun pe hold, CHIAR dacă AWB-ul e ghost în xConnector (has_awb=False). Altfel o comandă livrată ajunge pe hold la CS.
     if awbprint_status(name) in PLECATA:
         return "shipped-skip", reason
+    # FĂRĂ CS (SK/HU/Orice Redus) → nu există cine să preia HOLD-ul: alt conținut = comandă REALĂ → o expediez.
+    if sh["shopDomain"] in NO_CS_DOMAINS:
+        return "ship", reason
     hold_and_log(st, sh["shopDomain"], name, reason, apply)
     if apply:
         cron_held_add(name)
@@ -5655,6 +5695,36 @@ def _do_awb(xc, sh, st, cons, con, name, o, notify):
                     return False, False, None   # email pus → AWB tura viitoare după re-sync (NU hold)
         except Exception:
             pass
+    # NUME cu UN SINGUR cuvant -> DPD respinge (`client_name_validator.invalid-name`, "cel putin 2 cuvinte").
+    # REGULA owner: pune numele de doua ori. Scriem in Shopify (sursa pe care o citeste xConnector) si reincercam
+    # pe loc; daca xConnector n-a resincronizat inca, tura urmatoare il prinde. O SINGURA incercare per comanda.
+    if name not in _name_fixed() and ("client_name_validator" in msg or "receiver.name" in msg):
+        name_fixed_add(name)
+        try:
+            if st and st.get("adminToken"):
+                gid, cur = shopify_order_address(st["shopDomain"], st["adminToken"], name)
+                nf, nl = dup_single_name(cur.get("firstName"), cur.get("lastName"))
+                if gid and nf:
+                    upd = {"countryCode": cur.get("countryCodeV2") or "RO", "firstName": nf, "lastName": nl}
+                    for k in ("address1", "address2", "city", "zip", "province", "phone", "company"):
+                        if cur.get(k) is not None:
+                            upd[k] = cur.get(k)
+                    if cur.get("provinceCode"):
+                        upd["provinceCode"] = cur.get("provinceCode")
+                    m = ("mutation($input: OrderInput!){ orderUpdate(input:$input){ order{ id } "
+                         "userErrors{ field message } } }")
+                    r = shopify_gql(st["shopDomain"], st["adminToken"], m,
+                                    {"input": {"id": gid, "shippingAddress": upd}})
+                    if not ((((r.get("data") or {}).get("orderUpdate") or {}).get("userErrors")) or r.get("errors")):
+                        awb_event(kind="name-dup", store=sh["shopDomain"], order=name, result="ok",
+                                  detail="%s -> %s %s" % (cur.get("firstName"), nf, nl))
+                        time.sleep(3.0)
+                        ok, s, d = _create_label(xc, body, _ctx={"store": sh["shopDomain"], "order": name})
+                        if ok:
+                            return True, False, None
+                        return False, False, None   # pus, dar nesincronizat inca -> tura viitoare (NU hold)
+        except Exception:
+            pass
     # RO: telefon in format gresit (bare 9-cifre "751842097" / "+400..." malformat) -> DPD RO il respinge.
     # Normalizeaza la 07xxxxxxxx O SINGURA data -> reincearca. (RO nu trece prin dpd_intl_sanitize.)
     if not _ctry and name not in _ro_phone_fixed():
@@ -6153,6 +6223,7 @@ def cmd_fulfill(a):
                 # are deja AWB (pleacă) → anulează cea nouă (nu dubla AWB); CARDUL nu se anulează NICIODATĂ.
                 x_paid = (fin or "").upper() == "PAID"
                 sibling = None if x_paid else awbprint_recent_dup(name)
+                ship_no_cs = False   # magazin fără CS: dedup-ul a decis EXPEDIEZ → sar restul triajului de dublură
                 if sibling:
                     # frate mai vechi ≤24h (același client+produse) are DEJA AWB = deja pleacă → X (cash) = dublura.
                     res, why = resolve_duplicate(sh, xc, o, st, name, sibling, a.apply)
@@ -6160,13 +6231,18 @@ def cmd_fulfill(a):
                         dup_shipped += 1
                     elif res in ("cancelled", "would-cancel"):
                         dup_cancel += 1
+                    elif res == "ship":
+                        dup_keep += 1
+                        print("    ▶️ %s vs %s: %s → magazin fără CS: EXPEDIEZ (nu HOLD)" % (name, sibling, why))
                     elif res == "held":
                         dup_hold += 1
                         print("    ⏸️ %s vs %s: %s → HOLD (nu anulez) → CS" % (name, sibling, why))
                     else:
                         failed += 1
-                    continue
-                if not x_paid:
+                    if res != "ship":
+                        continue
+                    ship_no_cs = True
+                if not x_paid and not ship_no_cs:
                     # Fereastra trebuie să acopere ȘI comanda însăși: pe una mai veche de 7 zile, clientul n-are
                     # nicio comandă în ultimele 7 zile → dates=[] → None → rămânea blocată PE VECI (nici AWB, nici
                     # anulare). Măsurat: 25 comenzi CZ înțepenite din 27. Coborâm pragul la data comenzii.
@@ -6179,12 +6255,16 @@ def cmd_fulfill(a):
                             dup_shipped += 1
                         elif res in ("cancelled", "would-cancel"):
                             dup_cancel += 1
+                        elif res == "ship":
+                            dup_keep += 1
+                            print("    ▶️ %s vs %s: %s → magazin fără CS: EXPEDIEZ (nu HOLD)" % (name, keeper, why))
                         elif res == "held":
                             dup_hold += 1
                             print("    ⏸️ %s vs %s: %s → HOLD (nu anulez) → CS" % (name, keeper, why))
                         else:
                             failed += 1
-                        continue
+                        if res != "ship":
+                            continue
                     if newest is None:
                         dup_unknown += 1; continue  # fără client → nu pot decide → NU expediez, NU anulez
                 # X = KEEPER (card protejat / cea mai nouă fără frate-cu-AWB) → marchez `duplicata-verificata`,
@@ -6209,6 +6289,9 @@ def cmd_fulfill(a):
                             dup_shipped += 1; continue
                         elif res in ("cancelled", "would-cancel"):
                             dup_cancel += 1; continue
+                        elif res == "ship":
+                            dup_keep += 1
+                            print("    ▶️ %s vs %s: %s → magazin fără CS: EXPEDIEZ (nu HOLD)" % (name, keeper, why))
                         elif res == "held":
                             dup_hold += 1
                             print("    ⏸️ %s vs %s: %s → HOLD (nu anulez) → CS" % (name, keeper, why)); continue
