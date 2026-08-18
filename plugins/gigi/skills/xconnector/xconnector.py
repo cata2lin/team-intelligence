@@ -2994,7 +2994,13 @@ def dpd_intl_sanitize(xc, o, shop_domain, name, country, st=None):
     # 1) ZIP — scriem DOAR un cod pe care nomenclatorul național îl CONFIRMĂ (zero ghicit: un zip greșit
     #    = colet la adresă greșită). Prima variantă confirmată câștigă; dacă niciuna nu trece, lăsăm zip-ul.
     cands = _zip_candidates(country, z0)
-    if cands and not (len(cands) == 1 and cands[0] == z0):
+    # GARDA VECHE ERA: `not (len(cands)==1 and cands[0]==z0)` — adică „dacă singurul candidat e chiar ce a scris
+    # clientul, nu mai verifica". Avea sens cât blocul doar CURĂȚA gunoiul din zip. Dar nomenclatorul poate spune
+    # că un zip perfect valid SINTACTIC e GREȘIT pentru localitatea aia — iar garda îl împiedica să se pronunțe.
+    # Efect măsurat pe Bonhaus CZ: „797 03" (Prostějov) arată curat, deci era sărit, deși codul real e 796 03;
+    # WPO îl respingea cu IV107 la nesfârșit. Acum sondăm ÎNTOTDEAUNA — corecția se scrie doar dacă nomenclatorul
+    # chiar propune altceva, deci verificarea în plus nu strică nimic.
+    if cands:
         cur = metrics_cursor_live()
         for cand in cands:
             try:
@@ -3016,9 +3022,19 @@ def dpd_intl_sanitize(xc, o, shop_domain, name, country, st=None):
                     # corecție PURĂ de cod poștal (aceeași localitate) → sigură
                     corr["zip"] = _nz
                 elif _nz and _nz != cand and _city_schimbat:
-                    # ⚠️ nomenclatorul propune ȘI altă localitate (ex. „Město Albrechtice" → „Albrechtice",
-                    # două orașe DIFERITE). Nu ghicim orașul clientului: lăsăm comanda la om.
-                    break
+                    # Nomenclatorul propune ȘI altă localitate. Două cazuri COMPLET diferite, separate după NOTĂ:
+                    #  ✅ LEGITIM — satul scris de client APARȚINE comunei propuse („Mizkolezy" → comuna
+                    #     Chvalkovice, „Krupka Maršov" → Krupka). Curierul rutează pe comună+PSČ, satul rămâne
+                    #     în adresă. Nota conține „recunoscut" (match confirmat în RÚIAN).
+                    #  ⛔ GHICIT — fallback „reprezentativ localitate"/„prefix PSČ": nomenclatorul n-a găsit
+                    #     localitatea și propune alta plauzibilă („Město Albrechtice" → „Albrechtice", DOUĂ
+                    #     ORAȘE DIFERITE). Aici NU ghicim orașul clientului — rămâne la om.
+                    _nota = ((nres or {}).get("note") or "")
+                    if "recunoscut" in _nota:
+                        corr["zip"] = _nz
+                        corr["city"] = cnl
+                    else:
+                        break
                 elif cand != z0:
                     corr["zip"] = cand
                 if cnl and _city_schimbat and "zip" in corr:
@@ -3710,6 +3726,35 @@ CRON_GIVEUP_FILE = os.path.join(_HERE_DIR, ".cron_giveup")   # scoasă de CS dar
 def load_cron_held():    return _here_state_load(CRON_HELD_FILE)
 def cron_held_add(n):    _here_state_add(CRON_HELD_FILE, n)
 def load_cron_giveup():  return _here_state_load(CRON_GIVEUP_FILE)
+GIVEUP_RETRY_H = 24   # o comandă abandonată se re-încearcă o dată la atâtea ore (NU „niciodată")
+GIVEUP_TRY_FILE = os.path.join(_HERE_DIR, ".cron_giveup_try")   # ultima re-încercare: "nume<TAB>iso"
+
+
+def _giveup_retry_due(n, hours):
+    """True dacă a trecut fereastra de la ultima re-încercare a unei comenzi abandonate. Fără asta,
+    `giveup` = condamnare pe viață: comanda nu mai e atinsă nici după ce apar reguli care o repară."""
+    import datetime as _dt
+    try:
+        last = {}
+        if os.path.exists(GIVEUP_TRY_FILE):
+            for ln in io.open(GIVEUP_TRY_FILE, encoding="utf-8"):
+                if "\t" in ln:
+                    k, v = ln.rstrip("\n").split("\t", 1); last[k] = v
+        prev = last.get(n)
+        now = _dt.datetime.utcnow()
+        if prev:
+            age = (now - _dt.datetime.fromisoformat(prev[:19])).total_seconds() / 3600.0
+            if age < hours:
+                return False
+        last[n] = now.isoformat()
+        with io.open(GIVEUP_TRY_FILE, "w", encoding="utf-8") as f:
+            for k, v in last.items():
+                f.write("%s\t%s\n" % (k, v))
+        return True
+    except Exception:
+        return False
+
+
 def cron_giveup_add(n):  _here_state_add(CRON_GIVEUP_FILE, n)
 
 # HELD SWEEP: cronul de fulfill re-trece periodic peste comenzile pe care LE-A pus pe HOLD (bad-address /
@@ -6180,6 +6225,7 @@ def cmd_fulfill(a):
         ready = fixable = hard = had_awb = noxc = made = fixed = failed = team_n = infl = here_ready = held_n = swap_n = 0
         already_shipped_n = 0   # comenzi cu tracking dar fulfillment anulat → NU re-expediez (gardă anti-dublă-expediere)
         dup_keep = dup_cancel = dup_shipped = dup_unknown = dup_untag = blocked = dup_hold = 0
+        giveup_n = giveup_retry_n = 0   # comenzi „abandonate": câte am sărit și câte am re-încercat
         bad_addr = []   # bad-address (hard sau curier-respins-permanent) → HOLD la finalul magazinului
         awb_fail_reason = {}   # name -> motiv HOLD specific (awb-esec-repetat după 3 ture), altfel bad-address
         shop_block = blocklist.get(sh["shopDomain"], set())
@@ -6241,7 +6287,16 @@ def cmd_fulfill(a):
             # pe hold (bad-address) dar a REAPĂRUT în unfulfilled = CS a scos-o de pe hold → o girează → AWB DIRECT
             # (fără re-validare/dedup). Pică → giveup (CS manual, nu re-hold, fără buclă).
             if name in cron_giveup:
-                continue
+                # GAURĂ NEAGRĂ REPARATĂ 2026-08-18: înainte era `continue` GOL — fără contor, fără log, fără
+                # nicio urmă. O comandă ajunsă aici dispărea din TOATE rezumatele, ca și cum n-ar fi existat.
+                # Măsurat pe Bonhaus CZ: 29 de comenzi „invizibile" — cronul le vedea în `unf`, dar rezumatul
+                # raporta doar 7 din 36. Nimeni n-avea cum să afle: nici log, nici event, nici cifră.
+                # Acum se NUMĂRĂ (apare în rezumat) și se re-încearcă periodic: `giveup` înseamnă „nu la
+                # fiecare tură", NU „niciodată" — altfel orice regulă nouă e cod mort pentru backlogul vechi.
+                giveup_n += 1
+                if not _giveup_retry_due(name, GIVEUP_RETRY_H):
+                    continue
+                giveup_retry_n += 1   # a trecut fereastra → mai încercăm o dată cu regulile de AZI
             if name in cron_held:
                 if a.apply:
                     okr, _perm, _hr = _do_awb(xc, sh, st, cons, con, name, o, a.notify)
@@ -6543,8 +6598,8 @@ def cmd_fulfill(a):
         for bn in set(bad_addr):
             hold_and_log(st, sh["shopDomain"], bn, awb_fail_reason.get(bn, "bad-address"), a.apply)
             if a.apply: cron_held_add(bn)
-        print("  %s — unfulfilled >%dmin: AWB %d gata + %d via-HERE + %d corectabile + %d grele→CS  ·  DUP: %d păstrate, %d de-anulat(identice), %d diferite→HOLD, %d plecate(protejate), %d fără-client, %d netag-uite→CS  ·  CS/draft (AWB fără dedup): %d · influencer-skip: %d · blocklist: %d  (aveau AWB %d, fără xc %d, deja-expediat-fulfillment-anulat %d)"
-              % (sh["shopDomain"], max_age, ready, here_ready, fixable, hard, dup_keep, dup_cancel, dup_hold, dup_shipped, dup_unknown, dup_untag, team_n, infl, blocked, had_awb, noxc, already_shipped_n))
+        print("  %s — unfulfilled >%dmin: AWB %d gata + %d via-HERE + %d corectabile + %d grele→CS  ·  DUP: %d păstrate, %d de-anulat(identice), %d diferite→HOLD, %d plecate(protejate), %d fără-client, %d netag-uite→CS  ·  CS/draft (AWB fără dedup): %d · influencer-skip: %d · blocklist: %d · abandonate-sarite: %d (re-incercate %d)  (aveau AWB %d, fără xc %d, deja-expediat-fulfillment-anulat %d)"
+              % (sh["shopDomain"], max_age, ready, here_ready, fixable, hard, dup_keep, dup_cancel, dup_hold, dup_shipped, dup_unknown, dup_untag, team_n, infl, blocked, giveup_n, giveup_retry_n, had_awb, noxc, already_shipped_n))
         if held_n:
             print("  ⏸️ %d magazii Grandia pe HOLD" % held_n)
         if swap_n:
