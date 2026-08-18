@@ -169,6 +169,89 @@ def check_awbprint(rows, ctx):
     cx.close()
 
 
+AWB_EVENT_LOG = "/root/Scripturi/logs/xc_awb_events.jsonl"
+# Praguri pe FEREASTRA ORARĂ de până acum (vezi mai jos), calibrate pe 7 zile reale de trafic:
+# Praguri CALIBRATE prin backtest pe 9 zile reale (nu ghicite). Cu 5/2 și fără condiția de consistență
+# dădea 3 fals pozitive de weekend: Rossi și Covoria aveau 0 AWB la 09:15, dar 8 pe toată ziua — magazine
+# de 8-18 AWB/zi, la care „0 dimineața" e variație normală, nu defect.
+AWB_BASE_CRIT = 20   # doar magazine cu volum mare: la ele 0 la ora asta e imposibil să fie întâmplare
+AWB_BASE_WARN = 5
+AWB_MIN_DAYS  = 6    # ...ȘI să fi produs în ≥6 din ultimele 7 zile (consistență, nu doar medie)
+
+
+def check_awb_output(rows, ctx):
+    """AWB-uri PRODUSE per magazin — golul care a lăsat incidentul din 2026-08-18 să treacă neobservat.
+
+    Ce s-a întâmplat: o comandă cu `address1` NULL arunca TypeError în mijlocul buclei de `fulfill` și
+    omora restul rulării magazinului. Esteban, Apreciat, Reduceri Bune și Ofertele Zilei au făcut ÎMPREUNĂ
+    414 AWB-uri într-o zi și **0** a doua zi. Watchdog-ul zicea totul verde: `awbprint.sync` și
+    `awbprint.orders` măsoară COMENZI CARE INTRĂ, nu ETICHETE CARE IES. Logul agregat al cronului scria
+    „AWB=15 · magazine=23", adică sănătos. Nimeni n-a aflat până n-a întrebat un om.
+
+    CUM compar (important): NU ziua întreagă față de media zilnică — `data_health` rulează la 09:15, când
+    ziua abia a început, deci orice prag pe total ar tăcea exact când e nevoie de el. Compar **aceeași
+    fereastră orară**: AWB-urile de azi până la ora curentă vs media AWB-urilor din ultimele 7 zile
+    până la ACEEAȘI oră. Măsurat pe date reale: până la 09:15 Esteban are mereu între 96 (duminica) și
+    632 (marți) — un 0 la ora aia nu e „zi liniștită", e cron mort.
+    """
+    if not os.path.exists(AWB_EVENT_LOG):
+        rows.append((WARN, "awb.output", "lipsește %s" % AWB_EVENT_LOG)); return
+
+    import json as _json
+    from collections import defaultdict
+    from datetime import timedelta
+
+    now = datetime.now()                 # logul scrie timestamp LOCAL naiv → compar tot în local
+    hhmm = now.strftime("%H:%M")
+    today = now.date().isoformat()
+    hist_days = [(now.date() - timedelta(days=i)).isoformat() for i in range(1, 8)]
+    keep = set(hist_days) | {today}
+
+    win = defaultdict(lambda: defaultdict(int))   # magazin -> zi -> AWB până la ora curentă
+    with open(AWB_EVENT_LOG, "rb") as f:
+        try:
+            f.seek(-12_000_000, os.SEEK_END); f.readline()   # doar coada; 8 zile încap lejer
+        except OSError:
+            f.seek(0)
+        for raw in f:
+            try:
+                d = _json.loads(raw.decode("utf-8", "replace"))
+            except Exception:
+                continue
+            if d.get("kind") != "awb" or d.get("result") != "ok":
+                continue
+            ts = d.get("ts") or ""
+            if ts[:10] in keep and ts[11:16] <= hhmm:        # ← fereastra orară
+                win[(d.get("store") or "?").split(".")[0]][ts[:10]] += 1
+
+    if not win:
+        rows.append((CRIT, "awb.output", "niciun AWB în ultimele 8 zile — cronul de AWB e mort complet"))
+        return
+
+    live = tot_today = 0
+    for store, byday in sorted(win.items()):
+        vals = [byday.get(d, 0) for d in hist_days]
+        base = sum(vals) / 7.0
+        nz = sum(1 for v in vals if v > 0)      # în câte din cele 7 zile a produs până la ora asta
+        n = byday.get(today, 0)
+        tot_today += n
+        if n:
+            live += 1
+        if n == 0 and base >= AWB_BASE_CRIT and nz >= AWB_MIN_DAYS:
+            rows.append((CRIT, "awb.%s" % store[:16],
+                         "0 AWB azi până la %s, dar media ultimelor 7 zile la aceeași oră = %.0f "
+                         "(a produs în %d/7 zile) → cronul acestui magazin nu mai produce" % (hhmm, base, nz)))
+        elif n == 0 and base >= AWB_BASE_WARN and nz == 7:
+            rows.append((WARN, "awb.%s" % store[:16],
+                         "0 AWB azi până la %s (media 7 zile la aceeași oră = %.1f, a produs în toate cele "
+                         "7 zile) — magazin mic, poate fi doar o dimineață liniștită" % (hhmm, base)))
+        elif base >= 20 and n < base * 0.25:
+            rows.append((WARN, "awb.%s" % store[:16],
+                         "doar %d AWB azi până la %s vs media %.0f (sub 25%%)" % (n, hhmm, base)))
+    rows.append((OK, "awb.output", "%d AWB azi până la %s, pe %d magazine active (din %d cu istoric)"
+                 % (tot_today, hhmm, live, len(win))))
+
+
 def check_profitdb(rows, ctx):
     """Motorul de profit + calea de marketing token-independentă (WMS)."""
     if not os.path.exists(PF_DB):
@@ -248,7 +331,7 @@ def main():
 
     rows = []
     ctx = {}  # check_metrics populează cache_fresh înainte ca check_profitdb să-l citească
-    for fn in (check_metrics, check_awbprint, check_profitdb, check_heartbeats):
+    for fn in (check_metrics, check_awbprint, check_awb_output, check_profitdb, check_heartbeats):
         try:
             fn(rows, ctx)
         except Exception as e:
