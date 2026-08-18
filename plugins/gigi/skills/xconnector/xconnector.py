@@ -3726,6 +3726,35 @@ CRON_GIVEUP_FILE = os.path.join(_HERE_DIR, ".cron_giveup")   # scoasă de CS dar
 def load_cron_held():    return _here_state_load(CRON_HELD_FILE)
 def cron_held_add(n):    _here_state_add(CRON_HELD_FILE, n)
 def load_cron_giveup():  return _here_state_load(CRON_GIVEUP_FILE)
+REPAIR_RETRY_H = 12   # orice reparație (email/nume/telefon) se re-încearcă după atâtea ore
+
+def _repair_due(marker_set, adder, name, hours=REPAIR_RETRY_H):
+    """A TREIA oară aceeași boală în ziua asta: markerele de reparație erau „o dată pe VIAȚĂ".
+    O comandă reparată o dată nu mai era atinsă NICIODATĂ — nici când reparația eșuase, nici după ce
+    apăreau reguli noi. Măsurat: `.intl_sanitized` sărea 22/28 comenzi CZ, `.cron_giveup` ascundea 29,
+    iar `.intl_email_synth` bloca TOATE cele 10 comenzi rămase pe eroarea de email.
+    Acum markerul e o FEREASTRĂ: reîncearcă după `hours`. Reparațiile sunt idempotente (nu scriu dacă
+    n-au ce schimba), deci re-încercarea nu costă decât un apel.
+    Marker fizic: „nume@ISO" în același fișier — retro-compatibil cu intrările vechi (fără @)."""
+    import datetime as _dt
+    now = _dt.datetime.utcnow()
+    for entry in list(marker_set):
+        if entry == name:                      # intrare VECHE (fără timestamp) → o tratăm ca expirată
+            marker_set.discard(entry)
+            break
+        if entry.startswith(name + "@"):
+            try:
+                age = (now - _dt.datetime.fromisoformat(entry.split("@", 1)[1][:19])).total_seconds() / 3600.0
+            except Exception:
+                age = 1e9
+            if age < hours:
+                return False
+            marker_set.discard(entry)
+            break
+    adder("%s@%s" % (name, now.isoformat()))
+    return True
+
+
 GIVEUP_RETRY_H = 24   # o comandă abandonată se re-încearcă o dată la atâtea ore (NU „niciodată")
 GIVEUP_TRY_FILE = os.path.join(_HERE_DIR, ".cron_giveup_try")   # ultima re-încercare: "nume<TAB>iso"
 
@@ -5769,9 +5798,8 @@ def _do_awb(xc, sh, st, cons, con, name, o, notify):
     # re-sync xConnector; setarea acum nu apucă să propage). Rulează CHIAR dacă a fost sanitizată (gardă PROPRIE
     # `_intl_email_synthed`, separată de `_intl_sanitized`). Doar dacă n-are email real (`_order_has_email` pe note-attr
     # NEredactat → NU suprascriem email real). CONFIRMAT: CZ89078/CZ89054 UNFULFILLED→FULFILLED.
-    if _ctry and name not in _intl_email_synthed() and \
-       ("email" in msg.lower() or "id_or_client_name" in msg.lower() or "recipient" in msg.lower()):
-        intl_email_synthed_add(name)
+    if _ctry and ("email" in msg.lower() or "id_or_client_name" in msg.lower() or "recipient" in msg.lower()) \
+       and _repair_due(_intl_email_synthed(), intl_email_synthed_add, name):
         try:
             if st and st.get("adminToken") and not _order_has_email(st["shopDomain"], st["adminToken"], name):
                 ph = "awb-%s@arona.ro" % (re.sub(r"[^a-z0-9]", "", (name or "x").lower())[:24] or "x")
@@ -5783,8 +5811,8 @@ def _do_awb(xc, sh, st, cons, con, name, o, notify):
     # NUME cu UN SINGUR cuvant -> DPD respinge (`client_name_validator.invalid-name`, "cel putin 2 cuvinte").
     # REGULA owner: pune numele de doua ori. Scriem in Shopify (sursa pe care o citeste xConnector) si reincercam
     # pe loc; daca xConnector n-a resincronizat inca, tura urmatoare il prinde. O SINGURA incercare per comanda.
-    if name not in _name_fixed() and ("client_name_validator" in msg or "receiver.name" in msg):
-        name_fixed_add(name)
+    if ("client_name_validator" in msg or "receiver.name" in msg) \
+       and _repair_due(_name_fixed(), name_fixed_add, name):
         try:
             if st and st.get("adminToken"):
                 gid, cur = shopify_order_address(st["shopDomain"], st["adminToken"], name)
