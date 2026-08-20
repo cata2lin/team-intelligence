@@ -40,12 +40,32 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
+# Consolele CS sunt Windows cp1252 — fara asta, ✓/✗/⊘ dau UnicodeEncodeError
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 
 # ─────────────────────────── credențiale (KB / env) ───────────────────────────
 
 def _kb_path():
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "..", "..", "..", "core", "scripts", "kb.py")
+    # Layout git: plugins/gigi/skills/awb-track -> plugins/core/scripts/kb.py
+    here = os.path.dirname(os.path.abspath(__file__))
+    p = os.path.join(here, "..", "..", "..", "core", "scripts", "kb.py")
+    if os.path.exists(p):
+        return p
+    # Layout cache plugin instalat: team-intelligence/gigi/<hash>/skills/awb-track
+    # -> team-intelligence/core/<hash>/scripts/kb.py (hash-ul core poate diferi)
+    ti = os.path.abspath(os.path.join(here, "..", "..", "..", ".."))
+    core = os.path.join(ti, "core")
+    if os.path.isdir(core):
+        for h in sorted(os.listdir(core), reverse=True):
+            cand = os.path.join(core, h, "scripts", "kb.py")
+            if os.path.exists(cand):
+                return cand
+    return p
 
 
 def load_creds():
