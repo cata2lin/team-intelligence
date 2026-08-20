@@ -34,7 +34,7 @@ Monedă = **moneda magazinului** (PLN/CZK/RON), geo = piața, limbă = a pieței
 ## 6. Enable + scalare
 Enable Brand Search **DUPĂ** ce conversia e confirmată salvată. După **15-30 conversii** → `set-tcpa` la target (deals ~8-20, parfumuri ~15). NU umbla zilnic (fiecare schimbare de bidding resetează learning 1-2 săpt).
 
-## ⚠️ Gotcha-uri v21 / interfață
+## ⚠️ Gotcha-uri v22 / interfață
 - Campania cere `containsEuPoliticalAdvertising = DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING` (altfel reject).
 - `businessName` **NU** e câmp valid pe `responsiveSearchAd` (dropează-l).
 - `gads.py set-budget --daily N` (NU `--budget`); micros currency-agnostic (valoare×1e6 în moneda contului).

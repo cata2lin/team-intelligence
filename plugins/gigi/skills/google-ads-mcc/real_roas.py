@@ -87,7 +87,7 @@ def main():
         return None
 
     def gads(cid):
-        rr = requests.post(f"https://googleads.googleapis.com/v21/customers/{cid}/googleAds:searchStream", headers=GH,
+        rr = requests.post(f"https://googleads.googleapis.com/v22/customers/{cid}/googleAds:searchStream", headers=GH,
                            json={"query": f"SELECT metrics.cost_micros, metrics.conversions, metrics.conversions_value FROM customer WHERE segments.date DURING {DUR}"}, timeout=60).json()
         rows = [x for ch in rr for x in ch.get("results", [])] if isinstance(rr, list) else []
         if not rows: return (0.0, 0.0, 0.0)

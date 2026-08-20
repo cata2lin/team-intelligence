@@ -8,7 +8,7 @@ relative to DIRARG. Dry-run unless --apply."""
 import os, sys, json, base64
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
-API=os.environ.get("GADS_API_VERSION","v21")
+API=os.environ.get("GADS_API_VERSION","v22")
 CID=os.environ["CIDARG"]; AGID=os.environ["AGARG"]; DIR=os.environ["DIRARG"]
 IMGS=json.loads(os.environ["IMGSARG"])
 AG=f"customers/{CID}/assetGroups/{AGID}"

@@ -14,7 +14,7 @@ import os, sys, json
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
 
-API = "v21"
+API = "v22"
 CID = "7566352958"
 AG  = "customers/7566352958/assetGroups/6570921716"
 

@@ -122,8 +122,8 @@ def main():
     tok = requests.post("https://oauth2.googleapis.com/token", data={"grant_type":"refresh_token","client_id":r["oid"],"client_secret":r["sec"],"refresh_token":r["rt"]}, timeout=20).json()["access_token"]
     MCC = "".join(ch for ch in str(r["mcc"]) if ch.isdigit())
     H = {"Authorization":f"Bearer {tok}","developer-token":r["dev"],"login-customer-id":MCC,"Content-Type":"application/json"}
-    def search(q): return requests.post(f"https://googleads.googleapis.com/v21/customers/{CID}/googleAds:search",headers=H,json={"query":q},timeout=40).json().get("results",[])
-    def mut(svc, ops): return requests.post(f"https://googleads.googleapis.com/v21/customers/{CID}/{svc}:mutate",headers=H,json={"operations":ops,"validateOnly":False},timeout=40)
+    def search(q): return requests.post(f"https://googleads.googleapis.com/v22/customers/{CID}/googleAds:search",headers=H,json={"query":q},timeout=40).json().get("results",[])
+    def mut(svc, ops): return requests.post(f"https://googleads.googleapis.com/v22/customers/{CID}/{svc}:mutate",headers=H,json={"operations":ops,"validateOnly":False},timeout=40)
 
     # ── 0) detectează dacă magazinul ARE COD form (altfel fix-ul nu se aplică) ──
     purl = a.url or resolve_public_url(search)

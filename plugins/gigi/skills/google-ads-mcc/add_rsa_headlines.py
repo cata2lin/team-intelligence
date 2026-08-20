@@ -7,7 +7,7 @@ Updates ad.responsive_search_ad.headlines via ads:mutate (full list replace)."""
 import os, sys, json
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
-API=os.environ.get("GADS_API_VERSION","v21")
+API=os.environ.get("GADS_API_VERSION","v22")
 
 # (cid, ad_id, [the FULL 15-headline list: 12 existing + 3 new])
 RSAS=[

@@ -21,7 +21,7 @@ to track longer. client=GOOGLE_ADS_API are MCC/script changes; WEB/BULK are huma
 import os, sys, argparse, collections
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
-API=os.environ.get("GADS_API_VERSION","v21")
+API=os.environ.get("GADS_API_VERSION","v22")
 
 _PG_OK={"host","port","dbname","user","password","sslmode","sslrootcert","sslcert","sslkey","connect_timeout","application_name","options","channel_binding"}
 def clean(d):

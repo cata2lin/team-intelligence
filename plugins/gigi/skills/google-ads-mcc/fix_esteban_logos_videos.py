@@ -16,7 +16,7 @@ import os, sys, json
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
 
-API = "v21"
+API = "v22"
 CID = "5229815058"
 
 CAMPAIGN_RN = "customers/5229815058/campaigns/23924430848"

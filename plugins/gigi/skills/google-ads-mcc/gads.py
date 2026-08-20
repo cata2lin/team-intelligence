@@ -19,7 +19,7 @@ import argparse, json, os, sys
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
 
-API = "v21"
+API = os.environ.get("GADS_API_VERSION", "v22")
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 _PG_OK = {"host","hostaddr","port","dbname","user","password","sslmode","sslrootcert",
           "sslcert","sslkey","connect_timeout","application_name","options","channel_binding"}
@@ -214,6 +214,19 @@ def main():
     cp.add_argument("--bidding", choices=["maxconv","maxvalue"], default="maxconv",
                     help="cold-start bidding strategy: maxconv=Maximize Conversions (DEFAULT — correct pt cont NOU fără istoric de conversii; value-bidding sufocă & servește 0 impresii la cold-start); maxvalue=Maximize Conversion Value (folosește DOAR dacă ai deja ≥15-30 conversii cu valoare)")
     cp.add_argument("--apply", action="store_true"); cp.add_argument("--mcc")
+    # NOTE: campaniile VIDEO nu se pot CREA prin API (Google: OPERATION_NOT_PERMITTED_FOR_CONTEXT pe orice
+    # strategie de licitare, chiar și campanie goală) → Video = UI-only. Demand Gen ACOPERĂ YouTube
+    # (in-feed/in-stream/Shorts) + Discover + Gmail și SE poate crea prin API → folosește create-demandgen.
+    cdg=sub.add_parser("create-demandgen", help="create a PAUSED Demand Gen campaign atomically (budget+campaign DEMAND_GEN+adGroup cu channel controls + audience-grouped; geo/lang ca pas 2 la --apply). Rulează pe v25 (channel controls necesită v25). Cu --channels instream = DOAR YouTube in-stream (echivalentul unei campanii Video prin API). Creative se atașează după cu attach_videos.py. (dry-run unless --apply)")
+    cdg.add_argument("--customer", required=True)
+    cdg.add_argument("--name", required=True, help="campaign name")
+    cdg.add_argument("--budget", required=True, type=float, help="daily budget, account currency")
+    cdg.add_argument("--geo", required=True, help="geoTargetConstant id, e.g. 2642 Romania")
+    cdg.add_argument("--lang", required=True, help="languageConstant id, e.g. 1032 Romanian")
+    cdg.add_argument("--tcpa", type=float, help="target CPA (account currency) la creare — Demand Gen acceptă targetCpa direct; fără = Maximize Conversions (cold-start)")
+    cdg.add_argument("--channels", choices=["all","instream","youtube"], default="all",
+                     help="suprafețe (channel controls, v25): all=toate (default, Google alege); instream=DOAR YouTube in-stream; youtube=in-stream+in-feed+Shorts (fără Discover/Gmail/Display)")
+    cdg.add_argument("--apply", action="store_true"); cdg.add_argument("--mcc")
     args=ap.parse_args()
 
     if args.cmd=="report":
@@ -436,6 +449,58 @@ def main():
                 rres=v.get("resourceName","")
                 if "/campaigns/" in rres and "Budget" not in k and "Criteri" not in k: print(f"  CAMPAIGN: {rres}")
                 if "/assetGroups/" in rres and "ListingGroup" not in k: print(f"  ASSET GROUP: {rres}")
+    elif args.cmd=="create-demandgen":
+        c=get_connection(args.mcc); tok=access_token(c)
+        cid=_digits(args.customer)
+        rn=lambda n: f"customers/{cid}/{n}"
+        # v25 e OBLIGATORIU aici: channel controls (in-stream) NU există în v22 (probat: pică validateOnly).
+        # tCPA la creare = câmpul standalone `targetCpa` (NU maximizeConversions.targetCpaMicros — ăla dă
+        # OPERATION_NOT_PERMITTED). geo/language = PAS 2 pe campania reală (criterion cu campanie temp pică).
+        DG_API="v25"
+        url=f"https://googleads.googleapis.com/{DG_API}/customers/{cid}/googleAds:mutate"
+        bid = {"targetCpa":{"targetCpaMicros":str(int(round(args.tcpa*1e6)))}} if args.tcpa else {"maximizeConversions":{}}
+        camp={"resourceName":rn("campaigns/-2"),"name":args.name,"status":"PAUSED",
+              "advertisingChannelType":"DEMAND_GEN","campaignBudget":rn("campaignBudgets/-1"),**bid,
+              "containsEuPoliticalAdvertising":"DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING"}
+        # audienceSetting.useAudienceGrouped e IMMUTABLE → trebuie setat la creare ca să poți atașa Audience după.
+        ag={"resourceName":rn("adGroups/-3"),"name":args.name,"campaign":rn("campaigns/-2"),"status":"ENABLED",
+            "audienceSetting":{"useAudienceGrouped":True}}
+        if args.channels!="all":
+            yt = args.channels=="youtube"
+            ag["demandGenAdGroupSettings"]={"channelControls":{"selectedChannels":{
+                "youtubeInStream":True,"youtubeInFeed":yt,"youtubeShorts":yt,
+                "discover":False,"gmail":False,"display":False,"maps":False}}}
+        ops=[
+         {"campaignBudgetOperation":{"create":{"resourceName":rn("campaignBudgets/-1"),
+            "amountMicros":str(int(round(args.budget*1e6))),"deliveryMethod":"STANDARD","explicitlyShared":False}}},
+         {"campaignOperation":{"create":camp}},
+         {"adGroupOperation":{"create":ag}},
+        ]
+        r=requests.post(url, headers=_headers(c,tok), json={"mutateOperations":ops,"validateOnly":(not args.apply)}, timeout=90)
+        if r.status_code!=200: sys.exit(f"Google Ads API {r.status_code}: {r.text[:900]}")
+        _bl = f"target CPA {args.tcpa}" if args.tcpa else "Maximize Conversions (cold-start)"
+        _ch = {"all":"toate suprafețele","instream":"DOAR YouTube in-stream","youtube":"YouTube in-stream+in-feed+Shorts"}[args.channels]
+        print(("APLICAT" if args.apply else "DRY-RUN (validateOnly) — adaugă --apply ca să creezi campania"))
+        print(f"  Demand Gen „{args.name}\" (PAUSED, {DG_API}) pe {cid} | buget {args.budget}/zi | {_bl} | {_ch}")
+        camp_rn=""
+        for x in r.json().get("mutateOperationResponses",[]):
+            for k,v in x.items():
+                rres=v.get("resourceName","")
+                if "/campaigns/" in rres and "Budget" not in k and "Criteri" not in k:
+                    camp_rn=rres; print(f"  CAMPAIGN: {rres}")
+                if "/adGroups/" in rres and "Criteri" not in k and "Ad" not in k: print(f"  AD GROUP: {rres}")
+        # PAS 2 (doar la --apply, pe campania reală): geo + language ca campaignCriterion
+        if args.apply and camp_rn:
+            crit=[{"campaignCriterionOperation":{"create":{"campaign":camp_rn,
+                     "location":{"geoTargetConstant":f"geoTargetConstants/{_digits(args.geo)}"}}}},
+                  {"campaignCriterionOperation":{"create":{"campaign":camp_rn,
+                     "language":{"languageConstant":f"languageConstants/{_digits(args.lang)}"}}}}]
+            r2=requests.post(url, headers=_headers(c,tok), json={"mutateOperations":crit,"validateOnly":False}, timeout=60)
+            if r2.status_code==200: print(f"  ✓ geo {args.geo} + lang {args.lang} adăugate")
+            else: print(f"  ⚠️ geo/lang NU s-au adăugat ({r2.status_code}) — setează-le în UI: {r2.text[:200]}")
+        else:
+            print(f"  (la --apply: geo {args.geo} + lang {args.lang} se adaugă ca pas 2)")
+        print("  ⚠️ skeleton fără creative — atașează video YouTube (attach_videos.py) + logo/imagini + text (v25: videos & logo OBLIGATORII pe DemandGenVideoResponsiveAd); apoi enable.")
 
 if __name__=="__main__":
     main()

@@ -7,7 +7,7 @@ ad strength + ad rank at once. Dry-run by default; --apply to execute. CIDARG se
 import os, sys, json
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
-API=os.environ.get("GADS_API_VERSION","v21")
+API=os.environ.get("GADS_API_VERSION","v22")
 CID=os.environ.get("CIDARG","")
 
 DATA = {
