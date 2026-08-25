@@ -77,15 +77,43 @@ def db_open(path):
 def fetch(store, days, vat):
     cx = awb_conn()
     with cx.cursor() as c:
-        c.execute("""SELECT o.id, o.customer_email, o.total_price, o.currency, o.frisbo_created_at, o.aggregated_status
+        c.execute("""SELECT o.id, o.customer_email, o.total_price, o.currency, o.frisbo_created_at, o.aggregated_status, o.order_number
             FROM orders o JOIN stores s ON s.uid=o.store_uid
             WHERE s.name ILIKE %s AND o.customer_email<>'' AND o.customer_email IS NOT NULL
               AND o.total_price>0 AND o.frisbo_created_at >= CURRENT_DATE - %s
             ORDER BY o.frisbo_created_at""", [f"%{store}%", days])
         rows = c.fetchall()
     return [dict(orderId=str(oid), email=sha(email), value=round(float(price)/vat,2), currency=(cur_ or "RON"),
-                 ts=created.strftime("%Y-%m-%dT%H:%M:%S+03:00"), status=status)
-            for oid,email,price,cur_,created,status in rows]
+                 ts=created.strftime("%Y-%m-%dT%H:%M:%S+03:00"), status=status, order_number=(onum or ""))
+            for oid,email,price,cur_,created,status,onum in rows]
+
+def gclid_lookup(prefix, days):
+    """{order_name -> (idtype, value)} din Shopify customAttributes (gclid capturat de gclid_capture.py).
+    gclid = click-id direct → rată de potrivire mult mai bună decât email-hash."""
+    import importlib.util
+    here = os.path.dirname(os.path.abspath(__file__))
+    if not os.getenv("KB_PY") and os.path.exists(os.path.join(here, "kb.py")):
+        os.environ["KB_PY"] = os.path.join(here, "kb.py")  # shopify_gql._find_kb() pe VPS
+    sgp = os.path.join(here, "shopify_gql.py")
+    spec = importlib.util.spec_from_file_location("shopify_gql", sgp)
+    sg = importlib.util.module_from_spec(spec)
+    _a = sys.argv; sys.argv = ["shopify_gql"]; spec.loader.exec_module(sg); sys.argv = _a
+    shop, tok = sg.resolve_store(prefix)
+    since = (dt.date.today() - dt.timedelta(days=days)).isoformat()
+    Q = ('query($after:String){ orders(first:250, after:$after, sortKey:CREATED_AT, reverse:true, '
+         'query:"created_at:>%s"){ pageInfo{hasNextPage endCursor} '
+         'nodes{ name customAttributes{key value} } } }') % since
+    out = {}; after = None
+    while True:                                   # paginate — nu trunchia la 250
+        conn = sg.gql(shop, tok, Q, {"after": after}).get("data", {}).get("orders", {})
+        for o in conn.get("nodes", []) or []:
+            m = {x["key"].lower(): (x.get("value") or "").strip() for x in (o.get("customAttributes") or [])}
+            for k in ("gclid", "gbraid", "wbraid"):
+                if m.get(k): out[o["name"]] = (k, m[k]); break
+        pi = conn.get("pageInfo", {}) or {}
+        if not pi.get("hasNextPage"): break
+        after = pi.get("endCursor")
+    return out
 
 def chunks(x, n=2000):
     for i in range(0, len(x), n): yield x[i:i+n]
@@ -100,6 +128,7 @@ def main():
     ap.add_argument("--marker-db", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "gads_uploaded.sqlite"))
     ap.add_argument("--limit", type=int, default=0); ap.add_argument("--apply", action="store_true")
     ap.add_argument("--validate-only", action="store_true", help="trimite validateOnly:true (testează fără a scrie)")
+    ap.add_argument("--gclid-prefix", default=None, help="prefix Shopify (ex GRAN) → adaugă adIdentifiers.gclid pe lângă email-hash (rată de potrivire mai mare)")
     a = ap.parse_args()
 
     orders = fetch(a.store, a.days, a.vat)
@@ -110,17 +139,32 @@ def main():
         fresh = [o for o in orders if o["status"] not in TERMINAL_NEG and o["orderId"] not in done]
     if a.limit: fresh = fresh[:a.limit]
 
+    gcov = 0
+    if a.gclid_prefix and fresh:
+        try:
+            gl = gclid_lookup(a.gclid_prefix, a.days + 2)   # +2z tampon: comanda plasată înainte de livrare
+            for o in fresh:
+                o["gclid"] = gl.get(o["order_number"])
+                if o.get("gclid"): gcov += 1
+        except Exception as e:
+            print(f"  ⚠️ gclid lookup a eșuat ({e}) — continui doar cu email-hash")
+
     digits = lambda s: "".join(ch for ch in str(s) if ch.isdigit())
     dest = {"operatingAccount":{"accountType":"GOOGLE_ADS","accountId":digits(a.customer)},
             "productDestinationId":a.conversion_action}
     if a.login_customer:  # doar dacă accesezi prin MCC; OMITE pt acces direct (ex Grandia)
         dest["loginAccount"]={"accountType":"GOOGLE_ADS","accountId":digits(a.login_customer)}
-    def ev(o): return {"eventTimestamp":o["ts"], "transactionId":o["orderId"],
-                       "conversionValue":o["value"], "currency":o["currency"], "eventSource":"WEB",
-                       "userData":{"userIdentifiers":[{"emailAddress":o["email"]}]}}
+    def ev(o):
+        e = {"eventTimestamp":o["ts"], "transactionId":o["orderId"],
+             "conversionValue":o["value"], "currency":o["currency"], "eventSource":"WEB",
+             "userData":{"userIdentifiers":[{"emailAddress":o["email"]}]}}
+        g = o.get("gclid")
+        if g: e["adIdentifiers"] = {g[0]: g[1]}   # gclid/gbraid/wbraid — Google potrivește pe el întâi, email fallback
+        return e
 
     print(f"=== Data Manager ingest [{a.mode}] — {a.store} → {digits(a.customer)}/conv {a.conversion_action} · {a.days}z ===")
-    print(f"candidați: {len(fresh)} | valoare ex-TVA: {sum(o['value'] for o in fresh):,.0f} RON")
+    print(f"candidați: {len(fresh)} | valoare ex-TVA: {sum(o['value'] for o in fresh):,.0f} RON"
+          + (f" | gclid: {gcov}/{len(fresh)} ({100*gcov//max(1,len(fresh))}%)" if a.gclid_prefix else ""))
     if fresh:
         s=fresh[0]; print(f"  sample event: order={s['orderId']} val={s['value']} ts={s['ts']} status={s['status']} email={s['email'][:10]}…")
     if not a.apply:
