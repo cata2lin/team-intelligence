@@ -18,13 +18,13 @@ Calculează profitul **NET** (nu brut) pe linie de business, cu metodologia cano
 **NET = (venit_livrat − COGS − transport) / 1,21 − marketing.** Compară implicit **HA** (SKU `HA-*`)
 cu **Grandia** (prefix `GRAN`), dar `--prefixes` acceptă orice magazin (EST, GT, OFER…).
 
-## Auth (secrete în KB, nu se printează)
-```bash
-KB=~/.claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py
-export PROFIT_SSH_HOST="$(uv run "$KB" secret-get PROFIT_SSH_HOST)"
-export PROFIT_SSH_USER="$(uv run "$KB" secret-get PROFIT_SSH_USER)"
-export PROFIT_SSH_PASS="$(uv run "$KB" secret-get PROFIT_SSH_PASS)"
-```
+## Auth (nimic de exportat)
+Autentificarea SSH vine din helper-ul partajat `core/scripts/arona_ssh.py`: **cheie întâi**
+(`PROFIT_SSH_KEY` sau `~/.ssh/id_ed25519`), apoi `ssh-agent`, parola doar ca ultim resort.
+VPS-ul acceptă **doar `publickey`**, deci exportul manual de `PROFIT_SSH_PASS` nu mai e necesar
+(și nici suficient). Dacă nu ai cheia pe mașină, eroarea îți spune ce s-a încercat și ce acceptă
+serverul — pune cheia publică în `~root/.ssh/authorized_keys` pe VPS sau setează
+`PROFIT_SSH_KEY=/cale/spre/cheia_privata`.
 
 ## Usage
 ```bash

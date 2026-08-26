@@ -114,7 +114,77 @@ PREFIX_BRAND = {
     "APR": "Apreciat", "RED": "Reduceri bune", "GEN": "Gento", "PAT": "Ce Pat Ai", "ROSSI": "Rossi Nails",
     "BON": "Bonhaus", "CZ": "Bonhaus CZ", "PL": "Bonhaus PL", "BG": "Bonhaus BG", "BONBG": "Bonhaus BG",
     "LUX": "Nocturna Lux",
+    # lipseau, desi au comenzi reale in profit_orders (masurat 26-aug-2026, tot istoricul):
+    "LAB": "Lab Noir",   # 3.145 comenzi; brand real in metrics (slug lab-noir)
+    "DUPBG": "Duppo BG",  # 31 comenzi; NU are brand in metrics -> nu primeste judet la join
+    # ⚠️ inca lipsesc (fara brand sigur in metrics, nu ghicim): SK 181, ORC 160, HU 132, MD 45.
+    # ⚠️ "Bonhaus BG" apare pe DOUA prefixe (BG si BONBG), iar tabelele nu sunt de acord ce e BG:
+    #    aici + fulfillment_analytics.PREFIX_TO_STORE zic bonhaus.bg, PREFIX_AWB_DOMAIN si
+    #    deliverability_monitor.PREFIX_TO_SLUG zic nocturna.bg. Pana se lamureste, `brand_aliases()`
+    #    marcheaza "bonhaus bg" drept AMBIGUU si cere prefixul explicit (BG 2.496 / BONBG 27.445).
 }
+
+# ---- alias brand -> PREFIX (ce tastezi in CLI: "esteban", "Lab Noir", "casaofertelor.ro" -> EST/LAB/BON) ----
+def alias_key(s: str) -> str:
+    """Cheie de potrivire: lower, fara diacritice, doar alfanumerice — asa "George Talent",
+    "george-talent" si "georgetalent.ro" cad pe aceeasi cheie."""
+    import unicodedata
+    s = unicodedata.normalize("NFD", (s or "").strip().lower())
+    return "".join(ch for ch in s if ch.isalnum())
+
+
+def brand_aliases(extra: dict = None) -> dict:
+    """{cheie: prefix} din tabelele CANONICE (PREFIX_BRAND + PREFIX_AWB_DOMAIN + prefixul insusi);
+    `extra` = {prefix: nume/slug suplimentare} de la apelant (ex. slug-urile din metrics).
+    O cheie care ar duce la DOUA prefixe primeste None (= ambiguu) si NU se ghiceste: un alias
+    gresit intoarce cifre plauzibile pe alt magazin, ceea ce e mai rau decat lipsa aliasului."""
+    m = {}
+
+    def add(k, pfx):
+        k = alias_key(k)
+        if not k:
+            return
+        if k in m and m[k] != pfx:
+            m[k] = None
+        else:
+            m.setdefault(k, pfx)
+
+    for pfx, name in PREFIX_BRAND.items():
+        add(pfx, pfx); add(name, pfx)
+    for pfx, dom in PREFIX_AWB_DOMAIN.items():
+        add(pfx, pfx); add(dom, pfx)
+        # doar domeniile .ro dau si eticheta scurta: pe "bonhaus.bg"/"bonhaus.cz" prima eticheta
+        # ("bonhaus") e a ALTUI prefix (BON), deci ar strica aliasul corect.
+        if dom.endswith(".ro"):
+            add(dom[:-3], pfx)
+    for pfx, names in (extra or {}).items():
+        add(pfx, pfx)
+        for n in (names if isinstance(names, (list, tuple, set)) else [names]):
+            add(n, pfx)
+    return m
+
+
+def resolve_prefix(arg: str, valid=None, extra: dict = None) -> str:
+    """Argument CLI -> PREFIX. Ridica ValueError cu lista prefixelor valide daca nu recunoaste —
+    NU intoarce 'nimic gasit', fiindca zero randuri arata ca un raspuns valid, nu ca o eroare."""
+    if not arg:
+        return None
+    known = set(valid or []) | set(PREFIX_BRAND) | set(PREFIX_AWB_DOMAIN)
+    up = arg.strip().upper()
+    if up in known:
+        return up
+    m = brand_aliases(extra)
+    hit = m.get(alias_key(arg), "__missing__")
+    if hit == "__missing__":
+        raise ValueError("Brand necunoscut: %r. Prefixe valide: %s (accepta si numele magazinului, "
+                         "ex. 'esteban', 'Lab Noir', 'casaofertelor.ro')." % (arg, ", ".join(sorted(known))))
+    if hit is None:
+        amb = sorted(p for p in known if alias_key(PREFIX_BRAND.get(p, "")) == alias_key(arg)
+                     or alias_key(PREFIX_AWB_DOMAIN.get(p, "")) == alias_key(arg))
+        raise ValueError("Brand AMBIGUU: %r se potriveste cu %s. Foloseste prefixul exact."
+                         % (arg, ", ".join(amb) or "mai multe prefixe"))
+    return hit
+
 
 def prefix_brandid(name2id: dict) -> dict:
     """prefix -> brand_id (metrics), via PREFIX_BRAND + brands(name->id), fallback pe primul cuvânt."""

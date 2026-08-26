@@ -32,10 +32,17 @@ API = "2026-01"
 
 from pathlib import Path as _Path
 _here = _Path(__file__).resolve()
-for _up in range(2, 8):
-    _c = _here.parents[_up] / "core" / "scripts"
-    if (_c / "arona_pg.py").exists():
-        sys.path.insert(0, str(_c)); break
+# GARDA: iteram parents (fara index fix) + layout plugin-cache core/<commit>/scripts
+def _core_scripts(need="arona_pg.py"):
+    h = _Path(__file__).resolve()
+    c = [_Path(os.environ["ARONA_CORE_SCRIPTS"])] if os.environ.get("ARONA_CORE_SCRIPTS") else []
+    for up in h.parents:
+        c += [up / "core" / "scripts", up / "plugins" / "core" / "scripts"] + \
+             (sorted((up / "core").glob("*/scripts")) if (up / "core").is_dir() else [])
+    ok = [x for x in c if (x / need).exists()]
+    return next((x for x in ok if x.parent.name in h.parts), ok[0] if ok else None)
+_cs = _core_scripts()
+if _cs: sys.path.insert(0, str(_cs))
 try:
     import arona_pg as _apg
     def kb_secret(key): return _apg.secret(key)
@@ -43,7 +50,10 @@ except Exception:
     def kb_secret(key):
         v = os.environ.get(key)
         if v: return v
-        for cand in ("kb.py", str(_here.parents[4] / "core" / "scripts" / "kb.py")):
+        _kbdir = _core_scripts("kb.py")           # fara index fix pe parents
+        for cand in ("kb.py", str(_kbdir / "kb.py") if _kbdir else ""):
+            if not cand:
+                continue
             try:
                 out = subprocess.run(["uv","run",cand,"secret-get",key], capture_output=True, text=True)
                 if out.returncode == 0 and out.stdout.strip(): return out.stdout.strip()

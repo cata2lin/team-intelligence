@@ -5,16 +5,30 @@ Kills the most-duplicated code in the marketplace (the audit found `_clean_dsn`
 copy-pasted in ~40 files, plus a per-skill `secret()` wrapper in most). New skills
 should import this instead of re-implementing; existing skills migrate opportunistically.
 
-Drop-in usage from any skill script:
+Drop-in usage from any skill script — RETETA CANONICA de bootstrap (copiaz-o ca atare;
+varianta veche `for up in range(2, 8): here.parents[up]` era o bomba: index fix pe `parents`
+=> IndexError pe fisiere putin adanci, si nu cunostea layout-ul plugin-cache
+`core/<commit12>/scripts`, deci orice import gigi->core murea in instalarea LIVE):
 
-    import sys, os
-    # make core/scripts importable (walk up to the marketplace, like kb.py is found)
-    from pathlib import Path
-    here = Path(__file__).resolve()
-    for up in range(2, 8):
-        cand = here.parents[up] / "core" / "scripts"
-        if (cand / "arona_pg.py").exists():
-            sys.path.insert(0, str(cand)); break
+    # core/scripts in orice layout (clona repo, marketplace, plugin-cache core/<commit>/scripts).
+    # GARDA: iteram parents (fara index fix) si preferam core-ul din ACELASI commit.
+    def _core_scripts(need="arona_pg.py"):
+        from pathlib import Path
+        import os
+        h = Path(__file__).resolve()
+        c = [Path(os.environ["ARONA_CORE_SCRIPTS"])] if os.environ.get("ARONA_CORE_SCRIPTS") else []
+        for up in h.parents:
+            c += [up / "core" / "scripts", up / "plugins" / "core" / "scripts"] + \
+                 (sorted((up / "core").glob("*/scripts")) if (up / "core").is_dir() else [])
+        ok = [x for x in c if (x / need).exists()]
+        return next((x for x in ok if x.parent.name in h.parts), ok[0] if ok else None)
+
+    import sys
+    _cs = _core_scripts()
+    if _cs is None:
+        sys.exit("core/scripts (arona_pg.py) negasit — actualizeaza plugin-urile "
+                 "sau seteaza ARONA_CORE_SCRIPTS=/cale/spre/plugins/core/scripts")
+    sys.path.insert(0, str(_cs))
     import arona_pg
 
     dsn = arona_pg.secret("DATABASE_URL_METRICS")     # env-first, KB fallback
@@ -41,6 +55,30 @@ except Exception:  # pragma: no cover - psycopg2 optional until connect() is use
 _LIBPQ_OK = {"sslmode", "sslrootcert", "sslcert", "sslkey", "connect_timeout", "application_name"}
 
 
+def find_core_scripts(need="arona_pg.py", start=None):
+    """Gaseste directorul `core/scripts` in ORICE layout de instalare, cu garda pe parents.
+
+    Trei layout-uri reale, toate vazute in productie:
+      - clona repo / marketplace : <root>/plugins/core/scripts  sau  <root>/core/scripts
+      - plugin-cache Claude Code : ~/.claude/plugins/cache/team-intelligence/core/<commit12>/scripts
+        (nivelul de commit in plus e motivul pentru care mergea in repo si murea in uz real)
+    `ARONA_CORE_SCRIPTS` bate totul. Cand skill-ul apelant vine din plugin-cache, preferam
+    core-ul din ACELASI commit — altfel legam cod nou de un helper vechi (drift tacut, mai rau
+    decat un crash zgomotos). Intoarce Path sau None; apelantul da eroarea explicita.
+    """
+    here = Path(start or __file__).resolve()
+    cands = []
+    env = os.environ.get("ARONA_CORE_SCRIPTS")
+    if env:
+        cands.append(Path(env))
+    for up in here.parents:                      # GARDA: iteram parents, fara index fix
+        cands += [up / "core" / "scripts", up / "plugins" / "core" / "scripts"]
+        if (up / "core").is_dir():
+            cands += sorted((up / "core").glob("*/scripts"))
+    ok = [c for c in cands if (c / need).exists()]
+    return next((c for c in ok if c.parent.name in here.parts), ok[0] if ok else None)
+
+
 def _kb_path():
     env = os.environ.get("KB_PATH")
     if env and Path(env).exists():
@@ -49,11 +87,8 @@ def _kb_path():
     cand = here.parent / "kb.py"            # we live next to kb.py in core/scripts
     if cand.exists():
         return str(cand)
-    for up in range(1, 7):
-        c = here.parents[up] / "core" / "scripts" / "kb.py"
-        if c.exists():
-            return str(c)
-    return None
+    c = find_core_scripts("kb.py")
+    return str(c / "kb.py") if c else None
 
 
 def secret(key: str) -> str:

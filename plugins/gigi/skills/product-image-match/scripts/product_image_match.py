@@ -43,15 +43,28 @@ Creds:  DATABASE_URL_GRANDIA  (full write)
 # --- shared secret helper (env-first, KB fallback) via core/scripts/arona_pg.py ---
 import os as _os, sys as _sys
 from pathlib import Path as _Path
-_here=_Path(__file__).resolve()
-for _up in range(2,8):
-    _c=_here.parents[_up]/"core"/"scripts"
-    if (_c/"arona_pg.py").exists(): _sys.path.insert(0,str(_c)); break
+# GARDA: iteram parents (fara index fix) si acceptam si layout-ul plugin-cache core/<commit>/scripts
+def _core_scripts(need="arona_pg.py"):
+    h = _Path(__file__).resolve()
+    c = [_Path(_os.environ["ARONA_CORE_SCRIPTS"])] if _os.environ.get("ARONA_CORE_SCRIPTS") else []
+    for up in h.parents:
+        c += [up / "core" / "scripts", up / "plugins" / "core" / "scripts"] + \
+             (sorted((up / "core").glob("*/scripts")) if (up / "core").is_dir() else [])
+    ok = [x for x in c if (x / need).exists()]
+    return next((x for x in ok if x.parent.name in h.parts), ok[0] if ok else None)
+_cs = _core_scripts()
+if _cs: _sys.path.insert(0, str(_cs))
 try:
     import arona_pg as _apg
     _secret=_apg.secret
 except Exception:
-    _secret=lambda k: _os.environ[k]
+    # fallback pe env: lipsa cheii da un mesaj CLAR, nu un KeyError care pare alt bug
+    def _secret(k):
+        v = _os.environ.get(k)
+        if not v:
+            _sys.exit("Lipseste %s (env) si core/scripts/arona_pg.py nu a fost gasit — "
+                      "actualizeaza plugin-urile sau seteaza ARONA_CORE_SCRIPTS." % k)
+        return v
 # --- end helper ---
 import os, re, sys, io, uuid, argparse
 from datetime import datetime

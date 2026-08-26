@@ -31,16 +31,43 @@ import os, sys, subprocess, argparse
 from pathlib import Path
 import psycopg2
 
+# core/scripts in orice layout de instalare (clona repo, marketplace, plugin-cache
+# core/<commit>/scripts). GARDA: iteram parents (fara index fix => fara IndexError) si
+# preferam core-ul din ACELASI commit ca skill-ul.
+def _core_scripts(need="kb.py"):
+    h = Path(__file__).resolve()
+    c = [Path(os.environ["ARONA_CORE_SCRIPTS"])] if os.environ.get("ARONA_CORE_SCRIPTS") else []
+    for up in h.parents:
+        c += [up / "core" / "scripts", up / "plugins" / "core" / "scripts"] + \
+             (sorted((up / "core").glob("*/scripts")) if (up / "core").is_dir() else [])
+    ok = [x for x in c if (x / need).exists()]
+    return next((x for x in ok if x.parent.name in h.parts), ok[0] if ok else None)
+
+
 def _kb():
     env = os.environ.get("KB_PATH")
     if env and Path(env).exists():
         return env
-    here = Path(__file__).resolve()
-    for up in range(3, 8):
-        c = here.parents[up] / "core" / "scripts" / "kb.py"
-        if c.exists():
-            return str(c)
-    raise FileNotFoundError("kb.py not found; set KB_PATH")
+    c = _core_scripts()
+    if c is None:
+        raise FileNotFoundError("kb.py not found; set KB_PATH or ARONA_CORE_SCRIPTS")
+    return str(c / "kb.py")
+
+
+def _ssh_connect():
+    """Helper SSH PARTAJAT (core/scripts/arona_ssh.py): CHEIE intai, apoi ssh-agent, parola
+    doar ca ultim resort — VPS-ul accepta doar `publickey`."""
+    cs = _core_scripts("arona_ssh.py")
+    if cs is None:
+        sys.exit("core/scripts/arona_ssh.py negasit — actualizeaza plugin-urile echipei "
+                 "sau seteaza ARONA_CORE_SCRIPTS=/cale/spre/plugins/core/scripts")
+    if str(cs) not in sys.path:
+        sys.path.insert(0, str(cs))
+    import arona_ssh
+    try:
+        return arona_ssh.connect()
+    except arona_ssh.SSHAuthError as e:
+        sys.exit(str(e))
 
 def secret(key):
     # env-first (works on servers that have the value in their .env / environment, no uv/KB needed),
@@ -698,14 +725,7 @@ for r in p.execute(q):
 """
 
 def _ssh_pull_tsv():
-    import paramiko, io
-    host = secret("PROFIT_SSH_HOST") or "84.46.242.181"
-    user = secret("PROFIT_SSH_USER") or "root"
-    pwd  = secret("PROFIT_SSH_PASS")
-    if not pwd:
-        print("!! PROFIT_SSH_PASS not in secret store"); sys.exit(1)
-    cl = paramiko.SSHClient(); cl.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    cl.connect(host, username=user, password=pwd, timeout=30)
+    cl = _ssh_connect()
     sftp = cl.open_sftp()
     with sftp.open("/tmp/_oo.py", "w") as f:
         f.write(ORDER_OUTCOME_REMOTE)
@@ -826,10 +846,7 @@ def _pull_daily_perf():
            "total_spend,profit,roas,cpa,aov FROM daily_perf")
         return [tuple(r) for r in p.execute(q)]
     # SSH fallback (running off the VPS)
-    import paramiko
-    pwd=secret("PROFIT_SSH_PASS")
-    cli=paramiko.SSHClient(); cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    cli.connect(secret("PROFIT_SSH_HOST") or "84.46.242.181", username=secret("PROFIT_SSH_USER") or "root", password=pwd, timeout=30)
+    cli=_ssh_connect()
     sftp=cli.open_sftp()
     with sftp.open("/tmp/_dpp.py","w") as f: f.write(DAILY_PERF_REMOTE)
     sftp.close()
@@ -1004,15 +1021,10 @@ def _pull_brand_pnl():
         if out.stderr.strip():
             print("[brand_pnl_real remote stderr] " + out.stderr.strip()[:400], file=sys.stderr)
         return out.stdout
-    # off-VPS: SSH and run the engine on the VPS
-    pwd = secret("PROFIT_SSH_PASS")
-    if not pwd:
-        print("[brand_pnl_real] not on VPS and no PROFIT_SSH_PASS — skipped (not an error).")
-        return ""
-    import paramiko
-    cli = paramiko.SSHClient(); cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    cli.connect(secret("PROFIT_SSH_HOST") or "84.46.242.181",
-                username=secret("PROFIT_SSH_USER") or "root", password=pwd, timeout=30)
+    # off-VPS: SSH and run the engine on the VPS.
+    # Un refresh care NU s-a produs nu e "not an error": cache.brand_pnl_monthly e sursa
+    # CANONICA de profit pe brand, iar un skip tacut = exact tiparul "decide dar nu executa".
+    cli = _ssh_connect()
     sftp = cli.open_sftp()
     with sftp.open("/tmp/_bpnl.py", "w") as f:
         f.write(BRAND_PNL_REMOTE)
@@ -1032,7 +1044,11 @@ def run_brand_pnl_real(apply):
     raw = [l.split("\t") for l in tsv.splitlines() if l]
     print(f"[brand_pnl_real] {len(raw)} (month,prefix) rows from the profitability engine")
     if not raw:
-        print("[brand_pnl_real] no rows (engine not reachable here) — skipped.")
+        # Refresh CERUT dar neprodus = esec, nu "skip". brand_pnl_monthly e sursa canonica de
+        # profit pe brand; un zero linistit aici lasa cache-ul vechi si nimeni nu afla.
+        print("[brand_pnl_real] ATENTIE: 0 randuri din engine — cache.brand_pnl_monthly NU s-a "
+              "reimprospatat (ramane versiunea veche).", file=sys.stderr)
+        _FAILED.append("brand_pnl_real")
         return
     if not apply:
         from collections import defaultdict
@@ -1122,6 +1138,9 @@ def run(table, apply):
     conn.commit(); conn.close()
     print(f"[{table}] APPLIED — cache.{table} now has {written} rows.")
 
+# tabele cerute care NU s-au reimprospatat -> cod de iesire nenul (cronul trebuie sa afle)
+_FAILED = []
+
 if __name__ == "__main__":
     # dependency order: order_outcome first (the others LEFT JOIN it)
     ALL = ["order_outcome", "daily_brand_pnl", "brand_pnl_real", "daily_ad_spend_ron", "product_ad_spend", "product_refusal_rate", "product_basket_pairs", "customer_agg", "order_enriched", "ticket_order_link", "product_returns"]
@@ -1148,3 +1167,6 @@ if __name__ == "__main__":
         print("specify --table <name>, --group <cs|ads|all>, --all, or --status"); sys.exit(1)
     for t in targets:
         run(t, a.apply)
+    if _FAILED:
+        print("[build_cache] NEREIMPROSPATATE: %s" % ", ".join(_FAILED), file=sys.stderr)
+        sys.exit(2)

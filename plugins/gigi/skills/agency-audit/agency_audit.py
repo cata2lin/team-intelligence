@@ -22,11 +22,24 @@ import argparse, datetime as dt, json, os, subprocess, sys
 from pathlib import Path
 
 # shared Postgres/secret helper — core/scripts/arona_pg.py
-_here = Path(__file__).resolve()
-for _up in range(2, 8):
-    _cand = _here.parents[_up] / "core" / "scripts"
-    if (_cand / "arona_pg.py").exists():
-        sys.path.insert(0, str(_cand)); break
+# core/scripts in orice layout de instalare (clona repo, marketplace, plugin-cache
+# core/<commit>/scripts). GARDA: iteram parents (fara index fix => fara IndexError) si
+# preferam core-ul din ACELASI commit ca skill-ul.
+def _core_scripts(need="arona_pg.py"):
+    h = Path(__file__).resolve()
+    c = [Path(os.environ["ARONA_CORE_SCRIPTS"])] if os.environ.get("ARONA_CORE_SCRIPTS") else []
+    for up in h.parents:
+        c += [up / "core" / "scripts", up / "plugins" / "core" / "scripts"] + \
+             (sorted((up / "core").glob("*/scripts")) if (up / "core").is_dir() else [])
+    ok = [x for x in c if (x / need).exists()]
+    return next((x for x in ok if x.parent.name in h.parts), ok[0] if ok else None)
+
+
+_cs = _core_scripts()
+if _cs is None:
+    sys.exit("core/scripts/arona_pg.py negasit — actualizeaza plugin-urile echipei "
+             "sau seteaza ARONA_CORE_SCRIPTS=/cale/spre/plugins/core/scripts")
+sys.path.insert(0, str(_cs))
 import arona_pg
 secret = arona_pg.secret
 

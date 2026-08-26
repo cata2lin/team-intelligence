@@ -42,36 +42,44 @@ import pg8000.dbapi
 
 VPS_HOST = "root@84.46.242.181"
 
-def _vps_run(remote_cmd):
-    """Run a command on the profit VPS over SSH (paramiko, password from KB/env).
-    Zero-touch: PROFIT_SSH_HOST/USER/PASS are read from env, else the team KB.
-    Returns a CompletedProcess-like object (.stdout/.stderr/.returncode)."""
-    import os as _os, sys as _sys, types as _types, subprocess as _sp
-    def _sec(k):
-        v = _os.environ.get(k)
-        if v:
-            return v
-        kb = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
-                           "..", "..", "..", "core", "scripts", "kb.py")
-        try:
-            return _sp.run(["uv", "run", kb, "secret-get", k],
-                           capture_output=True, text=True, timeout=30).stdout.strip()
-        except Exception:
-            return ""
-    host = _sec("PROFIT_SSH_HOST") or "84.46.242.181"
-    user = _sec("PROFIT_SSH_USER") or "root"
-    pwd = _sec("PROFIT_SSH_PASS")
-    if not pwd:
-        _sys.exit("Lipsa PROFIT_SSH_PASS (KB/env). Ruleaza: kb.py secret-set PROFIT_SSH_PASS ...")
-    import paramiko
-    cl = paramiko.SSHClient()
-    cl.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    cl.connect(host, username=user, password=pwd, timeout=30)
-    _i, _o, _e = cl.exec_command(remote_cmd, timeout=180)
-    out = _o.read().decode(); err = _e.read().decode()
-    rc = _o.channel.recv_exit_status()
-    cl.close()
-    return _types.SimpleNamespace(stdout=out, stderr=err, returncode=rc)
+# core/scripts in orice layout de instalare (clona repo, marketplace, plugin-cache
+# core/<commit>/scripts). GARDA: iteram parents (fara index fix => fara IndexError) si
+# preferam core-ul din ACELASI commit ca skill-ul, ca sa nu legam cod nou de helper vechi.
+def _core_scripts(need="arona_ssh.py"):
+    from pathlib import Path
+    import os as _os
+    h = Path(__file__).resolve()
+    c = [Path(_os.environ["ARONA_CORE_SCRIPTS"])] if _os.environ.get("ARONA_CORE_SCRIPTS") else []
+    for up in h.parents:
+        c += [up / "core" / "scripts", up / "plugins" / "core" / "scripts"] + \
+             (sorted((up / "core").glob("*/scripts")) if (up / "core").is_dir() else [])
+    ok = [x for x in c if (x / need).exists()]
+    return next((x for x in ok if x.parent.name in h.parts), ok[0] if ok else None)
+
+
+def _arona_ssh():
+    """Helper SSH PARTAJAT (core/scripts/arona_ssh.py): CHEIE intai, apoi ssh-agent, parola
+    doar ca ultim resort — VPS-ul de profit accepta doar `publickey`."""
+    import sys as _sys
+    cs = _core_scripts()
+    if cs is None:
+        _sys.exit("core/scripts/arona_ssh.py negasit — actualizeaza plugin-urile echipei "
+                  "sau seteaza ARONA_CORE_SCRIPTS=/cale/spre/plugins/core/scripts")
+    if str(cs) not in _sys.path:
+        _sys.path.insert(0, str(cs))
+    import arona_ssh
+    return arona_ssh
+
+
+def _vps_run(remote_cmd, timeout=180):
+    """Ruleaza o comanda pe VPS-ul de profit. Aceeasi forma de raspuns ca inainte
+    (.stdout/.stderr/.returncode)."""
+    import sys as _sys
+    ssh = _arona_ssh()
+    try:
+        return ssh.vps_run(remote_cmd, timeout=timeout)
+    except ssh.SSHAuthError as e:
+        _sys.exit(str(e))
 VPS_PY = "/root/Scripturi/.venv/bin/python3"
 VPS_DB = "/root/Scripturi/data/profitability.db"
 
@@ -88,7 +96,50 @@ PREFIX_TO_SLUG = {
     "BG": "nocturna-bg", "BELA": "belasil", "NOC": "nocturna", "LUX": "nocturna-lux",
     "ROSSI": "rossi-nails", "OFER": "ofertele-zilei", "MAG": "magdeal",
     "APR": "apreciat", "PAT": "ce-pat-ai",
+    "LAB": "lab-noir",   # lipsea: 1.490 comenzi in 2026-07 (nu erau numite deloc de --brand).
+    # ⚠️ masurat 26-aug-2026: metrics.orders NU are NICIUN rand pe brands.slug='lab-noir', deci
+    # judetul pt LAB tot iese '?' — maparea e conditia necesara, dar warehouse-ul inca nu-l acopera.
 }
+# ⚠️ prefixe cu comenzi reale care NU au (inca) brand in metrics: DUPBG (Duppo BG), SK, ORC, HU, MD.
+# Apar in cifrele pe brand/curier/SKU, dar la --by county / --by pocket ies cu judetul '?'.
+
+# tabelul CANONIC de alias-uri (nume magazin/domeniu -> prefix) sta in profit_core, langa
+# PREFIX_BRAND/PREFIX_AWB_DOMAIN — il IMPORTAM, nu-l duplicam aici.
+def _profit_core():
+    from pathlib import Path
+    import sys
+    h = Path(__file__).resolve()
+    for up in h.parents:                       # GARDA: iteram parents, fara index fix
+        c = up / "metrics-cache" / "scripts"
+        if (c / "profit_core.py").exists():
+            if str(c) not in sys.path:
+                sys.path.insert(0, str(c))
+            import profit_core
+            return profit_core
+    return None
+
+
+def resolve_brand(arg):
+    """--brand accepta prefixul (EST), numele magazinului (esteban / "Lab Noir") sau domeniul
+    (casaofertelor.ro). Inainte se facea doar .upper(), deci "esteban" != "EST" si iesea
+    "Nicio comanda ..." — un ZERO care arata ca un raspuns valid, nu ca o eroare."""
+    if not arg:
+        return None
+    pc = _profit_core()
+    if pc is None:                                     # fara profit_core: doar prefixele de aici
+        up = arg.strip().upper()
+        if up in PREFIX_TO_SLUG:
+            return up
+        inv = {v.replace("-", ""): k for k, v in PREFIX_TO_SLUG.items()}
+        hit = inv.get("".join(ch for ch in arg.lower() if ch.isalnum()))
+        if hit:
+            return hit
+        raise SystemExit("Brand necunoscut: %r. Prefixe valide: %s"
+                         % (arg, ", ".join(sorted(PREFIX_TO_SLUG))))
+    try:
+        return pc.resolve_prefix(arg, valid=set(PREFIX_TO_SLUG), extra=PREFIX_TO_SLUG)
+    except ValueError as e:
+        raise SystemExit(str(e))
 # curierele pe care le aratam frumos
 COURIER_LABEL = {"dpd-ro": "DPD", "packeta": "Packeta", "econt": "Econt",
                  "sameday": "Sameday", "unknown": "(necunoscut)"}
@@ -307,7 +358,7 @@ def main():
                     help="awb = AWBprint (default, instant, ~99%%, toate 21 magazinele, judet inclus); "
                          "vps = profitability.db de pe VPS prin SSH + judet din metrics (incomplet)")
     a = ap.parse_args()
-    brand = a.brand.upper() if a.brand else None
+    brand = resolve_brand(a.brand)
 
     data = fetch_awb(a.month, brand) if a.source == "awb" else fetch_vps(a.month, brand)
     rows = data["rows"]
