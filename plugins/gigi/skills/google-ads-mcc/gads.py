@@ -482,21 +482,24 @@ def main():
         _ch = {"all":"toate suprafețele","instream":"DOAR YouTube in-stream","youtube":"YouTube in-stream+in-feed+Shorts"}[args.channels]
         print(("APLICAT" if args.apply else "DRY-RUN (validateOnly) — adaugă --apply ca să creezi campania"))
         print(f"  Demand Gen „{args.name}\" (PAUSED, {DG_API}) pe {cid} | buget {args.budget}/zi | {_bl} | {_ch}")
-        camp_rn=""
+        camp_rn=""; ag_rn=""
         for x in r.json().get("mutateOperationResponses",[]):
             for k,v in x.items():
                 rres=v.get("resourceName","")
                 if "/campaigns/" in rres and "Budget" not in k and "Criteri" not in k:
                     camp_rn=rres; print(f"  CAMPAIGN: {rres}")
-                if "/adGroups/" in rres and "Criteri" not in k and "Ad" not in k: print(f"  AD GROUP: {rres}")
-        # PAS 2 (doar la --apply, pe campania reală): geo + language ca campaignCriterion
-        if args.apply and camp_rn:
-            crit=[{"campaignCriterionOperation":{"create":{"campaign":camp_rn,
+                if "/adGroups/" in rres and "Criteri" not in k and "Ad" not in k:
+                    ag_rn=rres; print(f"  AD GROUP: {rres}")
+        # PAS 2 (doar la --apply): geo + language ca adGroupCriterion.
+        # ⚠️ campaignCriterion location/language PICĂ pe Demand Gen (400, trigger OWNED_AND_OPERATED /
+        # „error code not in this version") — targetarea Demand Gen se pune pe AD GROUP, nu pe campanie.
+        if args.apply and ag_rn:
+            crit=[{"adGroupCriterionOperation":{"create":{"adGroup":ag_rn,
                      "location":{"geoTargetConstant":f"geoTargetConstants/{_digits(args.geo)}"}}}},
-                  {"campaignCriterionOperation":{"create":{"campaign":camp_rn,
+                  {"adGroupCriterionOperation":{"create":{"adGroup":ag_rn,
                      "language":{"languageConstant":f"languageConstants/{_digits(args.lang)}"}}}}]
             r2=requests.post(url, headers=_headers(c,tok), json={"mutateOperations":crit,"validateOnly":False}, timeout=60)
-            if r2.status_code==200: print(f"  ✓ geo {args.geo} + lang {args.lang} adăugate")
+            if r2.status_code==200: print(f"  ✓ geo {args.geo} + lang {args.lang} adăugate (adGroupCriterion)")
             else: print(f"  ⚠️ geo/lang NU s-au adăugat ({r2.status_code}) — setează-le în UI: {r2.text[:200]}")
         else:
             print(f"  (la --apply: geo {args.geo} + lang {args.lang} se adaugă ca pas 2)")
