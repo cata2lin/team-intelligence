@@ -32,18 +32,38 @@ VAT = 1.21
 DEALS_PREFIXES = ["MAG", "OFER", "RED", "BON"]   # magazinele unde se vand SKU-urile HA-*
 SHIPPED = ("Livrata", "In curs de livrare", "Refuzata")
 
+# core/scripts in orice layout de instalare (clona repo, marketplace, plugin-cache
+# core/<commit>/scripts). GARDA: iteram parents (fara index fix => fara IndexError) si
+# preferam core-ul din ACELASI commit ca skill-ul.
+def _core_scripts(need="arona_ssh.py"):
+    from pathlib import Path
+    h = Path(__file__).resolve()
+    c = [Path(os.environ["ARONA_CORE_SCRIPTS"])] if os.environ.get("ARONA_CORE_SCRIPTS") else []
+    for up in h.parents:
+        c += [up / "core" / "scripts", up / "plugins" / "core" / "scripts"] + \
+             (sorted((up / "core").glob("*/scripts")) if (up / "core").is_dir() else [])
+    ok = [x for x in c if (x / need).exists()]
+    return next((x for x in ok if x.parent.name in h.parts), ok[0] if ok else None)
+
+
 def remote(sql):
-    import paramiko
-    host = os.environ.get("PROFIT_SSH_HOST", "84.46.242.181")
-    user = os.environ.get("PROFIT_SSH_USER", "root")
-    pwd  = os.environ.get("PROFIT_SSH_PASS")
-    if not pwd: sys.exit("Lipsă PROFIT_SSH_PASS (export din kb.py secret-get).")
+    """Interogheaza profitability.db de pe VPS. Autentificarea vine din helper-ul PARTAJAT
+    (cheie -> ssh-agent -> parola ultim resort), deci NU mai e nevoie de `export PROFIT_SSH_PASS`."""
+    cs = _core_scripts()
+    if cs is None:
+        sys.exit("core/scripts/arona_ssh.py negasit — actualizeaza plugin-urile echipei "
+                 "sau seteaza ARONA_CORE_SCRIPTS=/cale/spre/plugins/core/scripts")
+    if str(cs) not in sys.path:
+        sys.path.insert(0, str(cs))
+    import arona_ssh
     script = ("import sqlite3,json,os\n"
               "os.chdir('/root/Scripturi')\n"
               "p=sqlite3.connect('data/profitability.db'); p.row_factory=sqlite3.Row\n"
               f'print(json.dumps([dict(r) for r in p.execute("""{sql}""").fetchall()],default=str))\n')
-    c = paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    c.connect(host, username=user, password=pwd, timeout=30)
+    try:
+        c = arona_ssh.connect()
+    except arona_ssh.SSHAuthError as e:
+        sys.exit(str(e))
     sftp = c.open_sftp()
     with sftp.open("/tmp/_pnl_q.py", "w") as f: f.write(script)
     sftp.close()

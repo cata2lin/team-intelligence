@@ -35,21 +35,31 @@ DATA = HERE.parent.parent / "data"
 
 
 # ---------- shared core helpers (arona_pg for Postgres, kb.py for the CSV secret) ----------
+def _core_scripts(need):
+    # GARDA: iteram HERE.parents (fara index fix => fara IndexError la adancime mica) si acoperim
+    # si layout-ul de plugin-cache `core/<commit12>/scripts`, unde core NU e frate direct.
+    import os as _os
+    c = [pathlib.Path(_os.environ["ARONA_CORE_SCRIPTS"])] if _os.environ.get("ARONA_CORE_SCRIPTS") else []
+    for up in HERE.parents:
+        c += [up / "core" / "scripts", up / "plugins" / "core" / "scripts"] + \
+             (sorted((up / "core").glob("*/scripts")) if (up / "core").is_dir() else [])
+    ok = [x for x in c if (x / need).exists()]
+    return next((x for x in ok if x.parent.name in HERE.parts), ok[0] if ok else None)
+
+
 def _import_arona_pg():
-    for up in range(2, 9):
-        cand = HERE.parents[up] / "core" / "scripts"
-        if (cand / "arona_pg.py").exists():
-            sys.path.insert(0, str(cand))
-            import arona_pg  # type: ignore
-            return arona_pg
-    return None
+    cand = _core_scripts("arona_pg.py")
+    if cand is None:
+        return None
+    sys.path.insert(0, str(cand))
+    import arona_pg  # type: ignore
+    return arona_pg
 
 
 def _find_kb():
-    for up in range(2, 9):
-        cand = HERE.parents[up] / "core" / "scripts" / "kb.py"
-        if cand.exists():
-            return str(cand)
+    cand = _core_scripts("kb.py")
+    if cand is not None:
+        return str(cand / "kb.py")
     return None
 
 

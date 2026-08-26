@@ -87,17 +87,39 @@ def kb_get(key: str) -> str | None:
         conn.close()
 
 
-def run_remote() -> dict:
-    host = kb_get(SSH_HOST_KEY) or "84.46.242.181"
-    user = kb_get(SSH_USER_KEY) or "root"
-    pwd  = kb_get(SSH_PASS_KEY)
-    if not pwd:
-        sys.exit(f"EROARE: secretul '{SSH_PASS_KEY}' lipseste din KB.\n"
-                 f"Adauga-l cu:  kb.py secret-set {SSH_PASS_KEY} <parola>")
 
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(host, username=user, password=pwd, timeout=30)
+# Helper SSH PARTAJAT (core/scripts/arona_ssh.py): CHEIE intai, apoi ssh-agent, parola doar ca
+# ultim resort. VPS-ul de profit accepta DOAR `publickey`, deci calea pe parola e moarta — iar
+# `sys.exit` pe parola lipsa omora scriptul INAINTE sa incerce cheia.
+def _core_scripts(need="arona_ssh.py"):
+    from pathlib import Path
+    import os as _os
+    h = Path(__file__).resolve()
+    c = [Path(_os.environ["ARONA_CORE_SCRIPTS"])] if _os.environ.get("ARONA_CORE_SCRIPTS") else []
+    for up in h.parents:
+        c += [up / "core" / "scripts", up / "plugins" / "core" / "scripts"] + \
+             (sorted((up / "core").glob("*/scripts")) if (up / "core").is_dir() else [])
+    ok = [x for x in c if (x / need).exists()]
+    return next((x for x in ok if x.parent.name in h.parts), ok[0] if ok else None)
+
+
+def _arona_ssh():
+    cs = _core_scripts()
+    if cs is None:
+        sys.exit("core/scripts/arona_ssh.py negasit — actualizeaza plugin-urile echipei "
+                 "sau seteaza ARONA_CORE_SCRIPTS=/cale/spre/plugins/core/scripts")
+    if str(cs) not in sys.path:
+        sys.path.insert(0, str(cs))
+    import arona_ssh
+    return arona_ssh
+
+
+def run_remote() -> dict:
+    ssh = _arona_ssh()
+    try:
+        client = ssh.connect(kb_get(SSH_HOST_KEY) or None, kb_get(SSH_USER_KEY) or None)
+    except ssh.SSHAuthError as e:
+        sys.exit(str(e))
 
     sftp = client.open_sftp()
     with sftp.open(REMOTE_SCRIPT, "w") as f:

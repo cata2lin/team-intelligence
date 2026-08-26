@@ -35,36 +35,44 @@ import pg8000.dbapi
 
 VPS = "root@84.46.242.181"
 
-def _vps_run(remote_cmd):
-    """Run a command on the profit VPS over SSH (paramiko, password from KB/env).
-    Zero-touch: PROFIT_SSH_HOST/USER/PASS are read from env, else the team KB.
-    Returns a CompletedProcess-like object (.stdout/.stderr/.returncode)."""
-    import os as _os, sys as _sys, types as _types, subprocess as _sp
-    def _sec(k):
-        v = _os.environ.get(k)
-        if v:
-            return v
-        kb = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
-                           "..", "..", "..", "core", "scripts", "kb.py")
-        try:
-            return _sp.run(["uv", "run", kb, "secret-get", k],
-                           capture_output=True, text=True, timeout=30).stdout.strip()
-        except Exception:
-            return ""
-    host = _sec("PROFIT_SSH_HOST") or "84.46.242.181"
-    user = _sec("PROFIT_SSH_USER") or "root"
-    pwd = _sec("PROFIT_SSH_PASS")
-    if not pwd:
-        _sys.exit("Lipsa PROFIT_SSH_PASS (KB/env). Ruleaza: kb.py secret-set PROFIT_SSH_PASS ...")
-    import paramiko
-    cl = paramiko.SSHClient()
-    cl.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    cl.connect(host, username=user, password=pwd, timeout=30)
-    _i, _o, _e = cl.exec_command(remote_cmd, timeout=180)
-    out = _o.read().decode(); err = _e.read().decode()
-    rc = _o.channel.recv_exit_status()
-    cl.close()
-    return _types.SimpleNamespace(stdout=out, stderr=err, returncode=rc)
+# core/scripts in orice layout de instalare (clona repo, marketplace, plugin-cache
+# core/<commit>/scripts). GARDA: iteram parents (fara index fix => fara IndexError) si
+# preferam core-ul din ACELASI commit ca skill-ul, ca sa nu legam cod nou de helper vechi.
+def _core_scripts(need="arona_ssh.py"):
+    from pathlib import Path
+    import os as _os
+    h = Path(__file__).resolve()
+    c = [Path(_os.environ["ARONA_CORE_SCRIPTS"])] if _os.environ.get("ARONA_CORE_SCRIPTS") else []
+    for up in h.parents:
+        c += [up / "core" / "scripts", up / "plugins" / "core" / "scripts"] + \
+             (sorted((up / "core").glob("*/scripts")) if (up / "core").is_dir() else [])
+    ok = [x for x in c if (x / need).exists()]
+    return next((x for x in ok if x.parent.name in h.parts), ok[0] if ok else None)
+
+
+def _arona_ssh():
+    """Helper SSH PARTAJAT (core/scripts/arona_ssh.py): CHEIE intai, apoi ssh-agent, parola
+    doar ca ultim resort — VPS-ul de profit accepta doar `publickey`."""
+    import sys as _sys
+    cs = _core_scripts()
+    if cs is None:
+        _sys.exit("core/scripts/arona_ssh.py negasit — actualizeaza plugin-urile echipei "
+                  "sau seteaza ARONA_CORE_SCRIPTS=/cale/spre/plugins/core/scripts")
+    if str(cs) not in _sys.path:
+        _sys.path.insert(0, str(cs))
+    import arona_ssh
+    return arona_ssh
+
+
+def _vps_run(remote_cmd, timeout=180):
+    """Ruleaza o comanda pe VPS-ul de profit. Aceeasi forma de raspuns ca inainte
+    (.stdout/.stderr/.returncode)."""
+    import sys as _sys
+    ssh = _arona_ssh()
+    try:
+        return ssh.vps_run(remote_cmd, timeout=timeout)
+    except ssh.SSHAuthError as e:
+        _sys.exit(str(e))
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # lead-time mediu order->sosire (AIR), măsurat din TOM (~15z). Folosit doar pt ETA aproximativ.

@@ -36,17 +36,43 @@ KB = _kb_path()
 
 
 def sec(k):
-    return subprocess.run(["/bin/zsh", "-lc", f"uv run '{KB}' secret-get {k}"],
+    # apel direct (fara `/bin/zsh -lc`): statiile CS/depozit sunt pe Windows, unde zsh nu exista
+    return subprocess.run(["uv", "run", KB, "secret-get", k],
                           capture_output=True, text=True).stdout.strip()
 
 
+# core/scripts in orice layout de instalare (clona repo, marketplace, plugin-cache
+# core/<commit>/scripts). GARDA: iteram parents (fara index fix => fara IndexError) si
+# preferam core-ul din ACELASI commit ca skill-ul.
+def _core_scripts(need="arona_ssh.py"):
+    from pathlib import Path
+    h = Path(__file__).resolve()
+    c = [Path(os.environ["ARONA_CORE_SCRIPTS"])] if os.environ.get("ARONA_CORE_SCRIPTS") else []
+    for up in h.parents:
+        c += [up / "core" / "scripts", up / "plugins" / "core" / "scripts"] + \
+             (sorted((up / "core").glob("*/scripts")) if (up / "core").is_dir() else [])
+    ok = [x for x in c if (x / need).exists()]
+    return next((x for x in ok if x.parent.name in h.parts), ok[0] if ok else None)
+
+
+def _ssh_connect():
+    """Helper SSH PARTAJAT (core/scripts/arona_ssh.py): CHEIE intai, apoi ssh-agent, parola
+    doar ca ultim resort — VPS-ul accepta doar `publickey`."""
+    cs = _core_scripts()
+    if cs is None:
+        sys.exit("core/scripts/arona_ssh.py negasit — actualizeaza plugin-urile echipei "
+                 "sau seteaza ARONA_CORE_SCRIPTS=/cale/spre/plugins/core/scripts")
+    if str(cs) not in sys.path:
+        sys.path.insert(0, str(cs))
+    import arona_ssh
+    try:
+        return arona_ssh.connect()
+    except arona_ssh.SSHAuthError as e:
+        sys.exit(str(e))
+
+
 def run_vps(cmd, timeout=600):
-    import paramiko
-    host, user, pw = sec("PROFIT_SSH_HOST"), sec("PROFIT_SSH_USER"), sec("PROFIT_SSH_PASS")
-    if not (host and user and pw):
-        sys.exit("lipsesc PROFIT_SSH_HOST/USER/PASS din KB")
-    c = paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    c.connect(host, username=user, password=pw, timeout=25)
+    c = _ssh_connect()
     chan = c.get_transport().open_session(); chan.settimeout(timeout)
     chan.exec_command(cmd)
     # stream stdout+stderr împreună

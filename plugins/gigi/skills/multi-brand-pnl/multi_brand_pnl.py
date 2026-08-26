@@ -34,11 +34,25 @@ import subprocess
 from pathlib import Path
 
 # shared Postgres/secret helper — core/scripts/arona_pg.py (env-first secret + clean_dsn + connect)
-_here = Path(__file__).resolve()
-for _up in range(2, 8):
-    _cand = _here.parents[_up] / "core" / "scripts"
-    if (_cand / "arona_pg.py").exists():
-        sys.path.insert(0, str(_cand)); break
+# core/scripts in orice layout de instalare (clona repo, marketplace, plugin-cache
+# core/<commit>/scripts). GARDA: iteram parents (fara index fix => fara `IndexError: 7`) si
+# preferam core-ul din ACELASI commit ca skill-ul, ca sa nu legam cod nou de helper vechi.
+def _core_scripts(need="arona_pg.py"):
+    h = Path(__file__).resolve()
+    c = [Path(os.environ["ARONA_CORE_SCRIPTS"])] if os.environ.get("ARONA_CORE_SCRIPTS") else []
+    for up in h.parents:
+        c += [up / "core" / "scripts", up / "plugins" / "core" / "scripts"] + \
+             (sorted((up / "core").glob("*/scripts")) if (up / "core").is_dir() else [])
+    ok = [x for x in c if (x / need).exists()]
+    return next((x for x in ok if x.parent.name in h.parts), ok[0] if ok else None)
+
+
+_cs = _core_scripts()
+if _cs is None:
+    sys.exit("core/scripts/arona_pg.py negasit pornind de la %s — actualizeaza plugin-urile "
+             "echipei sau seteaza ARONA_CORE_SCRIPTS=/cale/spre/plugins/core/scripts"
+             % Path(__file__).resolve().parent)
+sys.path.insert(0, str(_cs))
 import arona_pg
 secret = arona_pg.secret
 
@@ -353,14 +367,13 @@ def run_canonical_range(dfrom, dto, frags):
             sys.exit("EROARE engine pe VPS: " + (r.stderr or "")[:400])
         data = r.stdout
     else:
-        # off-VPS: SSH la VPS (paramiko + secrete PROFIT_SSH_*)
-        import paramiko
-        pwd = secret("PROFIT_SSH_PASS")
-        if not pwd:
-            sys.exit("Lipsește PROFIT_SSH_PASS în KB — nu pot rula engine-ul canonic pe VPS.")
-        cli = paramiko.SSHClient(); cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        cli.connect(secret("PROFIT_SSH_HOST") or "84.46.242.181",
-                    username=secret("PROFIT_SSH_USER") or "root", password=pwd, timeout=30)
+        # off-VPS: SSH la VPS prin helper-ul PARTAJAT (cheie -> ssh-agent -> parola ultim resort)
+        sys.path.insert(0, str(_cs))
+        import arona_ssh
+        try:
+            cli = arona_ssh.connect()
+        except arona_ssh.SSHAuthError as e:
+            sys.exit(str(e))
         sftp = cli.open_sftp()
         with sftp.open("/tmp/_range_pnl.py", "w") as f:
             f.write(RANGE_REMOTE)
