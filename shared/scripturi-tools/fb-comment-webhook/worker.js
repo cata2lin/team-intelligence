@@ -16,6 +16,32 @@ const GRAPH="https://graph.facebook.com/v20.0";
 const SITE={"775068272350568":"https://magdeal.ro","676105508924341":"https://george-talent.ro","629666993566339":"https://grandia.ro","680369271815957":"https://bonhaus.bg","628544790345906":"https://gentipromo.ro","621560724373069":"https://carpetto.ro","651700798017858":"https://casaofertelor.ro","575484808985734":"https://covoria.ro","522811567592063":"https://gento.ro","506398435900401":"https://produsebisericesti.ro","421367954403103":"https://apreciat.ro","132189989971450":"https://stemma.ro","115983611500696":"https://manscout.ro","103675612509107":"https://bonhaus.ro","104553898590313":"https://www.uneltepotrivite.ro","582569158278392":"https://nubra.ro","582681401604162":"https://ofertelezilei.ro"};
 const siteOf=pid=>SITE[pid]||"site-ul nostru";
 
+
+// ---------- captare BRUTA (D1) ----------
+// Se scrie ÎNAINTE de clasificare/hide, deliberat. Motivul, măsurat: pe Instagram 81% din
+// comentarii dispar de pe platformă înainte să apuci să le citești prin Graph (polling = 13%
+// recall), iar ce dispare e SELECTIV — rămân "Recomand", se șterg "mi-am luat țeapă". Dacă
+// scriem după moderare, oglinda moștenește exact aceeași orbire.
+// INSERT OR IGNORE: un re-livrat de Meta (retry) nu suprascrie ce am prins prima dată.
+async function rawSave(env, obj, entryId, field, v, body){
+ if(!env.RAW) return;
+ try{
+  const id = v.comment_id || v.id || v.mid || (v.message && v.message.mid) || `${entryId}_${Date.now()}`;
+  const from = v.from || (v.sender || {});
+  await env.RAW.prepare(
+    `INSERT OR IGNORE INTO raw_event
+     (id,object,field,entry_id,parent_id,from_id,from_name,text,created_at,received_at,verb,raw)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+   .bind(String(id), obj||"", field||"", String(entryId||""),
+         String(v.parent_id || v.post_id || v.media_id || (v.media && v.media.id) || ""),
+         String(from.id||""), String(from.name||from.username||""),
+         String(v.message ?? v.text ?? ""),
+         Number(v.created_time||0)||0, Date.now(), String(v.verb||""),
+         String(body).slice(0,20000))
+   .run();
+ }catch(e){ console.log("rawSave err", String(e).slice(0,120)); }
+}
+
 // ---------- clasificator: întoarce {act, scn} ----------
 // normalizare: scoate diacriticele + lowercase (ca să prindă „încercat/să/țepari" indiferent de scriere)
 const norm=s=>(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/ș|ş/gi,"s").replace(/ț|ţ/gi,"t").toLowerCase();
@@ -157,6 +183,18 @@ export default {
       ents.flatMap(e=>(e.changes||[]).map(c=>c.field)).join(","),
       ents.flatMap(e=>(e.messaging||[]).map(()=>"messaging")).join(","));
    }catch(_){}
+   // ⚠️ CAPTAREA BRUTA SE FACE PRIMA, inaintea oricarui filtru. Prima versiune o pusese DUPA
+   // `if(!pt)continue` / `if(!acc)continue` — adica exact evenimentele de pe pagini care NU sunt in
+   // harta (token lipsa, cont IG nelegat) se pierdeau tacut, fix cazul pentru care exista captarea.
+   // Dovedit: un eveniment IG de test n-a ajuns in D1, desi cel FB a ajuns.
+   for(const e of data.entry||[]){
+    for(const ch of e.changes||[]){
+     await rawSave(env, data.object, e.id, ch.field, ch.value||{}, body);
+    }
+    for(const m of e.messaging||[]){
+     await rawSave(env, data.object, e.id, "messaging", m, body);
+    }
+   }
    const {fb,ig}=await maps(env.FB_SYSTEM_TOKEN);
    const live=(env.REPLY_MODE||"draft")==="live";
    for(const e of data.entry||[]){
