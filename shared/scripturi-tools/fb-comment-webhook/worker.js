@@ -145,7 +145,19 @@ export default {
   if(req.method==="POST"){
    const body=await req.text();
    if(!(await verifySig(req,body,env.FB_APP_SECRET))&&!(env.IG_APP_SECRET&&await verifySig(req,body,env.IG_APP_SECRET)))return new Response("bad sig",{status:401});
-   const data=JSON.parse(body);const {fb,ig}=await maps(env.FB_SYSTEM_TOKEN);
+   const data=JSON.parse(body);
+   // Fara linia asta, logurile nu spun CE a livrat Meta: corpul cererii nu apare in Workers Logs,
+   // deci "instagram vs page" ramanea deductie din user-agent, iar livrarile reale nu se puteau
+   // separa de butonul "Test" din App Dashboard (acelasi UA). entry.id = pagina / contul IG real;
+   // payloadul de test are un entry.id care NU e printre id-urile noastre.
+   try{
+    const ents=data.entry||[];
+    console.log("wh", data.object, ents.length,
+      ents.map(e=>e.id).join(","),
+      ents.flatMap(e=>(e.changes||[]).map(c=>c.field)).join(","),
+      ents.flatMap(e=>(e.messaging||[]).map(()=>"messaging")).join(","));
+   }catch(_){}
+   const {fb,ig}=await maps(env.FB_SYSTEM_TOKEN);
    const live=(env.REPLY_MODE||"draft")==="live";
    for(const e of data.entry||[]){
     if(data.object==="instagram"){                                   // --- IG comments ---
