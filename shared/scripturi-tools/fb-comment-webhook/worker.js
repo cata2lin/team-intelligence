@@ -26,21 +26,49 @@ const siteOf=pid=>SITE[pid]||"site-ul nostru";
 async function rawSave(env, obj, entryId, field, v, body){
  if(!env.RAW) return;
  try{
-  const id = v.comment_id || v.id || v.mid || (v.message && v.message.mid) || `${entryId}_${Date.now()}`;
-  const from = v.from || (v.sender || {});
+  // Doua forme COMPLET diferite pe acelasi webhook:
+  //  changes[]   -> comentarii: {comment_id, from:{id,name|username}, message|text, created_time, verb}
+  //  messaging[] -> DM-uri:     {sender:{id}, recipient:{id}, timestamp,
+  //                              message:{mid,text,attachments} | read:{mid} | delivery:{mids}
+  //                              | reaction:{mid,emoji} | postback:{...}}
+  // Prima versiune trata doar prima forma => DM-urile intrau cu autor si text GOALE
+  // (payloadul se pastra in `raw`, deci nu s-a pierdut nimic, dar coloanele erau inutile).
+  const isMsg = field === "messaging";
+  let id, fromId, fromName, text, ts, verb, parent;
+  if(isMsg){
+   const m = v.message || {};
+   verb = v.message ? "message" : v.read ? "read" : v.delivery ? "delivery"
+        : v.reaction ? "reaction" : v.postback ? "postback" : "other";
+   id = m.mid || (v.read&&v.read.mid) || (v.reaction&&v.reaction.mid)
+        || (v.delivery&&(v.delivery.mids||[])[0]) || `${entryId}_${v.timestamp||Date.now()}_${verb}`;
+   fromId = (v.sender||{}).id || "";
+   fromName = (v.sender||{}).username || (v.sender||{}).name || "";
+   // atasamentele nu au text; notam tipul ca sa nu para mesaj gol
+   const att = (m.attachments||[]).map(a=>a.type).filter(Boolean).join(",");
+   text = m.text || (att ? `[attachment:${att}]` : "") || (v.reaction&&v.reaction.emoji) || "";
+   ts = Number(v.timestamp||0)||0;
+   parent = (v.recipient||{}).id || "";
+  } else {
+   const from = v.from || {};
+   verb = String(v.verb||"");
+   id = v.comment_id || v.id || `${entryId}_${Date.now()}`;
+   fromId = from.id || "";
+   fromName = from.name || from.username || "";
+   text = v.message ?? v.text ?? "";
+   ts = Number(v.created_time||0)||0;
+   parent = v.parent_id || v.post_id || v.media_id || (v.media&&v.media.id) || "";
+  }
   await env.RAW.prepare(
     `INSERT OR IGNORE INTO raw_event
      (id,object,field,entry_id,parent_id,from_id,from_name,text,created_at,received_at,verb,raw)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
-   .bind(String(id), obj||"", field||"", String(entryId||""),
-         String(v.parent_id || v.post_id || v.media_id || (v.media && v.media.id) || ""),
-         String(from.id||""), String(from.name||from.username||""),
-         String(v.message ?? v.text ?? ""),
-         Number(v.created_time||0)||0, Date.now(), String(v.verb||""),
-         String(body).slice(0,20000))
+   .bind(String(id), obj||"", field||"", String(entryId||""), String(parent||""),
+         String(fromId), String(fromName), String(text),
+         ts, Date.now(), verb, String(body).slice(0,20000))
    .run();
  }catch(e){ console.log("rawSave err", String(e).slice(0,120)); }
 }
+
 
 // ---------- clasificator: întoarce {act, scn} ----------
 // normalizare: scoate diacriticele + lowercase (ca să prindă „încercat/să/țepari" indiferent de scriere)
