@@ -28,10 +28,28 @@ AP=argparse.ArgumentParser(); AP.add_argument("--days",type=int,default=30); AP.
 days=min(A.days,30)
 DSN=clean(kb("DATABASE_URL_METRICS"))
 cx=psycopg2.connect(DSN); cx.set_session(readonly=not A.apply); cu=cx.cursor()
-# FX USD->RON
-cu.execute("SELECT rate FROM fx_rates WHERE \"fromCurrency\"='USD' AND \"toCurrency\"='RON' ORDER BY \"rateDate\" DESC LIMIT 1")
-r=cu.fetchone(); USD=float(r[0]) if r else 4.601
-def fx(cur): return USD if cur=="USD" else 1.0
+# FX -> RON: cursul ZILEI respective (forward-fill pe weekend/sarbatori), NU ultimul curs aplicat
+# retroactiv. Retroactivitatea facea ca spendRon istoric sa se schimbe la fiecare rulare si sa nu se
+# potriveasca cu app-ul ARONA Metrics, care foloseste fx_rates pe ziua respectiva. Vezi auditul 05-sep-2026.
+cu.execute('SELECT "fromCurrency", "rateDate"::date, rate FROM fx_rates '
+           'WHERE "toCurrency"=\'RON\' ORDER BY "fromCurrency", "rateDate"')
+_FX={}
+for _c,_d,_r in cu.fetchall(): _FX.setdefault(_c,[]).append((_d,float(_r)))
+_FALLBACK={"USD":4.601}
+def fx(cur,day):
+    if cur=="RON": return 1.0
+    ser=_FX.get(cur)
+    if not ser:
+        if cur not in _MISSING_FX: _MISSING_FX.add(cur)
+        return _FALLBACK.get(cur,1.0)
+    d=datetime.date.fromisoformat(day) if isinstance(day,str) else day
+    lo,hi,best=0,len(ser)-1,None
+    while lo<=hi:                      # ultimul curs <= zi (forward-fill)
+        mid=(lo+hi)//2
+        if ser[mid][0]<=d: best=ser[mid][1]; lo=mid+1
+        else: hi=mid-1
+    return best if best is not None else ser[0][1]
+_MISSING_FX=set()
 # active advertisers + token
 cu.execute("""SELECT ta.id, ta."tikTokAccountId", ta.name, ta.currency, tt."accessToken"
               FROM tiktok_ad_accounts ta JOIN tiktok_access_tokens tt ON tt.id=ta."tokenId"
@@ -60,14 +78,14 @@ def num(m,k):
     except: return 0.0
 adrows=[]; camprows=[]; errs=[]; per=[]
 for aid,advid,name,cur,tok in ADV:
-    f=fx(cur)
     al,e1=report(tok,advid,"AUCTION_ADVERTISER",["advertiser_id","stat_time_day"])
     if e1: errs.append((name,"adv",e1))
     sp_tot=0; pu_tot=0
     for it in al:
         d=it["dimensions"]["stat_time_day"][:10]; m=it["metrics"]
         sp=num(m,"spend"); roas=num(m,"complete_payment_roas"); pu=num(m,"complete_payment"); val=sp*roas
-        sp_tot+=sp; pu_tot+=pu
+        f=fx(cur,d)
+        sp_tot+=sp*f; pu_tot+=pu
         adrows.append((f"{aid}_{d}",aid,d,sp,round(sp*f,2),int(num(m,'impressions')),int(num(m,'clicks')),
                        num(m,'ctr'),num(m,'cpc'),num(m,'cpm'),int(pu),round(val,2),round(val*f,2),roas,
                        round(sp/pu,2) if pu else 0,cur))
@@ -84,11 +102,12 @@ for aid,advid,name,cur,tok in ADV:
     for it in cl:
         d=it["dimensions"]["stat_time_day"][:10]; cid=it["dimensions"]["campaign_id"]; m=it["metrics"]
         sp=num(m,"spend"); roas=num(m,"complete_payment_roas"); pu=num(m,"complete_payment"); val=sp*roas
+        f=fx(cur,d)
         camprows.append((f"{aid}_{cid}_{d}",aid,cid,nm.get(cid,""),d,sp,round(sp*f,2),int(num(m,'impressions')),
                          int(num(m,'clicks')),num(m,'ctr'),num(m,'cpc'),num(m,'cpm'),int(pu),round(val,2),round(val*f,2),
                          roas,round(sp/pu,2) if pu else 0,cur))
-    per.append((name,len(al),round(sp_tot*f),int(pu_tot)))
-print(f"=== DRY-RUN === fereastra {start}→{end} | {len(ADV)} advertisere | USD×{USD}")
+    per.append((name,len(al),round(sp_tot),int(pu_tot)))
+print(f"=== DRY-RUN === fereastra {start}→{end} | {len(ADV)} advertisere | FX: curs BNR pe ziua respectivă")
 print(f"rânduri pregătite: ad_insights={len(adrows)}  campaign_insights={len(camprows)}")
 tot_ron=sum(p[2] for p in per)
 print(f"spend total fereastră: {tot_ron:,} RON | conv: {sum(p[3] for p in per):,}")
@@ -98,6 +117,13 @@ for n,nd,ron,pu in sorted(per,key=lambda x:-x[2])[:12]:
 if errs:
     print(f"\n⚠ {len(errs)} erori (advertiser,level,msg):")
     for n,l,m in errs[:8]: print(f"  {n[:30]} [{l}] {m[:60]}")
+if not adrows:
+    # Fara acest exit, un API cazut complet insemna "0 randuri, exit 0" -> cronul pinguia heartbeat-ul
+    # ca SUCCES si esecul ramanea invizibil. Vezi regula CUTOVER (verifica EFECTUL).
+    print("\n❌ ZERO rânduri din API — NU se scrie nimic. Ies cu cod 2 (heartbeat nu va raporta succes).")
+    cx.close(); sys.exit(2)
+if errs:
+    print(f"\n❌ {len(errs)} advertisere au eșuat — datele sunt PARȚIALE. Se scrie ce s-a obținut, dar ies cu cod 3.")
 if A.apply and adrows:
     adtmpl="("+",".join(["%s"]*len(adrows[0]))+",now())"
     camptmpl="("+",".join(["%s"]*len(camprows[0]))+",now())" if camprows else None
@@ -120,4 +146,7 @@ if A.apply and adrows:
     cx.commit(); print(f"\n✅ APPLIED — upsert {len(adrows)} ad + {len(camprows)} campaign rânduri.")
 else:
     print("\n(DRY-RUN — nimic scris. Adaugă --apply ca să scrii în warehouse.)")
+if _MISSING_FX:
+    print(f"⚠ monede fără curs în fx_rates (tratate cu fallback): {sorted(_MISSING_FX)}")
 cx.close()
+if errs: sys.exit(3)
