@@ -56,7 +56,127 @@ def primary(o):
 
 def shop_match(dom, wants): return (not wants) or any(dom.startswith(w) or w in dom for w in wants)
 
+# ─── MOD SERVER: decizia sta pe VPS, statia doar descarca si deschide ──────────────────────
+# DE CE: cat timp `pull`/`plan` rulau pe laptopul din depozit, (1) nu puteam schimba ce fac decat
+# printr-un update de plugin pe fiecare masina, si (2) nu vedeam ce printeaza — evidenta statea
+# in ~/.arona_print_queue.db, LOCAL. Cu PRINT_QUEUE_SERVER setat, aceleasi comenzi vorbesc cu
+# /api/print-queue de pe VPS, care ruleaza EXACT acest fisier server-side. Nu exista a doua regula.
+# Fara variabila setata, totul merge ca inainte (local) — deci nu se rupe nicio statie neconfigurata.
+SERVER = (os.environ.get("PRINT_QUEUE_SERVER") or "").rstrip("/")
+SRV_USER = os.environ.get("PRINT_QUEUE_USER") or ""
+SRV_PASS = os.environ.get("PRINT_QUEUE_PASS") or ""
+_TOKEN = {"t": None, "exp": 0}
+
+
+def _srv_token():
+    import urllib.request, urllib.error
+    if _TOKEN["t"] and time.time() < _TOKEN["exp"]:
+        return _TOKEN["t"]
+    if not (SRV_USER and SRV_PASS):
+        raise SystemExit("PRINT_QUEUE_USER / PRINT_QUEUE_PASS nu sunt setate pe statia asta.")
+    body = json.dumps({"username": SRV_USER, "password": SRV_PASS}).encode()
+    req = urllib.request.Request(SERVER + "/api/auth/login", data=body,
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=30) as r:
+        d = json.loads(r.read().decode())
+    t = d.get("access_token") or d.get("token")
+    if not t:
+        raise SystemExit("Login pe %s a intors un raspuns fara token." % SERVER)
+    _TOKEN.update(t=t, exp=time.time() + 30 * 60)
+    return t
+
+
+def _srv(path, params=None, body=None, raw=False, timeout=300):
+    import urllib.request, urllib.parse, urllib.error
+    url = SERVER + path
+    if params:
+        url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, "", False)})
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=("POST" if body is not None else "GET"),
+                                 headers={"Authorization": "Bearer " + _srv_token(),
+                                          "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read() if raw else json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        detaliu = e.read().decode("utf-8", "replace")[:400]
+        raise SystemExit("Serverul a raspuns %s: %s" % (e.code, detaliu))
+
+
+def _srv_params(a, refresh=False):
+    by = "sku" if getattr(a, "by_sku", False) else ("qty" if getattr(a, "by_qty", False)
+         else ("category" if getattr(a, "by_category", False) else None))
+    return {"machine": _machine_of(a) or "", "shop": getattr(a, "shop", None),
+            "sku": getattr(a, "sku", None), "items": getattr(a, "items", None),
+            "by": by, "threshold": getattr(a, "threshold", 3), "refresh": 1 if refresh else None}
+
+
+def _srv_afiseaza(d):
+    print("PLAN (%s, de pe server) — %d etichete" % (d.get("machine"), d.get("total", 0)))
+    for g in d.get("grupuri") or []:
+        if "sku" in g:
+            print("    %-22s x%s %s" % (g["sku"], g["cantitate"], g["etichete"]))
+        elif "categorie" in g:
+            print("== %s: %s buc ==" % (g["categorie"], g["etichete"]))
+            for x in g.get("pdf") or []:
+                print("   %-30s %s buc" % (x["nume"], x["etichete"]))
+        elif "cantitati" in g:
+            print("== %s ==" % g["magazin"])
+            for x in g["cantitati"]:
+                print("   x%s %s buc" % (x["x"], x["etichete"]))
+        else:
+            print("   %-14s %s buc" % (g.get("nume"), g.get("etichete")))
+    if d.get("diverse"):
+        print("  DIVERSE: %d" % d["diverse"])
+    for m in d.get("pe_magazin") or []:
+        print("  %-28s %s" % (m["magazin"], m["etichete"]))
+
+
+def _srv_pull(a):
+    d = _srv("/api/print-queue/plan", _srv_params(a, refresh=True))
+    if d.get("jurnal_refresh"):
+        print(d["jurnal_refresh"])
+    _srv_afiseaza(d)
+
+
+def _srv_plan(a):
+    _srv_afiseaza(_srv("/api/print-queue/plan", _srv_params(a)))
+
+
+def _srv_open(a):
+    import zipfile
+    p = _srv_params(a)
+    body = {k: v for k, v in p.items() if k not in ("refresh",)}
+    body["batch"] = getattr(a, "batch", 250)
+    z = _srv("/api/print-queue/labels", body=body, raw=True)
+    outdir = os.path.expanduser(a.out or "~/Downloads/print-batch/grupat")
+    os.makedirs(outdir, exist_ok=True)
+    for f in os.listdir(outdir):
+        try: os.remove(os.path.join(outdir, f))
+        except Exception: pass
+    with zipfile.ZipFile(io.BytesIO(z)) as zf:
+        zf.extractall(outdir)
+    pdfs = sorted(os.path.join(outdir, f) for f in os.listdir(outdir) if f.lower().endswith(".pdf"))
+    print("OPEN (de pe server) -> %s" % outdir)
+    for f in pdfs:
+        print("  %s" % os.path.basename(f))
+    if not getattr(a, "no_open", False) and pdfs:
+        import subprocess, shutil
+        chrome = next((c for c in (shutil.which("chrome"),
+                                   r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                                   r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                                   os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"))
+                       if c and os.path.exists(c)), None)
+        if chrome:
+            subprocess.Popen([chrome] + pdfs)
+            print("  -> deschis %d PDF-uri in Chrome (Ctrl+P)." % len(pdfs))
+        try: subprocess.Popen(["explorer", outdir])
+        except Exception: pass
+
+
 def cmd_pull(a):
+    if SERVER:
+        return _srv_pull(a)
     xc = load_xconn(); shops = xc.load_shops()
     wants = [w.strip() for w in (a.shop or "").split(",") if w.strip()]
     if getattr(a, "group", None): wants = STORE_GROUPS[a.group]
@@ -190,6 +310,8 @@ def _detergent_groups(rows):
     return out
 
 def cmd_plan(a):
+    if SERVER:
+        return _srv_plan(a)
     con = db(); rows = _rows(con.cursor(), a)
     if not rows: print("Nimic in DB pt filtru. Rulează întâi pull."); return
     if getattr(a, "by_sku", False):
@@ -226,6 +348,8 @@ def _download(url, auth):
     return None
 
 def cmd_open(a):
+    if SERVER:
+        return _srv_open(a)
     from pypdf import PdfReader, PdfWriter
     con = db(); rows = _rows(con.cursor(), a)
     if not rows: print("Nimic in DB. Rulează pull."); return

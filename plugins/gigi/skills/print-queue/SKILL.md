@@ -38,6 +38,22 @@ pe ce mașină e. Dacă variabila lipsește, folosește `--machine <stația>` ex
 ## Două scripturi — nu le confunda
 | Fișier | Rol | Unde rulează |
 |---|---|---|
+
+## Unde ruleaza logica (din 8-sep-2026: pe VPS)
+
+Cu `PRINT_QUEUE_SERVER` setat, `pull`/`plan`/`open` **nu mai calculeaza nimic pe laptop** — cer
+`/api/print-queue` de pe VPS, care ruleaza **exact acest fisier** server-side. Comenzile si ce vede
+operatorul raman identice; se schimba doar unde se ia decizia.
+
+De ce: cat timp rula local, (1) orice schimbare de regula cerea update de plugin pe fiecare statie,
+si (2) nu se vedea ce printeaza nimeni — evidenta statea in `~/.arona_print_queue.db`, pe laptopul
+lor. Acum apelurile si etichetele descarcate se scriu central; `GET /api/print-queue/activity?days=7`
+arata cine ce a cerut si ce a iesit la print.
+
+**Fara variabila setata, totul merge exact ca inainte (local)** — o statie neconfigurata nu se rupe.
+`open` are acelasi efect ireversibil ca inainte: descarcarea scoate eticheta din coada TUTUROR
+statiilor, deci se cheama doar la print real.
+
 | **`print_queue.py`** | **Stația.** `pull/plan/open/printed/reprint`, filtrat pe `--machine`. Live din xConnector, cache în SQLite local (`~/.arona_print_queue.db`). | laptopul din depozit / uzina2 |
 | `print_queue_central.py` | **Centralul.** `sync/query/print/printed` → construiește `metrics.print_queue` (Postgres) pentru raportare. Cron 01:00 via `print_queue_nightly.sh`. | VPS |
 
@@ -47,6 +63,9 @@ pe ce mașină e. Dacă variabila lipsește, folosește `--machine <stația>` ex
 ```bash
 # Windows (PowerShell), apoi terminal NOU:
 setx PRINT_MACHINE uzina2        # sau: depozit
+setx PRINT_QUEUE_SERVER https://scripts.arona.ro     # decizia se ia pe VPS, nu aici
+setx PRINT_QUEUE_USER   uzina2-svc                   # sau: depozit-svc
+setx PRINT_QUEUE_PASS   <din seif: PRINT_QUEUE_PASS_UZINA2 / _DEPOZIT>
 ```
 `print_queue.py` își găsește singur `xconnector.py` dacă folderele stau unul lângă altul
 (`../xconnector/xconnector.py`) — layout-ul normal din marketplace. Dacă e în altă parte:
