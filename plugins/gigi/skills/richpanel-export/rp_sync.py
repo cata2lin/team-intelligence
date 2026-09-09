@@ -174,6 +174,12 @@ def plan_day(db, tickets):
 
 
 # ───────────────────────────────────────────────────────────── 3) firul unei conversații
+def conversation_no(db, tid):
+    """Numărul de conversație din oglindă (rezerva de adresare pentru §6.1)."""
+    r = db.execute("SELECT conversation_no FROM rp_ticket WHERE id = ?", (tid,)).fetchone()
+    return r[0] if r and r[0] else None
+
+
 def fetch_thread(mcp, db, tid, stats, fetched_at):
     """get_conversation(mode=audit) + paginare pe message_cursor → oglindă.
 
@@ -183,12 +189,29 @@ def fetch_thread(mcp, db, tid, stats, fetched_at):
     """
     cursor, pages, n_msg = None, 0, 0
     ticket_obj = None
+    # Cheia de adresare: id-ul, cu rezervă pe NUMĂR. Validatorul serverului respinge
+    # id-urile care conțin <>=+ (Message-ID de email) sau -_ (base64url de Messenger)
+    # cu „Error: id contains invalid characters." — vezi §6.1. Numărul e deja în
+    # oglindă, deci rezerva nu costă niciun apel în plus.
+    key = {"conversation_id": tid}
     while pages < MAX_THREAD_PAGES:
-        args = {"conversation_id": tid, "mode": "audit", "max_messages": 50,
+        args = {**key, "mode": "audit", "max_messages": 50,
                 "max_message_chars": MAX_MSG_CHARS, "include_private_notes": True}
         if cursor is not None:
             args["message_cursor"] = cursor
-        d = mcp.call("get_conversation", args) or {}
+        try:
+            d = mcp.call("get_conversation", args) or {}
+        except cm.MCPError:
+            no = conversation_no(db, tid)
+            if "conversation_id" not in key or no is None:
+                raise
+            stats["id_rejected"] = stats.get("id_rejected", 0) + 1
+            key = {"conversation_number": no}
+            args = {**key, "mode": "audit", "max_messages": 50,
+                    "max_message_chars": MAX_MSG_CHARS, "include_private_notes": True}
+            if cursor is not None:
+                args["message_cursor"] = cursor
+            d = mcp.call("get_conversation", args) or {}
         pages += 1
         ticket_obj = d.get("ticket") or ticket_obj
         msgs = d.get("messages") or []
@@ -235,7 +258,7 @@ def sync(db, mcp, d_from, d_to, statuses, limit=None, log=_log):
     stats = {"days": 0, "tickets_seen": 0, "threads_fetched": 0, "threads_skipped": 0,
              "messages": 0, "inserted": 0, "updated": 0, "unchanged": 0, "frozen": 0,
              "agent_msgs": 0, "bot_msgs": 0, "private_notes": 0, "attachments": 0,
-             "thread_pages": 0, "truncated_threads": 0, "errors": 0}
+             "thread_pages": 0, "truncated_threads": 0, "id_rejected": 0, "errors": 0}
     t0 = time.time()
     note = f"{d_from}..{d_to} statuses={'+'.join(statuses)} rpm={mcp.limiter.target_rpm()}"
     with cm.sync_run(db, "rp_sync", note=note) as run:
@@ -315,6 +338,8 @@ def report(stats):
     print(f"durata              {el}s"
           + (f"   ({stats['api_calls'] / (el / 60.0):.1f} apeluri/min efectiv)"
              if el > 0 else ""))
+    if stats.get("id_rejected"):
+        print(f"id respins de server → luat după NUMĂR: {stats['id_rejected']}")
     if stats["truncated_threads"]:
         print(f"⚠️ {stats['truncated_threads']} fire au atins plafonul de "
               f"{MAX_THREAD_PAGES} pagini")
@@ -354,6 +379,83 @@ def stats_cmd(db):
               f"err={r['errors']}  {(r['note'] or '')[:90]}")
 
 
+def selftest():
+    """Dovada rezervei de adresare din 6.1. ZERO apeluri API: MCP-ul e un dublu care
+    respinge id-ul exact cum o face serverul, apoi raspunde la numar."""
+    import tempfile
+
+    R = []
+
+    def chk(name, cond, detail=""):
+        R.append(bool(cond))
+        print(f"  {'OK  ' if cond else 'PICA'} {name}" + (f"  - {detail}" if detail else ""))
+
+    class FakeMCP:
+        """Respinge conversation_id cu TEXT (ca serverul), accepta conversation_number."""
+
+        def __init__(self):
+            self.seen = []
+
+        def call(self, tool, args):
+            self.seen.append(dict(args))
+            if "conversation_id" in args:
+                raise cm.MCPError(tool, "Error: id contains invalid characters.")
+            return {"ticket": {"id": "m_jTGUpyrNk1NS-_", "conversation_no": 324855,
+                               "channel": "facebook_message", "status": "CLOSED"},
+                    "messages": [
+                        {"index": 0, "text": "Buna, unde e comanda?", "from": {"id": "fb_9"},
+                         "created_at": "2026-08-31T10:00:00Z"},
+                        {"index": 1, "text": "Buna ziua, a plecat azi.",
+                         "author_is_workspace_agent": True,
+                         "from": {"id": "u_1", "name": "Monica Dan"},
+                         "created_at": "2026-08-31T11:00:00Z"}],
+                    "messages_page": {"next_cursor": None}}
+
+    tmp = tempfile.mkdtemp(prefix="rp_sync_selftest_")
+    db = cm.open_db(os.path.join(tmp, "mirror.db"))
+    tid = "m_jTGUpyrNk1NS-_"
+    cm.upsert_ticket(db, {"id": tid, "conversation_no": 324855,
+                          "channel": "facebook_message", "status": "CLOSED"},
+                     fetched_at=cm.now_iso())
+    db.commit()
+
+    print("\n1) id respins de server -> se reia dupa NUMAR")
+    mcp = FakeMCP()
+    st = {"agent_msgs": 0, "bot_msgs": 0, "private_notes": 0, "attachments": 0,
+          "thread_pages": 0, "truncated_threads": 0, "id_rejected": 0}
+    n = fetch_thread(mcp, db, tid, st, cm.now_iso())
+    db.commit()
+    chk("firul e captat, nu pierdut", n == 2, f"{n} mesaje")
+    chk("a incercat INTAI dupa id", "conversation_id" in mcp.seen[0])
+    chk("a cazut pe conversation_number", mcp.seen[1].get("conversation_number") == 324855,
+        str(mcp.seen[1].get("conversation_number")))
+    chk("rezerva nu costa un apel de cautare in plus", len(mcp.seen) == 2,
+        f"{len(mcp.seen)} apeluri")
+    chk("caderea e NUMARATA, nu tacuta", st["id_rejected"] == 1)
+    chk("raspunsul agentului real e captat", st["agent_msgs"] == 1)
+    rows = db.execute("SELECT COUNT(*) FROM rp_message WHERE ticket_id = ?", (tid,)).fetchone()
+    chk("mesajele chiar au ajuns in oglinda", rows[0] == 2, f"{rows[0]} randuri")
+
+    print("\n2) fara numar in oglinda, eroarea NU se inghite")
+    orphan = "<CAMxp_TNpjBKGq7dQqkVyMvuXgrFNp8x=tVaS@mail.gmail.com>"
+    cm.upsert_ticket(db, {"id": orphan, "channel": "email", "status": "OPEN"},
+                     fetched_at=cm.now_iso())
+    db.commit()
+    chk("conversation_no lipsa => None", conversation_no(db, orphan) is None)
+    try:
+        fetch_thread(FakeMCP(), db, orphan, dict(st), cm.now_iso())
+        propagated = False
+    except cm.MCPError:
+        propagated = True
+    chk("MCPError se propaga cu textul serverului", propagated)
+
+    db.close()
+    ok = sum(R)
+    print("\n" + "=" * 72)
+    print(f"{ok}/{len(R)} verificari trecute")
+    return 0 if ok == len(R) else 1
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Captarea oglinzii CS Richpanel (READ-ONLY).")
@@ -369,8 +471,13 @@ def main():
     ap.add_argument("--statuses", default="OPEN,CLOSED",
                     help='status=all NU merge — se cer separat (implicit "OPEN,CLOSED")')
     ap.add_argument("--stats", action="store_true", help="doar raportează oglinda")
+    ap.add_argument("--selftest", action="store_true",
+                    help="dovada rezervei conversation_number (ZERO apeluri API)")
     ap.add_argument("--db", default=cm.DB_DEFAULT)
     a = ap.parse_args()
+
+    if a.selftest:
+        sys.exit(selftest())
 
     db = cm.open_db(a.db)
     if a.stats:

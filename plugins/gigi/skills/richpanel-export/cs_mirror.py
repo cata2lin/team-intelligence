@@ -818,6 +818,17 @@ class RateLimiter:
 
 
 # ───────────────────────────────────────────────────────── gardă READ-ONLY + MCP
+class MCPError(RuntimeError):
+    """Serverul MCP a răspuns cu TEXT, nu cu obiect (ex. „Error: id contains invalid
+    characters."). Fără asta textul se întorcea ca string obișnuit, `d.get(...)` arunca
+    AttributeError, iar mesajul real al serverului nu ajungea niciodată în jurnal."""
+
+    def __init__(self, tool, payload):
+        self.tool = tool
+        self.payload = payload
+        super().__init__(f"{tool}: raspuns non-dict de la MCP: {str(payload)[:200]}")
+
+
 READ_TOOLS = {"get_conversation", "list_conversations", "search_conversations_by_customer",
               "get_customer_by_email_or_phone", "get_user", "list_users", "list_tags",
               "list_teams", "query_analytics", "get_available_metrics",
@@ -899,7 +910,10 @@ class MirrorMCP:
 
     def call(self, tool, args=None):
         assert_read_only(tool)
-        return self.mcp.call(tool, args or {})
+        out = self.mcp.call(tool, args or {})
+        if out is not None and not isinstance(out, dict):
+            raise MCPError(tool, out)
+        return out
 
 
 # ───────────────────────────────────────────────────────────────────── selftest
@@ -1115,6 +1129,27 @@ def selftest(db_path=None):
     except PermissionError:
         unknown_blocked = True
     _chk(R, "unealta necunoscuta = refuzata (allowlist)", unknown_blocked)
+
+    # Regresie 6.1: serverul respinge id-urile cu <>=+ (Message-ID de email) sau -_
+    # (base64url de Messenger) si raspunde cu TEXT. Inainte, textul se intorcea ca
+    # string, `d.get(...)` arunca AttributeError, iar mesajul real al serverului nu
+    # ajungea niciodata in jurnal.
+    mcp_stub = MirrorMCP.__new__(MirrorMCP)
+    mcp_stub.mcp = type("FakeRP", (), {
+        "call": lambda self, t, a: "Error: id contains invalid characters."})()
+    try:
+        mcp_stub.call("get_conversation", {"conversation_id": "m_jTGUpyrNk1NS-_"})
+        raised = None
+    except MCPError as e:
+        raised = e
+    _chk(R, "raspuns non-dict de la MCP => MCPError, nu string", raised is not None,
+         str(raised)[:60] if raised else "nu a aruncat")
+    _chk(R, "textul serverului ajunge in exceptie",
+         raised is not None and "invalid characters" in str(raised))
+    mcp_ok = MirrorMCP.__new__(MirrorMCP)
+    mcp_ok.mcp = type("FakeRP2", (), {"call": lambda self, t, a: {"messages": []}})()
+    _chk(R, "raspunsul dict trece nemodificat",
+         mcp_ok.call("get_conversation", {}) == {"messages": []})
 
     print("\n7) ticket / atasamente / paritate / sync_run")
     ms = int(datetime.datetime(2026, 8, 30, 9, 0, tzinfo=datetime.timezone.utc).timestamp() * 1000)
