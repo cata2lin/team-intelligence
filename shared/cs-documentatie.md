@@ -99,6 +99,20 @@ s-o reducă. Cumpără trei lucruri:
 > **Restul repo-ului are drift** (≈37 fișiere modificate necommitate, în afara CS). Nu ține de
 > sistemul ăsta, dar e bine de știut înainte de un `deploy.sh --apply`.
 
+> **🌍 REPO-UL E PUBLIC — `cata2lin/team-intelligence`, `visibility=public`.**
+> Verificat anonim, fără token: PR-ul și fișierele se citesc de oricine.
+> **Consecința pentru orice scrii aici:** fără adrese de email personale ale colegilor, fără valori
+> de secrete, fără chei. Identitățile agenților se citesc la nevoie cu `uv run rp.py agents`, din
+> Richpanel — nu din fișiere versionate.
+>
+> Primul commit al acestui branch (9 sep) conținea două adrese personale; le-am redactat și am
+> rescris branch-ul cu `--force-with-lease`. ⚠️ **Commiturile vechi rămân accesibile pe GitHub după
+> SHA** (`8384201`, `757fcb7`) până când GitHub le colectează — ștergerea completă cere fie o cerere
+> la GitHub Support, fie trecerea repo-ului pe privat. **Decizie de owner, nedeschisă încă.**
+>
+> Ce era deja public înainte (nu de la commitul ăsta): IP-ul VPS-ului (23 fișiere), `nocturna954`,
+> și un cont de agent.
+
 ### 2.2 Mediu
 
 Toate scripturile sunt PEP-723 (dependențe declarate inline) și se rulează cu **`uv run`**.
