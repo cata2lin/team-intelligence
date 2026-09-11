@@ -34,20 +34,26 @@ API_VERSION = "2026-04"
 
 # --- Fetch tokens din KB sau fallback din env ---
 def get_token(key: str) -> str:
-    """Incearca kb.py secret-get, fallback la env."""
+    """Incearca kb.py secret-get (cauta kb.py in PATH-ul plugin-ului), fallback la env."""
     import os, subprocess
     val = os.environ.get(key)
     if val:
         return val
-    try:
-        result = subprocess.run(
-            ["uv", "run", "kb.py", "secret-get", key],
-            capture_output=True, text=True, timeout=10
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except Exception:
-        pass
+    # Cauta kb.py in locatiile cunoscute
+    kb_candidates = [
+        Path.home() / ".claude/plugins/cache/team-intelligence/core/8c084a3466c1/scripts/kb.py",
+    ]
+    kb_path = next((p for p in kb_candidates if p.exists()), None)
+    if kb_path:
+        try:
+            result = subprocess.run(
+                ["uv", "run", str(kb_path), "secret-get", key],
+                capture_output=True, text=True, timeout=15
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
     return None
 
 def load_stores():
