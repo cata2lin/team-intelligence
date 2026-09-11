@@ -5,6 +5,15 @@ description: Adauga stoc pentru marfa noua (un container) pe cele 4 magazine "de
 
 # adaugare-stoc-produse
 
+> ⚠️ **DEPRECIAT pentru CANTITATEA de stoc (2026-07-23, decizia lui Anne).**
+> Stock-sync **v2** al lui Catalin e LIVE din 2026-07-22 (`https://bi.arona.ro:8002`,
+> toate cele 19 magazine + Trendyol) si detine stocul autoritativ prin ledger.
+> **NU mai scrie stoc direct in Shopify** (nici macar doar pe Magdeal) — ajustarile
+> de stoc se fac prin **`catalin:stock-sync-operator`** (ajustare pe Master Product,
+> cu `requestedBy`). Partile NON-stoc de mai jos (barcode, tracking, policy DENY,
+> tag `test`, dubluri pe DRAFT, marcat verde in sheet) raman valabile pana confirmi
+> in runbook-ul v2 ca le acopera si el.
+
 > Autor: **Anne**. Runbook + tool pentru pus stoc la marfa noua pe magazinele deals.
 > Construit iul-2026 pe containerul C41 (31 SKU-uri HA), verificat cap-coada de user.
 
