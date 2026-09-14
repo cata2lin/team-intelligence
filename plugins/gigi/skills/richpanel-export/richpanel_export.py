@@ -173,11 +173,27 @@ def upsert(db, tickets):
     for t in tickets:
         store, order, cat = derive(t)
         cust = t.get("customer") or {}
-        db.execute("""INSERT OR REPLACE INTO tickets
+        # ⚠️ NU folosi INSERT OR REPLACE: în SQLite el ȘTERGE rândul și inserează unul nou, deci
+        # coloanele NElistate aici (applied_tags, applied_note_sig, sentiment, quality_flags,
+        # resolved_store, comment_type, match_order…) revin la NULL. Efectul: `richpanel_apply`
+        # nu mai știe că a scris deja nota și o rescrie la FIECARE rulare a pipeline-ului
+        # (cron la 30 min ⇒ ~6.500 note duplicate în 2 zile, raportat de CS 19-aug-2026).
+        # Upsert-ul de mai jos actualizează DOAR câmpurile venite din pull.
+        db.execute("""INSERT INTO tickets
             (id, conversation_no, subject, status, priority, assignee_id, channel, from_email, to_email,
              customer_id, customer_name, customer_email, tags, first_message, comment_count, created_at,
              updated_at, store, order_name, category, raw)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+              conversation_no=excluded.conversation_no, subject=excluded.subject,
+              status=excluded.status, priority=excluded.priority, assignee_id=excluded.assignee_id,
+              channel=excluded.channel, from_email=excluded.from_email, to_email=excluded.to_email,
+              customer_id=excluded.customer_id, customer_name=excluded.customer_name,
+              customer_email=excluded.customer_email, tags=excluded.tags,
+              first_message=excluded.first_message, comment_count=excluded.comment_count,
+              created_at=excluded.created_at, updated_at=excluded.updated_at,
+              store=excluded.store, order_name=excluded.order_name, category=excluded.category,
+              raw=excluded.raw""", (
             str(t.get("id")), t.get("conversation_no"), clean(t.get("subject")), t.get("status"), t.get("priority"),
             t.get("assignee_id"), t.get("channel"),
             clean((t.get("from") or {}).get("email") or (t.get("from") or {}).get("id") or ""),
