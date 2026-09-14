@@ -539,23 +539,59 @@ Observability a fost **activat** (era `{}`, de-aia nu exista istoric de loguri).
 > de payload și scrie înainte de orice filtrare, iar workerul e viu (cele 6 evenimente IG au trecut
 > prin el).
 >
-> **Cauza rădăcină:** app-ul „Api export" (`1268707461439970`) are aprobate exact **două** permisiuni:
+> **CAUZA RĂDĂCINĂ: comentariile vin de pe DARK POSTS, iar `page/feed` nu se declanșează pentru ele.**
+>
+> Eșantion de 25 de tichete `facebook_feed_comment` din 7–14 sep, verificate la sursă:
 >
 > ```
-> email           live
-> public_profile  live
+> 20  NEPUBLICAT (dark post / reclamă)   is_published = false
+>  0  PUBLICAT (organic)
+>  4  pagina nu e în tokenul nostru
+>  1  postarea nu mai există
 > ```
 >
-> Îi lipsesc `pages_read_engagement`, `pages_manage_engagement`, `pages_read_user_content`.
-> Fără ele Meta **nu livrează** evenimente `feed` pentru comentariile oamenilor reali — exact
-> același zid ca la DM-urile Instagram (§5): **Standard Access**, date doar pentru cine are rol în app.
+> **20 din 20** verificabile sunt reclame pe postări nepublicate. Abonamentul `feed` acoperă feed-ul
+> **publicat** al paginii; dark posts nu sunt în el.
 >
-> ⇒ **ReplyZen și Instagram sunt ACELAȘI blocaj**, nu două. Ambele se deschid cu o singură
-> submisie de App Review pe app-ul „Api export", pentru: `pages_read_engagement`,
-> `pages_manage_engagement`, `instagram_manage_comments`, `instagram_manage_messages`.
+> **⚠️ NU e problemă de permisiuni.** Am afirmat asta întâi, greșit — citisem
+> `GET /{app-id}/permissions`, care arată aprobările de App Review pentru Facebook Login, nu ce poate
+> face un system user. `META_SYSTEM_TOKEN`, al **aceluiași** app, are 31 de scope-uri, între care
+> `pages_read_engagement`, `pages_manage_engagement`, `pages_read_user_content`,
+> `instagram_manage_comments`, `instagram_manage_messages`. Permisiunile există.
 >
-> ⚠️ Deci criteriul din README — „3–5 zile de rulare în paralel" — **nu se poate îndeplini azi**.
-> Validarea ar fi picat. **ReplyZen rămâne pornit**, dar nu din prudență: din necesitate.
+> ⇒ **App Review NU deblochează ReplyZen.** Deblochează doar DM-urile Instagram (§5), diagnostic
+> separat și corect măsurat (`subcode 2534048`).
+
+### 3.5b Înlocuitorul ReplyZen e FEZABIL AZI, cu tokenurile pe care le avem
+
+Măsurat 14 sep cu `META_SYSTEM_TOKEN` (app „Api export", system user, 31 de scope-uri) + page tokens.
+Fără App Review, fără webhook, fără permisiune nouă.
+
+| Ce am testat | Rezultat |
+|---|---|
+| Citirea comentariilor de pe **dark posts** | **115 comentarii** de pe 4 postări nepublicate, 0 erori |
+| Costul de cotă | **zero** — Meta nici nu returnează `x-app-usage` pe calea page-scoped |
+| Moderarea (ce face ReplyZen) | `can_hide=true`, `can_remove=true` pe toate cele verificate |
+| Descoperirea creativelor | **34 conturi active** din 39; **1.070 story-uri unice** din primele 6 conturi în **7,8s**, 0 erori |
+
+```
+GET  /me/adaccounts                                    -> 34 conturi active
+GET  /act_{id}/adcreatives?fields=effective_object_story_id
+GET  /{story}/comments?filter=stream&order=reverse_chronological   <- PAGE token
+POST /{comment_id}  is_hidden=true                                 <- moderarea
+```
+
+**⚠️ Identitatea rămâne indisponibilă pe Facebook, pe ORICE cale.** Din cele 115 comentarii citite,
+numele care apar sunt ale **paginii** (răspunsurile noastre); ale clienților lipsesc — consistent cu
+0 din 24.110 măsurat anterior. Webhook-ul ar fi purtat `from.id`+`from.name`, dar nu se declanșează
+pentru dark posts, de unde vin 20 din 20 din comentariile noastre. Deci pentru comentariile de pe
+reclame Facebook, interogarea **nu e un compromis — e echivalentă**. Webhook-ul mai contează doar
+pentru **Instagram**, unde identitatea chiar vine (29%, §5.1).
+
+**Singura pierdere reală a interogării:** ajunge **după** moderare. Se compensează cu frecvența —
+un baleiaj complet costă ~0 în cotă, deci poate rula des.
+
+**ReplyZen rămâne pornit** până se scrie bucla de interogare.
 
 ### 3.6 Puntea AWBprint → fișa clientului — `rp.py push` · ⛔ OPRIT
 
@@ -1059,6 +1095,9 @@ Partea cea mai utilă a dosarului. Fiecare rând a costat timp sau, într-un caz
 | 17 | „M1 = 100%, zero ID-uri lipsă ⇒ am captat tot" | M1 dovedește „tot ce a **numit** `list_conversations`". **11 din 18 zile au în oglindă mai multe tichete decât a numărat Richpanel**, toate raportate 100%. §6.5 |
 | 18 | „ReplyZen așteaptă 3–5 zile de validare în paralel" | **Validarea ar fi picat.** Webhook-ul primește **0 evenimente Facebook în 7 zile**. §3.5 |
 | 20 | „Cauza e că app-ul are doar `email` + `public_profile`" | **Fals — am citit tabelul greșit.** `GET /{app-id}/permissions` arată aprobările de App Review pentru Facebook Login, nu ce poate un system user. `META_SYSTEM_TOKEN`, al **aceluiași** app, are 31 de scope-uri, inclusiv toate cele `pages_*` și `instagram_*` necesare. Corectat în aceeași zi, după ce ownerul a întrebat „ce token, că avem mai multe". §3.5 |
+| 22 | „ReplyZen cere altă cale de captare”, lăsând impresia că e nedovedit, de construit | **Calea există și e dovedită.** Testat cu tokenurile pe care le avem: 115 comentarii citite de pe dark posts, `can_hide=true`, 1.070 story-uri din 6 din 34 de conturi în 7,8s, cotă zero. Ownerul a prins-o: „vezi ce tokeni avem, tu trageai comentariile printr-unul”. §3.5b |
+| 23 | „Compromisul interogării: ajunge după moderare **și nu poartă identitatea**” | Jumătate fals. Pe Facebook identitatea **nu există pe nicio cale**. Interogarea nu pierde nimic față de webhook pe FB; contează doar pentru Instagram. §3.5b |
+| 24 | Scriptul de patch a printat „ok” pentru două înlocuiri, apoi a crăpat ÎNAINTE de scriere | Corecția din §3.5 s-a pierdut tăcut, iar documentul a rămas o zi contrazicându-se: corpul spunea „permisiuni”, erata 20–21 spunea că e fals. **Un mesaj de succes emis înainte de efect nu e o dovadă.** Verifică prin re-citire, nu prin log. |
 | 21 | „ReplyZen și Instagram sunt același blocaj, o singură submisie de App Review" | **Fals, decurgea din 20.** Cauza reală: **20 din 20** de postări eșantionate sunt dark posts (`is_published=false`), iar `page/feed` nu se declanșează pentru ele. App Review deblochează doar DM-urile IG; ReplyZen cere altă **cale de captare**, nu altă permisiune. §3.5 |
 | 19 | „Wrapperele sunt versionate odată cu restul" | Cele 4 care **conduc** producția nu erau în git nicăieri și erau invizibile pentru `deploy_parity.py`. Reparat, PR #587. §2.1 |
 
@@ -1093,7 +1132,8 @@ Partea cea mai utilă a dosarului. Fiecare rând a costat timp sau, într-un caz
 | ~~Scurgerea evenimentelor brute din D1 în `cs_mirror.db`~~ | **fără obiect** | D1 are 6 rânduri, toate IG DM. N-are ce scurge până nu trece App Review-ul |
 | **Citește `subject` pentru comentariile șterse** + fuzionează cele două arhive (§6.4) | **de făcut, ieftin** | Recuperează azi text pe care documentul îl declara pierdut definitiv |
 | **Repară parserul SSE la U+2028** (§6.1b), în toate cele 15 fișiere | **de făcut** | 7 din 8 erori curente; și riscul tăcut de a pierde o zi întreagă la enumerare |
-| **App Review pentru „Api export"** — `pages_read_engagement`, `pages_manage_engagement`, `instagram_manage_comments`, `instagram_manage_messages` | **decizie de owner** | **Deblochează SIMULTAN: ReplyZen (149 $/lună), identitatea comentatorilor FB, și DM-urile Instagram.** Sunt același blocaj, nu trei (§3.5) |
+| **Bucla de interogare pe `/{story}/comments` pentru creativele ACTIVE** | **de scris — fezabilitatea e DOVEDITĂ (§3.5b)** | 149 $/lună. Tokenurile există, citirea merge, `can_hide=true`, cotă zero. Fără App Review |
+| Advanced Access Instagram (App Review) | **decizie de owner** | DOAR DM-urile Instagram. **Nu** deblochează ReplyZen |
 | ~~Validare ReplyZen: 3–5 zile în paralel~~ | **imposibil azi** | Webhook-ul nu primește niciun eveniment Facebook. Validarea ar pica. ReplyZen rămâne pornit |
 | Acordarea paginilor lipsă în Business Manager | administrativ | 12% din volumul social + conectarea DUPPO Moldova în Richpanel. *Criteriu de succes = EFECTUL:* `GET /{page}?fields=access_token` → 200 **și** în 24h comentariile apar în oglindă |
 | Comentarii TikTok pe grupurile de reclame ACTIVE | de făcut | Canal pe care Richpanel nu-l are deloc; acum se moderează în ReplyZen. Semnătura API e cunoscută (`/open_api/v1.3/comment/list/`) |
