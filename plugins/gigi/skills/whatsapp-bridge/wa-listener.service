@@ -1,0 +1,17 @@
+[Unit]
+Description=Punte WhatsApp - listener permanent (Arona)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/wa-bridge
+# 0 = fara termen. Grupurile se schimba la cald din groups.json, deci NU e nevoie de repornire
+# ca sa intri pe un grup nou — repornirea ar rupe sesiunea, exact ce vrem sa evitam.
+ExecStart=/usr/bin/node /root/wa-bridge/multi_bot.js "" 0
+Restart=always
+RestartSec=10
+StandardOutput=append:/root/wa-bridge/multi_bot.out
+StandardError=append:/root/wa-bridge/multi_bot.out
+
+[Install]
+WantedBy=multi-user.target

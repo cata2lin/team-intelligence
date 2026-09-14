@@ -8,7 +8,7 @@ rp.py — CLI unificat Richpanel, în tiparul `gigi:xconnector`: citiri libere, 
 DRY-RUN by default (`--apply` execută). Zero tokeni LLM — pur JSON-RPC peste MCP.
 
   CITIRE
-    uv run rp.py find --phone 0748620192          # client + comenzi + tichete
+    uv run rp.py find --phone 0700000000          # client + comenzi + tichete
     uv run rp.py conv 312879                      # o conversație (id / nr / URL)
     uv run rp.py list --status OPEN --limit 20    # coada
     uv run rp.py agents | tags | teams

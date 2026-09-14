@@ -1,0 +1,28 @@
+{
+  "store": "Nubra (nubra.ro)",
+  "admin_handle": "bmuwvv-jy",
+  "lang": "ro",
+  "source": "shop policies + delivery (orders shippingLine, live OAuth token via VPS) + payment gateways (2026-06-17). DE CONFIRMAT: termen retur (14 vs 30 zile) + curier afișat (DPD vs multi-curier)",
+  "faqs": [
+    { "q": "Cât costă transportul?", "a": "Transportul se face prin curier DPD și costă 20 de lei. Pentru comenzile de peste 150 de lei, livrarea este gratuită, așa că merită să profitați când luați mai multe parfumuri deodată." },
+    { "q": "Cum beneficiez de transport gratuit?", "a": "Livrarea este gratuită pentru orice comandă de peste 150 de lei, indiferent câte produse alegeți. Este momentul ideal să vă completați colecția, mai ales că la noi plătiți pentru esență, nu pentru ambalaje." },
+    { "q": "În cât timp ajunge comanda?", "a": "De regulă, comenzile ajung în 2-3 zile lucrătoare și sunt livrate prin curier DPD. Vă recomandăm să lăsați un număr de telefon valid, ca să vă poată contacta curierul înainte de livrare." },
+    { "q": "Cum îmi urmăresc comanda?", "a": "Imediat ce comanda este expediată, primiți pe e-mail numărul AWB și un link de urmărire, cu care vedeți în orice moment unde se află coletul. Dacă nu găsiți acest e-mail, scrieți-ne la contact@nubra.ro și vă trimitem noi toate detaliile." },
+    { "q": "Ce metode de plată acceptați?", "a": "Puteți alege între plata ramburs (în numerar, direct curierului la livrare) și plata online cu cardul, în mod securizat, la finalizarea comenzii. Ambele opțiuni sunt disponibile pentru orice comandă." },
+    { "q": "Cum funcționează plata ramburs?", "a": "Cu plata ramburs achitați comanda în numerar curierului DPD, în momentul în care primiți coletul. Este una dintre cele două variante de plată, alături de plata online cu cardul, și o alegeți direct la finalizarea comenzii." },
+    { "q": "Cum returnez un produs?", "a": "Aveți dreptul de retur în 14 zile de la primirea comenzii, conform OUG 34/2014. Este suficient să ne scrieți la contact@nubra.ro cu numărul comenzii și datele dumneavoastră, iar produsul trebuie să fie nefolosit, sigilat și în ambalajul original." },
+    { "q": "Pot returna un parfum pe care l-am desigilat sau testat?", "a": "Din motive de igienă, parfumurile desigilate, testate sau folosite nu pot fi acceptate la retur. Vă putem prelua înapoi doar produsele rămase sigilate, în ambalajul original, exact așa cum le-ați primit." },
+    { "q": "Cine plătește transportul pentru retur?", "a": "Costul transportului pentru retur este suportat de client. Singura excepție este atunci când produsul primit este neconform sau a fost livrat greșit, caz în care transportul retur este pe contul nostru." },
+    { "q": "În cât timp primesc banii înapoi după un retur?", "a": "După ce primim produsul returnat și verificăm că este sigilat și nefolosit, vă rambursăm contravaloarea în cel mult 14 zile. Banii ajung pe aceeași cale prin care ați achitat comanda." },
+    { "q": "Cum anulez o comandă?", "a": "Puteți anula comanda oricând înainte de a fi expediată. Scrieți-ne cât mai repede la contact@nubra.ro cu numărul comenzii, iar noi oprim livrarea și anulăm comanda fără niciun cost." },
+    { "q": "Pot să modific adresa sau datele comenzii?", "a": "Da, putem modifica adresa, numărul de telefon sau alte detalii ale comenzii, atât timp cât aceasta nu a fost încă expediată. Trimiteți-ne noile date la contact@nubra.ro și facem schimbarea pentru dumneavoastră." },
+    { "q": "Aveți și magazin fizic?", "a": "Nubra este un magazin exclusiv online, așa că nu avem un punct de vânzare fizic. Astfel reușim să ținem prețurile mici și să vă oferim miros de lux la un preț accesibil, livrat direct la ușă prin curier DPD." },
+    { "q": "Cum vă pot contacta?", "a": "Ne puteți scrie oricând la contact@nubra.ro sau prin formularul de contact de pe site. Vă răspundem cât mai repede, de obicei chiar în aceeași zi lucrătoare." },
+    { "q": "Aveți promoții sau coduri de reducere?", "a": "Avem frecvent oferte și reduceri, iar prețurile noastre sunt deja gândite să vă ofere cel mai mic preț garantat. Vă recomandăm să urmăriți site-ul și paginile noastre, ca să prindeți cele mai bune oferte la parfumurile preferate." },
+    { "q": "Faceți vânzări en-gros sau colaborări?", "a": "Da, suntem deschiși la colaborări și comenzi în cantități mai mari. Scrieți-ne la contact@nubra.ro cu detaliile dorite și revenim cu o propunere potrivită pentru dumneavoastră." },
+    { "q": "Cât rezistă parfumurile Nubra pe piele?", "a": "Parfumurile Nubra au o persistență de 12 ore și peste, datorită concentrației ridicate de esență. Așa vă bucurați de miros pe tot parcursul zilei, dintr-o singură aplicare." },
+    { "q": "De ce sunt parfumurile atât de accesibile dacă miros a lux?", "a": "Pentru că plătiți pentru esență, nu pentru ambalaje scumpe și campanii de marketing. Parfumurile noastre sunt Made in France și folosesc esențe de calitate, așa că obțineți miros de lux la un preț corect." },
+    { "q": "De ce îmi amintesc parfumurile Nubra de arome de lux cunoscute?", "a": "Pentru că sunt inspirate, pe față, după arome de lux îndrăgite, recreate cu esențe de calitate Made in France. Așa primiți același tip de experiență olfactivă, dar plătiți pentru esență, nu pentru numele de pe sticlă." },
+    { "q": "Cum aleg parfumul potrivit pentru mine?", "a": "Vă recomandăm să porniți de la aromele care vă plac deja, fie ele florale, dulci, lemnoase sau proaspete, iar descrierea fiecărui parfum vă spune ce note conține. Dacă aveți nevoie de o sugestie, scrieți-ne la contact@nubra.ro și vă ajutăm cu plăcere." }
+  ]
+}

@@ -15,7 +15,7 @@
 ## 1. 🔎 CAUT o comandă / un client
 | Am … | Tool | Exemplu |
 |---|---|---|
-| **telefon** client | `gigi:cs-360 customer` | `cs360.py customer --phone 0748620192` → toate comenzile lui, LTV, refuzuri. **Merge și `40748…` / `+40748…`** (ultimele 9 cifre). |
+| **telefon** client | `gigi:cs-360 customer` | `cs360.py customer --phone 0700000000` → toate comenzile lui, LTV, refuzuri. **Merge și `40748…` / `+40748…`** (ultimele 9 cifre). |
 | **nume** client | `gigi:cs-360 customer` | `cs360.py customer --name "Rebeca Kiss"` |
 | **email** client | `gigi:cs-360 customer` | `cs360.py customer --email ana@gmail.com` |
 | **nr comandă** (GT123) | `gigi:xconnector links` | `xconnector.py links --order GT45911` → status + linkuri Shopify/xConnector/tracking |

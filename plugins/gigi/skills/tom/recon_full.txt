@@ -1,0 +1,96 @@
+==========================================================================
+A. ATRIBUIRE GRESITA — 29 PO-uri
+==========================================================================
+  TOM-002    TOM zice ARONA-BI  / REC-fbcyekuw               → corect GRANDIA / cmnn96caq0000333x1cj089z8   [SHIPPED]
+  TOM-004    TOM zice ARONA-BI  / REC-vgepmaet               → corect GRANDIA / cmoih51a90000x23xn9qjde8q   [SHIPPED]
+  TOM-011    TOM zice ARONA-BI  / REC-3scn36f9               → corect SCENTUM / Pk-020   [NEW]
+  TOM-012    TOM zice MANUAL    / manual-TOM-012             → corect ARONA-BI / 7   [SHIPPED]
+  TOM-015    TOM zice ARONA-BI  / REC-q47k4ftk               → corect VIGO / PO-0009   [NEW]
+  TOM-016    TOM zice ARONA-BI  / REC-s7nck7gr               → corect VIGO / PO-0010   [NEW]
+  TOM-017    TOM zice ARONA-BI  / REC-09lhyr4j               → corect SCENTUM / Pk-021   [NEW]
+  TOM-019    TOM zice ARONA-BI  / REC-s3352w6d               → corect ARONA-BI / 46   [NEW]
+  TOM-021    TOM zice ARONA-BI  / REC-0rvu026s               → corect GRANDIA / cmp3yf0il000004l28nszx3yp   [PARTIALLY_SHIPPED]
+  TOM-022    TOM zice ARONA-BI  / REC-6xawbej3               → corect GRANDIA / cmpco8cor000104l6wtvxmnxv   [SHIPPED]
+  TOM-024    TOM zice ARONA-BI  / REC-paazx33l               → corect SCENTUM / Pk-022   [NEW]
+  TOM-025    TOM zice ARONA-BI  / REC-eaipgq8p               → corect SCENTUM / Pk-025   [NEW]
+  TOM-026    TOM zice ARONA-BI  / REC-4eakwyzc               → corect SCENTUM / Pk-027   [NEW]
+  TOM-029    TOM zice ARONA-BI  / REC-xcbfep4r               → corect SCENTUM / Pk-024   [NEW]
+  TOM-030    TOM zice ARONA-BI  / REC-efuzfnyq               → corect SCENTUM / Pk-029   [NEW]
+  TOM-031    TOM zice ARONA-BI  / REC-caebeuvu               → corect SCENTUM / Pk-030   [NEW]
+  TOM-033    TOM zice ARONA-BI  / REC-m96w4mzp               → corect SCENTUM / Pk-036   [NEW]
+  TOM-035    TOM zice ARONA-BI  / REC-9pmpro8e               → corect SCENTUM / Pk-038   [NEW]
+  TOM-038    TOM zice ARONA-BI  / REC-mqbbc9r7               → corect SCENTUM / Pk-043   [NEW]
+  TOM-040    TOM zice ARONA-BI  / REC-9tf5bdag               → corect SCENTUM / Pk-032   [NEW]
+  TOM-042    TOM zice ARONA-BI  / REC-iql4ll4h               → corect SCENTUM / Pk-033   [NEW]
+  TOM-044    TOM zice ARONA-BI  / REC-2k4c8nea               → corect SCENTUM / Pk-046   [NEW]
+  TOM-045    TOM zice ARONA-BI  / REC-fjre596b               → corect VIGO / PO-0013   [NEW]
+  TOM-047    TOM zice ARONA-BI  / REC-0491aiy3               → corect SCENTUM / Pk-054   [NEW]
+  TOM-050    TOM zice ARONA-BI  / REC-xnh8s2g9               → corect SCENTUM / Pk-055   [NEW]
+  TOM-053    TOM zice ARONA-BI  / REC-igdtg8kd               → corect SCENTUM / Pk-056   [NEW]
+  TOM-056    TOM zice ARONA-BI  / REC-qsdanqkh               → corect SCENTUM / Pk-044   [NEW]
+  TOM-058    TOM zice ARONA-BI  / REC-z4li7hw0               → corect SCENTUM / Pk-034   [NEW]
+  TOM-060    TOM zice ARONA-BI  / REC-ng2r3onn               → corect SCENTUM / Pk-039   [NEW]
+
+==========================================================================
+B. LIPSESC DIN TOM — 5 PO-uri
+==========================================================================
+  TOM-007    exista in SCENTUM, id Pk-013 — de recreat
+  TOM-013    exista in SCENTUM, id Pk-018 — de recreat
+  TOM-020    exista in VIGO, id PO-0012 — de recreat
+  TOM-023    exista in SCENTUM, id Pk-023 — de recreat
+  TOM-028    exista in SCENTUM, id Pk-028 — de recreat
+
+==========================================================================
+C. ORFANE IN TOM (nicio sursa nu le revendica) — 12
+==========================================================================
+  TOM-051            atribuit ARONA-BI  / REC-rqdqcm1k               [NEW]
+  TOM-052            atribuit VIGO      / ROSSI-POLYGEL-0002         [NEW]
+  TOM-054            atribuit ARONA-BI  / REC-nfxpy28o               [NEW]
+  TOM-055            atribuit VIGO      / PO-ANNE-BF-GP-02           [CANCELLED]
+  TOM-066            atribuit ARONA-BI  / REC-nawv3y1b               [NEW]
+  TOM-067            atribuit GRANDIA   / QC-DEMO-001                [NEW]
+  TOM-REC-ia3b7q     atribuit ARONA-BI  / REC-zdia3b7q               [NEW]
+  TOM-REC-ivznkm     atribuit ARONA-BI  / REC-6civznkm               [NEW]
+  TOM-REC-kz8vla     atribuit ARONA-BI  / REC-hakz8vla               [NEW]
+  TOM-REC-na52cs     atribuit ARONA-BI  / REC-t7na52cs               [NEW]
+  TOM-REC-w3qxny     atribuit ARONA-BI  / REC-69w3qxny               [NEW]
+  TOM-REC-x8byhp     atribuit ARONA-BI  / REC-tkx8byhp               [NEW]
+
+==========================================================================
+D. REVENDICATE DE 2 SURSE — 2
+==========================================================================
+  TOM-005    revendicat de SCENTUM(id Pk-009), ARONA-BI(id 8) | TOM are SCENTUM / Pk-009
+  TOM-009    revendicat de GRANDIA(id cmoikzu1c000104l8r7xujryf), VIGO(id PO-0007) | TOM are ARONA-BI / REC-8e3cyle6
+
+==========================================================================
+SQL PROPUS (NEEXECUTAT) — corectarea atribuirii
+==========================================================================
+UPDATE purchase_orders SET "sourceAppId"='cmoh3cw0v00033xs65vomw2aj', "sourcePoId"='cmnn96caq0000333x1cj089z8' WHERE id='cmoiph06a001kky04fbcyekuw';  -- TOM-002: ARONA-BI→GRANDIA
+UPDATE purchase_orders SET "sourceAppId"='cmoh3cw0v00033xs65vomw2aj', "sourcePoId"='cmoih51a90000x23xn9qjde8q' WHERE id='cmoiphfsf004zky04vgepmaet';  -- TOM-004: ARONA-BI→GRANDIA
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-020' WHERE id='cmosf0a7u0002l7043scn36f9';  -- TOM-011: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh30ne50000kz04rxnei1sx', "sourcePoId"='7' WHERE id='cmoswme940002w2kz25zdp580';  -- TOM-012: MANUAL→ARONA-BI
+UPDATE purchase_orders SET "sourceAppId"='cmoh5gv4p0000l1044fv6hiq6', "sourcePoId"='PO-0009' WHERE id='cmovil8k80001ic04q47k4ftk';  -- TOM-015: ARONA-BI→VIGO
+UPDATE purchase_orders SET "sourceAppId"='cmoh5gv4p0000l1044fv6hiq6', "sourcePoId"='PO-0010' WHERE id='cmowtk97r0001l204s7nck7gr';  -- TOM-016: ARONA-BI→VIGO
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-021' WHERE id='cmp3v0qu40002jv0409lhyr4j';  -- TOM-017: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh30ne50000kz04rxnei1sx', "sourcePoId"='46' WHERE id='cmp40ic4m0014l404s3352w6d';  -- TOM-019: ARONA-BI→ARONA-BI
+UPDATE purchase_orders SET "sourceAppId"='cmoh3cw0v00033xs65vomw2aj', "sourcePoId"='cmp3yf0il000004l28nszx3yp' WHERE id='cmpcom4ri0001l5040rvu026s';  -- TOM-021: ARONA-BI→GRANDIA
+UPDATE purchase_orders SET "sourceAppId"='cmoh3cw0v00033xs65vomw2aj', "sourcePoId"='cmpco8cor000104l6wtvxmnxv' WHERE id='cmpcom90q003bl5046xawbej3';  -- TOM-022: ARONA-BI→GRANDIA
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-022' WHERE id='cmpnvi9wt0002i804paazx33l';  -- TOM-024: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-025' WHERE id='cmps5nklb0002l504eaipgq8p';  -- TOM-025: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-027' WHERE id='cmpxzasqs0003la044eakwyzc';  -- TOM-026: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-024' WHERE id='cmq0we6co0003l704xcbfep4r';  -- TOM-029: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-029' WHERE id='cmq4wij460003jm04efuzfnyq';  -- TOM-030: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-030' WHERE id='cmq6dn89g0001jy04caebeuvu';  -- TOM-031: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-036' WHERE id='cmq6lwq8x0004jp04m96w4mzp';  -- TOM-033: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-038' WHERE id='cmq6m6380001ajp049pmpro8e';  -- TOM-035: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-043' WHERE id='cmq83qkf90002jo04mqbbc9r7';  -- TOM-038: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-032' WHERE id='cmqgi9qp20001lb049tf5bdag';  -- TOM-040: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-033' WHERE id='cmqgiagu80024lb04iql4ll4h';  -- TOM-042: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-046' WHERE id='cmqgjchby003ulb042k4c8nea';  -- TOM-044: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh5gv4p0000l1044fv6hiq6', "sourcePoId"='PO-0013' WHERE id='cmrgcz1io0001l504fjre596b';  -- TOM-045: ARONA-BI→VIGO
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-054' WHERE id='cmriz40uf0002l7040491aiy3';  -- TOM-047: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-055' WHERE id='cms5xyye00002ie04xnh8s2g9';  -- TOM-050: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-056' WHERE id='cmsagcu0n0002jo04igdtg8kd';  -- TOM-053: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-044' WHERE id='cmsel3a510001jp04qsdanqkh';  -- TOM-056: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-034' WHERE id='cmsel3w94002ajp04z4li7hw0';  -- TOM-058: ARONA-BI→SCENTUM
+UPDATE purchase_orders SET "sourceAppId"='cmoh58mdc0000l404yib49b92', "sourcePoId"='Pk-039' WHERE id='cmselplud0049jp04ng2r3onn';  -- TOM-060: ARONA-BI→SCENTUM

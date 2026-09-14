@@ -28,7 +28,7 @@ Mix real de volum (Richpanel, de la 1-iun-2026, total 49.497 tichete): `facebook
 ### 1.3 Mesaje private Facebook (7,3%) — merg complet
 - `GET /{page}/conversations` merge pe **20/20** pagini testate care generează tichete DM (2.669 mesaje, 35,4% de la pagină). Recensământ verificat exact pe 4 pagini (54/54, 65/65, 11/11, 121/121).
 - **Fără fereastră de retenție**: istoric până în 2022-09 pe unele pagini. Fără trunchiere de fir: 12 thread-uri cu >25 mesaje, `message_count == fetched` în **12/12** cazuri.
-- Test decisiv de paritate cu Richpanel pe aceeași conversație (RP #312780 ↔ Meta `t_1568293114781914`): **17 vs 17 mesaje**, potrivire 1-la-1 pe timestamp + text, inclusiv atașamentul audio.
+- Test decisiv de paritate cu Richpanel pe aceeași conversație (un tichet RP ↔ firul lui Meta): **17 vs 17 mesaje**, potrivire 1-la-1 pe timestamp + text, inclusiv atașamentul audio.
 - Filtru nativ pe client: `GET /{page}/conversations?user_id={PSID}` — PSID-ul e exact valoarea din `from.id` a tichetului Richpanel.
 - Debit: 800 conversații + 4.704 mesaje în 44,7s (17,9 conv/s), 0 erori.
 

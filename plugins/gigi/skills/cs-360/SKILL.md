@@ -13,7 +13,7 @@ argument-hint: "customer --phone|--email|--name  ·  conversation --conv <id> [-
 ## Moduri
 ```bash
 # CLIENT: telefon/email/nume → toate comenzile (toate magazinele), LTV livrat, refuzuri, flag REFUZNIC SERIAL
-uv run scripts/cs360.py customer --phone 0748620192      # merge și 40748…/+40748… (ultimele 9 cifre)
+uv run scripts/cs360.py customer --phone 0700000000      # merge și 40748…/+40748… (ultimele 9 cifre)
 uv run scripts/cs360.py customer --name "Rebeca Kiss"
 uv run scripts/cs360.py customer --email ana@gmail.com
 
@@ -24,7 +24,7 @@ uv run scripts/cs360.py conversation --conv <conv_id> --llm    # sinteză LLM (p
 # WISMO / status comandă: order/AWB/telefon/email → comandă+plată+fulfillment+livrabilitate + tracking AWB LIVE
 uv run scripts/cs360.py wismo --order GT45911
 uv run scripts/cs360.py wismo --awb 81298289998
-uv run scripts/cs360.py order --phone 0748620192 --reply       # +răspuns RO gata de trimis
+uv run scripts/cs360.py order --phone 0700000000 --reply       # +răspuns RO gata de trimis
 ```
 
 ## Când folosești ce
