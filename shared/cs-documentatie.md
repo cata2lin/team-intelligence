@@ -96,8 +96,20 @@ s-o reducă. Cumpără trei lucruri:
 >   (§3.6). Regula echipei e categorică — credențialele nu intră în git — iar fișierul se re-culege
 >   în câteva secunde: `uv run rp.py keys --refresh`.
 >
+> **Cele 4 wrappere care CONDUC producția sunt acum în git** (PR #587, 14 sep):
+> `run_cs_mirror.sh`, `run_cs_pipeline.py`, `run_rp_push.sh`, `run_apply.sh`, în
+> `shared/scripturi-tools/`. Nu erau nicăieri, și erau **structural invizibile** pentru
+> `deploy_parity.py` (el compară doar fișiere care există deja în git).
+> ⚠️ `run_cs_pipeline.py` face el însuși `git pull --ff-only` la fiecare 30 de minute — codul CS se
+> auto-actualizează nesupravegheat, iar un fișier untracked poate bloca tăcut acel pull.
+>
 > **Restul repo-ului are drift** (≈37 fișiere modificate necommitate, în afara CS). Nu ține de
 > sistemul ăsta, dar e bine de știut înainte de un `deploy.sh --apply`.
+>
+> ⚠️ **`deploy.sh --apply` NU e sigur orb.** Dry-run-ul din 14 sep arată **11 fișiere flat
+> divergente**, iar scriptul însuși avertizează că divergența poate fi în orice direcție. Exact așa
+> era `richpanel_export.py`: serverul avea fixul notelor duplicate, git-ul nu — un `--apply` l-ar fi
+> reînviat pe cel vechi. **Verifică direcția per fișier înainte.**
 
 > **🌍 REPO-UL E PUBLIC — `cata2lin/team-intelligence`, `visibility=public`.**
 > Verificat anonim, fără token: PR-ul și fișierele se citesc de oricine.
@@ -475,7 +487,41 @@ Observability a fost **activat** (era `{}`, de-aia nu exista istoric de loguri).
 6. Scanarea `/{page}/feed` arată 0 comentarii recente pentru că vede **doar postările organice**;
    evenimentele vin de la reclame (dark posts).
 
-**ReplyZen rămâne pornit** până la 3–5 zile de rulare în paralel fără scăpări (criteriul din README).
+> ### 🔴 MĂSURAT 14 sep: webhook-ul NU captează nimic de pe Facebook
+>
+> Șapte zile de loguri Workers, cu păstrare 100%:
+>
+> ```
+> invocări totale       9
+> object=page           0     ← comentarii Facebook
+> object=instagram      6     ← DM-uri
+> ```
+>
+> **Zero.** În aceleași 7 zile Richpanel a primit ~3.000 de comentarii Facebook. Iar D1
+> (`cs-raw-events`) are **6 rânduri în total**, toate `instagram/messaging`, niciunul Facebook.
+>
+> **Nu e greșeală de configurare** — am verificat tot lanțul: abonamentul app-ului `page/feed` e
+> **activ**, **29 din 29 de pagini** sunt abonate pe `feed`, `rawSave` tratează corect ambele forme
+> de payload și scrie înainte de orice filtrare, iar workerul e viu (cele 6 evenimente IG au trecut
+> prin el).
+>
+> **Cauza rădăcină:** app-ul „Api export" (`1268707461439970`) are aprobate exact **două** permisiuni:
+>
+> ```
+> email           live
+> public_profile  live
+> ```
+>
+> Îi lipsesc `pages_read_engagement`, `pages_manage_engagement`, `pages_read_user_content`.
+> Fără ele Meta **nu livrează** evenimente `feed` pentru comentariile oamenilor reali — exact
+> același zid ca la DM-urile Instagram (§5): **Standard Access**, date doar pentru cine are rol în app.
+>
+> ⇒ **ReplyZen și Instagram sunt ACELAȘI blocaj**, nu două. Ambele se deschid cu o singură
+> submisie de App Review pe app-ul „Api export", pentru: `pages_read_engagement`,
+> `pages_manage_engagement`, `instagram_manage_comments`, `instagram_manage_messages`.
+>
+> ⚠️ Deci criteriul din README — „3–5 zile de rulare în paralel" — **nu se poate îndeplini azi**.
+> Validarea ar fi picat. **ReplyZen rămâne pornit**, dar nu din prudență: din necesitate.
 
 ### 3.6 Puntea AWBprint → fișa clientului — `rp.py push` · ⛔ OPRIT
 
@@ -790,8 +836,15 @@ Apoi `d.get("messages")` pe un string aruncă `AttributeError: 'str' object has 
 prins per-tichet în `sync()` și jurnalizat ca eroare misterioasă. **Mesajul real al serverului era
 acolo tot timpul, dar nu ajungea niciodată în jurnal.**
 
-Id-urile afectate conțin caractere pe care validatorul serverului le respinge: Message-ID-urile de
-email au `<`, `>`, `=`, `+`; id-urile de Messenger sunt base64url cu `-` și `_`.
+> **⚠️ CORECTAT 14 sep — teoria caracterelor e INFIRMATĂ, și era doar 1 din 8 erori.**
+>
+> Scrisesem aici că validatorul respinge id-urile cu `<`, `>`, `=`, `+`, `-`, `_`. **Fals**: printre
+> id-urile ACCEPTATE, 618 conțin `=`, 648 conțin `+`, iar 579 din cele 770 `m_*` conțin `-`.
+> Regula reală a validatorului rămâne **necunoscută**, iar cazurile sunt doar 2 incidente
+> independente (ambele de la același client, același fir), nu 3.
+>
+> Mai important: din cele **8 erori** ale ultimei rulări, **doar 1** e clasa asta. Celelalte **7**
+> sunt o clasă nouă, în care **serverul răspunde corect și crapă clientul nostru** — vezi §6.1b.
 
 **Fix verificat:** același tichet, cerut după **număr**, se întoarce complet:
 
@@ -806,8 +859,48 @@ mcp.call("get_conversation", {"conversation_number": 324855})
 2. **`fetch_thread` să cadă pe `conversation_number`** când `conversation_id` e respins
    (`rp_ticket.conversation_no` e deja în oglindă, deci nu e nevoie de niciun apel în plus).
 
-După fix, rulează `rp_sync.py --from 2026-08-30 --to 2026-09-03` ca să recuperezi cele două fire, apoi
-`parity_check.py --days 7` ca să confirmi că M3 scade.
+⚠️ **Fixul ăsta acoperă 1 din 8 erori.** Pentru celelalte 7, vezi §6.1b — sunt cauză diferită și
+reparație diferită.
+
+### 6.1b Parserul SSE se rupe la U+2028 — **7 din 8 erori · NEREPARAT**
+
+**Cauza:** parserul din `rp.py` (`for line in txt.splitlines(): if line.startswith("data:")`) taie
+răspunsul în două când corpul conține **U+2028 LINE SEPARATOR** — caracter *legal neescapat* în JSON,
+dar pe care Python îl tratează ca sfârșit de linie. De aici:
+
+```
+JSONDecodeError: Unterminated string starting at: line 1 column 45 (char 44)
+                                                              ↑
+        exact lungimea prefixului {"result":{"content":[{"type":"text","text":"
+```
+
+Serverul răspunde **corect**; noi stricăm răspunsul la parsare.
+
+**Dovada:** din 2.586 id-uri de tichet care există și în cutiile Gmail (sursă independentă de
+Richpanel), cele **7 cu U+2028 sunt 7/7 fără fir**; cele 2.579 fără U+2028 dau **unul singur**.
+
+**De unde vine caracterul:** dintr-un singur șablon de email — invitații TestFlight scrise de un
+dezvoltator care lipește text dintr-o aplicație Mac ce folosește U+2028 ca rând moale. Din 44 de
+tichete „X has invited you to test", pică 7 (15,9%), toate din același lot; 37 de invitații identice
+ca șablon, de la alte firme, trec.
+
+**⚠️ Riscul real e pe cealaltă cale.** Același parser e și pe **enumerare**
+(`list_conversations`): acolo un U+2028 ar ucide o pagină de 50 și, prin `except`-ul de zi din
+`rp_sync.py`, **o zi întreagă** — iar acele tichete n-ar intra niciodată în `rp_ticket`, deci ar fi
+invizibile și în numitorul parității. Nu s-a întâmplat încă **doar** fiindcă `first_message` din listă
+e trunchiat la 300 de caractere, iar U+2028-ul observat stă la offset 1057.
+
+**Fix:** în `rp.py::_post`, împarte pe `\n` / `\r\n` explicit, nu cu `splitlines()` — sau parsează SSE
+pe octeți. Parserul naiv apare în **15 fișiere din 9 skill-uri** (`cs-360`, `cs-draft-reply`,
+`cs-photo`, `cs-procedures`, `cs-sla-dashboard`, `customer-identity`, `richpanel-auto-triage`,
+`richpanel-backlog-janitor`, `richpanel-export`), deci reparația trebuie făcută în toate.
+
+**Istoric: nu știu.** `richpanel_tickets.db` n-are tabel de mesaje — firele istorice n-au fost trase
+niciodată — iar `first_message` e trunchiat la 300 de caractere și supus aceleiași selecții de
+supraviețuire. Orice extrapolare ar fi ghicit.
+
+După ambele fixuri, rulează `rp_sync.py --from 2026-08-30 --to 2026-09-14` ca să recuperezi firele,
+apoi `parity_check.py --days 7`.
 
 ### 6.2 ~~Cinci fișiere untracked în git~~ — REZOLVAT 9 sep 2026
 
@@ -823,9 +916,8 @@ nu e în `main`, un `git pull --ff-only` pe VPS tot nu vede codul — deci riscu
 
 ### 6.3 Ce nu știu (explicit)
 
-1. Dacă `get_conversation` **live** mai are textul pentru tichetele marcate șterse. **Toată
-   dimensionarea valorii congelatorului atârnă de asta.** Test: 50 de tichete al căror `first_message`
-   local e `This message was deleted` → `get_conversation` live. Răspuns binar.
+1. ~~Dacă Richpanel live mai are textul tichetelor marcate șterse.~~ **REZOLVAT 14 sep — răspunsul e DA.**
+   Vezi §6.4.
 2. De ce Graph ratează ~24% din comentariile care încă există. Nu pot separa „API-ul chiar nu
    returnează" de „scrape-ul a fost trunchiat tăcut de rate-limit". Test: re-paginare exhaustivă,
    single-thread, cu eșec zgomotos, pe story-ul `122185382600525741`.
@@ -837,6 +929,75 @@ nu e în `main`, un `git pull --ff-only` pe VPS tot nu vede codul — deci riscu
    `psql "$LOCAL_PG" -c 'select 1'` / `systemctl status postgresql`.
 
 ---
+
+### 6.4 Textul șters NU se pierde — Richpanel îl ține în `subject` *(fost §6.3.1)*
+
+Întrebarea care bloca decizia pe congelatorul de comentarii. **Răspunsul e DA**, dar în alt câmp
+decât cel în care ne uitam.
+
+```
+conv 321372   messages[0].text  = "This message was deleted"
+              first_message     = "This message was deleted"
+              subject           = "Csalók !!!!!!! Nem ezt küldik !!!!!!!"   ← textul real
+```
+
+| Măsurătoare | Rezultat |
+|---|--:|
+| Tichete cu mesaj tombstone care au text real în `subject` (oglindă) | **1.868 / 1.868 = 100%** |
+| Idem, pe arhiva de 2 ani `richpanel_tickets.db` | **70.572 / 70.573 = 100%** |
+| `subject` chiar E textul comentariului (pe 4.984 comentarii neșterse) | 88,5% identic · 11,5% = primele 100 car + `…` |
+
+⚠️ **Plafon: 100 de caractere.** Ce depășește se taie.
+
+**Ce înseamnă pentru congelator.** Rămâne pornit, dar justificarea lui e cu **un ordin de mărime**
+mai mică decât scria aici. Nu salvează „1.928 de texte altfel pierdute". Salvează:
+- **193 de comentarii** care depășesc 100 de caractere (~38 tăiate fiecare);
+- **60 de mesaje** tombstone care nu sunt primul din fir;
+- **60 de URL-uri** de atașament;
+- asigurarea că `subject` nu începe și el să fie suprascris.
+
+**Pârghia adevărată e alta, și e ieftină: viteza de captare.** În zilele în care oglinda a citit
+repede a prins **381/381** și **450/450** intacte; pe 2026-08-29 a pierdut **66,3%**, în timp ce
+arhiva paralelă pierduse 17,7%. Cei „26,3% deja șterse la captare" nu sunt o proprietate a
+comentariilor — sunt **decalajul nostru de citire**.
+
+**Și mai există o copie pe același server.** `richpanel_tickets.db` are **284 de texte** pe care
+oglinda le are doar ca tombstone. Tabloul complet pe comentarii FB+IG (N=6.851):
+
+| | tichete | % |
+|---|--:|--:|
+| ambele arhive au textul | 3.888 | 56,8% |
+| doar oglinda | 1.096 | 16,0% |
+| **doar arhiva veche** | **284** | **4,1%** |
+| niciuna | 1.583 | 23,1% |
+| **reuniunea** | **5.268** | **76,9%** (vs 72,7% oglinda singură) |
+
+⇒ Trei acțiuni ieftine care recuperează azi text declarat pierdut: **citește `subject`**,
+**fuzionează cele două arhive**, **micșorează decalajul de captare**.
+
+### 6.5 Paritatea dovedește mai puțin decât pare *(corectat 14 sep)*
+
+Două nuanțe pe care raportarea „M1 = 100%, M3 = 0" le ascunde:
+
+**M1 dovedește „am captat tot ce a NUMIT `list_conversations`", nu „tot ce are Richpanel".**
+Măsurat: **11 din 18 zile au în oglindă mai multe tichete decât a numărat Richpanel** (cu 1–6,
+concentrat pe `instagram_comment` și `email`), toate raportate `coverage_pct = 100.0`, `ok=1`.
+Niciun rând invers. Garda pentru numitor trunchiat există, dar se declanșează doar la **exact zero** —
+divergența parțială trece tăcută.
+
+**M3 e slab exact pe ziua care contează.** Cronul rulează la 02:00 și verifică D-7..D-1, dar zilele
+proaspete n-au fost re-trase după ce a răspuns CS-ul. În rularea din 14 sep, **12 și 13 septembrie au
+contribuit 0 candidați din 1.230 de tichete** (26% din fereastră) și verdictul a ieșit tot
+„PARITATE DOVEDITĂ". Inofensiv acum (CS nu lucrează în weekend), dar puterea lui M3 stă pe D-7..D-3 —
+adică **nu** pe ziua în care ar apărea prima o regresie de captare.
+
+**Fixul corect nu e** „leagă `candidați > 0` de `ok`" (ar înnegri fiecare luni), **ci** „cere candidați
+pe zilele care au avut timp să fie răspunse, și marchează explicit zilele NEEVALUABILE în
+`parity_daily` și în `--json`".
+
+**Cele 2 selftest-uri picate (22/24) sunt teste greșite, nu defecte** — ambele cer contractul de
+dinaintea unei reparații. Garda lor e fail-closed: poate produce doar fals-roșu, și n-a declanșat
+niciodată în producție (0 zile cu `rp_count=0` din 18).
 
 ## 7. Erată — ce am afirmat greșit
 
@@ -858,6 +1019,12 @@ Partea cea mai utilă a dosarului. Fiecare rând a costat timp sau, într-un caz
 | 11 | „Paritate perfectă — 100% pe toate zilele și canalele" | M1 era 100%. Dar **M3 a găsit 28 de răspunsuri lipsă**. *Un singur indicator, oricât de verde, nu dovedește paritatea* |
 | 12 | „Pagina DUPPO Moldova nu se conectează — e bug Richpanel" | Nu e bug. Ecranul arată „All your pages are connected", iar Duppo lipsește din lista pe care **Richpanel** o vede — deși tokenul nostru o vede fără probleme (`id 575422458989566`, tasks `CREATE_CONTENT,MODERATE,MESSAGING,ADVERTISE,ANALYZE`, IG `17841437880793429`). **Lipsește acordarea paginii către aplicația Richpanel** în Business Manager. *Colateral: „ROSSI Nails" apare de 5× în lista de pagini conectate* |
 | 13 | „Eroarea de parsare e un câmp uneori obiect, uneori text" | Aproape. Era **răspunsul întreg**: MCP-ul întoarce un STRING de eroare (`id contains invalid characters`) în loc de obiect, iar clientul nostru îl pasa mai departe. §6.1 |
+| 14 | „Id-urile pică din cauza caracterelor `<`, `>`, `=`, `+`, `-`" | **Infirmat.** Printre id-urile ACCEPTATE: 618 conțin `=`, 648 conțin `+`, 579 din 770 `m_*` conțin `-`. Regula validatorului rămâne necunoscută, iar cazurile sunt 2 incidente, nu 3. §6.1 |
+| 15 | „Cele 8 erori sunt toate clasa §6.1" | **Doar 1 din 8.** Celelalte 7: serverul răspunde corect și **crapă clientul nostru** pe U+2028 în parserul SSE. Dovada: din 2.586 id-uri prezente și în Gmail, cele 7 cu U+2028 sunt 7/7 fără fir; cele 2.579 fără dau unul singur. §6.1b |
+| 16 | „Nu știm dacă Richpanel mai are textul comentariilor șterse — de asta atârnă tot congelatorul" | **Îl are**, în `ticket.subject`, 1.868/1.868 în oglindă și 70.572/70.573 pe 2 ani. Ne uitasem doar în `messages[].text` și `first_message`. Valoarea congelatorului scade cu un ordin de mărime. §6.4 |
+| 17 | „M1 = 100%, zero ID-uri lipsă ⇒ am captat tot" | M1 dovedește „tot ce a **numit** `list_conversations`". **11 din 18 zile au în oglindă mai multe tichete decât a numărat Richpanel**, toate raportate 100%. §6.5 |
+| 18 | „ReplyZen așteaptă 3–5 zile de validare în paralel" | **Validarea ar fi picat.** Webhook-ul primește **0 evenimente Facebook în 7 zile**, fiindcă app-ul are aprobate doar `email` + `public_profile`. ReplyZen și Instagram sunt **același** blocaj: o singură submisie de App Review. §3.5 |
+| 19 | „Wrapperele sunt versionate odată cu restul" | Cele 4 care **conduc** producția nu erau în git nicăieri și erau invizibile pentru `deploy_parity.py`. Reparat, PR #587. §2.1 |
 
 **Alte bug-uri de producție găsite pe drum:**
 
@@ -887,11 +1054,14 @@ Partea cea mai utilă a dosarului. Fiecare rând a costat timp sau, într-un caz
 |---|---|---|
 | **Fix `conversation_number` + `MirrorMCP.call` să arunce** (§6.1) | **cauză găsită, fix neaplicat** | 0,02% din tichete, dar tăcut. E cea mai mică sarcină cu cel mai clar câștig |
 | ~~Commit în git al celor 5 fișiere untracked~~ → **merge PR #576 în `main`** + `deploy.sh --apply` (§6.2) | commis și împins, **nemergiat** | Până la merge, VPS-ul tot nu ia codul prin `git pull` |
-| Scurgerea evenimentelor brute din D1 în `cs_mirror.db` | de făcut | Comentariile FB/IG **cu identitatea autorului** intră în oglindă |
-| Validare ReplyZen: 3–5 zile de rulare în paralel | în curs | **149 $/lună.** Criteriul e din README: zero scăpări la spot-check |
+| ~~Scurgerea evenimentelor brute din D1 în `cs_mirror.db`~~ | **fără obiect** | D1 are 6 rânduri, toate IG DM. N-are ce scurge până nu trece App Review-ul |
+| **Citește `subject` pentru comentariile șterse** + fuzionează cele două arhive (§6.4) | **de făcut, ieftin** | Recuperează azi text pe care documentul îl declara pierdut definitiv |
+| **Repară parserul SSE la U+2028** (§6.1b), în toate cele 15 fișiere | **de făcut** | 7 din 8 erori curente; și riscul tăcut de a pierde o zi întreagă la enumerare |
+| **App Review pentru „Api export"** — `pages_read_engagement`, `pages_manage_engagement`, `instagram_manage_comments`, `instagram_manage_messages` | **decizie de owner** | **Deblochează SIMULTAN: ReplyZen (149 $/lună), identitatea comentatorilor FB, și DM-urile Instagram.** Sunt același blocaj, nu trei (§3.5) |
+| ~~Validare ReplyZen: 3–5 zile în paralel~~ | **imposibil azi** | Webhook-ul nu primește niciun eveniment Facebook. Validarea ar pica. ReplyZen rămâne pornit |
 | Acordarea paginilor lipsă în Business Manager | administrativ | 12% din volumul social + conectarea DUPPO Moldova în Richpanel. *Criteriu de succes = EFECTUL:* `GET /{page}?fields=access_token` → 200 **și** în 24h comentariile apar în oglindă |
 | Comentarii TikTok pe grupurile de reclame ACTIVE | de făcut | Canal pe care Richpanel nu-l are deloc; acum se moderează în ReplyZen. Semnătura API e cunoscută (`/open_api/v1.3/comment/list/`) |
-| Advanced Access Instagram (App Review) | **amânat de owner** | Mesajele directe Instagram. Lead time zile–săptămâni (business verification + screencast + privacy policy) |
+| ~~Advanced Access Instagram~~ → inclus în App Review-ul de mai sus | **decizie de owner** | Nu mai e un item separat |
 | Testul „RP live mai are textul șters?" (§6.3.1) | de făcut | Decide dacă congelatorul de comentarii merită costul |
 
 ### 8.1 Cerințele pentru aplicația proprie
