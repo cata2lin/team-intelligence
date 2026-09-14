@@ -10,7 +10,7 @@ de trimis în română. NU scrie nimic.
 
   uv run cs_order_status.py --order EST179388
   uv run cs_order_status.py --awb 81298289998
-  uv run cs_order_status.py --phone 0748620192
+  uv run cs_order_status.py --phone 0700000000
   uv run cs_order_status.py --email client@gmail.com --reply
 """
 import os, sys, json, subprocess, shlex, urllib.parse, argparse

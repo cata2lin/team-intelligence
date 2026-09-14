@@ -1,0 +1,28 @@
+{
+  "store": "Grandia (grandia.ro)",
+  "admin_handle": "n12w89-yy",
+  "lang": "ro",
+  "source": "shop policies + delivery (orders shippingLine) + Richpanel tickets + payment gateways (2026-06-17)",
+  "faqs": [
+    { "q": "Cât costă transportul?", "a": "Transportul se face prin curier DPD și costă 19 lei. Pentru comenzile de peste 150 de lei livrarea este gratuită, așa că merită să profitați când luați mai multe produse pentru casă sau grădină deodată." },
+    { "q": "De la ce sumă am transport gratuit?", "a": "Transportul este gratuit pentru orice comandă de peste 150 de lei. Sub această valoare se aplică taxa standard de 19 lei prin curier DPD." },
+    { "q": "În cât timp ajunge comanda?", "a": "De regulă comenzile ajung în 1-3 zile lucrătoare și sunt livrate prin curier DPD. Vă recomandăm să lăsați un număr de telefon valid, ca să vă poată contacta curierul înainte de livrare." },
+    { "q": "Cum îmi urmăresc comanda?", "a": "Imediat ce comanda este expediată primiți pe e-mail numărul AWB și un link de urmărire, cu care vedeți oricând unde se află coletul pe site-ul DPD. Dacă nu găsiți acest e-mail, scrieți-ne la contact@grandia.ro și vă trimitem noi toate detaliile." },
+    { "q": "Ce metode de plată acceptați?", "a": "Puteți alege plata ramburs, în numerar curierului la livrare, sau plata online cu cardul, în mod securizat, la finalizarea comenzii. Ambele opțiuni sunt disponibile pentru orice comandă." },
+    { "q": "Pot plăti ramburs, la primirea coletului?", "a": "Da, plata ramburs este disponibilă, adică achitați comanda în numerar curierului DPD chiar în momentul livrării. La fel de bine puteți plăti și online cu cardul, securizat, la finalizarea comenzii." },
+    { "q": "Cum returnez un produs?", "a": "Aveți dreptul de retur în 14 zile de la primirea comenzii, conform OUG 34/2014. Ne scrieți la contact@grandia.ro cu numărul comenzii și datele dumneavoastră, iar produsul trebuie să fie nefolosit, cu etichetele intacte și în ambalajul original." },
+    { "q": "Pot returna un produs care nu mai are ambalajul original?", "a": "Pentru a putea fi returnat, produsul trebuie să fie nefolosit, cu etichetele intacte și în ambalajul original în care l-ați primit. Dacă aveți o nelămurire legată de starea unui produs, scrieți-ne la contact@grandia.ro și vă spunem cum putem proceda." },
+    { "q": "Cine plătește transportul pentru retur?", "a": "Costul transportului de retur este suportat de client. Singura excepție este atunci când produsul primit este neconform, greșit sau deteriorat, caz în care transportul de retur este pe contul nostru." },
+    { "q": "În cât timp primesc banii înapoi după un retur?", "a": "Vă rambursăm contravaloarea produselor în maximum 14 zile de la momentul în care primim coletul returnat. Vă anunțăm pe e-mail imediat ce returul a ajuns la noi și a fost procesat." },
+    { "q": "Pot anula o comandă?", "a": "Da, puteți anula comanda atâta timp cât aceasta nu a fost încă expediată. Scrieți-ne cât mai repede la contact@grandia.ro cu numărul comenzii, iar noi o oprim înainte să plece spre dumneavoastră." },
+    { "q": "Pot schimba adresa sau datele de livrare după ce am comandat?", "a": "Da, putem modifica adresa sau datele de livrare cât timp comanda nu a fost încă expediată. Trimiteți-ne noile detalii la contact@grandia.ro, împreună cu numărul comenzii, și le actualizăm pentru dumneavoastră." },
+    { "q": "Aveți și magazin fizic?", "a": "Grandia este un magazin exclusiv online, așa că nu avem un punct de vânzare fizic. Comandați comod de pe site, iar produsele ajung la dumneavoastră acasă prin curier DPD, în toată România." },
+    { "q": "Cum vă pot contacta?", "a": "Ne puteți scrie oricând la contact@grandia.ro și vă răspundem cât mai repede, de obicei chiar în aceeași zi lucrătoare." },
+    { "q": "Produsele au garanție?", "a": "Da, produsele beneficiază de garanția legală de conformitate. Dacă întâmpinați o problemă cu un produs, scrieți-ne la contact@grandia.ro și găsim împreună o soluție." },
+    { "q": "Produsele necesită asamblare?", "a": "Depinde de produs, iar acolo unde este nevoie de montaj găsiți instrucțiunile în pachet și detaliile în descrierea de pe pagina produsului. Dacă aveți o nelămurire înainte de a comanda, scrieți-ne la contact@grandia.ro și vă lămurim." },
+    { "q": "Din ce materiale sunt produsele?", "a": "Materialul fiecărui produs este trecut în descrierea de pe pagina lui, ca să știți exact ce primiți. Dacă aveți nevoie de detalii suplimentare despre un anumit articol, scrieți-ne la contact@grandia.ro și vă oferim toate informațiile." },
+    { "q": "Unde găsesc dimensiunile unui produs?", "a": "Dimensiunile sunt trecute în descrierea fiecărui produs, ca să vă asigurați că se potrivește în spațiul dumneavoastră. Dacă nu găsiți o măsură de care aveți nevoie, scrieți-ne la contact@grandia.ro și v-o transmitem noi." },
+    { "q": "Aveți reduceri sau coduri de discount?", "a": "Da, avem periodic promoții și reduceri la produsele pentru casă și grădină. Dacă aveți un cod de discount, îl aplicați în coș la finalizarea comenzii, iar reducerea se reflectă imediat în total." },
+    { "q": "Pot comanda en-gros sau pentru o colaborare?", "a": "Da, suntem deschiși la comenzi în cantități mai mari și la colaborări. Scrieți-ne la contact@grandia.ro cu detaliile dorite și revenim cu o ofertă potrivită pentru dumneavoastră." }
+  ]
+}

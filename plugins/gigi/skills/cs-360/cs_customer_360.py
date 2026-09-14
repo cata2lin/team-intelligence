@@ -8,7 +8,7 @@ Lipești telefon / email / nume -> toate comenzile lui (din toate magazinele), L
 livrate vs refuzate, retururi (RMA Grandia), și flag automat "REFUZNIC SERIAL"
 (de pus pe card, nu COD) ca să nu mai pierdem bani. NU scrie nimic.
 
-  uv run cs_customer_360.py --phone 0748620192
+  uv run cs_customer_360.py --phone 0700000000
   uv run cs_customer_360.py --email client@gmail.com
 """
 import os, sys, json, subprocess, shlex, urllib.parse, argparse

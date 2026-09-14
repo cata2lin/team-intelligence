@@ -1,0 +1,27 @@
+{
+  "store": "GT Parfumuri by George Talent (george-talent.ro)",
+  "admin_handle": "ix5bxc-hr",
+  "lang": "ro",
+  "source": "shop policies + delivery (orders shippingLine) + Richpanel tickets + payment gateways (2026-06-17)",
+  "faqs": [
+    { "q": "Cât costă transportul?", "a": "Transportul prin curier DPD costă 20 de lei, iar la comenzile de peste 150 de lei livrarea e gratuită. Așa că merită să vă luați mai multe parfumuri deodată." },
+    { "q": "Cum primesc transport gratuit?", "a": "Aveți livrarea gratuită automat la orice comandă de peste 150 de lei, prin curier DPD. E momentul bun să combinați mai multe parfumuri sau să prindeți o ofertă, ca să nu mai plătiți transportul deloc." },
+    { "q": "În cât timp ajunge comanda?", "a": "De regulă comanda ajunge în 2-3 zile lucrătoare, prin curier DPD. Lăsați un număr de telefon valid, ca să vă poată suna curierul înainte de livrare." },
+    { "q": "Cum îmi urmăresc comanda?", "a": "Imediat ce expediem comanda, primiți pe e-mail numărul AWB și un link de urmărire, ca să vedeți oricând unde e coletul. Dacă nu găsiți e-mailul, scrieți-ne la contact@george-talent.ro și vă trimitem noi detaliile." },
+    { "q": "Ce metode de plată acceptați?", "a": "Puteți plăti ramburs, în numerar direct curierului la livrare, sau online cu cardul, în siguranță, la finalizarea comenzii. Ambele variante sunt disponibile la orice comandă." },
+    { "q": "Cum funcționează plata ramburs?", "a": "La ramburs achitați comanda în numerar, direct curierului DPD, când primiți coletul. E una dintre variantele disponibile, alături de plata online cu cardul, și o alegeți la finalizarea comenzii." },
+    { "q": "Cum returnez un produs?", "a": "Aveți drept de retur 30 de zile de la primire, iar produsul trebuie să fie nefolosit, sigilat și în ambalajul original. Scrieți-ne la contact@george-talent.ro cu numărul comenzii și vă spunem pas cu pas ce aveți de făcut." },
+    { "q": "Pot returna un parfum desigilat sau testat?", "a": "Din motive de igienă, parfumurile desigilate, testate sau folosite nu se acceptă la retur. Ca să poată fi returnat, produsul trebuie să rămână sigilat și în ambalajul original, exact așa cum l-ați primit." },
+    { "q": "Cine plătește transportul pentru retur?", "a": "Transportul pentru retur este suportat de client. Singura excepție e atunci când produsul primit este neconform sau a fost livrat greșit, caz în care transportul retur e pe contul nostru." },
+    { "q": "În cât timp primesc banii înapoi după retur?", "a": "După ce primim produsul returnat și verificăm că e în regulă, vă rambursăm banii în maximum 14 zile. Vă ținem la curent pe e-mail la fiecare pas, ca să știți exact unde a ajuns returul." },
+    { "q": "Pot să anulez comanda?", "a": "Da, puteți anula comanda atât timp cât nu a fost încă expediată. Scrieți-ne cât mai repede la contact@george-talent.ro cu numărul comenzii și ne ocupăm imediat." },
+    { "q": "Pot modifica adresa sau datele comenzii?", "a": "Da, putem modifica adresa de livrare sau datele de contact înainte ca această comandă să fie expediată. Trimiteți-ne noile detalii la contact@george-talent.ro și le actualizăm pentru dumneavoastră." },
+    { "q": "Aveți magazin fizic?", "a": "Suntem un magazin exclusiv online, deci nu avem magazin fizic. Comandați comod de pe george-talent.ro și vă trimitem parfumurile direct acasă, prin curier DPD." },
+    { "q": "Cum vă pot contacta?", "a": "Ne scrieți oricând la contact@george-talent.ro, prin formularul de contact de pe site sau pe paginile noastre de social media. Vă răspundem cât mai repede, de obicei chiar în aceeași zi lucrătoare." },
+    { "q": "Aveți oferte sau coduri de reducere?", "a": "Da, avem destul de des oferte faine, de tipul 2+1, ca să luați mai multe parfumuri la un preț și mai bun. Dacă aveți un cod de reducere, îl introduceți în coș la finalizarea comenzii și se aplică pe loc." },
+    { "q": "Cât rezistă parfumurile pe piele?", "a": "Parfumurile noastre au o persistență de aproximativ 10-14 ore, datorită concentrației ridicate de esență. Practic le simțiți pe piele toată ziua, fără să fie nevoie să reaplicați." },
+    { "q": "De ce miros parfumurile voastre atât de scump?", "a": "Pentru că le facem cu o concentrație ridicată, de aproximativ 25% esență, mult peste un parfum obișnuit. De aici și senzația aceea de parfum scump, care se simte și rezistă ore bune pe piele." },
+    { "q": "Sunt parfumuri originale de designer?", "a": "Parfumurile noastre poartă denumiri proprii, cu N°, și sunt inspirate deschis din compoziții celebre, realizate cu esențe de calitate. Practic primiți o experiență olfactivă în aceeași notă, dar la o fracțiune din prețul unui parfum de designer: miroase scump, dar nu e scump." },
+    { "q": "Care e diferența față de un parfum de la mall?", "a": "Lucrăm cu o concentrație ridicată de esență, în jur de 25%, ca parfumul să se simtă bogat și să țină 10-14 ore pe piele. Diferența mare o faceți la preț, fiindcă plătiți pentru esența din sticlă, nu pentru un nume scump de pe etichetă." }
+  ]
+}

@@ -1123,7 +1123,7 @@ def selftest(db_path=None):
          "first_message": "Buna, unde e coletul meu GT45911?",
          "to": {"id": "775068272350568", "email": "info@magdeal.ro"},
          "from": {"id": "fb_1", "email": "ana@gmail.com"},
-         "customer": {"id": "c1", "name": "Ana", "email": "ana@gmail.com", "phone": "0748620192"},
+         "customer": {"id": "c1", "name": "Ana", "email": "ana@gmail.com", "phone": "0700000000"},
          "tags": ["wismo"], "comment_count": 3, "created_at": ms,
          "updated_at": "2026-08-30T12:00:00Z"}
     upsert_ticket(db, t, msg_total=5)

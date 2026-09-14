@@ -856,8 +856,8 @@ apare doar când numești un user anume (`&user_id=`).
 
 | Tichet | Canal | Id |
 |---|---|---|
-| `#322801` | `email` | `<CAMxp_TNpjBKGq7dQqkVyMvuXgrFNp8xdH8BwVM=tVaS…` (Message-ID RFC822) |
-| `#324855` | `facebook_message` | `m_jTGUpyrNk1NSBgdELBNv9M7nJWYQgIuqaecQnydpo18…` (base64url) |
+| `#322801` | `email` | `<CAMxp_…>` (Message-ID RFC822, trunchiat) |
+| `#324855` | `facebook_message` | `m_jTGU…` (base64url, trunchiat) |
 
 **Cauza, reprodusă 9 sep:** MCP-ul respinge id-ul și răspunde cu **text**, nu cu obiect:
 
@@ -970,9 +970,9 @@ nu e în `main`, un `git pull --ff-only` pe VPS tot nu vede codul — deci riscu
 decât cel în care ne uitam.
 
 ```
-conv 321372   messages[0].text  = "This message was deleted"
+conv <nr>     messages[0].text  = "This message was deleted"
               first_message     = "This message was deleted"
-              subject           = "Csalók !!!!!!! Nem ezt küldik !!!!!!!"   ← textul real
+              subject           = "<textul real al comentariului, ≤100 car.>"   ← aici e
 ```
 
 | Măsurătoare | Rezultat |

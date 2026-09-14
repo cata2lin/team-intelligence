@@ -1,0 +1,28 @@
+{
+  "store": "Belasil (belasil.ro)",
+  "admin_handle": "dvk4hu-dq",
+  "lang": "ro",
+  "source": "shop policies + delivery + Richpanel tickets + payment gateways (2026-06-17) — COD-only store",
+  "faqs": [
+    { "q": "Cât costă transportul?", "a": "Transportul se face prin curier DPD și costă 20 de lei. La comenzile de peste 100 de lei livrarea este gratuită, așa că merită să luați un bidon mai mare sau două dintr-o singură comandă." },
+    { "q": "De la ce sumă am transport gratuit?", "a": "Livrarea este gratuită la toate comenzile de peste 100 de lei. Sub acest prag, transportul prin curier DPD costă 20 de lei." },
+    { "q": "În cât timp ajunge comanda?", "a": "De regulă comanda ajunge în 1-2 zile lucrătoare, livrată prin curier DPD. Vă recomandăm să lăsați un număr de telefon valid, ca să vă poată suna curierul înainte de livrare." },
+    { "q": "Cum îmi urmăresc comanda?", "a": "Imediat ce comanda este expediată, primiți pe e-mail numărul AWB și un link de urmărire, cu care vedeți oricând unde se află coletul. Dacă nu găsiți acest e-mail, scrieți-ne la contact@belasil.ro și vă trimitem noi toate detaliile." },
+    { "q": "Ce metode de plată acceptați?", "a": "Plata se face prin ramburs, adică în numerar, direct curierului DPD în momentul livrării. Plătiți doar atunci când coletul ajunge la dumneavoastră." },
+    { "q": "Pot plăti cu cardul online?", "a": "Nu, nu avem plată cu cardul; toate comenzile se achită prin ramburs, în numerar la curier când primiți coletul. Așa nu dați niciun ban în avans." },
+    { "q": "Cum returnez un produs?", "a": "Aveți la dispoziție 30 de zile de la primirea comenzii ca să returnați un produs. Ne scrieți la contact@belasil.ro cu numărul comenzii și datele dumneavoastră, iar bidonul trebuie să fie nefolosit, sigilat și în ambalajul original." },
+    { "q": "Pot returna un bidon desfăcut sau din care am folosit?", "a": "Din motive de igienă nu putem primi înapoi produsele desigilate sau folosite, așa că la retur acceptăm doar bidoanele nedeschise, în ambalajul original. Dacă aveți o nelămurire înainte să desfaceți bidonul, scrieți-ne la contact@belasil.ro și vă ajutăm cu drag." },
+    { "q": "Cine plătește transportul pentru retur?", "a": "Costul transportului la retur este suportat de client. Singura excepție este când produsul primit este neconform sau a fost livrat greșit, caz în care transportul retur îl plătim noi." },
+    { "q": "În cât timp primesc banii înapoi după un retur?", "a": "După ce primim bidonul returnat și verificăm că este nefolosit și sigilat, vă returnăm banii în cel mult 14 zile. Vă anunțăm pe e-mail în momentul în care rambursarea a fost făcută." },
+    { "q": "Pot anula comanda?", "a": "Da, puteți anula comanda cât timp aceasta nu a fost încă expediată. Scrieți-ne cât mai repede la contact@belasil.ro cu numărul comenzii și o oprim imediat." },
+    { "q": "Pot modifica adresa sau datele de livrare?", "a": "Da, putem schimba adresa, numărul de telefon sau celelalte date de livrare cât timp comanda nu a plecat încă spre dumneavoastră. Trimiteți-ne datele corecte la contact@belasil.ro și actualizăm comanda." },
+    { "q": "Aveți magazin fizic unde pot veni să cumpăr?", "a": "Belasil este un magazin exclusiv online, așa că nu avem un punct fizic de vânzare. Comandați direct de pe site, iar coletul vă ajunge acasă prin curier DPD în 1-2 zile lucrătoare." },
+    { "q": "Cum vă pot contacta?", "a": "Ne puteți scrie oricând la contact@belasil.ro sau prin formularul de contact de pe site. Vă răspundem cât mai repede, de obicei chiar în aceeași zi lucrătoare." },
+    { "q": "Câte spălări iese dintr-un bidon?", "a": "Detergentul este concentrat, așa că dintr-un bidon ies în jur de 200 de spălări, adică în jur de 0,49 lei pe spălare. O singură comandă vă ajunge pentru luni întregi." },
+    { "q": "Detergentul conține și balsam de rufe?", "a": "Da, balsamul este deja inclus în formulă, așa că nu mai trebuie să cumpărați separat balsam de rufe. Hainele ies moi, plăcut mirositoare, cu un parfum care ține mult timp." },
+    { "q": "Pentru ce tip de rufe și ce mașină este potrivit?", "a": "Detergentul merge atât la rufe albe, cât și la cele colorate, și se poate folosi la spălarea automată, în mașină, dar și la spălarea manuală. Un singur bidon vă acoperă toate tipurile de rufe din casă." },
+    { "q": "De ce este detergentul mai ieftin decât în magazine?", "a": "Pentru că vine direct de la producător, fără intermediari, așa că plătiți doar produsul, nu și adaosurile lanțului de distribuție. La aproximativ 0,49 lei pe spălare, cu balsam inclus, randamentul vorbește de la sine." },
+    { "q": "Aveți reduceri sau coduri promoționale?", "a": "Cea mai bună economie o aveți deja din preț: detergent de la producător, concentrat, cu balsam inclus și transport gratuit peste 100 de lei. Dacă apar oferte speciale, le anunțăm pe site, iar pentru orice nelămurire ne puteți scrie la contact@belasil.ro." },
+    { "q": "Vindeți și en-gros sau acceptați colaborări?", "a": "Da, fiind producători, putem discuta comenzi mai mari sau colaborări. Scrieți-ne la contact@belasil.ro cu ce aveți nevoie și revenim cu cea mai bună variantă pentru dumneavoastră." }
+  ]
+}
