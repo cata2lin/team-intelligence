@@ -14,7 +14,12 @@ Tool-uri **standalone** (rulabile, au `__main__`) din aplicația Scripturi de pe
 | `shopify_tag_orders_parallel.py` | Tag comenzi Shopify în paralel (workers + throttling, GraphQL `tagsAdd`). |
 | `sku_to_url.py` | Mapare SKU → URL produs (folosește `core.stores`, fallback CSV). |
 | `upload_shopify_img.py` | Upload imagini în Shopify (folosește `core.stores`, fallback CSV). |
-| `sku_box_map_build.py` (+`.sh`) | Construiește **map-ul central SKU→nr colete** (`data/sku_box_map.json`) din metafield-urile `custom.nr_cutii`/`nr_produse` de pe cele 9 magazine deals (consensus per SKU, exclude ≤0). Folosit ca **fallback** de `xconnector.order_parcel_count` → setezi metafield-ul o dată pe orice magazin, cronul de AWB îl aplică pe TOATE (ca `sku_station`/DEPOZIT_SKU_RULES la depozite). **Cron `30 6 * * *`** (map-only). `--fill` completează și metafield-ul `nr_produse` pe magazinele unde lipsește (vizibilitate; one-time). |
+| `parcel_shop_index.py` | **Lista UNICĂ de magazine** a pipeline-ului de colete (12: cele 9 deals + Grandia, Belasil, Carpetto) + scanul lor + indexul `SKU → valoare Shopify + product id per magazin` (`data/parcel_shop_values.json`). Importat de `parcel_products_build.py`, `parcel_density_push.py`, `sku_box_map_build.py` și de pagina `/colete`. Aici se adaugă un magazin nou, nicăieri altundeva. |
+| `parcel_products_build.py` | Reconstruiește lista de produse din `/colete` (`data/parcel_products.json`), ordonată după comenzile din ultimele 90 zile. Sare produsele cu tag `test` și pe cele ARCHIVED. **Cron `0 6 * * 1`**. |
+| `parcel_density_push.py` | Propagă densitățile din `parcel_density.db` în Shopify (`custom.nr_cutii`) pe toate magazinele. Plasă de siguranță zilnică (pagina scrie deja la salvare). **Cron `15 6 * * *`**. |
+| `parcel_density_learn.py` | Învață densitatea din istoricul AWBprint (comenzi mono-SKU expediate cu UN colet). Nu reduce niciodată capacitatea, nu suprascrie ce a pus omul. **Cron `45 5 * * 1`**. |
+| `parcel_count_watch.py` (+`parcel_watch.sh`) | Compară nr. de colete de pe ultimul AWB cu regula curentă; email doar pe diferențe noi. **Cron `0 8 * * *`**. |
+| `sku_box_map_build.py` (+`.sh`) | Construiește **map-ul central SKU→nr colete** (`data/sku_box_map.json`) din metafield-urile `custom.nr_cutii`/`nr_produse` de pe magazinele din `parcel_shop_index.STORES` (consensus per SKU; `0` = intenționat „fără colet propriu", negativul = zgomot). Folosit ca **fallback** de `xconnector.order_parcel_count` și ca **singură sursă** de `order_hub/services/cron_parity/parcels.py` → setezi metafield-ul o dată pe orice magazin, cronul de AWB îl aplică pe TOATE. **Cron `30 6 * * *`** (map-only). `--fill` completează și `nr_produse` unde lipsește. |
 
 ## Reguli (ca să NU divergă de VPS)
 - **Editezi AICI (git)**, apoi deployezi: `scp shared/scripturi-tools/<x>.py $VPS:/root/Scripturi/<x>.py`.
@@ -31,13 +36,16 @@ Trimite conversii server-side la Google Ads din comenzile AWBprint (email hash S
 
 ## sku_box_map_build.py — nr colete central pe SKU (pt cronul de AWB)
 Rezolvă „setezi nr colete pe UN magazin, dar produsul fan-out e pe multe": construiește un **map SKU→nr_cutii**
-(`/root/Scripturi/data/sku_box_map.json`) din metafield-urile setate pe cele 9 magazine deals (ofertelezilei,
-audusp-rf, bonhaus, covoareauto-ro, oriceredus, ux1x6n-n2, vthuzq-7j, 63e901-2f, 16w7xv-0w), consensus per SKU
-(`nr_cutii` preferat, altfel `nr_produse`; exclude valorile ≤0 = zgomot). `xconnector.order_parcel_count` îl citește
+(`/root/Scripturi/data/sku_box_map.json`) din metafield-urile setate pe magazinele din `parcel_shop_index.STORES`
+(cele 9 deals + Grandia, Belasil, Carpetto), consensus per SKU (`nr_cutii` preferat, altfel `nr_produse`; `0` =
+INTENȚIONAT „nu-și cere colet propriu, merge în coletul altuia" — lavetele Belasil; doar negativul e zgomot).
+Order Hub (`services/cron_parity/parcels.py`) NU citește metafield-uri deloc, doar map-ul ăsta — un magazin lipsă
+de aici înseamnă colete pe default (32 comenzi Belasil în 5 zile cu 1 colet în loc de 2-4, 20-24 aug 2026).
+`xconnector.order_parcel_count` îl citește
 prin `_sku_box_map_get(sku)` ca **fallback** când produsul local n-are metafield → **setezi o dată, merge pe toate**.
 Mecanica e identică cu `sku_station()`/`DEPOZIT_SKU_RULES` (rută pe SKU), dar pentru nr colete.
 
-**Deploy:** `scp shared/scripturi-tools/sku_box_map_build.{py,sh} $VPS:/root/Scripturi/`.
+**Deploy:** `scp shared/scripturi-tools/{sku_box_map_build.py,sku_box_map_build.sh,parcel_shop_index.py} $VPS:/root/Scripturi/`.
 **Cron (pe crontab VPS, nu în git):** `30 6 * * * /usr/bin/flock -n /tmp/sku_box_map.lock /root/Scripturi/sku_box_map_build.sh >> /root/Scripturi/logs/sku_box_map.log 2>&1` (map-only; `--fill` doar manual, pt propagarea metafield-urilor).
 
 **Regula de colete în `order_parcel_count`** (magazine split pe stații): densitate setată (`nr_cutii`/map) → `box×qty`
@@ -47,12 +55,29 @@ articolele mici (regula owner 14-aug-2026, înlocuiește qty-driven-ul de pe 13-
 
 **Overlay depozit (AUTORITATIV):** builder-ul citește și `data/parcel_density.db` (input-ul depozitului din pagina
 `/colete`, vezi mai jos) și-l pune PESTE consensul din Shopify — deci ce completează depozitul nu se pierde la rebuild-ul
-de 6:30 (`nr_cutii` din DB câștigă). Pagina scrie și direct în `sku_box_map.json` la fiecare salvare (efect imediat).
+de 6:30 (`nr_cutii` din DB câștigă). Pagina scrie și direct în `sku_box_map.json` ȘI în metafield-ul Shopify la fiecare
+salvare (efect imediat, fără să aștepte cronul).
 
 ## parcel_density_app.py — pagina DEPOZIT „câte bucăți intră într-un colet" (`/colete`)
 App FastAPI (pornit cu `colete_app.sh` → uvicorn `127.0.0.1:8091`, sub **pm2** `colete`; nginx `location /colete` pe
-`scripts.arona.ro` → **https://scripts.arona.ro/colete**). Listă cu produsele fără nr colete (poză+titlu+SKU din
-`data/parcel_products.json`); depozitul scrie câte bucăți/colet → auto-save → `data/parcel_density.db`
-(`sku, per_parcel, nr_cutii=1/per_parcel, updated_by`) + update imediat în `sku_box_map.json`. De acolo `order_parcel_count`
-îl folosește pe toate magazinele. **Deploy:** `scp parcel_density_app.py colete_app.sh $VPS:/root/Scripturi/` + `pm2 restart colete`.
-Regenerarea listei de produse: scanezi magazinele deals (produse fără metafield + fără tag `test`) → `parcel_products.json`.
+`scripts.arona.ro` → **https://scripts.arona.ro/colete**). Listă cu produsele de pe cele 12 magazine din
+`parcel_shop_index.STORES` (poză+titlu+SKU+magazine din `data/parcel_products.json`); depozitul scrie câte bucăți/colet
+→ auto-save, care face TREI lucruri deodată:
+1. scrie în `data/parcel_density.db` (`sku, per_parcel, nr_cutii=1/per_parcel, updated_by`);
+2. actualizează `sku_box_map.json` (efect imediat în `order_parcel_count` + Order Hub);
+3. **scrie metafield-ul `custom.nr_cutii` DIRECT în Shopify**, pe toate magazinele unde există SKU-ul
+   (product id din `data/parcel_shop_values.json`, fallback căutare live după SKU). ~0,5s; pagina arată în ce
+   magazine a scris. Golirea valorii **ȘTERGE** metafield-ul — altfel `order_parcel_count` ar folosi mai departe
+   valoarea greșită de pe produs, care are prioritate în fața hărții centrale.
+
+Pagina arată și produsele care au valoarea pusă **deja în Shopify** (violet, „din Shopify"), nu doar ce a completat
+depozitul — cu filtre pe magazin și pe stare (necompletate / doar Shopify / depozit / învățate din istoric).
+Unități: implicit **bucăți/colet**; pentru produse voluminoase există comutatorul **colete/buc** (`nr_cutii > 1`).
+`nr_cutii = 0` (produsul călătorește în coletul altuia — lavetele Belasil) se afișează, dar nu se poate seta din pagină.
+
+⚠️ **Cauza-rădăcină reparată (14-sep-2026):** lista de magazine era scrisă separat în trei scripturi. Grandia era în
+lista de PUSH dar nu și în cea din care se construiește pagina → cele 484 de produse Grandia (toate cu `nr_cutii` pus
+în Shopify) n-au apărut niciodată în `/colete`. Acum lista e într-un singur loc: `parcel_shop_index.STORES`.
+
+**Deploy:** `scp parcel_density_app.py parcel_shop_index.py colete_app.sh $VPS:/root/Scripturi/` + `pm2 restart colete`.
+Regenerarea listei de produse: `parcel_colete.sh list --apply` (cron luni 6:00).

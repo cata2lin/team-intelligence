@@ -1,9 +1,19 @@
-"""Colete pe produs — pagina pt DEPOZIT: câte bucăți intră într-un colet, per produs.
-Salvează în SQLite (parcel_density.db) + alimentează IMEDIAT map-ul central sku_box_map.json
-pe care cronul de AWB (order_parcel_count) îl folosește. Servit sub /colete pe scripts.arona.ro."""
-import os, json, sqlite3, time
+"""Colete pe produs — pagina pt DEPOZIT: cate bucati intra intr-un colet, per produs.
+
+Salveaza in SQLite (parcel_density.db), alimenteaza IMEDIAT map-ul central sku_box_map.json pe care cronul de
+AWB (order_parcel_count) il foloseste, SI scrie metafield-ul `custom.nr_cutii` direct in Shopify, pe toate
+magazinele unde exista SKU-ul (fara sa astepte cronul de 6:15). Arata si produsele care au valoarea pusa DEJA
+in Shopify, marcate ca atare — pagina e tot tabloul, nu doar ce a completat depozitul.
+
+Unitatea canonica (peste tot in pipeline) = `nr_cutii` = cate CUTII ocupa O BUCATA. Pagina vorbeste insa
+limba depozitului: BUCATI/COLET (inversul). Pt produse voluminoase (o bucata = mai multe colete) exista
+comutatorul de unitate. Servit sub /colete pe scripts.arona.ro."""
+import os, sys, json, sqlite3, time
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import parcel_shop_index as SI
 
 DATA = "/root/Scripturi/data"
 DB = os.path.join(DATA, "parcel_density.db")
@@ -37,23 +47,46 @@ def load_products():
         return []
 
 
+def _box(v):
+    """Valoarea locala (parcel_density) — acolo 0 nu exista: pagina salveaza doar numere >= 1."""
+    try:
+        f = float(v)
+        return f if f > 0 else None
+    except Exception:
+        return None
+
+
 @app.get(PREFIX + "/api/products")
 def api_products():
     prods = load_products()
+    idx = SI.load_index()
     c = db()
     saved = {r["sku"]: dict(r) for r in c.execute("select * from parcel_density")}
     c.close()
     out = []
     for p in prods:
-        s = saved.get(p.get("sku"))
+        sku = p.get("sku")
+        s = saved.get(sku)
+        shop = (idx.get(sku) or {}).get("box")
+        local = _box(s["nr_cutii"]) if s else None
+        by = ((s["updated_by"] if s else "") or "")
+        if local is not None:
+            src = "istoric" if by.startswith("istoric") else "depozit"
+        else:
+            src = "shopify" if shop is not None else None
         out.append({
-            "sku": p.get("sku"), "title": p.get("title") or "", "img": p.get("img") or "",
-            "per_parcel": (s["per_parcel"] if s else None),
-            "note": (s["note"] if s else "") or "",
-            "by": (s["updated_by"] if s else "") or "",
+            "sku": sku, "title": p.get("title") or "", "img": p.get("img") or "",
+            "stores": p.get("stores") or [],
+            "box": local if local is not None else shop,     # valoarea EFECTIVA (depozitul bate Shopify)
+            "shop_box": shop,                                 # ce e acum in Shopify (pt drift)
+            "src": src,
+            "note": ((s["note"] if s else "") or ""),
+            "by": by,
+            "at": ((s["updated_at"] if s else "") or ""),
         })
-    done = sum(1 for x in out if x["per_parcel"])
-    return {"products": out, "total": len(out), "done": done}
+    done = sum(1 for x in out if x["box"] is not None)
+    human = sum(1 for x in out if x["src"] == "depozit")
+    return {"products": out, "total": len(out), "done": done, "human": human}
 
 
 @app.post(PREFIX + "/api/save")
@@ -62,42 +95,62 @@ async def api_save(req: Request):
     sku = (b.get("sku") or "").strip()
     if not sku:
         return JSONResponse({"ok": False, "err": "sku lipsă"}, status_code=400)
-    pp = b.get("per_parcel")
     by = (b.get("by") or "").strip()[:40]
     note = (b.get("note") or "").strip()[:200]
+    unit = (b.get("unit") or "pc").strip()          # pc = bucăți/colet · box = colete/bucată
+    val = b.get("value", b.get("per_parcel"))       # `per_parcel` = numele vechi al câmpului
     now = time.strftime("%Y-%m-%d %H:%M")
-    c = db()
-    if pp in (None, "", 0, "0"):
-        c.execute("delete from parcel_density where sku=?", (sku,))
-        nr = None
+
+    if val in (None, "", 0, "0"):
+        box, pp = None, None
     else:
         try:
-            pp = int(float(pp))
+            val = float(val)
         except Exception:
-            c.close()
             return JSONResponse({"ok": False, "err": "număr invalid"}, status_code=400)
-        if pp < 1:
-            pp = 1
-        nr = round(1.0 / pp, 4)
+        if val < 1:
+            val = 1
+        val = int(val)
+        if unit == "box":                           # o bucată ocupă `val` colete (voluminos)
+            box, pp = float(val), None
+        else:                                       # `val` bucăți intră într-un colet
+            box, pp = round(1.0 / val, 4), val
+
+    c = db()
+    if box is None:
+        c.execute("delete from parcel_density where sku=?", (sku,))
+    else:
         c.execute("""insert into parcel_density(sku,per_parcel,nr_cutii,note,updated_at,updated_by)
             values(?,?,?,?,?,?)
             on conflict(sku) do update set per_parcel=excluded.per_parcel, nr_cutii=excluded.nr_cutii,
               note=excluded.note, updated_at=excluded.updated_at, updated_by=excluded.updated_by""",
-                  (sku, pp, nr, note, now, by))
+                  (sku, pp, box, note, now, by))
     c.commit(); c.close()
+
     # alimentează IMEDIAT map-ul central (order_parcel_count îl reîncarcă pe mtime)
     try:
         m = json.load(open(MAP, encoding="utf-8"))
     except Exception:
         m = {}
-    if nr is None:
+    if box is None:
         m.pop(sku, None)
     else:
-        m[sku] = nr
+        m[sku] = box
     tmp = MAP + ".tmp"
     json.dump(m, open(tmp, "w", encoding="utf-8"))
     os.replace(tmp, MAP)
-    return {"ok": True, "sku": sku, "per_parcel": pp if nr is not None else None, "nr_cutii": nr}
+
+    # scrie DIRECT în Shopify (custom.nr_cutii) pe toate magazinele unde există SKU-ul.
+    # Metafield-ul de pe produs are prioritate în order_parcel_count față de map — deci și ȘTERGEREA
+    # trebuie să ajungă acolo, altfel valoarea greșită ar continua să fie folosită la AWB.
+    push = {"ok": [], "err": [], "stores": 0}
+    try:
+        push = SI.push_sku(sku, box)
+    except Exception as e:
+        push["err"].append(("shopify", str(e)[:150]))
+
+    return {"ok": True, "sku": sku, "box": box, "per_parcel": pp, "unit": unit,
+            "pushed": push["ok"], "push_err": [{"store": s, "msg": m_} for s, m_ in push["err"]]}
 
 
 @app.get(PREFIX)
@@ -110,7 +163,7 @@ PAGE = r"""<!doctype html><html lang="ro"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Colete pe produs — Depozit</title>
 <style>
-:root{--bg:#f4f5f7;--card:#fff;--line:#e6e8eb;--txt:#1e2229;--mut:#6b7280;--acc:#2563eb;--ok:#16a34a}
+:root{--bg:#f4f5f7;--card:#fff;--line:#e6e8eb;--txt:#1e2229;--mut:#6b7280;--acc:#2563eb;--ok:#16a34a;--shop:#7c3aed;--warn:#b45309}
 *{box-sizing:border-box}
 body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--txt)}
 header{position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid var(--line);padding:10px 14px;box-shadow:0 1px 4px rgba(0,0,0,.04)}
@@ -120,27 +173,35 @@ input,select{font-size:15px;padding:8px 10px;border:1px solid var(--line);border
 #nume{min-width:150px}
 #q{flex:1;min-width:160px}
 .prog{font-size:13px;color:var(--mut);white-space:nowrap}
-.bar{height:6px;background:#e6e8eb;border-radius:6px;overflow:hidden;flex:1;min-width:120px}
+.bar{height:6px;background:#e6e8eb;border-radius:6px;overflow:hidden;flex:1;min-width:120px;display:flex}
 .bar>i{display:block;height:100%;background:var(--ok);width:0;transition:width .3s}
+.bar>u{display:block;height:100%;background:#c4b5fd;width:0;transition:width .3s}
 .hint{font-size:12.5px;color:var(--mut);margin-top:6px;line-height:1.4}
 .wrap{max-width:900px;margin:0 auto;padding:12px}
 .item{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:10px}
 .item.done{border-color:#bfe3c9;background:#f6fdf8}
+.item.shop{border-color:#ddd6fe;background:#faf8ff}
 .thumb{width:60px;height:60px;flex:none;border-radius:8px;object-fit:cover;background:#eceef1}
 .meta{flex:1;min-width:0}
 .tt{font-size:14px;font-weight:600;line-height:1.25;word-break:break-word}
 .sku{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--mut);margin-top:2px}
+.shops{font-size:11px;color:var(--mut);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ctl{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex:none}
+.inp{display:flex;gap:4px;align-items:center}
 .pp{width:74px;text-align:center;font-size:17px;font-weight:700}
+.un{font-size:11px;padding:4px 5px;color:var(--mut)}
 .chips{display:flex;gap:4px}
 .chip{font-size:12px;padding:3px 7px;border:1px solid var(--line);border-radius:20px;background:#fafafa;cursor:pointer;color:var(--mut)}
 .chip:hover{border-color:var(--acc);color:var(--acc)}
-.st{font-size:11px;color:var(--mut);min-height:14px}
+.st{font-size:11px;color:var(--mut);min-height:14px;text-align:right;max-width:230px}
 .st.ok{color:var(--ok)}
-.filters{display:flex;gap:8px;align-items:center;margin:2px 0 12px}
-label.tg{font-size:13px;color:var(--mut);display:flex;gap:5px;align-items:center;cursor:pointer}
+.st.shop{color:var(--shop)}
+.st.warn{color:var(--warn)}
+.filters{display:flex;gap:8px;align-items:center;margin:2px 0 12px;flex-wrap:wrap}
+.filters select{font-size:13px;padding:6px 8px}
 .empty{text-align:center;color:var(--mut);padding:40px}
-@media(max-width:520px){.thumb{width:48px;height:48px}.tt{font-size:13px}.pp{width:64px}}
+.legend{font-size:12px;color:var(--mut);margin-left:auto}
+@media(max-width:520px){.thumb{width:48px;height:48px}.tt{font-size:13px}.pp{width:64px}.legend{margin-left:0}}
 </style></head><body>
 <header>
   <div class="h1">📦 Colete pe produs — Depozit</div>
@@ -148,13 +209,23 @@ label.tg{font-size:13px;color:var(--mut);display:flex;gap:5px;align-items:center
     <input id="nume" placeholder="Numele tău (cine completează)">
     <input id="q" placeholder="Caută produs / SKU…">
     <div class="prog"><span id="cnt">0 / 0</span></div>
-    <div class="bar"><i id="fill"></i></div>
+    <div class="bar"><i id="fill"></i><u id="fill2"></u></div>
   </div>
-  <div class="hint">Scrie <b>câte BUCĂȚI din produs intră într-UN colet</b>. Ex: <b>1</b> = fiecare bucată în colet separat · <b>2</b> = 2 la colet · <b>20</b> = 20 la colet. Se salvează automat.</div>
+  <div class="hint">Scrie <b>câte BUCĂȚI din produs intră într-UN colet</b>. Ex: <b>1</b> = fiecare bucată în colet separat · <b>2</b> = 2 la colet · <b>20</b> = 20 la colet.
+  Dacă produsul e voluminos și o bucată ocupă mai multe colete, schimbă unitatea în <b>colete/buc</b>.
+  Se salvează automat <b>și în Shopify</b>.</div>
 </header>
 <div class="wrap">
   <div class="filters">
-    <label class="tg"><input type="checkbox" id="onlyempty"> arată doar necompletate</label>
+    <select id="fstore"><option value="">toate magazinele</option></select>
+    <select id="fstat">
+      <option value="">toate produsele</option>
+      <option value="empty">doar necompletate</option>
+      <option value="shop">doar din Shopify (neconfirmate de depozit)</option>
+      <option value="hum">completate de depozit</option>
+      <option value="istoric">învățate din istoric</option>
+    </select>
+    <span class="legend">🟢 confirmat (depozit / istoric) · 🟣 doar în Shopify</span>
   </div>
   <div id="list"></div>
   <div id="empty" class="empty" style="display:none">Nimic de afișat.</div>
@@ -164,47 +235,94 @@ const P="/colete", $=s=>document.querySelector(s);
 let DATA=[], NUME=localStorage.getItem("colete_nume")||"";
 $("#nume").value=NUME;
 $("#nume").oninput=e=>{NUME=e.target.value.trim();localStorage.setItem("colete_nume",NUME)};
-function prog(){const d=DATA.filter(x=>x.per_parcel).length;$("#cnt").textContent=d+" / "+DATA.length;$("#fill").style.width=(DATA.length?100*d/DATA.length:0)+"%"}
+// nr_cutii (cutii/bucată) -> ce vede depozitul. <=1 => bucăți/colet; >1 => colete/bucată (voluminos)
+function disp(box){
+  if(box==null || box<=0) return {v:"",u:"pc"};   // 0 = produsul nu-si cere colet propriu (nu se scrie din pagina)
+  if(box<=1) return {v:Math.round(1/box),u:"pc"};
+  return {v:Math.round(box),u:"box"};
+}
+function lbl(box){
+  if(box===0) return "fără colet propriu (merge cu alt produs)";
+  const d=disp(box); return d.u=="pc" ? d.v+"/colet" : d.v+" colete/buc";
+}
+function prog(){
+  const h=DATA.filter(x=>x.src=="depozit"||x.src=="istoric").length, s=DATA.filter(x=>x.src=="shopify").length;
+  $("#cnt").textContent=(h+s)+" / "+DATA.length+" · "+h+" confirmate";
+  $("#fill").style.width=(DATA.length?100*h/DATA.length:0)+"%";
+  $("#fill2").style.width=(DATA.length?100*s/DATA.length:0)+"%";
+}
+function stores(){
+  const all=new Set(); DATA.forEach(p=>(p.stores||[]).forEach(s=>all.add(s)));
+  const sel=$("#fstore");
+  [...all].sort().forEach(s=>{const o=document.createElement("option");o.value=s;o.textContent=s;sel.appendChild(o)});
+}
+function status(p){
+  if(p.src=="depozit") return ["ok","✓ "+lbl(p.box)+(p.by?" · "+p.by:"")];
+  if(p.src=="istoric") return ["ok","✓ "+lbl(p.box)+" · învățat din istoric"];
+  if(p.src=="shopify") return ["shop","din Shopify: "+lbl(p.box)];
+  return ["",""];
+}
 function render(){
-  const q=($("#q").value||"").toLowerCase(), oe=$("#onlyempty").checked;
+  const q=($("#q").value||"").toLowerCase(), fs=$("#fstore").value, st=$("#fstat").value;
   const list=$("#list"); list.innerHTML="";
   let shown=0;
+  const frag=document.createDocumentFragment();
   for(const p of DATA){
-    if(oe && p.per_parcel) continue;
+    if(st=="empty" && p.box!=null) continue;
+    if(st=="shop" && p.src!="shopify") continue;
+    if(st=="hum" && p.src!="depozit") continue;
+    if(st=="istoric" && p.src!="istoric") continue;
+    if(fs && !(p.stores||[]).includes(fs)) continue;
     if(q && !((p.title||"").toLowerCase().includes(q) || (p.sku||"").toLowerCase().includes(q))) continue;
     shown++;
-    const it=document.createElement("div"); it.className="item"+(p.per_parcel?" done":""); it.dataset.sku=p.sku;
+    const d=disp(p.box), s=status(p);
+    const it=document.createElement("div");
+    it.className="item"+(p.src=="depozit"||p.src=="istoric"?" done":(p.src=="shopify"?" shop":""));
+    it.dataset.sku=p.sku;
     it.innerHTML=`<img class="thumb" loading="lazy" referrerpolicy="no-referrer" src="${p.img||""}">
-      <div class="meta"><div class="tt">${esc(p.title)}</div><div class="sku">${esc(p.sku)}</div></div>
+      <div class="meta"><div class="tt">${esc(p.title)}</div><div class="sku">${esc(p.sku)}</div>
+        <div class="shops" title="${esc((p.stores||[]).join(", "))}">${esc(shops(p.stores))}</div></div>
       <div class="ctl">
-        <input class="pp" type="number" min="1" inputmode="numeric" placeholder="?" value="${p.per_parcel||""}">
+        <div class="inp">
+          <input class="pp" type="number" min="1" inputmode="numeric" placeholder="?" value="${d.v}">
+          <select class="un"><option value="pc"${d.u=="pc"?" selected":""}>buc/colet</option><option value="box"${d.u=="box"?" selected":""}>colete/buc</option></select>
+        </div>
         <div class="chips">${[1,2,5,10,20].map(n=>`<span class="chip" data-n="${n}">${n}</span>`).join("")}</div>
-        <div class="st ${p.per_parcel?'ok':''}">${p.per_parcel?('✓ '+p.per_parcel+'/colet'+(p.by?' · '+esc(p.by):'')):''}</div>
+        <div class="st ${s[0]}">${esc(s[1])}</div>
       </div>`;
-    const inp=it.querySelector(".pp"), st=it.querySelector(".st");
-    inp.addEventListener("change",()=>save(p,inp.value,st,it));
-    it.querySelectorAll(".chip").forEach(ch=>ch.onclick=()=>{inp.value=ch.dataset.n;save(p,inp.value,st,it)});
-    list.appendChild(it);
+    const inp=it.querySelector(".pp"), un=it.querySelector(".un"), stx=it.querySelector(".st");
+    inp.addEventListener("change",()=>save(p,inp.value,un.value,stx,it));
+    un.addEventListener("change",()=>{ if(inp.value!=="") save(p,inp.value,un.value,stx,it) });
+    it.querySelectorAll(".chip").forEach(ch=>ch.onclick=()=>{inp.value=ch.dataset.n;un.value="pc";save(p,inp.value,"pc",stx,it)});
+    frag.appendChild(it);
   }
+  list.appendChild(frag);
   $("#empty").style.display=shown?"none":"block";
   prog();
 }
+function shops(a){ a=a||[]; return a.length>3 ? a.slice(0,3).join(", ")+" +"+(a.length-3) : a.join(", "); }
 function esc(s){return (s||"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-let t;
-async function save(p,val,st,it){
+async function save(p,val,unit,st,it){
   st.textContent="… salvez"; st.className="st";
   try{
     const r=await fetch(P+"/api/save",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({sku:p.sku,per_parcel:val===""?null:val,by:NUME})});
+      body:JSON.stringify({sku:p.sku,value:val===""?null:val,unit:unit,by:NUME})});
     const j=await r.json();
     if(j.ok){
-      p.per_parcel=j.per_parcel; p.by=NUME;
-      st.className="st ok"; st.textContent=j.per_parcel?("✓ "+j.per_parcel+"/colet"+(NUME?" · "+NUME:"")):"— șters";
-      it.classList.toggle("done",!!j.per_parcel);
+      p.box=j.box; p.by=NUME; p.src=(j.box==null?(p.shop_box!=null?"shopify":null):"depozit");
+      if(j.box!=null) p.shop_box=j.box;
+      const pushed=(j.pushed||[]), errs=(j.push_err||[]);
+      let txt = j.box==null ? "— șters" : ("✓ "+lbl(j.box)+(NUME?" · "+NUME:""));
+      if(pushed.length) txt += " → Shopify: "+pushed.join(", ");
+      else if(!errs.length) txt += " · SKU negăsit în magazine";
+      st.className="st "+(errs.length?"warn":"ok");
+      if(errs.length) txt += " ⚠ "+errs.map(e=>e.store).join(", ");
+      st.textContent=txt;
+      it.className="item"+(p.src=="depozit"?" done":(p.src=="shopify"?" shop":""));
       prog();
-    } else { st.className="st"; st.textContent="⚠ "+(j.err||"eroare"); }
-  }catch(e){ st.className="st"; st.textContent="⚠ fără net"; }
+    } else { st.className="st warn"; st.textContent="⚠ "+(j.err||"eroare"); }
+  }catch(e){ st.className="st warn"; st.textContent="⚠ fără net"; }
 }
-$("#q").oninput=render; $("#onlyempty").onchange=render;
-fetch(P+"/api/products").then(r=>r.json()).then(d=>{DATA=d.products;render()});
+$("#q").oninput=render; $("#fstat").onchange=render; $("#fstore").onchange=render;
+fetch(P+"/api/products").then(r=>r.json()).then(d=>{DATA=d.products;stores();render()});
 </script></body></html>"""
