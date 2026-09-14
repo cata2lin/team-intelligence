@@ -164,6 +164,7 @@ def page():
 PAGE = r"""<!doctype html><html lang="ro"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Colete pe produs — Depozit</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%A6%3C/text%3E%3C/svg%3E">
 <style>
 :root{--bg:#f4f5f7;--card:#fff;--line:#e6e8eb;--txt:#1e2229;--mut:#6b7280;--acc:#2563eb;--ok:#16a34a;--shop:#7c3aed;--warn:#b45309}
 *{box-sizing:border-box}
@@ -219,18 +220,18 @@ details.hint>div{margin-top:5px}
   .h1{font-size:15px}
   .wrap{padding:10px}
   .legend{display:none}
-  .item{flex-wrap:wrap;gap:10px;padding:10px}
-  .thumb{width:56px;height:56px}
+  .item{flex-wrap:wrap;gap:8px;padding:9px 10px;margin-bottom:8px}
+  .thumb{width:52px;height:52px}
   .meta{flex:1 1 0;min-width:0}
   .tt{font-size:14.5px}
-  .ctl{flex:1 0 100%;flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px;
-       border-top:1px solid var(--line);padding-top:9px}
-  .inp{order:1}
-  .pp{width:84px;height:44px;font-size:19px}
-  .un{height:44px;padding:0 6px}
-  .st{order:2;flex:1;text-align:right;max-width:none;font-size:12px}
+  .ctl{flex:1 0 100%;flex-direction:row;flex-wrap:wrap;align-items:center;gap:7px;
+       border-top:1px solid var(--line);padding-top:8px}
+  .inp{order:1;gap:5px}
+  .pp{width:78px;height:44px;font-size:19px}
+  .un{height:44px;padding:0 5px;font-size:13px}
+  .st{order:2;flex:1;text-align:right;max-width:none;font-size:12px;line-height:1.25}
   .chips{order:3;flex:1 0 100%;gap:6px}
-  .chip{flex:1;text-align:center;font-size:15px;padding:11px 0;border-radius:10px}
+  .chip{flex:1;text-align:center;font-size:15px;padding:10px 0;border-radius:10px}
 }
 </style></head><body>
 <header>
@@ -268,7 +269,7 @@ details.hint>div{margin-top:5px}
   <div id="empty" class="empty" style="display:none">Nimic de afișat.</div>
 </div>
 <script>
-const P="/colete", $=s=>document.querySelector(s), BATCH=60;
+const P="/colete", $=s=>document.querySelector(s), BATCH=60, MIC=matchMedia("(max-width:600px)").matches;
 let DATA=[], VIZ=[], SHOWN=0, NUME=localStorage.getItem("colete_nume")||"";
 // nume: odată scris, se strânge într-un chip ca să nu mănânce un rând întreg pe telefon
 function numeUI(){
@@ -304,7 +305,7 @@ function stores(){
 }
 function status(p){
   if(p.src=="depozit") return ["ok","✓ "+lbl(p.box)+(p.by?" · "+p.by:"")];
-  if(p.src=="istoric") return ["ok","✓ "+lbl(p.box)+" · învățat din istoric"];
+  if(p.src=="istoric") return ["ok","✓ "+lbl(p.box)+(MIC?" · istoric":" · învățat din istoric")];
   if(p.src=="shopify") return ["shop","din Shopify: "+lbl(p.box)];
   return ["",""];
 }
