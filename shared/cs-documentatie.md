@@ -240,6 +240,40 @@ ssh root@84.46.242.181 'bash /root/Scripturi/deploy.sh --apply'
 `run_cs_pipeline.py` face el însuși `git pull` înainte de fiecare rulare.
 **scp-ul manual e cauza divergențelor git↔VPS** — de aceea cele 5 fișiere untracked sunt un risc.
 
+### 2.5b Acces pentru cine nu e root — `mirror-ctl`
+
+`/root` e `0700`, deci un cont normal nu ajunge nici la `cs_mirror.db`, nici la
+`RICHPANEL_MCP_TOKEN` din `.env`. În loc de o cheie de root, tiparul casei (ca `awb-ctl`, `cs-ctl`)
+e un punct de intrare controlat: **`/usr/local/sbin/mirror-ctl`**, rulat prin `sudo` de grupul
+**`csmirror`** (`/etc/sudoers.d/cs-mirror`, NOPASSWD).
+
+```bash
+sudo mirror-ctl stats              # ce avem în oglindă, zero apeluri API
+sudo mirror-ctl parity [N]         # paritatea pe N zile (implicit 7)
+sudo mirror-ctl selftest           # cs_mirror + parity_check, zero API
+sudo mirror-ctl sync FROM TO       # captare pe o fereastră; DOAR YYYY-MM-DD
+sudo mirror-ctl log [N]            # jurnalul rulărilor
+sudo mirror-ctl errors [N]         # doar liniile de eroare
+sudo mirror-ctl runs               # ultimele rulări din sync_run
+sudo mirror-ctl snapshot           # copie CONSISTENTĂ a bazei în /srv/cs-share/ (citibilă de grup)
+sudo mirror-ctl pull               # aduce checkout-ul la zi — NU `deploy.sh --apply`
+```
+
+**Verificat prin efect**, ca utilizatorul `sonia`, nu ca root: `snapshot` scrie copia,
+`python3 /srv/cs-share/cs_mirror.db` o citește (11.520 tichete), `errors` întoarce erorile reale,
+`sync` fără date e refuzat (`data invalida`), iar `sudo cat /root/Scripturi/.env` cere parolă — deci
+poarta chiar limitează, nu doar pare că limitează.
+
+⚠️ **Copia primește `journal_mode=DELETE`.** Fără asta moștenește WAL, iar WAL cere să poți SCRIE un
+`-shm` lângă fișier — deci o citire „read-only" crapă cu `attempt to write a readonly database`
+într-un director `750`.
+
+⚠️ `mirror-ctl pull` face intenționat `git pull --ff-only`, **nu** `deploy.sh --apply` — vezi §2.1
+pentru de ce al doilea nu e sigur orb.
+
+Adăugare de om nou: `usermod -aG csmirror <user>`. Contul are nevoie și de o cheie SSH validă în
+`~/.ssh/authorized_keys`.
+
 ### 2.6 Prima verificare când preiei
 
 ```bash

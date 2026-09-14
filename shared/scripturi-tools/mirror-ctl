@@ -1,0 +1,52 @@
+#!/bin/bash
+# mirror-ctl — operatiile privilegiate de care are nevoie cine lucreaza la OGLINDA CS
+# (Richpanel -> /root/Scripturi/data/cs_mirror.db). Grupul csmirror il ruleaza prin sudo.
+# Model copiat dupa cs-ctl / awb-ctl.
+#
+# DE CE EXISTA: /root e 0700, deci un cont normal nu ajunge nici la baza, nici la .env cu
+# RICHPANEL_MCP_TOKEN. Alternativa ar fi fost o cheie de root — asta da exact atat cat trebuie.
+set -euo pipefail
+SK=/root/Scripturi/team-intelligence/plugins/gigi/skills/richpanel-export
+SHARE=/srv/cs-share
+export PATH=/root/.local/bin:$PATH
+export CS_MIRROR_DB=/root/Scripturi/data/cs_mirror.db
+
+env_for() {
+  export RICHPANEL_MCP_TOKEN="$(grep -m1 '^RICHPANEL_MCP_TOKEN=' /root/Scripturi/.env | cut -d= -f2-)"
+  export KB_DATABASE_URL="$(grep -m1 '^KB_DATABASE_URL=' /root/Scripturi/.env | cut -d= -f2-)"
+}
+# fereastra: acceptam DOAR YYYY-MM-DD, ca sa nu se poata strecura alti parametri
+ymd() { [[ "$1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "data invalida: $1" >&2; exit 2; }; }
+
+case "${1:-}" in
+  stats)    cd "$SK"; env_for; exec uv run rp_sync.py --stats ;;
+  parity)   cd "$SK"; env_for; exec uv run parity_check.py --days "${2:-7}" ;;
+  selftest) cd "$SK"; env_for; uv run cs_mirror.py selftest; exec uv run parity_check.py --selftest ;;
+  sync)     ymd "${2:-}"; ymd "${3:-}"; cd "$SK"; env_for
+            exec /usr/bin/flock -n /tmp/cs_mirror.lock uv run rp_sync.py --from "$2" --to "$3" --max-rpm 45 ;;
+  log)      exec tail -n "${2:-80}" /root/Scripturi/data/cs_mirror.log ;;
+  errors)   exec grep -E '^\s+! ' /root/Scripturi/data/cs_mirror.log | tail -n "${2:-40}" ;;
+  runs)     cd "$SK"; env_for; exec uv run rp_sync.py --stats 2>/dev/null | sed -n '/ultimele rul/,$p' ;;
+  # copie READ-ONLY a bazei, intr-un loc unde grupul chiar ajunge (/root e 0700)
+  snapshot) mkdir -p "$SHARE"; chgrp csmirror "$SHARE"; chmod 750 "$SHARE"
+            /root/Scripturi/.venv/bin/python - <<'PY'
+import sqlite3
+src=sqlite3.connect("file:/root/Scripturi/data/cs_mirror.db?mode=ro", uri=True)
+dst=sqlite3.connect("/srv/cs-share/cs_mirror.db")
+src.backup(dst)
+# ⚠️ copia mosteneste WAL, iar WAL cere sa poti SCRIE un -shm langa fisier — deci o citire
+# „read-only" crapa cu „attempt to write a readonly database" intr-un director 750.
+# DELETE scoate dependenta de -wal/-shm, deci copia se citeste fara drept de scriere.
+dst.execute("PRAGMA journal_mode=DELETE")
+dst.commit(); dst.close(); src.close()
+print("copie consistenta scrisa (journal_mode=DELETE, citibila read-only)")
+PY
+            chgrp csmirror "$SHARE/cs_mirror.db"; chmod 640 "$SHARE/cs_mirror.db"
+            ls -la "$SHARE/cs_mirror.db" ;;
+  # aduce checkout-ul la zi FARA deploy.sh --apply (ala suprascrie si fisiere flat unde VPS-ul
+  # e mai NOU decat git — vezi cs-documentatie.md §2.1)
+  pull)     cd /root/Scripturi/team-intelligence
+            git fetch -q origin
+            git pull --ff-only origin main && git rev-parse --short HEAD ;;
+  *) echo "usage: sudo mirror-ctl {stats|parity [N]|selftest|sync FROM TO|log [N]|errors [N]|runs|snapshot|pull}" >&2; exit 2 ;;
+esac
