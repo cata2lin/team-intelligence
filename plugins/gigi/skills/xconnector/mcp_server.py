@@ -118,5 +118,35 @@ def deliverability(brand: str = "", by: str = "", month: str = "",
         if v: a+=[k,str(v)]
     return _run(DELIV,a,timeout=420)
 
+# ─── AWB RAPID (awb.sh pe VPS, ~0.3s/comandă vs ~65s prin xconnector.py resolve_order) ───
+def _awb_fast(mode, orders):
+    host=_kb("PROFIT_SSH_HOST"); user=_kb("PROFIT_SSH_USER"); pw=_kb("PROFIT_SSH_PASS")
+    if not (host and user and pw): return "Lipsesc PROFIT_SSH_* din KB."
+    args=[o.strip() for o in orders.replace(","," ").split() if o.strip()]
+    if not args: return "Dă cel puțin o comandă."
+    e=dict(os.environ); e["SSHPASS"]=pw
+    cmd=["sshpass","-e","ssh","-o","StrictHostKeyChecking=accept-new","-o","ConnectTimeout=25",
+         "%s@%s"%(user,host),"/root/Scripturi/awb.sh %s %s"%(mode," ".join(args))]
+    try:
+        r=subprocess.run(cmd,capture_output=True,text=True,env=e,timeout=150)
+    except Exception as ex:
+        return "EROARE ssh: %s" % str(ex)[:200]
+    return ((r.stdout or "").strip() or "(fără output)")+(("\n[stderr] "+(r.stderr or "")[:300]) if r.returncode!=0 else "")
+
+@mcp.tool()
+def xc_awb_regen(orders: str) -> str:
+    """RAPID (~0.3s/comandă, awb.sh pe VPS): REFACE AWB-ul cu alt nr de colete — anulează vechiul + face unul nou, gestionează 429 singur. Format „ORDER:N" per comandă (ex „OFER48566:1 RED25746:2"); fără „:N" ia nr. colete auto din metafield. Mai multe comenzi deodată. FOLOSEȘTE ASTA pt refacere colete — NU xc_awb_void+xc_awb_make (lente ~65s, dau timeout)."""
+    return _awb_fast("regen", orders)
+
+@mcp.tool()
+def xc_awb_check(orders: str) -> str:
+    """RAPID (~0.3s/comandă): câte colete are fiecare comandă + dacă are AWB. Read-only. Mai multe comenzi separate prin spațiu/virgulă."""
+    return _awb_fast("check", orders)
+
+@mcp.tool()
+def xc_awb_send(orders: str) -> str:
+    """RAPID: descarcă eticheta AWB (PDF) și o TRIMITE pe grupul WhatsApp „AWB" (verifică pagini=colete). Mai multe comenzi deodată."""
+    return _awb_fast("send", orders)
+
 if __name__=="__main__":
     mcp.run()
