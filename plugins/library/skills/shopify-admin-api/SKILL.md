@@ -36,6 +36,7 @@ Load when working on any of:
 | Locations (incl. FS/legacy), Shop, AppInstallation, AppSubscription, Markets, Channels | [`locations-shop-billing.md`](locations-shop-billing.md) | Location imports (`includeLegacy: true` rule), billing flow, plan changes, shop metadata |
 | Bulk Operations, rate limits, auth, errors, `@idempotent`, metafields, files, release notes | [`platform.md`](platform.md) | "Platform plumbing." Always the right answer for THROTTLED, idempotency keys, version compatibility |
 | Scalars (GID, DateTime, Money), enums (Currency/Country/Weight), search syntax, access scopes, Customer object | [`adjacent-types.md`](adjacent-types.md) | Cross-cutting types used everywhere. The universal search query syntax lives here. |
+| Blog/Article image quirks (REST vs GraphQL), theme JSON template `image_picker` editing, AI image-generation pattern (OpenAI vs Gemini) | [`blogs-articles-themes.md`](blogs-articles-themes.md) | Carved out of "Things deliberately NOT covered" — editing blog content/imagery or a theme template programmatically |
 
 ## High-value gotchas (always re-read before relevant work)
 
@@ -98,6 +99,20 @@ These are the things that have cost me/SyncApp real bugs. Internalize before the
 
 22. **`read_all_orders` scope is required to read orders >60 days old** without protected-customer-data access. See [`adjacent-types.md`](adjacent-types.md) §12.
 
+### Blogs, Articles & Themes
+
+22a. **`Article` has no writable `image` field in GraphQL — use the REST
+    `PUT .../articles/{id}.json` endpoint with a base64 `image.attachment`.**
+    And `body` vs `summary` are two separate HTML fields (listing page
+    renders `summary`, detail page renders `body`) — a copy fix needs both
+    checked. See [`blogs-articles-themes.md`](blogs-articles-themes.md) §1–2.
+
+22b. **A theme's generic `image` block does not read `article.image`.**
+    It renders a static `block.settings.image` (Shopify's gradient
+    placeholder if unset) — looks identical across every article until you
+    realize the per-article image write in 22a never touched that block at
+    all. See [`blogs-articles-themes.md`](blogs-articles-themes.md) §3.
+
 ### Platform
 
 23. **GIDs are strings, not numbers.** `gid://shopify/Product/123456` is the format. The numeric portion can exceed JS Number precision (`UnsignedInt64`). Never parse to int — keep as string. See [`adjacent-types.md`](adjacent-types.md) §4.
@@ -152,7 +167,11 @@ These categories are documented in shopify.dev but not in this skill because the
 
 - Storefront API (this is Admin API only — different endpoint, different auth)
 - B2B catalogs, draft companies, B2B price lists
-- Themes & Online Store (theme files, sections, sections-everywhere)
+- Themes & Online Store (theme files, sections, sections-everywhere) —
+  **except** the specific Article-image / `image_picker` editing pattern
+  now covered in [`blogs-articles-themes.md`](blogs-articles-themes.md),
+  added after a real content task needed it. Broader theme work (new
+  sections, layout changes) is still out of scope.
 - Marketing campaigns, automations, abandoned-cart flows
 - Customer accounts (new login flow, customer account API)
 - Gift cards (issuance, redemption)
