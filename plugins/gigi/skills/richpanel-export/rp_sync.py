@@ -97,7 +97,10 @@ def enumerate_day(mcp, day, statuses, log):
             d = mcp.call("list_conversations", {
                 "status": status, "startDate": ds, "endDate": de,
                 "per_page": PER_PAGE, "page": page})
-            ts = (d.get("tickets") or []) if isinstance(d, dict) else []
+            # `mcp.call` ARUNCA pe raspuns non-dict (vezi cm.MCPError). Deci un sir de
+            # eroare de la server nu mai trece drept "pagina goala" — ziua pica zgomotos,
+            # e jurnalizata si se reia la urmatoarea rulare, in loc sa fie TRUNCHIATA tacut.
+            ts = d.get("tickets") or []
             for t in ts:
                 if t.get("id"):
                     out[str(t["id"])] = t
@@ -436,7 +439,22 @@ def selftest():
     rows = db.execute("SELECT COUNT(*) FROM rp_message WHERE ticket_id = ?", (tid,)).fetchone()
     chk("mesajele chiar au ajuns in oglinda", rows[0] == 2, f"{rows[0]} randuri")
 
-    print("\n2) fara numar in oglinda, eroarea NU se inghite")
+    print("\n2) enumerarea nu mai inghite un sir drept pagina goala")
+
+    class EnumSir:
+        """Contractul lui cm.MirrorMCP: `call` arunca pe non-dict."""
+
+        def call(self, tool, args):
+            raise cm.MCPError(tool, "Error: Request failed with status code 400")
+
+    try:
+        enumerate_day(EnumSir(), datetime.date(2026, 8, 30), ["OPEN"], lambda m: None)
+        zgomotos = False
+    except cm.MCPError:
+        zgomotos = True
+    chk("un sir de la server opreste ziua ZGOMOTOS, nu tacut", zgomotos)
+
+    print("\n3) fara numar in oglinda, eroarea NU se inghite")
     orphan = "<CAMxp_TNpjBKGq7dQqkVyMvuXgrFNp8x=tVaS@mail.gmail.com>"
     cm.upsert_ticket(db, {"id": orphan, "channel": "email", "status": "OPEN"},
                      fetched_at=cm.now_iso())

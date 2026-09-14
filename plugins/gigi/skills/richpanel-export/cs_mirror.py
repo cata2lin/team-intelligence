@@ -908,9 +908,16 @@ class MirrorMCP:
                 out = _json.loads(line[5:].strip())
         return out if out is not None else (_json.loads(txt) if txt.strip() else None)
 
-    def call(self, tool, args=None):
+    def call_raw(self, tool, args=None):
+        """Raspunsul EXACT cum a venit, non-dict inclusiv. Pentru apelantii care
+        inspecteaza ei insisi raspunsul si degradeaza controlat — `parity_check`
+        marcheaza ziua NEDOVEDITA cand serverul intoarce un sir de la pagina ~51.
+        Restul folosesc `call`, care arunca."""
         assert_read_only(tool)
-        out = self.mcp.call(tool, args or {})
+        return self.mcp.call(tool, args or {})
+
+    def call(self, tool, args=None):
+        out = self.call_raw(tool, args)
         if out is not None and not isinstance(out, dict):
             raise MCPError(tool, out)
         return out
