@@ -28,3 +28,12 @@ build/
 
 # apps-script-deploy runtime backups (junk)
 plugins/gigi/skills/apps-script-deploy/scripts/gas_backup_*.json
+
+# CS mirror (gigi:richpanel-export) — stare de rulare si chei, NU cod.
+# push_log.json  = jurnalul de semnaturi al `rp.py push` (se reface singur).
+# connector_keys.json = cheile Custom Connector. Sunt publice (stau in sursa fiecarui
+#   magazin), DAR sunt credentiale de SCRIERE in fisa clientului: connectorul n-are alta
+#   autentificare. Se re-culeg in cateva secunde cu `uv run rp.py keys --refresh`.
+plugins/gigi/skills/richpanel-export/push_log.json
+plugins/gigi/skills/richpanel-export/connector_keys.json
+*.bak

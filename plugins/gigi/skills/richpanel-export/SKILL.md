@@ -24,6 +24,29 @@ După `pull`, leagă fiecare tichet de clientul Shopify și-i atribuie magazinul
 - Restul ~1% e ireductibil fără citirea corpului fiecărei conversații (mesaje generice „Chat with us" fără semnal + emailuri de la cine n-a comandat + notificări FB).
 - Pt o vedere completă pe UN client (cross-platform, cu livrare/profit/tichete) folosește skill-ul `gigi:customer-identity`.
 
+## `richpanel_apply.py` — scrie enrichment-ul ÎNAPOI în Richpanel (taguri + notă internă)
+```bash
+uv run richpanel_apply.py                     # DRY-RUN pe OPEN (ce AR scrie)
+uv run richpanel_apply.py --recent 1 --apply  # intraday (așa rulează cronul, prin richpanel_pipeline --push)
+uv run richpanel_apply.py --note-mode never --apply   # doar taguri, zero note
+```
+Taguri `magazin-*`/`cat-*`/`sentiment-*`/`flag-*`/lead/reclamatie/awb-trimis + **UN private note intern**
+(client, comandă, status, tracking DPD). Niciodată mesaj/draft către client, nu schimbă status/assignee.
+
+⚠️ **Nota se scrie O SINGURĂ DATĂ pe conversație** (`--note-mode once`, implicit) — e un SNAPSHOT de la
+primul contact, nu un live feed. Vechiul „update-on-change" re-punea nota la fiecare schimbare de
+status/AWB (Netrimisa → In curs de livrare → Refuzata = 4 note pe același tichet în 3 zile), iar notele
+**nu se pot șterge prin MCP**. Statusul curent se ia cu `gigi:cs-360` / `gigi:xconnector links`.
+Două gărzi împotriva dublurilor: coloana `applied_note_sig` din SQLite **și** o verificare în Richpanel
+(`get_conversation` + `include_private_notes`) înainte de fiecare scriere — pentru că semnătura din DB
+s-a mai pierdut o dată (pull cu `INSERT OR REPLACE`) și au ieșit ~6.500 note duplicate.
+
+⚠️ **`list_tags` fără `query` întoarce DOAR primele 25** dintr-un dicționar de ~1.900 taguri — de-aia
+`tag_id()` caută întâi pe nume (`query=<tag>`) și abia apoi creează. Fără asta, tagurile uzuale
+(`magazin-esteban`, `awb-trimis`, `cat-livrare-wismo`) păreau inexistente la fiecare rulare: `create_tag`
+umplea workspace-ul de dubluri urât-normalizate (`colaborar`, `flagfrictiune`) și ~7 tichete/rulare
+rămâneau needitate, reîncercate la nesfârșit. Reparat 24-aug-2026.
+
 ## Ce extrage per tichet
 id, nr conversație, subiect, **primul mesaj**, status, canal, agent (assignee), client (nume/email), **magazin** (din emailul destinație contact@<domeniu> sau prefixul comenzii), **nr comandă** (regex EST/GT/GRAND/... din subiect+mesaj), timestamps, + JSON-ul brut.
 
@@ -41,3 +64,51 @@ id, nr conversație, subiect, **primul mesaj**, status, canal, agent (assignee),
 - `get_conversation` (mode=audit) pe eșantioane per categorie → cum s-a răspuns, timpi, calitate → **documentația CS** + raport „unde s-a răspuns prost".
 - Mapare pagini Facebook (`to.id`) → magazin pt comentariile social (acum „necunoscut").
 - Îmbogățire cu comanda clientului (metrics.orders + profit_orders) și LLM pe categria `altele`.
+
+## `gmail_sync.py` — a doua sursă a oglinzii CS: **cutiile Gmail** (READ-ONLY)
+Richpanel nu e singurul loc unde stă Customer Service-ul: emailul intră în cutiile `contact@*`, iar
+o parte din răspunsuri pleacă **direct din Gmail**, pe lângă helpdesk. `gmail_sync.py` captează
+cutiile în ACEEAȘI bază (`cs_mirror.db`, tabelele `gm_message` / `gm_attachment` / `gm_gap` /
+`gm_state`), cu ACEEAȘI regulă de îngheț ca mesajele Richpanel.
+
+```bash
+uv run gmail_sync.py --recent 3                      # ultimele N zile, toate cutiile CS
+uv run gmail_sync.py --mailbox contact@esteban.ro --recent 1
+uv run gmail_sync.py --since 2026-08-27 --until 2026-08-30   # fereastră fixă (--until EXCLUSIV)
+uv run gmail_sync.py --stats
+uv run gmail_sync.py --reconcile --days 7            # ce e în cutie dar NU în Richpanel
+```
+Acces: service account `GOOGLE_SA_LOOKER_SHEETS_JSON` din KB + delegare de domeniu, **scope unic
+`gmail.readonly`**. `assert_read_only()` respinge orice metodă Gmail care nu e de citire, iar
+`assert_scopes()` respinge orice scope care nu e readonly — faza e DOAR CAPTARE.
+
+**Ce trebuie știut (măsurat, nu presupus):**
+- **21 de adrese accesibile ≠ 21 de cutii.** 4 sunt ALIASURI (`contact@bonhaus.hu/hr` +
+  `contact@nocturna.pl` → `contact@trynocturna.eu`; `contact@ofertelezilei.ro` →
+  `contact@casaofertelor.ro`; `reclamatii@aronagroup.ro` → `facturi@aronagroup.ro`). Cutiile se
+  dedublează prin `users.getProfile().emailAddress` — altfel tragi aceeași cutie de 4 ori.
+  `contact@bonhaus.ro` și `contact@bonhaus.sk` NU există ca utilizatori Google (`invalid_grant`).
+- **Cutia NU conține doar inbound.** Măsurat pe 08-28: 110 mesaje `SENT`, toate cu Message-ID
+  `@mail.gmail.com` = scrise de om în interfața Gmail, nu de Richpanel (care trimite prin SES).
+- **~36% din volum e AUTOMAT** (Judge.me, curieri, Shopify, Klaviyo). NU se aruncă: `is_automated`
+  + `auto_reason`. ⚠️ expeditorul cunoscut se verifică ÎNAINTEA anteturilor generice — altfel
+  `List-Unsubscribe` înghite proveniența și Judge.me apare ca „listă" (măsurat: raporta 0).
+- `TRASH = 0` pe toate cele 17 cutii → se parcurg doar `INBOX/SENT/SPAM`.
+- Incremental REAL pe `users.history.list` (`gm_state.history_id`, luat ÎNAINTE de enumerare și
+  salvat doar dacă trecerea a mers). Cursor prea vechi → 404 → cade automat pe interogarea după
+  dată. ⚠️ 404 nu are voie să fie tratat global ca „nimic nou" — ar pierde tăcut tot.
+- Atașamentele: **doar metadate** (nume/mime/mărime/`attachment_id`), conținutul nu se descarcă.
+
+### `--reconcile` = dovada cantitativă a ce pierde Richpanel
+Cheia de legătură e Message-ID-ul RFC822 (`rp_ticket.id` **este** Message-ID pe 99,74% din emailuri).
+⚠️ Verdictul are trei trepte, fiindcă și dovezile au calități diferite — fără distincția asta ai
+raporta drept „pierderi" zilele pe care pur și simplu nu le-ai tras din Richpanel:
+| verdict | ce înseamnă |
+|---|---|
+| `lipsa_in_rp` | ziua are în oglindă id-uri **per mesaj** → absența e DOVEDITĂ |
+| `lipsa_in_rp_probabil` | ziua e acoperită doar de exportul vechi (id-uri de **conversație**) → probabil |
+| *(nescris în `gm_gap`)* | ziua n-are NICIO acoperire RP → **nejudecabil**, nu pierdere |
+
+Măsurat pe 2026-08-28 (zi cu pull RP complet), 3 cutii: din 229 emailuri, **145 în Richpanel (63,3%)
+și 84 lipsă (36,7%)** — 40 notificări de curier, **17 emailuri UMANE de client** (retur, produs spart,
+anulare) și **23 de răspunsuri trimise din Gmail**, invizibile în orice raport de CS.

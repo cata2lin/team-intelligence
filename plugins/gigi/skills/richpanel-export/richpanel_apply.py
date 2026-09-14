@@ -10,13 +10,21 @@ richpanel_apply.py — împinge ENRICHMENT-ul din DB înapoi în Richpanel, ca s
 ⚠️ NU atinge NICIODATĂ răspunsul către client (fără mesaj, fără draft) și NU schimbă
 status/assignee/prioritate — deci nu poate încurca agentul când scrie. Doar taguri + 1 notă internă.
 
-Incremental + update-on-change: reține ce-a aplicat (applied_tags / applied_note_sig) și scrie DOAR
-delta. Re-rulat des (intraday) = puține scrieri → sub rate limit. Nota se re-pune doar dacă
-se schimbă comanda/AWB/status (marcată „🔄 UPDATE"), niciodată spam.
+Incremental: reține ce-a aplicat (applied_tags / applied_note_sig) și scrie DOAR delta.
+Re-rulat des (intraday) = puține scrieri → sub rate limit.
+
+NOTA SE SCRIE O SINGURĂ DATĂ pe conversație (`--note-mode once`, implicit). Statusul livrării se
+schimbă de mai multe ori (Netrimisa → In curs de livrare → Refuzata) și AWB-ul se poate reface —
+vechiul „update-on-change" punea o notă nouă la fiecare schimbare (4 note pe #316159 în 3 zile) și
+notele NU se pot șterge prin MCP. Statusul live e oricum în fișa CS (connector) și în tracking.
+Dublă gardă: pe lângă coloana `applied_note_sig` (care s-a pierdut deja o dată, la un pull cu
+INSERT OR REPLACE), verificăm ÎN Richpanel dacă nota există deja înainte de a scrie.
+`--note-mode on-change` = comportamentul vechi; `--note-mode never` = doar taguri.
 
   uv run richpanel_apply.py                     # DRY-RUN pe tichetele OPEN (ce AR scrie)
   uv run richpanel_apply.py --apply             # scrie taguri + notă (OPEN)
   uv run richpanel_apply.py --recent 1 --apply  # doar tichete schimbate în ultima zi (intraday)
+  uv run richpanel_apply.py --note-mode never --apply   # doar taguri, zero note
   uv run richpanel_apply.py --limit 50 --json
 Read-only pe Richpanel în lipsa lui --apply. Rulează pe VPS (are SQLite local + profitability.db).
 """
@@ -75,22 +83,31 @@ class MCP:
             return {"_error": str(e)}
 
 
-def load_tag_map(mcp):
-    """name(lower) -> id, din list_tags (acceptă mai multe forme de răspuns)."""
-    r = mcp.call("list_tags", {})
-    items = r if isinstance(r, list) else (r.get("tags") or r.get("results") or r.get("data") or [])
-    m = {}
+def _tag_items(r):
+    """(nume_lower, id) din răspunsul list_tags/create_tag (acceptă mai multe forme)."""
+    items = r if isinstance(r, list) else ((r.get("tags") or r.get("results") or r.get("data") or []) if isinstance(r, dict) else [])
     for t in items if isinstance(items, list) else []:
         if isinstance(t, dict):
             nm, tid = t.get("name") or t.get("label"), t.get("id") or t.get("tag_id") or t.get("_id")
             if nm and tid:
-                m[nm.strip().lower()] = tid
-    return m
+                yield nm.strip().lower(), tid
+
+
+def load_tag_map(mcp, query=None):
+    """name(lower) -> id. ⚠️ list_tags FĂRĂ query întoarce doar primele 25 dintr-un dicționar de
+    ~1.900 taguri — de-aia căutăm punctual pe nume (altfel create_tag umple workspace-ul de dubluri."""
+    args = {"limit": 200}
+    if query:
+        args["query"] = query
+    return dict(_tag_items(mcp.call("list_tags", args)))
 
 
 def tag_id(mcp, tagmap, name):
     """id-ul tagului; îl creează dacă lipsește. None dacă nu reușește."""
     k = name.strip().lower()
+    if k in tagmap:
+        return tagmap[k]
+    tagmap.update(load_tag_map(mcp, query=name))  # caută pe nume ÎNAINTE de a crea (vezi load_tag_map)
     if k in tagmap:
         return tagmap[k]
     r = mcp.call("create_tag", {"name": name})
@@ -100,7 +117,7 @@ def tag_id(mcp, tagmap, name):
         if not tid and isinstance(r.get("tag"), dict):
             tid = r["tag"].get("id")
     if not tid:  # fallback robust: reîncarcă lista și caută după nume
-        tagmap.update(load_tag_map(mcp))
+        tagmap.update(load_tag_map(mcp, query=name))
         tid = tagmap.get(k)
     if tid:
         tagmap[k] = tid
@@ -134,6 +151,28 @@ def desired_tags(store, cat, sentiment, qflags, ctype, has_awb):
     return out
 
 
+NOTE_MARK = "[auto] profil identificat de sistem"  # marcajul notei noastre, pt gardă anti-dublură
+
+
+def has_bot_note(mcp, cid, pages=3):
+    """A mai pus botul nota pe conversația asta? True/False, sau None dacă n-am putut verifica."""
+    cur = None
+    for _ in range(pages):
+        args = {"id": cid, "include_private_notes": True, "max_messages": 50, "max_message_chars": 300}
+        if cur:
+            args["message_cursor"] = cur
+        r = mcp.call("get_conversation", args)
+        if not isinstance(r, dict) or r.get("_error") or not isinstance(r.get("messages"), list):
+            return None
+        for m in r["messages"]:
+            if isinstance(m, dict) and NOTE_MARK in (m.get("text") or ""):
+                return True
+        cur = (r.get("messages_page") or {}).get("next_cursor")
+        if not cur:
+            return False
+    return False
+
+
 def build_note(name, store, order, prof, qflags):
     """notă internă concisă pt agent. (text, sig) sau (None,None) dacă nu-i nimic util."""
     if not order:
@@ -142,7 +181,7 @@ def build_note(name, store, order, prof, qflags):
     status = p.get("st") or "?"
     awb = p.get("awb") or ""
     skus = (p.get("skus") or "")[:70]
-    lines = ["🤖 [auto] profil identificat de sistem (intern)"]
+    lines = ["🤖 %s (intern)" % NOTE_MARK]
     who = name or "(necunoscut)"
     lines.append("Client: %s · %s" % (who, store or "?"))
     lines.append("Comandă %s — status: %s%s" % (order, status, (" · " + skus) if skus else ""))
@@ -188,6 +227,8 @@ def main():
     ap.add_argument("--recent", type=int, help="doar tichete updatate în ultimele N zile (intraday)")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--apply", action="store_true", help="scrie efectiv în Richpanel (altfel DRY-RUN)")
+    ap.add_argument("--note-mode", choices=("once", "on-change", "never"), default="once",
+                    help="once (implicit) = O SINGURĂ notă/conversație; on-change = re-pune la schimbare de status/AWB (vechi, face spam); never = doar taguri")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
     if not os.path.exists(DB):
@@ -219,7 +260,12 @@ def main():
         A = [t for t in (atags or "").split(",") if t]
         add = [t for t in D if t not in A]
         rem = [t for t in A if t not in D]
-        note_due = bool(note) and sig != (anote or "")
+        if a.note_mode == "never":
+            note_due = False
+        elif a.note_mode == "once":
+            note_due = bool(note) and not (anote or "")  # nota o dată/conversație, apoi niciodată
+        else:
+            note_due = bool(note) and sig != (anote or "")
         if add or rem or note_due:
             plan.append((tid, conv, add, rem, (note if note_due else None), sig, D, bool(anote)))
 
@@ -245,7 +291,7 @@ def main():
     mcp = MCP(secret("RICHPANEL_MCP_TOKEN"))
     tagmap = load_tag_map(mcp)
     w = ensure_cols()
-    done = nadd = nrem = nnote = 0
+    done = nadd = nrem = nnote = nskip = 0
     for (tid, conv, add, rem, note, sig, D, had_note) in plan:
         cid = tid
         ok = True
@@ -262,12 +308,20 @@ def main():
             if ids:
                 mcp.call("remove_tags_from_conversation", {"conversation_id": cid, "tags": ids}); nrem += 1
         if note:
-            body = note if not had_note else ("🔄 UPDATE\n" + note)
-            r = mcp.call("add_private_note", {"conversation_id": cid, "body": body})
-            if isinstance(r, dict) and r.get("_error"):
-                ok = False
+            # gardă anti-dublură: întreb Richpanel dacă nota există deja (semnătura din SQLite
+            # s-a mai pierdut o dată, la un pull cu INSERT OR REPLACE → 6.500 note duplicate).
+            already = has_bot_note(mcp, cid) if a.note_mode == "once" else False
+            if already is None:
+                ok = False          # n-am putut verifica → NU scriu; reîncerc la rularea următoare
+            elif already:
+                nskip += 1          # deja pusă → doar marchez în DB, fără scriere
             else:
-                nnote += 1
+                body = note if a.note_mode == "once" or not had_note else ("🔄 UPDATE\n" + note)
+                r = mcp.call("add_private_note", {"conversation_id": cid, "body": body})
+                if isinstance(r, dict) and r.get("_error"):
+                    ok = False
+                else:
+                    nnote += 1
         if ok:  # marchează „aplicat" doar dacă a reușit → reîncearcă data viitoare dacă a picat (429 etc.)
             w.execute("UPDATE tickets SET applied_tags=?, applied_note_sig=? WHERE id=?", (",".join(D), sig, tid))
             done += 1
@@ -275,7 +329,8 @@ def main():
         if (done + 1) % 100 == 0:
             w.commit(); print("  …%d/%d aplicate" % (done, len(plan)), flush=True)
     w.commit(); w.close()
-    print("\n════ %d tichete actualizate | %d cu taguri noi, %d curățate, %d note ════" % (done, nadd, nrem, nnote))
+    print("\n════ %d tichete actualizate | %d cu taguri noi, %d curățate, %d note noi, %d note deja existente (sărite) ════"
+          % (done, nadd, nrem, nnote, nskip))
     print("  taguri puse:", dict(cnt.most_common(12)))
 
 
