@@ -15,6 +15,7 @@ cu regex și leagă la Shopify. Rulează după `richpanel_link.py`.
   uv run richpanel_deep.py --workers 6
 """
 import os, re, json, sqlite3, subprocess, urllib.parse, urllib.request, argparse, datetime
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pg8000.dbapi
 
@@ -55,9 +56,30 @@ def parse_dt(v):
     except Exception:
         return None
 BAD_EMAIL = ("richpanel", "judgeme", "shopify", "sentry", "facebook", "no-reply", "noreply", "mailer")
-# emailurile AGENȚILOR (apar în transcript ca expeditor — NU sunt clientul)
-AGENT_EMAILS = {"annamariarugina982@gmail.com", "martina.klimcikova@seznam.cz", "staverdaniela1@gmail.com",
-                "contact@nocturna.ro", "ralucadiaconu636@gmail.com", "contact@upstreamtradellc.com"}
+# Emailurile AGENȚILOR (apar în transcript ca expeditor — NU sunt clientul), folosite ca listă de
+# excludere mai jos: fără ele, adresa agentului ar fi extrasă drept adresa clientului.
+#
+# ⚠️ NU le pune înapoi în sursă. Erau hardcodate aici din 12-iun-2026, iar repo-ul e PUBLIC — patru
+# adrese personale ale colegelor au stat trei luni la vedere, citibile anonim. Regula echipei e
+# categorică: valorile stau EXCLUSIV în tabelul `secrets`; aici rămâne doar numele cheii.
+#
+#   kb.py secret-set CS_AGENT_EMAILS "a@x.ro,b@y.com,..."
+#
+# Lipsa secretului NU e fatală — degradează doar precizia extragerii (un tichet poate primi adresa
+# agentului în loc de a clientului), deci nu oprim pipeline-ul; o semnalăm o singură dată.
+_AGENT_EMAILS = None
+
+
+def agent_emails():
+    global _AGENT_EMAILS
+    if _AGENT_EMAILS is None:
+        raw = secret("CS_AGENT_EMAILS") or ""
+        _AGENT_EMAILS = {e.strip().lower() for e in raw.split(",") if e.strip()}
+        if not _AGENT_EMAILS:
+            print("  ! CS_AGENT_EMAILS lipseste din seif - adresele agentilor pot fi extrase drept "
+                  "adrese de client. Seteaza: kb.py secret-set CS_AGENT_EMAILS \"a@x,b@y\"",
+                  file=sys.stderr)
+    return _AGENT_EMAILS
 
 
 def secret(k):
@@ -232,7 +254,7 @@ def main():
         emails, phones = set(), set()
         for e in EMAIL_RE.findall(blob):
             el = e.lower()
-            if el not in AGENT_EMAILS and not any(b in el for b in BAD_EMAIL):
+            if el not in agent_emails() and not any(b in el for b in BAD_EMAIL):
                 emails.add(el)
         for p in PHONE_RE.findall(blob):
             k = ph9(p)
