@@ -903,7 +903,8 @@ class MirrorMCP:
                     raise
                 time.sleep(2 ** i * 1.5)
         out = None
-        for line in txt.splitlines():
+        # NU splitlines(): taie si la U+2028, caracter legal neescapat in JSON (cs-documentatie §6.1b)
+        for line in txt.split("\n"):
             if line.startswith("data:"):
                 out = _json.loads(line[5:].strip())
         return out if out is not None else (_json.loads(txt) if txt.strip() else None)
@@ -1260,6 +1261,57 @@ def selftest(db_path=None):
     g8 = db.execute("SELECT COUNT(*) n, MAX(reason) r FROM gm_gap").fetchone()
     _chk(R, "verdictul de gap se IMBUNATATESTE, nu se dubleaza",
          g8["n"] == 1 and g8["r"] == "lipsa_in_rp", f"{g8['n']} randuri, {g8['r']}")
+
+    # §6.1b — parserul SSE nu are voie sa taie la U+2028. splitlines() il trateaza ca sfarsit de
+    # linie, desi in JSON e caracter LEGAL neescapat => JSONDecodeError pe un raspuns CORECT.
+    import urllib.request as _ur
+    U, NL = chr(0x2028), chr(10)
+    _chk(R, "capcana e reala: splitlines() taie la U+2028", len(("a" + U + "b").splitlines()) == 2)
+    payload = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"content": [
+        {"type": "text", "text": "invitatie" + U + "TestFlight"}]}}, ensure_ascii=False)
+    sse = ("event: message" + NL + "data: " + payload + NL + NL).encode("utf-8")
+
+    class _Resp:
+        headers = {"Mcp-Session-Id": "s1", "x-ratelimit-remaining": "40"}
+
+        def __init__(self, data):
+            self.data = data
+
+        def read(self):
+            return self.data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    real_urlopen = _ur.urlopen
+    _ur.urlopen = lambda req, timeout=None: _Resp(sse)
+    try:
+        rpmod = _rp()
+        c = rpmod.MCP.__new__(rpmod.MCP)
+        c.tok, c.sid, c.n = "x", None, 0
+        try:
+            txt_rp = c._post({"jsonrpc": "2.0", "id": 1})["result"]["content"][0]["text"]
+        except Exception as e:
+            txt_rp = f"{type(e).__name__}: {e}"
+        _chk(R, "rp.MCP._post parseaza SSE cu U+2028 in corp (§6.1b)",
+             txt_rp == "invitatie" + U + "TestFlight", repr(txt_rp)[:80])
+
+        m = MirrorMCP.__new__(MirrorMCP)
+        m.limiter = RateLimiter(rpm=100000, sleep=lambda _s: None)
+        m.last_headers = {}
+        m.mcp = rpmod.MCP.__new__(rpmod.MCP)
+        m.mcp.tok, m.mcp.sid, m.mcp.n = "x", None, 0
+        try:
+            txt_m = m._post({"jsonrpc": "2.0", "id": 1})["result"]["content"][0]["text"]
+        except Exception as e:
+            txt_m = f"{type(e).__name__}: {e}"
+        _chk(R, "MirrorMCP._post parseaza SSE cu U+2028 in corp (§6.1b)",
+             txt_m == "invitatie" + U + "TestFlight", repr(txt_m)[:80])
+    finally:
+        _ur.urlopen = real_urlopen
 
     db.close()
     ok = sum(1 for c, _, _ in R if c)

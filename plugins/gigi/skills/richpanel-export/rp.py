@@ -110,7 +110,8 @@ class MCP:
                     raise
                 time.sleep(2 ** i * 1.5)
         out = None
-        for line in txt.splitlines():
+        # NU splitlines(): taie si la U+2028, caracter legal neescapat in JSON (cs-documentatie §6.1b)
+        for line in txt.split("\n"):
             if line.startswith("data:"):
                 out = json.loads(line[5:].strip())
         return out if out is not None else (json.loads(txt) if txt.strip() else None)
