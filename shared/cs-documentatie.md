@@ -1023,7 +1023,9 @@ Partea cea mai utilă a dosarului. Fiecare rând a costat timp sau, într-un caz
 | 15 | „Cele 8 erori sunt toate clasa §6.1" | **Doar 1 din 8.** Celelalte 7: serverul răspunde corect și **crapă clientul nostru** pe U+2028 în parserul SSE. Dovada: din 2.586 id-uri prezente și în Gmail, cele 7 cu U+2028 sunt 7/7 fără fir; cele 2.579 fără dau unul singur. §6.1b |
 | 16 | „Nu știm dacă Richpanel mai are textul comentariilor șterse — de asta atârnă tot congelatorul" | **Îl are**, în `ticket.subject`, 1.868/1.868 în oglindă și 70.572/70.573 pe 2 ani. Ne uitasem doar în `messages[].text` și `first_message`. Valoarea congelatorului scade cu un ordin de mărime. §6.4 |
 | 17 | „M1 = 100%, zero ID-uri lipsă ⇒ am captat tot" | M1 dovedește „tot ce a **numit** `list_conversations`". **11 din 18 zile au în oglindă mai multe tichete decât a numărat Richpanel**, toate raportate 100%. §6.5 |
-| 18 | „ReplyZen așteaptă 3–5 zile de validare în paralel" | **Validarea ar fi picat.** Webhook-ul primește **0 evenimente Facebook în 7 zile**, fiindcă app-ul are aprobate doar `email` + `public_profile`. ReplyZen și Instagram sunt **același** blocaj: o singură submisie de App Review. §3.5 |
+| 18 | „ReplyZen așteaptă 3–5 zile de validare în paralel" | **Validarea ar fi picat.** Webhook-ul primește **0 evenimente Facebook în 7 zile**. §3.5 |
+| 20 | „Cauza e că app-ul are doar `email` + `public_profile`" | **Fals — am citit tabelul greșit.** `GET /{app-id}/permissions` arată aprobările de App Review pentru Facebook Login, nu ce poate un system user. `META_SYSTEM_TOKEN`, al **aceluiași** app, are 31 de scope-uri, inclusiv toate cele `pages_*` și `instagram_*` necesare. Corectat în aceeași zi, după ce ownerul a întrebat „ce token, că avem mai multe". §3.5 |
+| 21 | „ReplyZen și Instagram sunt același blocaj, o singură submisie de App Review" | **Fals, decurgea din 20.** Cauza reală: **20 din 20** de postări eșantionate sunt dark posts (`is_published=false`), iar `page/feed` nu se declanșează pentru ele. App Review deblochează doar DM-urile IG; ReplyZen cere altă **cale de captare**, nu altă permisiune. §3.5 |
 | 19 | „Wrapperele sunt versionate odată cu restul" | Cele 4 care **conduc** producția nu erau în git nicăieri și erau invizibile pentru `deploy_parity.py`. Reparat, PR #587. §2.1 |
 
 **Alte bug-uri de producție găsite pe drum:**
@@ -1061,7 +1063,6 @@ Partea cea mai utilă a dosarului. Fiecare rând a costat timp sau, într-un caz
 | ~~Validare ReplyZen: 3–5 zile în paralel~~ | **imposibil azi** | Webhook-ul nu primește niciun eveniment Facebook. Validarea ar pica. ReplyZen rămâne pornit |
 | Acordarea paginilor lipsă în Business Manager | administrativ | 12% din volumul social + conectarea DUPPO Moldova în Richpanel. *Criteriu de succes = EFECTUL:* `GET /{page}?fields=access_token` → 200 **și** în 24h comentariile apar în oglindă |
 | Comentarii TikTok pe grupurile de reclame ACTIVE | de făcut | Canal pe care Richpanel nu-l are deloc; acum se moderează în ReplyZen. Semnătura API e cunoscută (`/open_api/v1.3/comment/list/`) |
-| ~~Advanced Access Instagram~~ → inclus în App Review-ul de mai sus | **decizie de owner** | Nu mai e un item separat |
 | Testul „RP live mai are textul șters?" (§6.3.1) | de făcut | Decide dacă congelatorul de comentarii merită costul |
 
 ### 8.1 Cerințele pentru aplicația proprie
