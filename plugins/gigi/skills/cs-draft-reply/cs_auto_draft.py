@@ -76,6 +76,13 @@ PAGE_STORE = {
     "575422458989566": "Duppo Moldova",
     "103675612509107": "Bonhaus",
     "425122607349368": "Nocturna Lux",
+    # Găsite 15-sep numărând comentariile OPEN pe pagină: apăreau ca „(nemapat)", deci ieșeau
+    # din AI cu store_name = "magazinul nostru" — fără limbă, fără telefon, fără brand în semnătură.
+    "575484808985734": "Covoria",          # 26 comentarii OPEN
+    "628544790345906": "Genti Promo", "704271086093669": "Ce-Pat-Ai",
+    "506398435900401": "Produse Bisericesti", "132189989971450": "Stemma",
+    "606625622532373": "Super Detergent", "104553898590313": "Unelte Potrivite",
+    "115983611500696": "Manscout", "122095975544011424": "Rossi Nails",
 }
 # Piețele pe care AI-ul NU răspunde (decizie de owner, 15-sep-2026): Moldova și Cehia.
 # Restul piețelor străine — BG, HU, SK, PL, HR — sunt ACTIVE.
@@ -1006,13 +1013,6 @@ def main():
                     photo_blk = _csp.client_photos_block(msgs, subj + " " + first) if _csp else describe_photos(msgs, subj + " " + first)
                 except Exception as _pe:
                     print("  ⚠️ vedere poze eșuată (#%s): %s" % (no, str(_pe)[:60]), file=sys.stderr)
-        # Piețele pe care AI-ul nu răspunde (Moldova, Cehia). Poarta stă AICI, după ce brandul e
-        # rezolvat din pagină/email/comandă — nu la selecția de canal, fiindcă un tichet CZ poate
-        # veni pe orice canal și pe orice cutie (aliasurile trimit bonhaus.hu în cutia trynocturna).
-        if store_name in AI_SKIP_STORES and not a.include_skipped:
-            print("  ⏭️  #%s — piață exclusă (%s); sări" % (no, store_name))
-            skipped_market += 1
-            continue
         # marchează explicit ULTIMUL mesaj al clientului — la EL răspundem; restul firului = doar context
         tr = tr + "\n>>> ULTIMUL MESAJ AL CLIENTULUI (răspunde la ACESTA; restul firului = context): " + last_cust
         if photo_blk:   # pozele văzute → în transcript (le folosesc atât triajul cât și draftul)
@@ -1072,6 +1072,17 @@ def main():
                 lab = CH_LABEL.get(c.get("channel"), c.get("channel") or "?")
                 ch_counts[lab] = ch_counts.get(lab, 0) + 1
             elsewhere = ", ".join("%s×%d" % (k, v) for k, v in sorted(ch_counts.items(), key=lambda x: -x[1])) or "doar aici (niciun alt tichet)"
+
+        # Piețele pe care AI-ul nu răspunde (azi: Moldova, Cehia — decizie de owner 15-sep-2026).
+        # Poarta stă AICI, nu mai sus: `store_name` se rafinează în TREI trepte — pagina FB, apoi
+        # domeniul cutiei, apoi brandul comenzii găsite. Pusă înainte de treapta a treia, ar fi
+        # lăsat să treacă tichetele unde brandul se află abia din comandă.
+        # Și nu la selecția de canal, fiindcă un tichet CZ poate veni pe orice canal și prin orice
+        # alias de cutie (bonhaus.hu aterizează în cutia trynocturna.eu).
+        if store_name in AI_SKIP_STORES and not a.include_skipped:
+            print("  ⏭️  #%s — piață exclusă (%s); sar" % (no, store_name))
+            skipped_market += 1
+            continue
 
         od = "\n".join("    • %s (%s): status=%s, curier=%s, AWB=%s, produse=%s" % (
             o.get("o"), o.get("brand", o.get("store", "?")), o.get("deliv", "?"),
