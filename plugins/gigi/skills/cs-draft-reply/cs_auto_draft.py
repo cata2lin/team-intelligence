@@ -404,6 +404,11 @@ def _f(v, d=0.0):
 
 _CYR = re.compile(r"[Ѐ-ӿ]")
 _HU_VOWELS = set("öüóúíéá")
+# Semnal că textul e ROMÂNESC: diacritice proprii SAU cuvinte funcționale care nu apar în maghiară.
+# Folosit ca să nu lăsăm o singură literă ő/ű dintr-un citat de email să mute tot tichetul pe „hu".
+_RO_SIGNAL = re.compile(r"[ăâîșțşţ]|\b(?:bun[aăe]?|foarte|multumesc|multumim|multumit[aăe]?|comand[aă]|"
+                        r"comenzi|comandat[aă]?|colet(?:ul)?|va rog|dumneavoastra|livrare|retur|"
+                        r"factura|produs(?:ul|e)?|zile|primit|ajuns|curier(?:ul)?|recomand|frumos)\b", re.I)
 _HU_WORDS = re.compile(r"\b(nem|hogy|egy|van|meg|m\u00e1r|csak|nagyon|k\u00f6sz\u00f6n\u00f6m|k\u00e9rem|rendel(?:\u00e9s|tem)|sz\u00e1ll\u00edt\u00e1s|term\u00e9k|ez|az|de|is)\b", re.I)
 
 
@@ -427,7 +432,13 @@ def detect_lang(text):
     if any(c in low for c in "ľĺŕôä"):
         return "sk"                       # litere specific slovace
     if any(c in low for c in "őű"):
-        return "hu"                       # litere specific maghiare
+        # ő/ű sunt specific maghiare, DAR pot intra dintr-un CITAT de email maghiar lipit sub un
+        # mesaj românesc (semnătura judge.me, „ezt írta (időpont: …)"). Măsurat pe oglinda live
+        # (17.017 mesaje de client): 50 detectate „hu", din care 20 erau clienți ROMÂNI pe magazine
+        # românești. Deci litera singură nu mai decide când textul are și semnal ROMÂNESC — atunci
+        # cere confirmare lexicală maghiară. Un maghiar real scrie oricum cuvinte maghiare.
+        if not (_RO_SIGNAL.search(low) and len(_HU_WORDS.findall(low)) < 2):
+            return "hu"
     if any(c in low for c in "ăâîșțşţ"):
         return "ro"                       # diacritice românești
     # Maghiara fără ő/ű: é/á/ö/ü sunt împărțite cu alte limbi, deci singure nu decid. DAR vocalele
