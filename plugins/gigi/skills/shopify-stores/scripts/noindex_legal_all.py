@@ -41,6 +41,13 @@ import requests
 API_DEFAULT = os.environ.get("SHOPIFY_API_VERSION", "2026-01")
 UA = {"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"}
 KB = os.path.expanduser("~/.claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py")
+if not os.path.exists(KB):  # SB server / dev clone instead of the installed marketplace
+    for _c in ("/opt/second-brain/vault/company/team-intelligence/plugins/core/scripts/kb.py",
+               os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                            "..", "..", "..", "..", "core", "scripts", "kb.py"))):
+        if os.path.exists(_c):
+            KB = _c
+            break
 POLICY_HANDLES = ["contact-information", "refund-policy", "privacy-policy", "terms-of-service",
                   "shipping-policy", "legal-notice", "subscription-policy"]
 ROBOTS_RE = re.compile(r'<meta[^>]+name=["\']robots["\'][^>]*noindex', re.I)
@@ -54,25 +61,47 @@ def kb_get(key):
         return ""
 
 
+def _resolve_markers(rows):
+    """Turn `OAUTH:<NAME>_CLIENT_ID+SECRET` markers into live tokens.
+
+    The client_credentials stores (BUC, ORC, SK, HU, MD, DUPBG) carry a marker, not a token —
+    without this every one of them 401s and silently reports "(none)" instead of its pages.
+    """
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from shopify_gql import _mint_client_credentials  # same dir, stdlib only
+    for r in rows:
+        tok = (r.get("token") or "").strip()
+        if tok.upper().startswith("OAUTH:") and "+SECRET" in tok.upper():
+            try:
+                r["token"] = _mint_client_credentials(r["shop"], tok)
+            except SystemExit as e:
+                print(f"   !! {r['prefix']}: {e}", file=sys.stderr)
+    return rows
+
+
 def load_stores():
-    """Yield {prefix, shop, token}. Prefer core.stores (OAuth-aware); fall back to KB CSV."""
+    """Yield {prefix, shop, token}. Prefer core.stores (OAuth-aware); fall back to env/KB CSV."""
     try:
         sys.path.insert(0, os.getcwd())
         from core.stores import list_stores  # type: ignore
         rows = list_stores()
         if rows:
-            return rows
+            return _resolve_markers(rows)
     except Exception:
         pass
     out = []
-    csv_text = kb_get("SHOPIFY_STORES_CSV")
+    # env FIRST: the Second Brain skill-runtime injects SHOPIFY_STORES_CSV as a secret and that
+    # box has no kb.py on the expected path — without this the scan dies "no stores resolved".
+    csv_text = os.environ.get("SHOPIFY_STORES_CSV") or kb_get("SHOPIFY_STORES_CSV")
+    if csv_text and "\n" not in csv_text and os.path.exists(csv_text):
+        csv_text = open(csv_text, encoding="utf-8-sig").read()
     if csv_text:
         for r in csv.DictReader(csv_text.splitlines()):
-            p = (r.get("prefix") or "").strip()
+            p = (r.get("prefix") or "").strip().lstrip("\ufeff")
             if p:
                 out.append({"prefix": p, "shop": (r.get("shop") or "").strip(),
                             "token": (r.get("token") or "").strip()})
-    return out
+    return _resolve_markers(out)
 
 
 def gql(shop, token, query, api):
