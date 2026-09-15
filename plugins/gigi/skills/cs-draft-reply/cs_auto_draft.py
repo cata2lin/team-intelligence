@@ -55,6 +55,13 @@ PLATFORM = {
     "instagram_dm": ("Instagram DM", "conversațional, prietenos; privat → date OK."),
     "sms": ("SMS", "FOARTE scurt, fără semnătură lungă; privat → date OK."),
     "facebook_feed_comment": ("Comentariu public Facebook", "PUBLIC, SCURT (1-2 fraze), cald, cu 1-2 emoji, POLITICOS la PLURAL (dumneavoastra/va, NU la 'tu'); NU expune comanda/AWB/telefon. Pozitiv/lauda -> multumire calda. Intrebare/reclamatie -> raspuns scurt + INVITA CLIENTUL sa ne SCRIE in privat (inbox/Messenger) SAU sa ne SUNE la TELEFON_COMANDA (daca e dat). NU spune 'v-am scris noi in privat' (nu trimitem noi DM)."),
+    # Richpanel trimite `facebook_message` / `instagram_message` / `email_from_widget`, NU
+    # `messenger` / `instagram_dm` / `email`. Fără aliasurile astea, TREI din cele cinci canale ale
+    # cronului cădeau pe fallback-ul generic („ton prietenos, la obiect") — adică fără regula de
+    # canal privat care spune că datele de comandă se pot da.
+    "facebook_message": ("Facebook Messenger", "conversațional, prietenos; privat → date OK."),
+    "instagram_message": ("Instagram DM", "conversațional, prietenos; privat → date OK."),
+    "email_from_widget": ("Email (formular site)", "răspuns COMPLET cu salut + semnătură; date de comandă OK (privat)."),
     "instagram_comment": ("Comentariu public Instagram", "PUBLIC, SCURT (1-2 fraze), cald, cu 1-2 emoji, POLITICOS la PLURAL (dumneavoastra/va, NU la 'tu'); NU expune comanda/AWB/telefon. Pozitiv/lauda -> multumire calda. Intrebare/reclamatie -> raspuns scurt + INVITA CLIENTUL sa ne SCRIE in privat (DM) SAU sa ne SUNE la TELEFON_COMANDA (daca e dat). NU spune 'v-am scris noi in privat' (nu trimitem noi DM)."),
 }
 PAGE_STORE = {
@@ -910,6 +917,7 @@ def main():
     ap.add_argument("--lean", action="store_true", help="proces REDUS pt volum mare: fără 360/SSH (comenzi), fără rutare escaladare (priority/notă) — doar transcript → draft → create_draft. Mult mai rapid + mai puține scrieri Richpanel.")
     ap.add_argument("--ground", action="store_true", help="GROUNDING self-contained (pt VPS/cron): caută comenzile clientului DIRECT din DB metrics + profitability.db (fără SSH/uv) → draftul are status/AWB real. Mai lent ca lean, dar fără halucinări de comandă.")
     ap.add_argument("--skip-tagged", action="store_true", help="sare tichetele care AU deja tag-ul AI (--tag) — pt cron/reluare: draftează DOAR tichetele noi, fără dubluri")
+    ap.add_argument("--auto-hide", action="store_true", help="APLICĂ pe loc ascunderea comentariilor clasificate spam/abuz (Graph, reversibil), pe TOATE magazinele — inclusiv pe piețele unde nu răspundem. Fără el, hide-ul rămâne o propunere pentru --approve.")
     ap.add_argument("--include-skipped", action="store_true", help="răspunde ȘI pe piețele excluse din AI_SKIP_STORES (azi: Moldova și Cehia). Implicit sunt sărite — decizie de owner 15-sep-2026.")
     ap.add_argument("--no-comments", action="store_true", help="exclude complet canalele de comentarii (facebook_feed_comment/instagram_comment) — nu le draftează (ex. pt cron: comentariile rămân pt CS)")
     ap.add_argument("--fast-triage", action="store_true", help="EFICIENȚĂ: sare apelul LLM de TRIAJ când categoria regex e sigură (non-'altele') → ~1 apel LLM/tichet în loc de 2. Gărzile de spam + escaladare rămân deterministe. Pierde doar extracția fină LLM (acțiuni/adresă) care oricum cere --approve.")
@@ -965,6 +973,8 @@ def main():
     queue = load_queue()
     rows = []
     n_spam = 0
+    hidden_now = 0              # comentarii ascunse efectiv in rularea asta (--auto-hide)
+    hide_fail = 0              # ascunderi incercate si esuate (token lipsa / comentariu sters)
     skipped_market = 0          # tichete sărite fiindcă brandul e pe o piață exclusă (AI_SKIP_STORES)
 
     for i, t in enumerate(picked, 1):
@@ -1079,10 +1089,16 @@ def main():
         # lăsat să treacă tichetele unde brandul se află abia din comandă.
         # Și nu la selecția de canal, fiindcă un tichet CZ poate veni pe orice canal și prin orice
         # alias de cutie (bonhaus.hu aterizează în cutia trynocturna.eu).
-        if store_name in AI_SKIP_STORES and not a.include_skipped:
-            print("  ⏭️  #%s — piață exclusă (%s); sar" % (no, store_name))
+        # Pe piețele excluse NU răspundem — dar ASCUNDEM în continuare comentariile negative
+        # (cerință de owner: moderarea se face pe TOATE magazinele, răspunsul doar pe unele).
+        # Deci nu sărim tichetul: îl ducem prin triaj și prin moderare, și suprimăm doar draftul.
+        skip_draft = store_name in AI_SKIP_STORES and not a.include_skipped
+        if skip_draft:
             skipped_market += 1
-            continue
+            if not (is_public and a.auto_hide):
+                print("  ⏭️  #%s — piață exclusă (%s); sar" % (no, store_name))
+                continue
+            print("  ⏭️  #%s — piață exclusă (%s); NU draftez, dar trec prin moderare" % (no, store_name))
 
         od = "\n".join("    • %s (%s): status=%s, curier=%s, AWB=%s, produse=%s" % (
             o.get("o"), o.get("brand", o.get("store", "?")), o.get("deliv", "?"),
@@ -1191,7 +1207,17 @@ def main():
         page_id = ((t.get("to") or {}).get("id") if isinstance(t.get("to"), dict) else "") or ""
         if is_public and cact == "hide":
             hide_obj = {"comment_id": cid, "page_id": page_id, "mode": "hide"}
-            proposal_line = (proposal_line + "\n  " if proposal_line else "") + "🙈 PROPUNERE HIDE (spam/abuz) — ascunde comentariul; aprobă cu --approve %s" % no
+            if a.auto_hide:
+                # Moderarea se aplică pe TOATE magazinele, inclusiv pe piețele unde nu răspundem.
+                # E reversibilă (`is_hidden=false`) și e exact ce face ReplyZen azi.
+                res = fb_hide_comment(cid, page_id, hide=True)
+                hidden_now += 1 if res.startswith("✅") else 0
+                hide_fail += 0 if res.startswith("✅") else 1
+                print("  🙈 HIDE #%s: %s" % (no, res))
+            else:
+                proposal_line = (proposal_line + "\n  " if proposal_line else "") + "🙈 PROPUNERE HIDE (spam/abuz) — ascunde comentariul; aprobă cu --approve %s sau rulează cu --auto-hide" % no
+        if skip_draft:
+            continue          # piață exclusă: moderarea s-a făcut, draftul NU
 
         # ---- 3) DRAFT ----
         sys_prompt = HOLDING if is_esc else SYSTEM
@@ -1299,6 +1325,9 @@ def main():
         time.sleep(a.sleep)
 
     save_queue(queue)
+    if hidden_now or hide_fail:
+        print("\n  🙈 Moderare: %d comentarii ascunse%s." % (
+            hidden_now, (", %d eșuate (token de pagină lipsă sau comentariu șters)" % hide_fail) if hide_fail else ""))
     if skipped_market:
         print("\n  ⏭️  Piețe excluse (%s): %d tichete sărite. --include-skipped ca să răspunzi și acolo."
               % (", ".join(sorted(AI_SKIP_STORES)), skipped_market))
