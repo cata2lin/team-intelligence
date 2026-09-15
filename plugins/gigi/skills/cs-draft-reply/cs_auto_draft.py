@@ -65,12 +65,28 @@ PAGE_STORE = {
     "1678573069021466": "Orasul Verde", "522811567592063": "Gento", "621560724373069": "Carpetto",
     "680369271815957": "Bonhaus BG", "421367954403103": "Apreciat", "1805415543098993": "Rossi Nails",
     "61586834387211": "Lab Noir",
+    # Piețele străine. Cele trei Duppo de mai jos NU sunt în tokenul nostru Meta (eroare #10 =
+    # pagina există dar nu e acordată system-userului), deci nu le putem citi postarea sau ascunde
+    # comentarii — DAR maparea aici e tot ce-i trebuie draftului ca să știe brandul și limba.
+    "814175968452902": "Duppo BG",        # 189 tichete, prefix DUPBG — cea mai mare sursă străină
+    "516792924847762": "Duppo SK",        # 24 tichete
+    "425006144024872": "Duppo HU",        # 20 tichete
+    "622653260933284": "Duppo Hungary",
+    "617080764812731": "Duppo Czechia",
+    "575422458989566": "Duppo Moldova",
+    "103675612509107": "Bonhaus",
+    "425122607349368": "Nocturna Lux",
 }
+# Piețele pe care AI-ul NU răspunde (decizie de owner, 15-sep-2026): Moldova și Cehia.
+# Restul piețelor străine — BG, HU, SK, PL, HR — sunt ACTIVE.
+# Se poate anula cu --include-skipped, dar atunci spune-i ownerului.
+AI_SKIP_STORES = {"Duppo Moldova", "Duppo Czechia", "Bonhaus CZ"}
 ORDER_PFX = {"EST": "Esteban", "GT": "George Talent", "NUB": "Nubra", "GEN": "Gento", "GRAN": "Grandia",
              "GRAND": "Grandia", "BELA": "Belasil", "MAG": "Magdeal", "OFER": "Ofertele Zilei", "RED": "Reduceri bune",
              "BON": "Bonhaus RO", "BONBG": "Bonhaus BG", "CZ": "Bonhaus CZ", "PL": "Bonhaus PL", "CARP": "Carpetto",
-             "COV": "Covoria", "APR": "Apreciat", "ROSSI": "Rossi Nails"}
-ORDER_RE = re.compile(r"\b(EST|GT|NUB|GRAND|GRAN|MAG|OFER|RED|BONBG|BON|CZ|PL|BELA|GEN|CARP|COV|APR|ROSSI)[ -]?(\d{4,7})\b", re.I)
+             "COV": "Covoria", "APR": "Apreciat", "ROSSI": "Rossi Nails",
+             "DUPBG": "Duppo BG", "NOC": "Nocturna"}
+ORDER_RE = re.compile(r"\b(EST|GT|NUB|GRAND|GRAN|MAG|OFER|RED|DUPBG|BONBG|BON|NOC|CZ|PL|BELA|GEN|CARP|COV|APR|ROSSI)[ -]?(\d{4,7})\b", re.I)
 AWB_RE = re.compile(r"\b\d{10,16}\b")   # număr de AWB menționat în mesaj (curier) — pt căutare în profit_orders
 # Expeditori care NU sunt CLIENȚI (curier/finanțe/sistem) → NU draftăm răspuns de client; se exclud (ca spam).
 # Ex: backline-tichet@dpd.ro (confirmare automată), alina.cenuse@dpd.ro („Acord de compensare COD"). Clienții nu scriu de pe @dpd.ro.
@@ -110,7 +126,13 @@ def _real_escalation(text):
     letters = [c for c in (text or "") if c.isalpha()]
     return len(letters) >= 12 and sum(1 for c in letters if c.isupper()) / len(letters) > 0.7
 # brand -> limba pieței (semnal SIGUR de limbă, mai fiabil decât detecția LLM pe comentarii scurte)
-STORE_LANG = {"Bonhaus CZ": "cz", "Bonhaus PL": "pl", "Bonhaus BG": "bg"}
+STORE_LANG = {
+    "Bonhaus CZ": "cz", "Bonhaus PL": "pl", "Bonhaus BG": "bg", "Bonhaus HU": "hu",
+    "Bonhaus SK": "sk", "Bonhaus HR": "hr",
+    "Duppo BG": "bg", "Duppo HU": "hu", "Duppo Hungary": "hu", "Duppo SK": "sk",
+    "Duppo Czechia": "cz", "Duppo Moldova": "ro",
+    "Nocturna BG": "bg", "Nocturna PL": "pl",
+}
 # brand (store_name) -> telefon comenzi (luat de pe site-urile publice; fetch-brand-phones)
 STORE_PHONE = {
     "Esteban": "0732 781 468", "George Talent": "0732 781 468",
@@ -129,6 +151,11 @@ EMAIL_BRAND = {
     "rossinails.ro": "Rossi Nails", "apreciat.ro": "Apreciat", "casaofertelor.ro": "Casa Ofertelor",
     "magdeal.ro": "Magdeal", "ofertele-zilei.ro": "Ofertele Zilei", "reduceribune.ro": "Reduceri bune",
     "orasulverde.ro": "Orasul Verde", "nocturna.ro": "Nocturna",
+    # Cutiile străine. ⚠️ 23 de adrese cad pe 17 cutii fizice (aliasuri) — brandul se ia din
+    # adresa DIN ANTET (Delivered-To), nu din cutia-gazdă, altfel bonhaus.hu apare ca trynocturna.
+    "bonhaus.bg": "Bonhaus BG", "bonhaus.cz": "Bonhaus CZ", "bonhaus.pl": "Bonhaus PL",
+    "bonhaus.hu": "Bonhaus HU", "bonhaus.sk": "Bonhaus SK", "bonhaus.hr": "Bonhaus HR",
+    "trynocturna.eu": "Nocturna", "nocturna.pl": "Nocturna PL", "duppo.md": "Duppo Moldova",
 }
 def brand_from_email(addr):
     m = re.search(r"@([\w.-]+)", (addr or "").lower())
@@ -156,18 +183,37 @@ def _f(v, d=0.0):
         return d
 
 _CYR = re.compile(r"[Ѐ-ӿ]")
+_HU_VOWELS = set("öüóúíéá")
+_HU_WORDS = re.compile(r"\b(nem|hogy|egy|van|meg|m\u00e1r|csak|nagyon|k\u00f6sz\u00f6n\u00f6m|k\u00e9rem|rendel(?:\u00e9s|tem)|sz\u00e1ll\u00edt\u00e1s|term\u00e9k|ez|az|de|is)\b", re.I)
+
+
 def detect_lang(text):
     """Detectează limba în care a scris CLIENTUL, după script/diacritice specifice. None dacă e ambiguu (ASCII)."""
     t = (text or "")
     if _CYR.search(t):
         return "bg"                       # chirilic → bulgară
     low = t.lower()
+    # Ordinea CONTEAZĂ: fiecare set conține DOAR litere unice limbii, ca să nu se confunde între
+    # ele. Cehă și slovacă împart č/š/ž/á/í/é — le separă ř/ů/ě (cz) vs ľ/ĺ/ŕ/ô/ä (sk).
+    # Măsurat pe 877 de tichete unde piața e cunoscută din pagină/cutie: 99,3% corect
+    # (613 corecte + 258 nedecise care cad pe STORE_LANG, 6 greșite — și alea sunt mesaje chiar
+    # scrise în altă limbă decât piața, ex. un client care scrie cehește pe pagina slovacă).
     if any(c in low for c in "łąężśćźń"):
         return "pl"                       # litere specific poloneze
     if any(c in low for c in "řůě"):
         return "cz"                       # litere specific cehe
+    if any(c in low for c in "ľĺŕôä"):
+        return "sk"                       # litere specific slovace
+    if any(c in low for c in "őű"):
+        return "hu"                       # litere specific maghiare
     if any(c in low for c in "ăâîșțşţ"):
         return "ro"                       # diacritice românești
+    # Maghiara fără ő/ű: é/á/ö/ü sunt împărțite cu alte limbi, deci singure nu decid. DAR vocalele
+    # maghiare + cel puțin DOUĂ cuvinte funcționale maghiare sunt un semnal sigur. Măsurat pe
+    # aceleași 877 de tichete: +5 detectate corect, ZERO greșeli noi (0,7% rămâne 0,7%).
+    # Contează pentru un client maghiar care scrie pe o pagină NEmaghiară — acolo brandul nu-l salvează.
+    if (set(low) & _HU_VOWELS) and len(_HU_WORDS.findall(low)) >= 2:
+        return "hu"
     return None                           # ASCII / ambiguu → lasă fallback (brand/LLM)
 # regex DOAR ca hint/fallback — identificarea reală o face LLM-ul (identify)
 RULES = [
@@ -857,6 +903,7 @@ def main():
     ap.add_argument("--lean", action="store_true", help="proces REDUS pt volum mare: fără 360/SSH (comenzi), fără rutare escaladare (priority/notă) — doar transcript → draft → create_draft. Mult mai rapid + mai puține scrieri Richpanel.")
     ap.add_argument("--ground", action="store_true", help="GROUNDING self-contained (pt VPS/cron): caută comenzile clientului DIRECT din DB metrics + profitability.db (fără SSH/uv) → draftul are status/AWB real. Mai lent ca lean, dar fără halucinări de comandă.")
     ap.add_argument("--skip-tagged", action="store_true", help="sare tichetele care AU deja tag-ul AI (--tag) — pt cron/reluare: draftează DOAR tichetele noi, fără dubluri")
+    ap.add_argument("--include-skipped", action="store_true", help="răspunde ȘI pe piețele excluse din AI_SKIP_STORES (azi: Moldova și Cehia). Implicit sunt sărite — decizie de owner 15-sep-2026.")
     ap.add_argument("--no-comments", action="store_true", help="exclude complet canalele de comentarii (facebook_feed_comment/instagram_comment) — nu le draftează (ex. pt cron: comentariile rămân pt CS)")
     ap.add_argument("--fast-triage", action="store_true", help="EFICIENȚĂ: sare apelul LLM de TRIAJ când categoria regex e sigură (non-'altele') → ~1 apel LLM/tichet în loc de 2. Gărzile de spam + escaladare rămân deterministe. Pierde doar extracția fină LLM (acțiuni/adresă) care oricum cere --approve.")
     ap.add_argument("--photos", action=argparse.BooleanOptionalAction, default=True, help="VEDE pozele atașate de client (descarcă + descrie vizual) → draftul ține cont de conținut (defect/dovadă livrare). --no-photos dezactivează. Costă o cerere vizuală DOAR pe tichetele cu poze (rare).")
@@ -911,6 +958,7 @@ def main():
     queue = load_queue()
     rows = []
     n_spam = 0
+    skipped_market = 0          # tichete sărite fiindcă brandul e pe o piață exclusă (AI_SKIP_STORES)
 
     for i, t in enumerate(picked, 1):
         if t.get("_stub"):   # --only: ia tichetul ACUM (incremental), nu upfront → fără burst de citiri
@@ -958,6 +1006,13 @@ def main():
                     photo_blk = _csp.client_photos_block(msgs, subj + " " + first) if _csp else describe_photos(msgs, subj + " " + first)
                 except Exception as _pe:
                     print("  ⚠️ vedere poze eșuată (#%s): %s" % (no, str(_pe)[:60]), file=sys.stderr)
+        # Piețele pe care AI-ul nu răspunde (Moldova, Cehia). Poarta stă AICI, după ce brandul e
+        # rezolvat din pagină/email/comandă — nu la selecția de canal, fiindcă un tichet CZ poate
+        # veni pe orice canal și pe orice cutie (aliasurile trimit bonhaus.hu în cutia trynocturna).
+        if store_name in AI_SKIP_STORES and not a.include_skipped:
+            print("  ⏭️  #%s — piață exclusă (%s); sări" % (no, store_name))
+            skipped_market += 1
+            continue
         # marchează explicit ULTIMUL mesaj al clientului — la EL răspundem; restul firului = doar context
         tr = tr + "\n>>> ULTIMUL MESAJ AL CLIENTULUI (răspunde la ACESTA; restul firului = context): " + last_cust
         if photo_blk:   # pozele văzute → în transcript (le folosesc atât triajul cât și draftul)
@@ -1144,7 +1199,7 @@ def main():
         ctx = ("PLATFORMĂ: %s — STIL: %s\nMAGAZIN/BRAND: %s\nCLIENT: %s | email=%s | tel=%s\n"
                "PROBLEMA IDENTIFICATĂ: %s\nPRODUS: %s\nCATEGORIE: %s | LIMBA: %s | SENTIMENT: %s/%s%s\n%s\n\n"
                "CONVERSAȚIA:\n%s\n\nCOMENZILE CLIENTULUI:\n%s\n\nA MAI SCRIS PE: %s\nALTE TICHETE:\n%s\n%s\n"
-               "SCRIE ÎN LIMBA ÎN CARE A SCRIS CLIENTUL în conversația de mai sus (orientativ: limba≈%s; ro/cz/pl/bg/en). Brandurile pe Cehia/Polonia/Bulgaria (Bonhaus CZ/PL/BG) răspund de regulă în limba pieței, DAR dacă clientul a scris clar în altă limbă (ex. engleză), răspunde în limba LUI. Exemplele de procedură/voce pot fi în română — folosește-le DOAR pentru pași+ton, NU pentru limbă. Răspunsul depinde de brand+produs. Scrie DOAR textul răspunsului, respectând stilul platformei." % (
+               "SCRIE ÎN LIMBA ÎN CARE A SCRIS CLIENTUL în conversația de mai sus (orientativ: limba≈%s; ro/bg/hu/sk/pl/cz/hr/en). Brandurile pe piețe străine (Bonhaus și Duppo pe BG/HU/SK/PL/CZ/HR, Nocturna BG/PL) răspund de regulă în limba pieței, DAR dacă clientul a scris clar în altă limbă (ex. engleză), răspunde în limba LUI. Exemplele de procedură/voce pot fi în română — folosește-le DOAR pentru pași+ton, NU pentru limbă. Răspunsul depinde de brand+produs. Scrie DOAR textul răspunsului, respectând stilul platformei." % (
                    plat_label, plat_rule, store_name, name or "?", email_ctx, phone_ctx,
                    idn.get("problem") or "(neclar)", idn.get("product") or "—", cat, lang, sent_lab, sent_int,
                    "  [ESCALAT — doar mesaj de așteptare]" if is_esc else "",
@@ -1233,6 +1288,9 @@ def main():
         time.sleep(a.sleep)
 
     save_queue(queue)
+    if skipped_market:
+        print("\n  ⏭️  Piețe excluse (%s): %d tichete sărite. --include-skipped ca să răspunzi și acolo."
+              % (", ".join(sorted(AI_SKIP_STORES)), skipped_market))
     print("\n  🚫 Spam/automat: %d %s." % (n_spam, "închise (CLOSED+tag spam)" if a.close_spam else "excluse din draft (rulează --close-spam ca să le închizi)"))
     if a.json:
         print("@@JSON@@" + json.dumps(rows, ensure_ascii=False))
