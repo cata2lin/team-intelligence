@@ -31,7 +31,7 @@ def _run(script, args, timeout=200):
 @mcp.tool()
 def cs_draft(conv: str, create_draft: bool = False) -> str:
     """Draft de răspuns pt un tichet Richpanel (în vocea CS, cu date reale + macro-uri ClickUp). create_draft=true îl scrie ca DRAFT în Richpanel (NICIODATĂ trimite). Fără = doar arată propunerea."""
-    return _run(DRAFT,["--conv",conv]+(["--create-draft"] if create_draft else []))
+    return _run(DRAFT,["--only",conv]+(["--create-draft"] if create_draft else []))
 @mcp.tool()
 def richpanel_triage(limit: int = 20, apply: bool = False) -> str:
     """Auto-triaj conversații OPEN: propune magazin/categorie/prioritate/tag (din to.id = pagina FB/IG). DRY-RUN dacă apply=false (scrie tag+prioritate, niciun mesaj la client)."""

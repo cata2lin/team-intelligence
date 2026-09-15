@@ -1,0 +1,84 @@
+{
+  "schema": "cs-incidents/1",
+  "_doc": {
+    "ce_e": "Registru de INCIDENTE: fapte VERIFICATE per comanda, pe care cs_auto_draft.py le injecteaza in contextul draftului DOAR cand tichetul se leaga de o comanda afectata.",
+    "unde_stau_datele_REALE": "NU in repo (e PUBLIC). Fisierul real se da prin env CS_INCIDENTS_FILE; implicit ~/.arona/cs_incidents.json pe statie, iar pe VPS pune-l in /root/Scripturi/data/cs_incidents.json. Fisierul de fata e DOAR structura + un exemplu ANONIMIZAT.",
+    "cum_verifici": "CS_INCIDENTS_FILE=<cale> uv run cs_auto_draft.py --limit 1 ... -> in context apare blocul 'INCIDENT CUNOSCUT - FAPTE VERIFICATE'; fara fisier, motorul se comporta exact ca azi.",
+    "campuri_incident": {
+      "id": "identificator stabil, kebab-case",
+      "active": "false = dezactivat, fara sa-l stergi",
+      "store": "magazinul afectat - numele EXACT din PAGE_STORE (potrivirea e EXACTA, nu pe subsir). Poate fi si o LISTA de magazine.",
+      "store_aliases": "OPTIONAL: alte nume exacte de magazin acoperite de acelasi incident. Fara ele, 'Duppo' NU mai prinde 'Duppo BG' - si asta e intentionat.",
+      "topic": "OBLIGATORIU ca bratul PUBLIC sa functioneze. Termenii pe care ii scrie CLIENTUL, grupati PE LIMBA: {\"bg\": [...], \"sk\": [...], \"*\": [...]}. Se folosesc doar termenii pe limba PIETEI magazinului (STORE_LANG) plus cei din '*' (fara limba: cifre, '2+1', nume de produs). O lista simpla se trateaza ca '*'. Scrie-i VERBATIM cum apar in comentarii, nu traduceri: un comentariu in bulgara nu se potriveste cu cuvinte romanesti. Fara termeni pe limba pietei, motorul STRIGA la incarcare si nu recunoaste nimic public acolo.",
+      "window": "fereastra de timp {from, to} in care s-a produs",
+      "description": "ce s-a intamplat, o fraza",
+      "orders": "harta nr_comanda -> fapte verificate"
+    },
+    "campuri_comanda": {
+      "ordered_qty": "bucati comandate",
+      "shipped_qty": "bucati plecate initial",
+      "remediated": "s-a retrimis diferenta? true/false",
+      "remediated_at": "data retrimiterii (YYYY-MM-DD), doar daca remediated",
+      "remediation_awb": "AWB-ul retrimiterii (string sau lista)",
+      "remediation_delivered": "retrimiterea a fost LIVRATA? true/false/null",
+      "fact": "o propozitie de adevar verificabil - exact ce avem voie sa-i spunem clientului"
+    },
+    "reguli": [
+      "orice AWB / data / livrare afirmata de draft trebuie sa vina de AICI (garda unbacked_claims din cs_auto_draft.py)",
+      "pe canal public nu ies date identificabile: incident_facts redacteaza singur nr. comanda / AWB / data",
+      "daca o comanda nu e in registru, comportamentul ramane cel de azi (nu se injecteaza nimic)",
+      "bratul PUBLIC (recunoasterea pe pagina magazinului) tine de MAGAZIN + `topic` pe limba, NICIODATA de comanda persoanei: promptul public e IDENTIC pentru o comanda afectata si una neafectata",
+      "`topic` scris doar in romana pe un magazin strain = no-op: verifica la pornire ca NU apare avertismentul 'REGISTRU INCIDENTE'"
+    ]
+  },
+  "incidents": [
+    {
+      "id": "exemplu-colete-incomplete-2026-09",
+      "active": true,
+      "store": "Exemplu Magazin",
+      "window": {"from": "2026-08-29", "to": "2026-09-07"},
+      "description": "Colete expediate cu o singura bucata in loc de cantitatea comandata (eroare de pregatire in depozit).",
+      "topic": {
+        "_de_ce": "termeni VERBATIM din comentarii reale pe piata RO, nu traduceri: asa scrie clientul cand ii lipsesc bucati din colet",
+        "ro": ["am primit doar", "in loc de trei", "2 in loc de 3", "nu am primit tot", "nu am primit comanda completa", "nu a fost completa", "nu contine toate", "lipseste un", "lipsa din colet", "un singur produs"],
+        "*": ["2+1"]
+      },
+      "orders": {
+        "EXM1001": {
+          "ordered_qty": 3,
+          "shipped_qty": 1,
+          "remediated": true,
+          "remediated_at": "2026-09-10",
+          "remediation_awb": "00000000001",
+          "remediation_delivered": true,
+          "fact": "Comanda a plecat cu 1 bucata in loc de 3; diferenta de 2 bucati a fost retrimisa pe 10-09 si livrata."
+        },
+        "EXM1002": {
+          "ordered_qty": 2,
+          "shipped_qty": 1,
+          "remediated": false,
+          "remediated_at": null,
+          "remediation_awb": null,
+          "remediation_delivered": null,
+          "fact": "Comanda a plecat cu 1 bucata in loc de 2; diferenta NU a fost inca retrimisa."
+        }
+      }
+    },
+    {
+      "_de_ce": "AL DOILEA exemplu, INACTIV: arata forma pt o PIATA STRAINA. `topic` pe limba pietei (bg/sk/hu) e singurul mod in care bratul public se aprinde acolo - descrierea romaneasca nu se potriveste cu un comentariu in bulgara. `store` e o LISTA, fiindca potrivirea e EXACTA.",
+      "id": "exemplu-piata-straina",
+      "active": false,
+      "store": ["Duppo BG", "Duppo SK"],
+      "store_aliases": ["Duppo HU"],
+      "window": {"from": "2026-08-29", "to": "2026-09-07"},
+      "description": "Colete expediate cu o singura bucata in loc de cantitatea comandata la promotia 2+1.",
+      "topic": {
+        "bg": ["\u043f\u043e\u043b\u0443\u0447\u0438\u0445 \u0441\u0430\u043c\u043e \u0435\u0434\u0438\u043d", "\u0432\u043c\u0435\u0441\u0442\u043e \u0442\u0440\u0438", "\u0441\u0430\u043c\u043e 1 \u0431\u0440", "\u0447\u0430\u0441\u0442 \u043e\u0442 \u043f\u043e\u0440\u044a\u0447\u043a\u0430\u0442\u0430"],
+        "sk": ["dostala som len jeden", "poslali len jeden"],
+        "hu": ["csak egy darabot kaptam"],
+        "*": ["2+1"]
+      },
+      "orders": {}
+    }
+  ]
+}

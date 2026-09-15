@@ -230,7 +230,7 @@ elif (not a.lean) and (email or phone):
 Rezultatul se formatează în `od` (1020-1023):
 
 ```
-    • EST193486 (EST): status=AWB creat, curier=DPD, AWB=1055059610112, produse=EST-0042
+    • EST000001 (EST): status=AWB creat, curier=DPD, AWB=0000000000001, produse=EST-0042
 ```
 
 sau `"    (nicio comandă găsită)"` — string-ul ăsta e verificat mai târziu de `has_order_data()`.
@@ -396,7 +396,7 @@ Formatul unei intrări, exact cum arată în jurnal:
   client: Roxana Manea | comenzi: 1 | a mai scris: grounded — 1 comenzi găsite în DB
   📷 2 poză(e) văzută(e) → folosite în draft
   problemă: Am lansat o comanda acum 3 zile. Nu am primit nici o notificare…
-  🔧 PROPUNERE MODIFY pe EST193486 (necesită aprobare): …
+  🔧 PROPUNERE MODIFY pe EST000001 (necesită aprobare): …
   ┌─ DRAFT (openai/gpt) ────────────
   │ Bună ziua, …
   └──────────────────────────────────
@@ -1121,7 +1121,7 @@ orders  = lookup_orders(email, phone, _onames, _awbs)
 ORDER_RE = re.compile(r"\b(EST|GT|NUB|GRAND|GRAN|MAG|OFER|RED|BONBG|BON|CZ|PL|BELA|GEN|CARP|COV|APR|ROSSI)[ -]?(\d{4,7})\b", re.I)
 ```
 
-Normalizarea scoate spațiile și cratimele și pune totul cu majuscule: `EST 193486` și `est-193486` devin ambele `EST193486`.
+Normalizarea scoate spațiile și cratimele și pune totul cu majuscule: `EST 000001` și `est-193486` devin ambele `EST000001`.
 
 **`AWB_RE`** (linia 73) — `\b\d{10,16}\b`. Orice grup de 10-16 cifre. Deliberat lat: acoperă Sameday (13), DPD, Econt, Packeta.
 
@@ -1155,7 +1155,7 @@ Două interogări, cu roluri diferite:
 
 **A. Îmbogățire, pe nume** (562-566) — pentru comenzile deja găsite în metrics, aduce statusul real de livrare, SKU-urile, AWB-ul și curierul. `_apply(r)` fără `create`.
 
-**B. Căutare după AWB** (567-570) — `WHERE awb IN (…)`, cu `_apply(r, create=True)`. Asta **creează** o intrare nouă. E cazul WISMO în care clientul dă doar AWB-ul, fără email cunoscut și fără număr de comandă. Validat pe VPS: AWB `1055059610112` → `BONBG18938`, status „Livrata”, curier econt.
+**B. Căutare după AWB** (567-570) — `WHERE awb IN (…)`, cu `_apply(r, create=True)`. Asta **creează** o intrare nouă. E cazul WISMO în care clientul dă doar AWB-ul, fără email cunoscut și fără număr de comandă. Validat pe VPS: AWB `0000000000001` → `BONBG00001`, status „Livrata”, curier econt.
 
 **Dimensiunea bazei, măsurată azi (15-sep-2026):** 843.459 de comenzi, 804.057 cu AWB (95,3%), 722 MB. E semnificativ mai mare decât cifrele din memorie (294k / 278k în iunie).
 
@@ -1166,7 +1166,7 @@ Coloanele disponibile în `profit_orders`: `id, month, prefix, shop, order_name,
 Formatarea, liniile 1020-1023, maximum 6 comenzi:
 
 ```
-    • EST193486 (EST): status=Livrata, curier=DPD, AWB=1055059610112, produse=EST-0042,EST-0091
+    • EST000001 (EST): status=Livrata, curier=DPD, AWB=0000000000001, produse=EST-0042,EST-0091
 ```
 
 Curierul trece prin tabelul de traducere `COURIER` (linia 873): `dpd-ro`/`dpd` → DPD, `sameday` → Sameday, `packeta` → Packeta, `econt` → Econt.
@@ -1279,7 +1279,7 @@ Generată de `escalation_note()` (833-843):
 ⚠️ ESCALADARE [URGENT] — client amenință cu ANPC pentru refund neefectuat
 Problemă: Clientul a primit promisiunea unui refund acum 3 săptămâni, nu a primit banii.
 Client: Maria Ionescu | tel: 0748123456 | email: maria@example.com
-Comandă: EST193486 (EST) status=Livrata AWB=1055059610112
+Comandă: EST000001 (EST) status=Livrata AWB=0000000000001
 A mai scris pe: Email×3, FB mesaj×1
 Sentiment: negativ/puternic
 → ACȚIUNE SUGERATĂ: verifică refundul în Shopify și sună clientul azi
@@ -1983,11 +1983,11 @@ Am importat modulul cu `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` si `RICHPANEL_MCP_T
 modul incarcat OK; PROFIT_DB = /root/Scripturi/data/profitability.db | exists: True
 
 -- dupa NUMAR DE COMANDA --
-[{'o':'EST254037','total':110.0,'fin':'PAID','date':'2026-08-31','brand':'EST',
-  'deliv':'Livrata','awb':'81356287186','courier':'dpd-ro','skus':'168; 96; 73'}]
+[{'o':'EST000002','total':110.0,'fin':'PAID','date':'2026-08-31','brand':'EST',
+  'deliv':'Livrata','awb':'00000000001','courier':'dpd-ro','skus':'168; 96; 73'}]
 
 -- dupa AWB (WISMO fara numar de comanda) --
-[{'o':'EST254037','deliv':'Livrata','awb':'81356287186','courier':'dpd-ro','skus':'168; 96; 73'}]
+[{'o':'EST000002','deliv':'Livrata','awb':'00000000001','courier':'dpd-ro','skus':'168; 96; 73'}]
 
 -- fara nicio ancora --
 []
@@ -2323,7 +2323,7 @@ unset ANTHROPIC_API_KEY OPENAI_API_KEY RICHPANEL_MCP_TOKEN
 .venv/bin/python3 -c "
 import sys; sys.path.insert(0,'/root/Scripturi')
 import cs_auto_draft as m
-print(m.lookup_orders(None, None, order_names=['EST254037']))"
+print(m.lookup_orders(None, None, order_names=['EST000002']))"
 ```
 Trebuie sa intoarca o comanda cu `deliv`, `awb` si `courier`. Daca intoarce `[]`, grounding-ul e mort si **NU ai voie sa repornesti** - asta e exact conditia care a produs halucinarile din iunie.
 
@@ -3432,7 +3432,7 @@ Categoriile: `LIVRARE_WISMO`, `RETUR`, `ANULARE`, `PROBLEMA_PRODUS`, `MODIFICARE
 | instagram_message | 31 |
 
 Exemple reale (vocea autentică, cu tot cu diacritice lipsă și fraze scurte):
-> „Buna ziua, Aveti o comanda EST252880 plasata ieri dar nu e platita ci cu plata ramburs la cureir. Livrarea se face in 2 zile lucratoare. Si mai e una din 19 august platita si livrata. Multumim"
+> „Buna ziua, Aveti o comanda EST000003 plasata ieri dar nu e platita ci cu plata ramburs la cureir. Livrarea se face in 2 zile lucratoare. Si mai e una din 19 august platita si livrata. Multumim"
 
 > „Dobrý den, mockrát se omlouváme, ale Vaši objednávku se nám již bohužel nepodařilo zrušit včas..." *(cehă — few-shot multilingv, gratis)*
 
@@ -3756,7 +3756,7 @@ Ordonate după impact, apoi după efort. Fiecare cu dovada care o susține.
 
 **25. Few-shot cu replici reale de agent, per categorie, din oglindă**
 
-- *De ce:* cs_mirror.db conține 2.179 de replici de agent de 60-900 caractere din ultimele 19 zile (761 email, 649 comentarii FB, 646 FB mesaj), cu vocea autentică — fraze scurte, fără diacritice, direct la subiect („Buna ziua, Aveti o comanda EST252880 plasata ieri dar nu e platita ci cu plata ramburs la cureir."). Playbook-ul actual are 82 de tichete și 84 de zile. Multilingv gratis: replici în cehă.
+- *De ce:* cs_mirror.db conține 2.179 de replici de agent de 60-900 caractere din ultimele 19 zile (761 email, 649 comentarii FB, 646 FB mesaj), cu vocea autentică — fraze scurte, fără diacritice, direct la subiect („Buna ziua, Aveti o comanda EST000003 plasata ieri dar nu e platita ci cu plata ramburs la cureir."). Playbook-ul actual are 82 de tichete și 84 de zile. Multilingv gratis: replici în cehă.
 - *Primul pas:* Extinde build-ul playbook-ului cu 3-5 replici reale per categorie selectate din cs_mirror (filtrează pe canal + lungime + prezența unui răspuns de agent), injectate ca exemple de TON, cu instrucțiunea existentă „NU copia datele din exemple". Măsoară delta de tokeni înainte de a o porni pe tot volumul.
 
 #### impact mediu · efort mic
@@ -3769,7 +3769,7 @@ Ordonate după impact, apoi după efort. Fiecare cu dovada care o susține.
 
 **27. Telefonul clientului se pierde tăcut dacă e stocat cu prefix internațional**
 
-- *De ce:* Linia 932: `phone = raw_phone if (raw_phone.isdigit() and 9 <= len(raw_phone) <= 13) else ""`. Un `+40732781468` sau `0040 732 781 468` pică testul `isdigit()` → `phone=""` → `--ground` nu mai caută după telefon (linia 998 și 534-537), iar tag-ul `de-sunat` nu se mai pune la escaladare (linia 1202). Funcția `norm_phone()` (507-509) face exact normalizarea corectă, dar e chemată abia DUPĂ filtrul care a golit câmpul.
+- *De ce:* Linia 932: `phone = raw_phone if (raw_phone.isdigit() and 9 <= len(raw_phone) <= 13) else ""`. Un `+40700000000` sau `0040 700 000 000` pică testul `isdigit()` → `phone=""` → `--ground` nu mai caută după telefon (linia 998 și 534-537), iar tag-ul `de-sunat` nu se mai pune la escaladare (linia 1202). Funcția `norm_phone()` (507-509) face exact normalizarea corectă, dar e chemată abia DUPĂ filtrul care a golit câmpul.
 - *Primul pas:* Înlocuiește filtrul de la 932 cu `phone = norm_phone(raw_phone) and raw_phone` (sau pasează direct `raw_phone` la `lookup_orders`, care normalizează singur).
 
 **28. Trei din cele cinci canale pe care le rulează cronul n-au stil de platformă definit**
@@ -3840,7 +3840,7 @@ Ordonate după impact, apoi după efort. Fiecare cu dovada care o susține.
 **41. Validează o singură dată căile care SCRIU: hide comentariu + cs-actions --apply**
 
 - *De ce:* Punct rămas din memorie „de rezolvat înainte de scalare". Azi preconditiile sunt demonstrat îndeplinite pentru hide: task MODERATE pe toate cele 29 de pagini, scope pages_manage_engagement + pages_read_user_content, iar id-ul de comentariu se rezolvă (am citit `is_hidden=True` pe #333841 și `is_hidden=False` pe #333832). Dar scrierea n-a fost testată niciodată, iar `fb_hide_comment` (linia 713) încearcă 3 formate de id la nimereală.
-- *Primul pas:* Alege UN comentariu de spam evident pe o pagină cu volum mic, rulează `--approve <conv>` cu un om lângă, verifică în UI-ul Facebook că e ascuns, apoi dezascunde. Separat, `cs-actions --apply` pe o comandă de test pe un magazin de test (precedentul GT44317 e documentat în memoria cs-actions-skill).
+- *Primul pas:* Alege UN comentariu de spam evident pe o pagină cu volum mic, rulează `--approve <conv>` cu un om lângă, verifică în UI-ul Facebook că e ascuns, apoi dezascunde. Separat, `cs-actions --apply` pe o comandă de test pe un magazin de test (precedentul GT000001 e documentat în memoria cs-actions-skill).
 
 **42. Repara capcana din grammar_audit.py (auditeaza mesajul clientului in loc de draft)**
 
@@ -4008,7 +4008,7 @@ unde e ușor să te înșeli pe sistemul ăsta.
 - Lipsește complet campania din 2-3 iul: al doilea log de producție (`/root/Scripturi/data/cs_draft_all.log`, 18.482 linii), cele 1.306 drafturi, cele 154 escaladări rutate, trecerea pe Claude și rata de halucinare de 2,6%. E cea mai recentă dovadă despre ce face sistemul și e singura care arată comportamentul post-reparații.
 - Lipsește MECANISMUL pentru «0 escaladări rutate»: gate-ul `if is_esc and not a.lean:` (L1201 VPS). Rutarea escaladărilor e dezactivată tăcut de `--lean`. Wrapper-ul de cron de azi (`cs_backlog.sh`) folosește `--ground`, NU `--lean` → la o repornire rutarea SE VA APRINDE și va scrie prioritate HIGH, tag-uri și note private în Richpanel. Documentul recomandă o repornire-pilot fără să avertizeze că suprafața de scriere se schimbă.
 - Lipsește cea mai importantă capcană de repornire: `cs_backlog.sh` exportă doar RICHPANEL_MCP_TOKEN, OPENAI_API_KEY, DATABASE_URL_METRICS și `DRAFT_MODEL=gpt-4o-mini` — NU exportă `ANTHROPIC_API_KEY` (care EXISTĂ în /root/Scripturi/.env). Cum `secret()` citește întâi env-ul și pe cron `uv` nu e în PATH (fallback la string gol), repornirea cronului pauzat readuce **gpt-4o-mini**, adică exact motorul cohortei cu 31% halucinare, aruncând configurația Claude (`cs_draft_all.sh`) care a produs cohorta cu 2,6%.
-- Lipsește starea REALĂ a grounding-ului (`--ground`) azi — reparația-cheie din 29-iun. Am dovedit-o rulând `lookup_orders` pe VPS: EST193486 → 1 comandă cu status „Livrata" + AWB; **MAG37619 → 0 comenzi**, deși comanda EXISTĂ în profit_orders (aceeași comandă e găsită dacă se citează AWB-ul 81366103792). Cauză: pasul 1 interoghează `metrics.orders`, care are **0 rânduri** pentru MAG / PL / LUX / NOC (verificat prin `count(*)`), iar pasul 2 (profit_orders) se execută doar dacă pasul 1 a găsit ceva (`if byname:`). Magdeal singur = 14.989 comenzi în ultimele 90 de zile.
+- Lipsește starea REALĂ a grounding-ului (`--ground`) azi — reparația-cheie din 29-iun. Am dovedit-o rulând `lookup_orders` pe VPS: EST000001 → 1 comandă cu status „Livrata" + AWB; **MAG000001 → 0 comenzi**, deși comanda EXISTĂ în profit_orders (aceeași comandă e găsită dacă se citează AWB-ul 00000000002). Cauză: pasul 1 interoghează `metrics.orders`, care are **0 rânduri** pentru MAG / PL / LUX / NOC (verificat prin `count(*)`), iar pasul 2 (profit_orders) se execută doar dacă pasul 1 a găsit ceva (`if byname:`). Magdeal singur = 14.989 comenzi în ultimele 90 de zile.
 - Lipsește un defect măsurabil al regexului de comenzi: `ORDER_RE` (L72 VPS) nu recunoaște formatele reale `NUBRA####`, `LAB####`, `NOC####`, `LUX####`, `MD###`, `HU###`, `SK###`, `DUPBG###`, `ORC###`. Testat pe 216.496 comenzi reale din ultimele 90 de zile: **16.616 (7,7%) nu sunt recunoscute**, din care Nubra 9.161 și Lab Noir 4.257 — două branduri ÎNTREGI. Efect direct pe calitate: clientul dă numărul comenzii, sistemul nu-l extrage, `has_order_data` e False, filtrul HALLU intervine și forțează șablonul „îmi puteți spune numărul comenzii?" — adică exact ce clientul tocmai a scris.
 - Lipsește motivul mecanic pentru care draftul zicea „nu am găsit nicio comandă": nu e halucinare liberă, e promptul care i-a dat modelului o premisă falsă. În `--lean`, câmpul de context `od` este literalmente `"    (nicio comandă găsită)"` (L1021-1025), indistinctibil de un lookup negativ real. Modelul a raportat fidel ce i s-a spus. Fixul nu e „mai mult prompt anti-halucinare", ci un text de context diferit pentru „nu s-a căutat" vs „s-a căutat și nu s-a găsit".
 - Lipsește acoperirea reală a playbook-ului învățat, chiar dacă l-ai deploya: `.learned_playbook.md` parsează în **9 categorii** (livrare_wismo, retur, anulare, problema_produs, modificare_comanda, schimb_swap, presale_intrebare, plata_factura, refuz_livrare), dar `IDENTIFY_SYS` are 14. Pe populația din 24-iun, doar **460/1.336 = 34,4%** din drafturi cad într-o categorie acoperită; **65,6% nu pot folosi playbook-ul niciodată** (altele 745, recenzie_feedback 60, comanda_noua 56, comentariu_social 14). Documentul prezintă playbook-ul ca o dependință care ar repara lucrurile dacă ar fi copiată.
@@ -4160,10 +4160,10 @@ Reprodus:
 
 | comandă | `brand` rezultat | `STORE_LANG` | `STORE_PHONE` | semnătura generată |
 |---|---|---|---|---|
-| EST193486 | `EST` | None | `""` | „Cu drag, Echipa **EST**” |
+| EST000001 | `EST` | None | `""` | „Cu drag, Echipa **EST**” |
 | CZ80817 | `CZ` | **None** | `""` | „Cu drag, Echipa **CZ**” |
-| GRAND16613 | `GRAN` | None | `""` | „Cu drag, Echipa **GRAN**” |
-| BONBG18938 | `BONBG` | **None** | `""` | „Cu drag, Echipa **BONBG**” |
+| GRAND00001 | `GRAN` | None | `""` | „Cu drag, Echipa **GRAN**” |
+| BONBG00001 | `BONBG` | **None** | `""` | „Cu drag, Echipa **BONBG**” |
 
 Trei efecte, nu unul:
 * semnătură ruptă către client;
@@ -4818,7 +4818,7 @@ Același regex `HALLU`, importat din același `/root/Scripturi/cs_auto_draft.py`
 Exemple, ca să se vadă diferența de natură:
 
 - **24-iun (lean)** — #272181, Esteban/anulare: *„…din păcate, **nu am găsit nicio comandă** asociată cu adresa dumneavoastră de email în sistemul nostru."* → afirmație fabricată: nu se făcuse niciun lookup.
-- **2-iul (ground)** — #275253, Nubra/recenzie_feedback: *„…am plasat comanda cu numărul **NUBRA8259**…"* → tiparul rămas e altul: confirmarea unei acțiuni, nu inventarea unui lookup.
+- **2-iul (ground)** — #275253, Nubra/recenzie_feedback: *„…am plasat comanda cu numărul **NUBRA00001**…"* → tiparul rămas e altul: confirmarea unei acțiuni, nu inventarea unui lookup.
 
 ---
 
@@ -4860,11 +4860,11 @@ Nuanță pe escaladări, pierdută în agregare: cele 173 HIGH sunt toate din 24
 Test rulat azi pe VPS (doar SELECT-uri):
 
 ```
-EST — comanda din metrics            onames=['EST193486'] -> 1 comandă  ('EST193486','Livrata','81310731376')
-MAG — există în profit_orders        onames=['MAG37619']  -> 0 comenzi
-MAG — aceeași comandă, prin AWB      awbs=['81366103792'] -> 1 comandă  ('MAG37619','Netrimisa',…)
-NUBRA1124 — ORDER_RE nici n-o extrage                     -> 0 comenzi
-LAB1020   — ORDER_RE nici n-o extrage                     -> 0 comenzi
+EST — comanda din metrics            onames=['EST000001'] -> 1 comandă  ('EST000001','Livrata','00000000003')
+MAG — există în profit_orders        onames=['MAG000001']  -> 0 comenzi
+MAG — aceeași comandă, prin AWB      awbs=['00000000002'] -> 1 comandă  ('MAG000001','Netrimisa',…)
+NUBRA00002 — ORDER_RE nici n-o extrage                     -> 0 comenzi
+LAB000001   — ORDER_RE nici n-o extrage                     -> 0 comenzi
 ```
 
 ### Cauza 1 — `metrics.orders` nu conține magazinele
@@ -4881,10 +4881,10 @@ Testat pe cele 216.496 de nume de comenzi reale din ultimele 90 de zile: **16.61
 
 | Prefix nepotrivit | Comenzi 90z | Format real |
 |---|---:|---|
-| NUB (Nubra) | 9.161 | `NUBRA1124` — „NUB" prinde, dar urmează „RA", nu cifre |
-| LAB (Lab Noir) | 4.257 | `LAB1020` — prefixul lipsește din regex |
+| NUB (Nubra) | 9.161 | `NUBRA00002` — „NUB" prinde, dar urmează „RA", nu cifre |
+| LAB (Lab Noir) | 4.257 | `LAB000001` — prefixul lipsește din regex |
 | LUX | 1.036 | `LUX17150` |
-| NOC (Nocturna) | 543 | `NOC16764` |
+| NOC (Nocturna) | 543 | `NOC000001` |
 | DUPBG / SK / ORC / HU / MD | 514 / 383 / 301 / 271 / 150 | lipsesc din regex |
 
 **Efectul pe calitate, în lanț:** clientul dă numărul comenzii → nu e extras → `orders=[]` → contextul devine `(nicio comandă găsită)` → `has_order_data()` False → `HALLU` intervine → draftul iese cu șablonul sigur *„Ca să verific exact comanda dumneavoastră, îmi puteți spune numărul comenzii sau un număr de telefon asociat?"* — adică exact informația pe care clientul tocmai a dat-o. Pentru Nubra și Lab Noir, asta e comportamentul implicit pe TOATE tichetele cu nr. de comandă.
@@ -4893,7 +4893,7 @@ Testat pe cele 216.496 de nume de comenzi reale din ultimele 90 de zile: **16.61
 
 1. `ORDER_RE`: adaugă `NUBRA|LAB|NOC|LUX|DUPBG|ORC|SK|HU|MD` **înaintea** alternativelor mai scurte (`NUBRA` înainte de `NUB`).
 2. `lookup_orders`: interoghează `profit_orders` **direct pe `order_names`**, nu doar pe `byname.keys()` — profit_orders are comenzile pe care metrics nu le are.
-3. Re-rulează testul de mai sus și cere ≥1 comandă pe `MAG37619`, `NUBRA1124`, `LAB1020`.
+3. Re-rulează testul de mai sus și cere ≥1 comandă pe `MAG000001`, `NUBRA00002`, `LAB000001`.
 
 ---
 
@@ -5102,9 +5102,9 @@ ssh root@84.46.242.181 'cd /root/Scripturi &&
 src=open(\"cs_auto_draft.py\",encoding=\"utf-8\").read()
 ns={\"__name__\":\"m\",\"__file__\":\"/root/Scripturi/cs_auto_draft.py\"}
 exec(compile(src,\"c\",\"exec\"),ns)
-print(ns[\"lookup_orders\"](\"\",\"\",[\"EST193486\"],[]))
-print(ns[\"lookup_orders\"](\"\",\"\",[\"MAG37619\"],[]))     # 0 — defectul
-print(ns[\"lookup_orders\"](\"\",\"\",[],[\"81366103792\"]))  # aceeași comandă, găsită prin AWB
+print(ns[\"lookup_orders\"](\"\",\"\",[\"EST000001\"],[]))
+print(ns[\"lookup_orders\"](\"\",\"\",[\"MAG000001\"],[]))     # 0 — defectul
+print(ns[\"lookup_orders\"](\"\",\"\",[],[\"00000000002\"]))  # aceeași comandă, găsită prin AWB
 "'
 
 # 5) acoperirea ORDER_RE pe comenzi reale (90 de zile, din profitability.db)

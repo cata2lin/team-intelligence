@@ -37,3 +37,12 @@ plugins/gigi/skills/apps-script-deploy/scripts/gas_backup_*.json
 plugins/gigi/skills/richpanel-export/push_log.json
 plugins/gigi/skills/richpanel-export/connector_keys.json
 *.bak
+# ⚠️ `*.bak` NU acoperă `*.bak2` / `*.bak3`. Măsurat 15-sep-2026: 5 copii de siguranță
+# (cs_auto_draft.py.bak2/.bak3, cs_photo.py.bak2/.bak3, mcp_server.py.bak3 = 408 KB de cod mort)
+# erau NETRACKATE și NEIGNORATE, deci intrau la `git add -A` într-un repo PUBLIC — iar
+# `pii_guard.py --paths cs_auto_draft.py.bak2` le REFUZĂ (tabelă veche de telefoane, fără
+# justificarea `pii-ok:` pe care o are fișierul curent).
+*.bak[0-9]*
+*.orig
+*.rej
+*~

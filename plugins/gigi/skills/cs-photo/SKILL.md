@@ -27,8 +27,19 @@ Așa știm la ce se referă „Ce preț are?/Dimensiunile?/Sunt turcești?" — 
 
 **PREȚ din CATALOG** — după ce identifică produsul din reclamă, `catalog_match(brand, text)` îl leagă de
 catalogul real (metrics `products`+`variants`) → **preț + stoc REALE** în `ad_block`. Ex: comentariu
-„prețul toaletei portabile?" pe Ofertele Zilei → draftul răspunde „169 lei (stoc 279)". Keyword-match pe titlu
-(scor = nr. cuvinte potrivite); `_brand_from_title` normalizează og:title→brand. Necesită `DATABASE_URL_METRICS`.
+„prețul toaletei portabile?" pe Ofertele Zilei → draftul răspunde „169 lei (stoc 279)". Necesită `DATABASE_URL_METRICS`.
+
+> ⚠️ **Brandul se dă, nu se ghicește** (reparat sep-2026). `ad_block(ticket, store_hint=…)` /
+> `ad_for_ticket(ticket, store_hint=…)` primesc brandul REAL al tichetului de la apelant (`cs-draft-reply`
+> îl are din `to.id`/comandă). `_brand_from_title` rămâne doar fallback și **nu mai cade pe brandul
+> ROMÂNESC** când piața străină n-are brand propriu în metrics („Bonhaus.hu", „Duppo.bg" → `""`): mai bine
+> NICIUN catalog decât catalogul altei piețe, cu prețuri în lei.
+>
+> ⚠️ **Potrivirea are PRAG DE ÎNCREDERE** — nu mai e „scorul = nr. de cuvinte potrivite". Se cer **≥2 cuvinte**
+> potrivite **ȘI** ca măcar un cuvânt de **CONȚINUT** (obiectul) să apară în titlu; atributele de tip
+> „electric"/„ceramic" nu califică singure (altfel un lunchbox electric „se potrivea" cu un clește de mufe).
+> Pragul e SEMANTIC, nu poziționat pe primul cuvânt: „Ofertă la …" nu mai pierde tot catalogul.
+> Un catalog GREȘIT e mai rău decât lipsa lui — fără potrivire sigură, blocul rămâne gol.
 (În `cs-draft-reply`, prețul din catalog e exceptat de la anti-halucinare — e dată reală.)
 
 **SKIP pe magazinele MONO-PRODUS** — produsul e cunoscut din brand → nu mai rezolvăm reclama (**zero LLM**).
@@ -59,7 +70,7 @@ import sys, os
 sys.path.insert(0, os.path.join(HERE, "..", "cs-photo"))   # layout skill; pe VPS pune cs_photo.py lângă script
 import cs_photo as csp
 blk_client = csp.client_photos_block(msgs, ctx)   # text cu pozele clientului (sau '')
-blk_ad     = csp.ad_block(ticket)                  # text cu reclama comentată (sau '')
+blk_ad     = csp.ad_block(ticket, store_hint=brand)  # text cu reclama comentată (sau ''); brand = magazinul REAL
 ```
 `cs-draft-reply` îl folosește exact așa: injectează **ambele** blocuri în context → draftul ține cont de
 poza clientului (defect/dovadă) ȘI de produsul din reclama comentată.
@@ -75,5 +86,13 @@ poza clientului (defect/dovadă) ȘI de produsul din reclama comentată.
 
 ## Note
 - **Read-only** — nu scrie nimic în Richpanel; reclama se ia public (og:image), fără token de pagină.
+- Modulul e acoperit de suitele rundelor 1-3 și de **poarta de pornire** a motorului CS:
+  `uv run ../cs-draft-reply/poarta_pornire.py` (vezi `cs-draft-reply/POARTA.md`). Poarta compară și copia
+  din repo cu cea a plugin-ului și cu cea de pe VPS — măsurat 15-sep-2026: **repo 686 linii, plugin 571,
+  VPS 571**, adică pe VPS rulează versiunea fără reparațiile de brand/catalog.
+- **Runda 4**: poarta măsoară acum scurgerile de date personale **cap-la-cap prin `main()`**,
+  iar `cs_photo.py` e pe acea cale (blocul de poze intră în contextul draftului). Desfășurarea
+  celor două fișiere se face ÎMPREUNĂ, în același folder — procedura completă, cu verificarea
+  parității pe toate cele trei copii, în `cs-draft-reply/POARTA.md` §3.
 - IG comments: rezolvarea reclamei e best-effort (URL FB); dacă nu vine og:image → produs gol (fără eroare).
 - Registrul (`fb_post_registry.sqlite`) e gitignored (date locale).
