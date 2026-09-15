@@ -99,7 +99,10 @@ def fetch_rp_day(mcp, day, passes=DEFAULT_PASSES, page_cap=PAGE_CAP, log=None):
             args["status"] = st
         page, npass = 1, 0
         while True:
-            d = mcp.call("list_conversations", dict(args, page=page)) or {}
+            # call_raw: pastreaza raspunsul non-dict ca sa-l putem trata mai jos.
+            # `call` ar arunca, iar `except Exception` de la main ar omori TOATE zilele.
+            _call = getattr(mcp, "call_raw", mcp.call)
+            d = _call("list_conversations", dict(args, page=page)) or {}
             diag["calls"] += 1
             diag["pages"] += 1
             # ⚠️ O EROARE DE LA SERVER NU E "0 TICHETE". Serverul intoarce un SIR
@@ -538,6 +541,38 @@ def selftest():
     _chk(R, "--today include ziua curenta",
          day_list(days=1, include_today=True)[-1] == datetime.date.today().isoformat())
     many = FakeMCP([mk(i, "email", "CLOSED", d=day2) for i in range(300)])
+    # Regresie: serverul intoarce un SIR de la pagina ~51 (plafonul de offset). Trebuie
+    # sa marcheze ziua NEDOVEDITA si sa mearga mai departe — NU sa arunce. O exceptie
+    # aici urca pana la `except Exception` din main si omoara TOATE zilele, fara raport.
+    class SirLaPagina2(FakeMCP):
+        """Imita CONTRACTUL lui cm.MirrorMCP: `call_raw` da raspunsul brut, `call`
+        arunca pe non-dict. Daca fetch_rp_day foloseste `call`, testul pica — exact
+        regresia pe care o pazim."""
+
+        def call_raw(self, tool, args):
+            if int(args.get("page", 1)) >= 2:
+                return "Error: Request failed with status code 400"
+            return FakeMCP.call(self, tool, args)
+
+        def call(self, tool, args):
+            out = self.call_raw(tool, args)
+            if out is not None and not isinstance(out, dict):
+                raise cm.MCPError(tool, out)
+            return out
+
+    sir = SirLaPagina2([mk(i, "email", "CLOSED", d=day2) for i in range(120)])
+    try:
+        rp_s, diag_s = fetch_rp_day(sir, day2, ("any",))
+        arunca = False
+    except Exception as exc:
+        rp_s, diag_s, arunca = {}, {}, exc
+    _chk(R, "sir de la server = zi NEDOVEDITA, nu exceptie care omoara raportul",
+         arunca is False and any("raspuns invalid" in c for c in diag_s.get("capped", [])),
+         f"{type(arunca).__name__}: {arunca}" if arunca else
+         "; ".join(diag_s.get("capped", []))[:80])
+    _chk(R, "paginile de dinainte de eroare NU se pierd",
+         arunca is False and len(rp_s) == 50, f"{len(rp_s)} tichete pastrate")
+
     rp_c, diag_c = fetch_rp_day(many, day2, ("any",), page_cap=2)
     _chk(R, "plafonul de paginare e RAPORTAT (nu tacut)",
          diag_c["capped"] == [f"{day2}/any"] and len(rp_c) == 100, str(diag_c["capped"]))

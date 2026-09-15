@@ -42,7 +42,8 @@ def mcp(token):
         req = urllib.request.Request(MCP_URL, data=json.dumps(p).encode(), headers=h)
         with urllib.request.urlopen(req, timeout=60) as r:
             body = r.read().decode()
-        ln = [l for l in body.splitlines() if l.startswith("data:")]
+        # NU splitlines(): taie si la U+2028, caracter legal neescapat in JSON (cs-documentatie §6.1b)
+        ln = [l for l in body.split("\n") if l.startswith("data:")]
         return json.loads(ln[-1][5:]) if ln else json.loads(body)
     post({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "proc", "version": "1"}}})
     return post

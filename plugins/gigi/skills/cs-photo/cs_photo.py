@@ -85,7 +85,8 @@ class MCP:
     def _post(self, p):
         h = {"Authorization": "Bearer " + self.t, "Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
         b = urllib.request.urlopen(urllib.request.Request(MCP_URL, data=json.dumps(p).encode(), headers=h), timeout=60).read().decode()
-        ln = [l for l in b.splitlines() if l.startswith("data:")]
+        # NU splitlines(): taie si la U+2028, caracter legal neescapat in JSON (cs-documentatie §6.1b)
+        ln = [l for l in b.split("\n") if l.startswith("data:")]
         return json.loads(ln[-1][5:]) if ln else json.loads(b)
 
     def call(self, name, args):
