@@ -399,20 +399,128 @@ def ad_for_ticket(ticket, describe_ad=True, use_cache=True, store_hint="", skip_
 
 _CATALOG_STOP = {"produsul", "produs", "produse", "promovat", "promoveaza", "este", "sunt", "pentru", "reclama", "care",
                  "avand", "culoare", "culori", "design", "poza", "ofera", "unui", "unei", "dintr", "intr", "negru",
-                 "negre", "alb", "albe", "prezentat", "prezentata", "model", "modele", "inferior", "superior", "imagine"}
+                 "negre", "alb", "albe", "prezentat", "prezentata", "model", "modele", "inferior", "superior", "imagine",
+                 # vocabular de MARKETING: nu descrie obiectul, dar mânca sloturi de cuvinte-cheie și —
+                 # cât timp pragul era pozițional — omora tot catalogul când reclama începea cu el
+                 "oferta", "oferte", "reducere", "reduceri", "promotie", "promotii", "super", "doar", "numai",
+                 "gratuit", "gratuita", "gratis", "livrare", "livrarea", "transport", "comanda", "comandati",
+                 "acum", "astazi", "lichidare", "limitat", "limitata", "pret", "pretul", "preturi", "stoc"}
+# ATRIBUTE (material/formă/însușire): potrivesc titluri din categorii complet diferite („electric" leagă
+# un lunchbox de un clește de mufe), deci nu pot fi ele OBIECTUL care confirmă potrivirea.
+_CATALOG_ATTR = {"electric", "electrica", "electrice", "ceramic", "ceramica", "ceramice", "inox", "metal",
+                 "metalic", "plastic", "silicon", "lemn", "sticla", "textil", "mare", "mari", "mica", "mici",
+                 "pliabil", "pliabila", "universal", "universala", "profesional", "profesionala", "dublu",
+                 "dubla", "triplu", "portabil", "portabila", "reglabil", "reglabila", "antiaderent", "inteligent",
+                 # ACȚIUNEA/SCOPUL nu e obiectul: „burete de curățare" prindea „Aspirator pentru
+                 # Curățarea Urechilor" de îndată ce pragul a devenit semantic (orice cuvânt, nu primul).
+                 "curatare", "curatat", "curata", "curatenie", "spalare", "spalat", "ingrijire",
+                 "intretinere", "depozitare", "pastrare", "organizare", "utilizat", "utilizare",
+                 "folosit", "folosire", "destinat", "destinata"}
+
+
+_MURL = None
+
+
+def _metrics_conn():
+    """Conexiune la metrics (sau None) — potrivirea cu catalogul, lista de branduri, moneda."""
+    global _MURL
+    if _MURL is None:
+        _MURL = secret("DATABASE_URL_METRICS") or ""
+    if not _MURL:
+        return None
+    try:
+        import pg8000.dbapi
+        u = urllib.parse.urlparse(_MURL)
+        return pg8000.dbapi.connect(ssl_context=True, user=urllib.parse.unquote(u.username or ""),
+                                    password=urllib.parse.unquote(u.password or ""), host=u.hostname,
+                                    port=u.port or 5432, database=(u.path or "/").lstrip("/").split("?")[0])
+    except Exception:
+        return None
+
+
+def _close(conn):
+    try:
+        conn.close()
+    except Exception:
+        pass
+
+
+_BRANDS = None
+
+
+def metrics_brands():
+    """{nume deaccentuat: nume real} pt toate brandurile din metrics (o dată per proces)."""
+    global _BRANDS
+    if _BRANDS is None:
+        _BRANDS = {}
+        conn = _metrics_conn()
+        if conn:
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT btrim(name) FROM brands")
+                _BRANDS = {_deacc(r[0]): r[0] for r in cur.fetchall() if r[0]}
+            except Exception:
+                pass
+            _close(conn)
+    return _BRANDS
+
+
+# Moneda e a MAGAZINULUI, nu „lei": un preț bulgăresc etichetat „lei" e o minciună către client.
+# Sursa = moneda ULTIMEI comenzi a brandului în metrics (prinde și schimbările de monedă — BG a
+# trecut BGN→EUR în iul-2026). NU folosim brands."nativeCurrency": minte (Bonhaus RO scrie acolo
+# EUR, dar vinde în lei). Fallback: piața din sufixul numelui, apoi lei.
+CUR_LABEL = {"RON": "lei", "BGN": "лв.", "CZK": "Kč", "HUF": "Ft", "PLN": "zł", "MDL": "MDL", "EUR": "EUR"}
+MARKET_CUR = {"bg": "EUR", "cz": "CZK", "sk": "EUR", "hu": "HUF", "pl": "PLN", "hr": "EUR", "md": "MDL"}
+_CUR = {}
+
+
+def brand_currency(store):
+    """Eticheta de monedă a magazinului („lei", „Kč", „EUR"…). Cache per proces."""
+    key = _deacc(store)
+    if key in _CUR:
+        return _CUR[key]
+    code = ""
+    conn = _metrics_conn()
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute('SELECT o.currency FROM orders o JOIN brands b ON b.id=o."brandId" '
+                        'WHERE lower(btrim(b.name))=lower(btrim(%s)) AND o.currency IS NOT NULL '
+                        'ORDER BY o."createdAt" DESC LIMIT 1', (store,))
+            r = cur.fetchone()
+            code = (r[0] or "") if r else ""
+        except Exception:
+            pass
+        _close(conn)
+    if not code:
+        m = re.search(r"[ .](bg|cz|sk|hu|pl|hr|md)$", key)
+        code = MARKET_CUR.get(m.group(1), "RON") if m else "RON"
+    _CUR[key] = CUR_LABEL.get(code.upper(), code.upper())
+    return _CUR[key]
 
 
 def _brand_from_title(og_title):
-    """Normalizează og:title („Ofertele-Zilei.ro", „MagDeal.ro") → nume brand pt metrics.brands (case-insensitiv la query)."""
-    t = re.sub(r"\.(ro|com|cz|pl|bg|hu|sk|hr)\b", "", og_title or "", flags=re.I)
-    t = re.sub(r"\s+by\s+.*$", "", t, flags=re.I)   # „... by George Talent"
-    return " ".join(re.sub(r"[-_.]+", " ", t).split())
+    """Normalizează og:title („Ofertele-Zilei.ro", „MagDeal.ro") → nume brand pt metrics.brands (case-insensitiv la query).
+    Sufixul de ȚARĂ NU se aruncă dacă există brand separat pe piața aia („Bonhaus.sk" → „Bonhaus SK"):
+    altfel clienta slovacă primea în context produse ROMÂNEȘTI la prețuri în lei."""
+    t = re.sub(r"\s+by\s+.*$", "", og_title or "", flags=re.I)   # „... by George Talent"
+    cc = re.search(r"\.(ro|com|cz|pl|bg|hu|sk|hr)\b", t, flags=re.I)
+    t = re.sub(r"\.(ro|com|cz|pl|bg|hu|sk|hr)\b", "", t, flags=re.I)
+    base = " ".join(re.sub(r"[-_.]+", " ", t).split())
+    if cc and cc.group(1).lower() not in ("ro", "com"):
+        hit = metrics_brands().get(_deacc(base + " " + cc.group(1)))
+        if hit:
+            return hit
+        # Piață STRĂINĂ fără brand propriu în metrics (măsurat: există „Bonhaus BG/CZ/PL/SK", dar NU
+        # „Bonhaus HU"/„Bonhaus HR" și niciun „Duppo") → NU cădea pe brandul ROMÂNESC: i-am servi unui
+        # maghiar catalogul RO, în lei. Mai bine NICIUN catalog decât catalogul altei piețe.
+        return ""
+    return base
 
 
 def catalog_match(store, text, limit=3):
     """Potrivește produsul din reclamă cu CATALOGUL (metrics products/variants) → preț+stoc reale. store = nume brand."""
-    url = secret("DATABASE_URL_METRICS")
-    if not url or not store or not text:
+    if not store or not text:
         return []
     stop = {_deacc(s) for s in _CATALOG_STOP}
     seen, kw = set(), []
@@ -425,32 +533,37 @@ def catalog_match(store, text, limit=3):
     kw = kw[:6]
     if not kw:
         return []
+    conn = _metrics_conn()
+    if not conn:
+        return []
     try:
-        import pg8000.dbapi
-        u = urllib.parse.urlparse(url)
-        conn = pg8000.dbapi.connect(ssl_context=True, user=urllib.parse.unquote(u.username or ""),
-                                    password=urllib.parse.unquote(u.password or ""), host=u.hostname,
-                                    port=u.port or 5432, database=(u.path or "/").lstrip("/").split("?")[0])
         cur = conn.cursor()
         like = ["%" + w + "%" for w in kw]
         score = " + ".join(["(lower(p.title) LIKE %s)::int" for _ in kw])
         where_or = " OR ".join(["lower(p.title) LIKE %s" for _ in kw])
         sql = ('SELECT p.title, v.price, v."inventoryQuantity", v.sku, (%s) AS sc '
                'FROM products p JOIN variants v ON v."productId"=p.id LEFT JOIN brands b ON b.id=p."brandId" '
-               'WHERE lower(b.name)=lower(%%s) AND (%s) ORDER BY sc DESC, v.price::numeric LIMIT %%s' % (score, where_or))
+               'WHERE lower(btrim(b.name))=lower(btrim(%%s)) AND (%s) ORDER BY sc DESC, v.price::numeric LIMIT %%s' % (score, where_or))
         cur.execute(sql, like + [store] + like + [limit * 4])
         rows = cur.fetchall()
         conn.close()
+        # PRAG DE ÎNCREDERE — un catalog GREȘIT e mai rău decât lipsa lui (un lunchbox electric
+        # „potrivit" cu un clește de mufe fiindcă ambele zic „electric"): cerem ≥2 cuvinte potrivite
+        # ȘI ca OBIECTUL (primul cuvânt de conținut din descrierea reclamei) să apară în titlu.
+        # Pragul e SEMANTIC, nu POZIȚIONAL: cerem ca măcar un cuvânt de CONȚINUT (obiectul — nu un
+        # atribut, nu un cuvânt de marketing) să apară în titlu. Varianta „primul cuvânt din descriere"
+        # pierdea TOT catalogul dacă reclama începea cu „Ofertă la …" (3 din 12 formulări RO reale).
+        heads = [_deacc(w)[:5] for w in kw if _deacc(w) not in _CATALOG_ATTR]
         out, seen_t = [], set()
         for title, price, stoc, sku, sc in rows:
-            if title in seen_t or sc < 1:
+            dt = _deacc(title)
+            if title in seen_t or sc < 2 or not any(h in dt for h in heads):
                 continue
             seen_t.add(title)
             out.append({"title": title, "price": price, "stock": stoc, "sku": sku, "score": sc})
             if len(out) >= limit:
                 break
-        # întoarce doar dacă top-ul are potrivire decentă (≥2 cuvinte) sau un singur rezultat clar
-        return out if out and (out[0]["score"] >= 2 or len(out) == 1) else out[:1] if out else []
+        return out
     except Exception:
         return []
 
@@ -460,11 +573,13 @@ def ad_block(ticket, describe_ad=True, store_hint=""):
     ad = ad_for_ticket(ticket, describe_ad=describe_ad, store_hint=store_hint)
     if not ad or ad.get("skipped") or not ad.get("product"):
         return ""
-    cat = catalog_match(store_hint or _brand_from_title(ad.get("store", "")), (ad["product"] + " " + (ad.get("copy") or "")))
+    brand = store_hint or _brand_from_title(ad.get("store", ""))
+    cat = catalog_match(brand, (ad["product"] + " " + (ad.get("copy") or "")))
     cat_txt = ""
     if cat:
+        cur = brand_currency(brand)   # prețul e în moneda MAGAZINULUI, nu în lei
         cat_txt = " | PRODUS în CATALOG (preț/stoc REALE — folosește-le): " + "; ".join(
-            "%s — %s lei%s" % (c["title"][:55], c["price"], (" (stoc %s)" % c["stock"]) if c.get("stock") is not None else "") for c in cat)
+            "%s — %s %s%s" % (c["title"][:55], c["price"], cur, (" (stoc %s)" % c["stock"]) if c.get("stock") is not None else "") for c in cat)
     extra = (" | Text reclamă: %s" % ad["copy"]) if ad.get("copy") else ""
     return ("RECLAMA/POSTAREA pe care comentează clientul (identifică PRODUSUL și răspunde la obiect, INCLUSIV PREȚUL din CATALOG dacă apare): %s%s%s%s" % (
         ad["product"], (" [magazin: %s]" % ad["store"]) if ad.get("store") else "", cat_txt, extra))

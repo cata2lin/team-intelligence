@@ -1,0 +1,5 @@
+#!/bin/sh
+# pre-commit: refuza commitul cand continutul ADAUGAT are date reale de client.
+# Repo-ul e PUBLIC. Activeaza-l o singura data, pe fiecare masina:
+#     git config core.hooksPath .githooks
+exec uv run --no-project "$(git rev-parse --show-toplevel)/plugins/core/scripts/pii_guard.py" --staged

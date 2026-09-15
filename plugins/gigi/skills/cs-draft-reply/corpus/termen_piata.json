@@ -1,0 +1,35 @@
+{
+  "_despre": "Fraze REALE de pe piață, extrase automat din paginile de politici ale MAGAZINELOR NOASTRE și de pe site-uri de curieri (HTML descărcat, propoziții păstrate verbatim). Niciun cuvânt inventat, niciun dat de client. Folosit de poarta_pornire.py ca să măsoare garda anti-halucinare pe TERMEN în fiecare limbă în care răspundem.",
+  "_extras": "2026-09-15",
+  "_etichete": {
+    "promisiune": "promisiune de termen pentru un colet — un draft care o scrie fără date în context trebuie PRINS de hallu_hits",
+    "politica": "termenul standard PUBLICAT al magazinului (politica), scutit deliberat de POLICY_DELIVERY/POLICY_REFUND — se așteaptă NEPRINS",
+    "disponibilitate": "program / disponibilitate („7 zile pe săptămână\"), nu termen de livrare — prinderea lui e FALS-POZITIV, se raportează, nu blochează"
+  },
+  "fraze": [
+    {"limba": "bg", "eticheta": "promisiune", "sursa": "https://duppo.bg/policies/shipping-policy",
+     "text": "Срок С куриер, между 2 и 3 работни дни в зависимост от населеното място."},
+    {"limba": "bg", "eticheta": "promisiune", "sursa": "https://bonhaus.bg/policies/shipping-policy",
+     "text": "Срок Чрез куриер, между 3 и 5 работни дни в зависимост от населеното място."},
+    {"limba": "cz", "eticheta": "promisiune", "sursa": "https://cz.duppo.eu/policies/shipping-policy",
+     "text": "Termín Kurýrem, obvykle do 1–2 pracovních dnů."},
+    {"limba": "cz", "eticheta": "promisiune", "sursa": "https://bonhaus.cz/policies/refund-policy",
+     "text": "Všechny objednávky jsou zpracovány do 24 hodin a obvykle doručeny do 3-5 pracovních dnů."},
+    {"limba": "hu", "eticheta": "promisiune", "sursa": "https://hu.duppo.eu/policies/shipping-policy",
+     "text": "Határidő Futárszolgálattal, jellemzően 1–2 munkanap alatt."},
+    {"limba": "pl", "eticheta": "promisiune", "sursa": "https://bonhaus.pl/policies/shipping-policy",
+     "text": "Przewidywany czas dostawy przez kuriera wynosi zazwyczaj 2–5 dni roboczych."},
+    {"limba": "pl", "eticheta": "promisiune", "sursa": "https://bonhaus.pl/policies/shipping-policy",
+     "text": "Zamówienie jest zwykle wysyłane w ciągu 1–2 dni roboczych od potwierdzenia."},
+    {"limba": "ro", "eticheta": "politica", "sursa": "https://esteban.ro/policies/shipping-policy",
+     "text": "Livrarea se va face în 2-3 zile de luni până vineri, în intervalul stabilit de companiile de curierat SameDay, GLS, DPD si Fan Courier.",
+     "nota": "termenul standard PUBLICAT; POLICY_DELIVERY îl scutește deliberat (1-3 zile)"},
+    {"limba": "cz", "eticheta": "politica", "sursa": "https://bonhaus.cz/policies/refund-policy",
+     "text": "14 dní na vrácení zboží V případě, že nejste s produktem spokojeni, jednoduše jej vraťte a my vám vrátíme peníze",
+     "nota": "termenul legal de retur; POLICY_REFUND îl scutește"},
+    {"limba": "pl", "eticheta": "disponibilitate", "sursa": "https://inpost.pl/pomoc",
+     "text": "Nasz Wirtualny Asystent jest dostępny 24 godziny na dobę, 7 dni w tygodniu."},
+    {"limba": "sk", "eticheta": "disponibilitate", "sursa": "https://www.packeta.sk/",
+     "text": "Stačí zásielku vložiť do najbližšieho Z-BOXu, a to kedykoľvek 24 hodín denne, 7 dní v týždni."}
+  ]
+}

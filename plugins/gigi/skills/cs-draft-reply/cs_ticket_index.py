@@ -44,7 +44,7 @@ def _paths(api):
 
 
 def _norm(s):
-    s = re.sub(r"\b[A-Z]{2,5}\d{3,}\b", "", s or "")   # scoate nr comenzi (GT43483) ca subiectele să se grupeze
+    s = re.sub(r"\b[A-Z]{2,5}\d{3,}\b", "", s or "")   # scoate nr comenzi (GT000001) ca subiectele să se grupeze
     return re.sub(r"\s+", " ", s).strip().lower()
 
 
