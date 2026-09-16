@@ -22,11 +22,14 @@ CLI:
   uv run cs_photo.py --conv 274972 --no-describe
   uv run cs_photo.py --registry-list               # ce postări avem salvate
   uv run cs_photo.py --registry-build --scan 200    # populează registrul din comentariile recente (incremental)
+  uv run cs_photo.py --catalog-build                # instantaneu de catalog din Shopify (piețe străine)
+  uv run cs_photo.py --catalog-list                 # ce branduri are instantaneul + monedă + vechime
 
 Necesită: RICHPANEL_MCP_TOKEN (atașamente + listă), OPENAI_API_KEY (descriere vizuală).
 Registru: env FB_POST_DB (default lângă script); pune-l pe o cale partajată (NAS) pt registru de echipă.
 NU scrie nimic în Richpanel (read-only).
 """
+import shutil
 import os, json, base64, sqlite3, datetime, re, time, unicodedata, urllib.request, urllib.parse, urllib.error, subprocess, argparse, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -46,8 +49,27 @@ MONO_PRODUCT_BRANDS = [b.strip() for b in os.environ.get(
     "esteban,george talent,gt parfumuri,nubra,belasil,lab noir,labnoir").split(",") if b.strip()]
 
 
+# Literele pe care NFKD NU le descompune (n-au accent COMBINABIL, litera e alta): fără ele
+# „protišmykových" se pliază, dar „łatwy"/„đak" nu, iar pe piața poloneză jumătate din cuvinte
+# rămâneau nepliate — adică nepotrivibile cu titlul din catalog.
+_DEACC_EXTRA = {"ł": "l", "đ": "d", "ø": "o", "ı": "i", "ß": "s", "æ": "a", "œ": "o", "ð": "d", "þ": "t"}
+
+
 def _deacc(s):
-    return "".join(c for c in unicodedata.normalize("NFKD", s or "") if not unicodedata.combining(c)).lower()
+    t = "".join(c for c in unicodedata.normalize("NFKD", s or "") if not unicodedata.combining(c)).lower()
+    return "".join(_DEACC_EXTRA.get(c, c) for c in t)
+
+
+# ACEEAȘI pliere, dar exprimată ca pereche pt `translate()` în SQL — ca titlul din Postgres și
+# cuvântul-cheie din Python să ajungă în EXACT aceeași formă. Tabelul vechi avea DOAR diacriticele
+# ROMÂNEȘTI („ăâîșțşţ"), deci pe piețele străine cele două părți se comparau în alfabete diferite:
+# „protišmykových" (titlu) vs „protismykovych" (cuvânt) → zero potriviri, pe un catalog care EXISTĂ.
+# ⚠️ Chirilica intră și ea: NFKD desface „й" în „и"+breve, deci fără perechea й→и partea SQL ar fi
+# rămas cu „й" iar cea Python cu „и".
+_FOLD_SRC = ("ăâîșțşţáàäãåçčćďéèêëěęğíìïĺľńñňóòôöõőŕřśšťúùûüůűýÿźżž"
+             "ąėįųāēīōūşțğıœæðþłđøйѝ")
+_FOLD_DST = "".join((_deacc(c) or c)[:1] for c in _FOLD_SRC)
+assert len(_FOLD_SRC) == len(_FOLD_DST), "tabelul de pliere trebuie să aibă aceeași lungime pe ambele părți"
 
 
 def is_mono_product(name):
@@ -66,12 +88,28 @@ def enc_url(u):
     return urllib.parse.urlunsplit((p.scheme, p.netloc, urllib.parse.quote(p.path), urllib.parse.quote(p.query, safe="=&%"), p.fragment))
 
 
+def _uv():
+    """Calea ABSOLUTĂ către `uv` — vezi cs_auto_draft.py: un cron pornește cu PATH minimal, unde
+    `uv` (instalat în ~/.local/bin) nu există, iar `secret()` întoarce tăcut gol."""
+    c = os.environ.get("UV_BIN") or shutil.which("uv")
+    if c:
+        return c
+    for p in (os.path.expanduser("~/.local/bin/uv"), "/usr/local/bin/uv", "/opt/homebrew/bin/uv",
+              "/root/.local/bin/uv", "/usr/bin/uv"):
+        if os.path.exists(p):
+            return p
+    return "uv"
+
+
+UV = _uv()
+
+
 def secret(k):
     v = os.environ.get(k)
     if v:
         return v
     try:
-        return subprocess.run(["uv", "run", KB, "secret-get", k], capture_output=True, text=True, timeout=30).stdout.strip()
+        return subprocess.run([UV, "run", KB, "secret-get", k], capture_output=True, text=True, timeout=30).stdout.strip()
     except Exception:
         return ""
 
@@ -479,6 +517,13 @@ def brand_currency(store):
     key = _deacc(store)
     if key in _CUR:
         return _CUR[key]
+    # Moneda DECLARATĂ de magazin (instantaneul Shopify) bate orice deducție: pe piețele străine
+    # n-avem comenzi în metrics de unde s-o citim, iar ghicitul din sufixul numelui a dat deja
+    # „BGN" pe Bulgaria după ce magazinul trecuse pe EUR.
+    _m = snapshot_meta(store)
+    if _m.get("currency"):
+        _CUR[key] = CUR_LABEL.get(_m["currency"].upper(), _m["currency"].upper())
+        return _CUR[key]
     code = ""
     conn = _metrics_conn()
     if conn:
@@ -518,54 +563,231 @@ def _brand_from_title(og_title):
     return base
 
 
-def catalog_match(store, text, limit=3):
-    """Potrivește produsul din reclamă cu CATALOGUL (metrics products/variants) → preț+stoc reale. store = nume brand."""
-    if not store or not text:
-        return []
-    stop = {_deacc(s) for s in _CATALOG_STOP}
-    seen, kw = set(), []
-    for w in re.findall(r"[a-zăâîșțA-ZĂÂÎȘȚ]{4,}", text):
-        wl = w.lower()
-        if _deacc(wl) in stop or wl in seen:
-            continue
-        seen.add(wl)
-        kw.append(wl)
-    kw = kw[:6]
-    if not kw:
-        return []
-    conn = _metrics_conn()
+_MCONN = [None]
+
+
+def _metrics_rows(store, kw, limit):
+    """Rândurile (titlu, preț, stoc, sku, scor) din warehouse-ul metrics, sau [] dacă n-are brandul.
+
+    Conexiunea se ȚINE deschisă pe proces: `catalog_match` poate întreba de două ori per tichet (o
+    dată pe descrierea în română, o dată pe copy-ul în limba pieței), iar o conexiune Postgres NOUĂ
+    per întrebare costă mai mult decât interogarea. La orice eroare se aruncă și se redeschide."""
+    conn = _MCONN[0]
+    if conn is None:
+        conn = _MCONN[0] = _metrics_conn()
     if not conn:
         return []
     try:
         cur = conn.cursor()
         like = ["%" + w + "%" for w in kw]
-        score = " + ".join(["(lower(p.title) LIKE %s)::int" for _ in kw])
-        where_or = " OR ".join(["lower(p.title) LIKE %s" for _ in kw])
+        # `translate` (nu extensia `unaccent`, care nu e instalată) — titlul pliat ÎN SQL cu ACELAȘI
+        # tabel ca `_deacc` din Python (vezi _FOLD_SRC/_FOLD_DST), ca ambele părți să se compare în
+        # aceeași formă, indiferent de alfabetul pieței.
+        _t = "translate(lower(p.title),%s,%s)"
+        score = " + ".join(["(" + _t + " LIKE %s)::int" for _ in kw])
+        where_or = " OR ".join([_t + " LIKE %s" for _ in kw])
         sql = ('SELECT p.title, v.price, v."inventoryQuantity", v.sku, (%s) AS sc '
                'FROM products p JOIN variants v ON v."productId"=p.id LEFT JOIN brands b ON b.id=p."brandId" '
                'WHERE lower(btrim(b.name))=lower(btrim(%%s)) AND (%s) ORDER BY sc DESC, v.price::numeric LIMIT %%s' % (score, where_or))
-        cur.execute(sql, like + [store] + like + [limit * 4])
-        rows = cur.fetchall()
-        conn.close()
-        # PRAG DE ÎNCREDERE — un catalog GREȘIT e mai rău decât lipsa lui (un lunchbox electric
-        # „potrivit" cu un clește de mufe fiindcă ambele zic „electric"): cerem ≥2 cuvinte potrivite
-        # ȘI ca OBIECTUL (primul cuvânt de conținut din descrierea reclamei) să apară în titlu.
-        # Pragul e SEMANTIC, nu POZIȚIONAL: cerem ca măcar un cuvânt de CONȚINUT (obiectul — nu un
-        # atribut, nu un cuvânt de marketing) să apară în titlu. Varianta „primul cuvânt din descriere"
-        # pierdea TOT catalogul dacă reclama începea cu „Ofertă la …" (3 din 12 formulări RO reale).
-        heads = [_deacc(w)[:5] for w in kw if _deacc(w) not in _CATALOG_ATTR]
-        out, seen_t = [], set()
-        for title, price, stoc, sku, sc in rows:
-            dt = _deacc(title)
-            if title in seen_t or sc < 2 or not any(h in dt for h in heads):
-                continue
-            seen_t.add(title)
-            out.append({"title": title, "price": price, "stock": stoc, "sku": sku, "score": sc})
-            if len(out) >= limit:
-                break
-        return out
+        args = []
+        for w in like:
+            args += [_FOLD_SRC, _FOLD_DST, w]
+        args.append(store)
+        for w in like:
+            args += [_FOLD_SRC, _FOLD_DST, w]
+        args.append(limit * 4)
+        cur.execute(sql, args)
+        return cur.fetchall()
     except Exception:
+        _close(conn)
+        _MCONN[0] = None
         return []
+
+
+# ── CATALOG LOCAL (instantaneu Shopify) — pt brandurile pe care metrics NU le are ──
+# De ce instantaneu și nu Shopify LIVE la fiecare tichet: regula CS („rația Shopify") spune că
+# lookup-urile CS nu lovesc Shopify live. Un instantaneu = UN singur pull per magazin, apoi zero
+# HTTP pe tichet. De ce nu „adăugăm brandurile în metrics": nu e în mâna acestui skill, iar dovada
+# că nici nu se întâmplă singur e „Bonhaus PL" — rând de brand în `brands` de luni de zile și ZERO
+# produse; un rând de brand fără sincronizare de produse nu dă niciun preț.
+CATALOG_DB = os.environ.get("CS_CATALOG_DB") or os.path.join(HERE, "cs_catalog.sqlite")
+# brand (exact numele din PAGE_STORE/store_name) -> prefixul magazinului Shopify (stores.csv).
+CATALOG_SHOPIFY = {"Duppo BG": "DUPBG", "Bonhaus PL": "PL", "Bonhaus HU": "HU", "Bonhaus SK": "SK",
+                   "Bonhaus BG": "BONBG", "Bonhaus CZ": "CZ", "Duppo Moldova": "MD"}
+_SNAP = {}
+_SNAP_META = {}
+
+
+def _snap_conn():
+    c = sqlite3.connect(CATALOG_DB, timeout=20)
+    c.execute("""CREATE TABLE IF NOT EXISTS catalog(
+        brand TEXT, title TEXT, title_pliat TEXT, price TEXT, stock INTEGER, sku TEXT,
+        PRIMARY KEY(brand, sku, title))""")
+    c.execute("""CREATE TABLE IF NOT EXISTS catalog_meta(
+        brand TEXT PRIMARY KEY, shop TEXT, currency TEXT, n INTEGER, updated_at TEXT,
+        uniform_price TEXT)""")
+    if "uniform_price" not in {r[1] for r in c.execute("PRAGMA table_info(catalog_meta)")}:
+        c.execute("ALTER TABLE catalog_meta ADD COLUMN uniform_price TEXT")
+    return c
+
+
+def snapshot_meta(store):
+    """{shop, currency, n, updated_at, uniform_price} pt brandul din instantaneu, sau {}.
+    Cache per proces: se cheamă o dată per tichet, iar `_snap_conn` face CREATE TABLE de fiecare dată."""
+    if not store:
+        return {}
+    if _deacc(store) in _SNAP_META:
+        return _SNAP_META[_deacc(store)]
+    try:
+        c = _snap_conn()
+        r = c.execute("SELECT shop, currency, n, updated_at, uniform_price FROM catalog_meta "
+                      "WHERE lower(brand)=lower(?)", (store,)).fetchone()
+        c.close()
+    except Exception:
+        return {}
+    _SNAP_META[_deacc(store)] = m = ({"shop": r[0], "currency": r[1], "n": r[2], "updated_at": r[3],
+                                      "uniform_price": r[4]} if r else {})
+    return m
+
+
+def _snapshot_rows(store, kw, limit):
+    """Aceleași rânduri ca `_metrics_rows`, dar din instantaneul local. Scorul se face în Python
+    (catalogul unui magazin străin are sute de rânduri, nu milioane) cu ACELAȘI `_deacc`."""
+    key = _deacc(store)
+    if key not in _SNAP:
+        try:
+            c = _snap_conn()
+            _SNAP[key] = c.execute(
+                "SELECT title, title_pliat, price, stock, sku FROM catalog WHERE lower(brand)=lower(?)",
+                (store,)).fetchall()
+            c.close()
+        except Exception:
+            _SNAP[key] = []
+    rows = []
+    for title, pliat, price, stoc, sku in _SNAP[key]:
+        sc = sum(1 for w in kw if w in (pliat or ""))
+        if sc:
+            rows.append((title, price, stoc, sku, sc))
+    rows.sort(key=lambda r: (-r[4], float(r[1] or 0)))
+    return rows[:limit * 4]
+
+
+def _cuvinte_cheie(text):
+    """Cuvintele-cheie (deaccentuate, fără vocabular de stop) dintr-un text, maximum 6."""
+    stop = {_deacc(s) for s in _CATALOG_STOP}
+    seen, kw = set(), []
+    # Clasa de litere e UNICODE, nu „a-z + diacriticele ROMÂNEȘTI". Cu vechea clasă, un text
+    # bulgăresc („четка за коса") dădea ZERO cuvinte-cheie → catalogul era mort pe BG chiar și pe
+    # brandurile care ÎL AU în metrics; iar pe sk/pl/hu/cz cuvintele se rupeau la prima literă
+    # străină („protišmykových" → „proti" + „mykov"). `[^\W\d_]` = orice literă, în orice alfabet.
+    for w in re.findall(r"[^\W\d_]{4,}", text, re.UNICODE):
+        # CUVINTELE INTRĂ DEACCENTUATE. Catalogul e scris FĂRĂ diacritice („Set 6 Genti din Piele
+        # Ecologica"), reclama CU („genți", „tacâmuri") → LIKE '%genți%' pe titlu dădea ZERO.
+        # Măsurat pe metrics: „genți" → 0 rânduri, „genti" → 8 titluri REALE pe Apreciat; pe 30 de
+        # reclame reale catalogul potrivea 3 (10%). Titlul se deaccentuează în SQL (translate),
+        # deci ambele părți se compară în ACEEAȘI formă — lista de STOP era deja deaccentuată,
+        # doar cuvintele nu erau, așa că filtrul funcționa și potrivirea nu.
+        wl = _deacc(w)
+        if wl in stop or wl in seen:
+            continue
+        seen.add(wl)
+        kw.append(wl)
+    return kw[:6]
+
+
+def _filtreaza(rows, kw, limit):
+    """Pragul de încredere aplicat rândurilor unei surse. [] = nicio potrivire credibilă."""
+    # PRAG DE ÎNCREDERE — un catalog GREȘIT e mai rău decât lipsa lui (un lunchbox electric
+    # „potrivit" cu un clește de mufe fiindcă ambele zic „electric"): cerem ≥2 cuvinte potrivite
+    # ȘI ca OBIECTUL (primul cuvânt de conținut din descrierea reclamei) să apară în titlu.
+    # Pragul e SEMANTIC, nu POZIȚIONAL: cerem ca măcar un cuvânt de CONȚINUT (obiectul — nu un
+    # atribut, nu un cuvânt de marketing) să apară în titlu. Varianta „primul cuvânt din descriere"
+    # pierdea TOT catalogul dacă reclama începea cu „Ofertă la …" (3 din 12 formulări RO reale).
+    heads = [_deacc(w)[:5] for w in kw if _deacc(w) not in _CATALOG_ATTR]
+    out, seen_t = [], set()
+    for title, price, stoc, sku, sc in rows:
+        dt = _deacc(title)
+        if title in seen_t or sc < 2 or not any(h in dt for h in heads):
+            continue
+        seen_t.add(title)
+        # STOCUL se dă clientului doar dacă e POZITIV. Măsurat pe Duppo BG: toate cele 119
+        # produse active au `inventoryQuantity` NEGATIV (−5 … −34) — magazin care nu urmărește
+        # stocul, nu marfă care lipsește. „(stoc −17)" în context e o cifră falsă pe care
+        # modelul o poate repeta clientului; „fără cifră" e adevărul.
+        try:
+            stoc = int(stoc) if stoc is not None and int(stoc) > 0 else None
+        except (TypeError, ValueError):
+            stoc = None
+        out.append({"title": title, "price": price, "stock": stoc, "sku": sku, "score": sc})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def catalog_match(store, text, limit=3, text2=""):
+    """Potrivește produsul din reclamă cu CATALOGUL → preț+stoc reale. store = nume brand.
+    Sursa 1 = warehouse-ul metrics; sursa 2 (piețe străine) = instantaneul Shopify local.
+
+    `text2` = a DOUA sursă de cuvinte-cheie, căutată separat. Pe piețele străine cele două părți ale
+    contextului sunt în LIMBI DIFERITE — descrierea reclamei o scrie modelul în ROMÂNĂ, iar copy-ul
+    postării (și titlul din catalog) sunt în limba pieței. Lipite într-un singur text, plafonul de 6
+    cuvinte-cheie se umplea integral cu partea ROMÂNEASCĂ, care nu se potrivește cu un titlu bulgăresc:
+    măsurat pe Bonhaus BG, reclama „електрическа кутия за храна 3 в 1" NU prindea produsul cu ACELAȘI
+    nume din catalog, fiindcă niciun cuvânt bulgăresc nu ajungea în cele 6 sloturi."""
+    if not store:
+        return []
+    for t in (text, text2):
+        kw = _cuvinte_cheie(t)
+        if not kw:
+            continue
+        # metrics întâi; instantaneul local dacă warehouse-ul n-are brandul SAU n-are nimic credibil
+        # (pe piețele străine catalogul din metrics e și incomplet, și amestecat cu titluri ROMÂNEȘTI).
+        out = _filtreaza(_metrics_rows(store, kw, limit), kw, limit)
+        if not out:
+            out = _filtreaza(_snapshot_rows(store, kw, limit), kw, limit)
+        if out:
+            return out
+    return []
+
+
+# PREȚUL scris în PROPRIA noastră reclamă. Măsurat: 39 din 403 copy-uri reale îl conțin
+# („covor pufos premiumcele mai mici prețuri 169 leicomandă pe…"), iar pe Magdeal — cel mai mare
+# magazin de pe comentarii publice, 328 din 1.306 — catalogul din metrics are ZERO produse, deci
+# copy-ul e SINGURA sursă de preț. Moneda se ia din copy (clientul o citește chiar acolo), nu se
+# presupune. Fără cifra asta modelul n-are ce spune sub postare și cade pe „scrieți-ne în privat".
+_COPY_PRICE_RE = re.compile(
+    r"(?<![\d,.])(\d{1,3}(?:[ .]\d{3})*(?:[,.]\d{1,2})?)\s?(lei|ron|kč|kc|лв|lv|ft|zł|zl|eur|€)",
+    re.I)
+
+
+def copy_price(copy):
+    """Prețul explicit din textul reclamei („169 lei") sau ''. Doar cifră + monedă, fără ghicit."""
+    m = _COPY_PRICE_RE.search(copy or "")
+    if not m:
+        return ""
+    return "%s %s" % (m.group(1).strip(), m.group(2))
+
+
+def catalog_block(store, text):
+    """Bloc de CATALOG pentru un canal FĂRĂ reclamă (mesaj privat / e-mail): produsul despre care
+    întreabă clientul + prețul REAL, în moneda pieței. '' dacă nu avem nimic cert.
+
+    Pe canal public produsul vine din POSTAREA comentată (`ad_block`); pe privat nu există postare,
+    deci singura sursă de fapte despre produs e ce scrie clientul — pe piețele străine, în limba lui."""
+    if not store or not text:
+        return ""
+    cat = catalog_match(store, text)
+    if cat:
+        cur = brand_currency(store)
+        return ("PRODUS în CATALOG (preț/stoc REALE — folosește-le): " + "; ".join(
+            "%s — %s %s%s" % (c["title"][:55], c["price"], cur,
+                              (" (stoc %s)" % c["stock"]) if c.get("stock") is not None else "")
+            for c in cat))
+    m = snapshot_meta(store)
+    if m.get("uniform_price"):
+        return ("PREȚ ÎN CATALOG: %s %s — la %s TOATE cele %d produse au ACELAȘI preț, deci cifra e "
+                "sigură indiferent de model." % (m["uniform_price"], brand_currency(store), store, m.get("n") or 0))
+    return ""
 
 
 def ad_block(ticket, describe_ad=True, store_hint=""):
@@ -574,15 +796,140 @@ def ad_block(ticket, describe_ad=True, store_hint=""):
     if not ad or ad.get("skipped") or not ad.get("product"):
         return ""
     brand = store_hint or _brand_from_title(ad.get("store", ""))
-    cat = catalog_match(brand, (ad["product"] + " " + (ad.get("copy") or "")))
+    cat = catalog_match(brand, ad["product"] + " " + (ad.get("copy") or ""), text2=ad.get("copy") or "")
     cat_txt = ""
     if cat:
         cur = brand_currency(brand)   # prețul e în moneda MAGAZINULUI, nu în lei
         cat_txt = " | PRODUS în CATALOG (preț/stoc REALE — folosește-le): " + "; ".join(
             "%s — %s %s%s" % (c["title"][:55], c["price"], cur, (" (stoc %s)" % c["stock"]) if c.get("stock") is not None else "") for c in cat)
+    # fallback de PREȚ: dacă n-avem catalog (brand fără produse în metrics — Magdeal, Casa
+    # Ofertelor — sau potrivire sub prag), luăm prețul din propria reclamă, ETICHETAT ca atare.
+    if not cat_txt:
+        _p = copy_price(ad.get("copy") or "")
+        if _p:
+            cat_txt = (" | PREȚ ÎN RECLAMĂ (scris de noi în postarea pe care o vede clientul — "
+                       "poți să-l dai PUBLIC): %s" % _p)
+    # ultima plasă de PREȚ, doar pe magazinele cu preț UNIC în tot catalogul (vezi `catalog_build`):
+    # acolo cifra e certă chiar dacă nu știm EXACT care produs e în reclamă.
+    if not cat_txt:
+        _m = snapshot_meta(brand)
+        if _m.get("uniform_price"):
+            cat_txt = (" | PREȚ ÎN CATALOG: %s %s — la %s TOATE cele %d produse au ACELAȘI preț, "
+                       "deci cifra e sigură indiferent de model (poți să o dai PUBLIC)"
+                       % (_m["uniform_price"], brand_currency(brand), brand, _m.get("n") or 0))
     extra = (" | Text reclamă: %s" % ad["copy"]) if ad.get("copy") else ""
-    return ("RECLAMA/POSTAREA pe care comentează clientul (identifică PRODUSUL și răspunde la obiect, INCLUSIV PREȚUL din CATALOG dacă apare): %s%s%s%s" % (
+    return ("RECLAMA/POSTAREA pe care comentează clientul (identifică PRODUSUL și răspunde la obiect PUBLIC, INCLUSIV PREȚUL din CATALOG / din RECLAMĂ dacă apare): %s%s%s%s" % (
         ad["product"], (" [magazin: %s]" % ad["store"]) if ad.get("store") else "", cat_txt, extra))
+
+
+# ───────────────────────── constructorul instantaneului Shopify ─────────────────────────
+def _stores_csv():
+    """Textul stores.csv: env (cale SAU conținut), apoi ./stores.csv, apoi secretul KB."""
+    env = os.environ.get("SHOPIFY_STORES_CSV")
+    if env:
+        return env if "\n" in env else open(env, encoding="utf-8-sig").read()
+    if os.path.exists("stores.csv"):
+        return open("stores.csv", encoding="utf-8-sig").read()
+    return secret("SHOPIFY_STORES_CSV") or ""
+
+
+def _shop_of(prefix):
+    """(domeniu myshopify, token static) pt un prefix din stores.csv."""
+    import csv as _csv, io as _io
+    for row in _csv.DictReader(_io.StringIO(_stores_csv())):
+        if (row.get("prefix") or "").strip().lstrip("﻿").upper() == prefix.upper():
+            return ((row.get("shop") or "").strip().replace("https://", "").strip("/"),
+                    (row.get("token") or "").strip())
+    return "", ""
+
+
+def _mint(shop):
+    """Token `client_credentials` pt magazinele ale căror app-uri îl emit la cerere (~24h).
+    Întâi app-urile din `SHOPIFY_READ_APPS` (ro-deals / bonhaus-intl), apoi app-ul ARONA."""
+    try:
+        cfg = json.loads(secret("SHOPIFY_READ_APPS") or "{}")
+    except Exception:
+        cfg = {}
+    perechi = [(a.get("client_id"), a.get("client_secret")) for a in (cfg.get("apps") or [])
+               if shop in (a.get("stores") or {}).values()]
+    perechi.append((secret("SHOPIFY_ARONA_CLIENT_ID"), secret("SHOPIFY_ARONA_CLIENT_SECRET")))
+    for cid, csec in perechi:
+        if not (cid and csec):
+            continue
+        try:
+            body = json.dumps({"client_id": cid, "client_secret": csec,
+                               "grant_type": "client_credentials"}).encode()
+            req = urllib.request.Request("https://%s/admin/oauth/access_token" % shop, data=body,
+                                         headers={"content-type": "application/json"})
+            return json.loads(urllib.request.urlopen(req, timeout=25).read())["access_token"]
+        except Exception:
+            continue
+    return ""
+
+
+def _shop_gql(shop, token, query, variables=None):
+    ver = os.environ.get("SHOPIFY_API_VERSION") or "2026-01"
+    body = json.dumps({"query": query, "variables": variables or {}}).encode()
+    req = urllib.request.Request("https://%s/admin/api/%s/graphql.json" % (shop, ver), data=body,
+                                 headers={"X-Shopify-Access-Token": token, "content-type": "application/json"})
+    out = json.loads(urllib.request.urlopen(req, timeout=60).read())
+    if out.get("errors"):
+        raise RuntimeError(json.dumps(out["errors"], ensure_ascii=False)[:200])
+    return out["data"]
+
+
+_Q_CATALOG = """query($c:String){
+  shop{ currencyCode }
+  products(first:100, after:$c, query:"status:active"){
+    pageInfo{ hasNextPage endCursor }
+    nodes{ title variants(first:10){ nodes{ price sku inventoryQuantity } } }
+  }
+}"""
+
+
+def catalog_build(store, prefix=""):
+    """Reface instantaneul local de catalog pentru UN brand, din magazinul lui Shopify.
+    Întoarce (n_produse, monedă) sau (0, '') dacă magazinul nu răspunde."""
+    prefix = prefix or CATALOG_SHOPIFY.get(store, "")
+    if not prefix:
+        raise SystemExit("Brandul %r n-are magazin Shopify în CATALOG_SHOPIFY." % store)
+    shop, token = _shop_of(prefix)
+    if not shop:
+        raise SystemExit("Prefixul %r nu e în stores.csv." % prefix)
+    cursor, randuri, cur_code = None, [], ""
+    for _ in range(40):                       # plafon de siguranță: 4.000 de produse
+        try:
+            d = _shop_gql(shop, token, _Q_CATALOG, {"c": cursor})
+        except Exception:
+            token = _mint(shop)               # tokenul din CSV e doar un MARCAJ pe magazinele client_credentials
+            if not token:
+                return 0, ""
+            d = _shop_gql(shop, token, _Q_CATALOG, {"c": cursor})
+        cur_code = (d.get("shop") or {}).get("currencyCode") or cur_code
+        for p in d["products"]["nodes"]:
+            vs = (p.get("variants") or {}).get("nodes") or []
+            preturi = [v["price"] for v in vs if v.get("price") is not None]
+            stocuri = [v.get("inventoryQuantity") for v in vs if isinstance(v.get("inventoryQuantity"), int)]
+            randuri.append((store, p["title"], _deacc(p["title"]),
+                            min(preturi, key=lambda x: float(x)) if preturi else None,
+                            max(stocuri) if stocuri else None,
+                            (vs[0].get("sku") if vs else "") or ""))
+        if not d["products"]["pageInfo"]["hasNextPage"]:
+            break
+        cursor = d["products"]["pageInfo"]["endCursor"]
+    # PREȚ UNIC: unele magazine străine vând TOT catalogul la același preț (măsurat pe Duppo BG:
+    # 113 produse active, toate 12,00 EUR). Acolo „cât costă?" — întrebarea de sub aproape fiecare
+    # reclamă — are un răspuns CERT chiar și când potrivirea pe titlu nu prinde produsul exact.
+    preturi = {p for _, _, _, p, _, _ in randuri if p}
+    unic = preturi.pop() if len(preturi) == 1 else None
+    c = _snap_conn()
+    c.execute("DELETE FROM catalog WHERE lower(brand)=lower(?)", (store,))
+    c.executemany("INSERT OR REPLACE INTO catalog(brand,title,title_pliat,price,stock,sku) VALUES(?,?,?,?,?,?)", randuri)
+    c.execute("INSERT OR REPLACE INTO catalog_meta(brand,shop,currency,n,updated_at,uniform_price) "
+              "VALUES(?,?,?,?,?,?)", (store, shop, cur_code, len(randuri), _now(), unic))
+    c.commit(); c.close()
+    _SNAP.pop(_deacc(store), None); _CUR.pop(_deacc(store), None); _SNAP_META.pop(_deacc(store), None)
+    return len(randuri), cur_code
 
 
 # ───────────────────────── CLI ─────────────────────────
@@ -607,7 +954,33 @@ def main():
     ap.add_argument("--registry-build", action="store_true", help="populează registrul din comentariile recente (incremental)")
     ap.add_argument("--channel", default="facebook_feed_comment", help="canal pt --registry-build")
     ap.add_argument("--scan", type=int, default=200, help="câte comentarii recente să scaneze la --registry-build")
+    ap.add_argument("--catalog-build", nargs="?", const="all", default=None, metavar="BRAND",
+                    help="reface instantaneul local de catalog din Shopify (implicit: toate brandurile din CATALOG_SHOPIFY)")
+    ap.add_argument("--catalog-list", action="store_true", help="ce branduri are instantaneul local + moneda + vechimea")
     a = ap.parse_args()
+
+    if a.catalog_list:
+        c = _snap_conn()
+        randuri = c.execute("SELECT brand, shop, currency, n, updated_at FROM catalog_meta ORDER BY brand").fetchall()
+        c.close()
+        print("\U0001f4e6 Instantaneu catalog (%s) — %d branduri\n" % (CATALOG_DB, len(randuri)))
+        for b, shop, cur, n, upd in randuri:
+            print("  \u2022 %-14s %-5s %4d produse  (%s, %s)" % (b, cur, n, shop, upd))
+        lipsa = [b for b in CATALOG_SHOPIFY if b not in {r[0] for r in randuri}]
+        if lipsa:
+            print("\n  \u26a0\ufe0f  f\u0103r\u0103 instantaneu: %s" % ", ".join(sorted(lipsa)))
+        return
+
+    if a.catalog_build:
+        branduri = sorted(CATALOG_SHOPIFY) if a.catalog_build == "all" else [a.catalog_build]
+        for b in branduri:
+            try:
+                n, cur = catalog_build(b)
+            except SystemExit as e:
+                print("  \u26d4 %-14s %s" % (b, e)); continue
+            print(("  \u2705 %-14s %4d produse, moneda %s" % (b, n, cur)) if n
+                  else ("  \u26d4 %-14s magazinul nu r\u0103spunde (token?)" % b))
+        return
 
     if a.registry_list:
         rows = reg_list()

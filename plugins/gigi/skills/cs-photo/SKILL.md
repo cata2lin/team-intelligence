@@ -29,6 +29,29 @@ Așa știm la ce se referă „Ce preț are?/Dimensiunile?/Sunt turcești?" — 
 catalogul real (metrics `products`+`variants`) → **preț + stoc REALE** în `ad_block`. Ex: comentariu
 „prețul toaletei portabile?" pe Ofertele Zilei → draftul răspunde „169 lei (stoc 279)". Necesită `DATABASE_URL_METRICS`.
 
+### (c) CATALOGUL PIEȚELOR STRĂINE — instantaneu Shopify (`--catalog-build`)
+Pe BG/SK/HU/PL warehouse-ul `metrics` nu poate da niciun preț: **nu există niciun brand „Duppo"**, iar
+„Bonhaus PL" e un rând de brand cu **0 produse**. Măsurat pe 307 tichete străine REALE din oglindă:
+**0 primeau vreun preț**. De aceea `catalog_match` are o a doua sursă — un **instantaneu local**
+(`cs_catalog.sqlite`, ignorat de git) construit dintr-un singur pull per magazin:
+
+```bash
+uv run cs_photo.py --catalog-build              # toate brandurile din CATALOG_SHOPIFY
+uv run cs_photo.py --catalog-build "Bonhaus PL" # unul singur
+uv run cs_photo.py --catalog-list               # ce avem + monedă + vechime
+```
+- **NU** se lovește Shopify per tichet (regula CS „rația Shopify") — un pull, apoi zero HTTP;
+- prețul și moneda sunt **ale pieței** (`shop.currencyCode`), niciodată în lei;
+- **stocul se citează doar dacă e POZITIV** (pe Duppo BG toate produsele au `inventoryQuantity` negativ:
+  magazin care nu urmărește stocul — „(stoc −17)" ar fi o cifră falsă);
+- unde TOT catalogul are un singur preț se scrie ca **preț unic pe magazin** (cert chiar fără să știi modelul);
+- `catalog_block(store, textul clientului)` = același lucru pe canal PRIVAT, unde nu există reclamă.
+
+⚠️ Potrivirea cere cuvinte-cheie **în limba catalogului**: `catalog_match(..., text2=copy)` caută separat
+și pe copy-ul postării, fiindcă descrierea reclamei o scrie modelul în română și umplea singură plafonul
+de 6 cuvinte. Plierea de diacritice (`_FOLD_SRC`/`_FOLD_DST`) e aceeași în Python și în `translate()` din
+SQL, altfel titlul și cuvântul se compară în alfabete diferite (sk/cz/pl/hu) sau chirilica nu dă deloc cuvinte.
+
 > ⚠️ **Brandul se dă, nu se ghicește** (reparat sep-2026). `ad_block(ticket, store_hint=…)` /
 > `ad_for_ticket(ticket, store_hint=…)` primesc brandul REAL al tichetului de la apelant (`cs-draft-reply`
 > îl are din `to.id`/comandă). `_brand_from_title` rămâne doar fallback și **nu mai cade pe brandul

@@ -169,7 +169,7 @@ reale · **D** gărzile de siguranță · **E** desfășurarea.
 | Indicator | Sursa datelor | Prag | Măsurat 15-sep (runda 4) |
 |---|---|---|---|
 | **B. fals-pozitiv față de POLITICA NOASTRĂ** | `data/cs_mirror.db` — 137 răspunsuri REALE de agent | ≤ 3% | **0,7%** (1 din 137) |
-| **A. divergență față de ce a scris AGENTUL** | aceleași 137 | ≤ 25% (derivă) | **19,7%** (27 din 137) |
+| **A. divergență față de ce a scris AGENTUL** | aceleași 137 | ≤ 34,5% (derivă) | **27,0%** (măsurat pe `fabricari`, 16-sep) |
 | promisiuni de termen VERBATIM de pe piață | `corpus/termen_definitie.json` | prinse TOATE | **8/8** (bg, cz, hu, pl, sk, hr) |
 | promisiuni în ÎNCADRAREA NOASTRĂ | același corpus, ramă scrisă de noi | scăpările să nu crească | **0/1** (1 scăpare, înghețată) |
 | scurgeri de date pe canal public | 4 drafturi OSTILE, cap-la-cap prin `main()` | 0 clase rămase | **3 cazuri din 4 scurg** `email`, `adresă`, `nume` |
@@ -197,6 +197,37 @@ se citește ca o regresie.
 
 Clasificatorul care face despărțirea e **în poartă** (`clasa_hit`, `fals_pozitiv_de_politica`), scris
 independent de regexurile motorului.
+
+#### 16-sep: indicatorul măsura ALT COD decât rulează
+
+Până azi C1 chema **`hallu_hits`**, iar producția cheamă **`fabricari`** (= `hallu_hits` +
+`fapte_inventate` + `angajament_hits`), și în `guard_reasons`, și în post-filtrul anti-halucinare.
+Adică exact indicatorul care trebuia să confirme că gărzile noi n-au crescut zgomotul **nu le putea
+vedea, prin construcție**. Pe deasupra, etichetele lor (stoc / curier / plată / livrare / promoție /
+produs / promisiune) cădeau toate în ramura implicită „status" a lui `clasa_hit`, unde
+`fals_pozitiv_de_politica` întoarce `False` — o groapă în care o gardă nouă nu putea fi **niciodată**
+declarată fals-pozitivă.
+
+Reparat: C1 cheamă `fabricari`, cele șapte clase au matchere proprii (puse **înaintea** lui
+`_H_LOOKUP`/`_H_TERMEN`, care caută oriunde în text — `\d` înghițea orice motiv cu cifre în el) și
+fiecare are un **predicat real** de fals-pozitiv: fapt care se află în context (ca la preț/dimensiune),
+curier numit ca **opțiune permisă** și nu alocat, ofertă **interogativă** în loc de promisiune.
+
+Măsurat pe ambele oglinzi, înainte → după (aceleași mesaje, aceeași zi):
+
+| Oglinda | divergență `hallu_hits` | divergență `fabricari` | fals-pozitiv (B) |
+|---|--:|--:|--:|
+| `cs_mirror.db` (137 răspunsuri) | 19,7% | **27,0%** | 0,7% (neschimbat) |
+| `cs_mirror_live.db` (2.769 răspunsuri) | 24,2% | **29,5%** | 0,1% (neschimbat) |
+
+Cifra A s-a „înrăutățit" pentru că indicatorul vede acum mai mult, nu pentru că draftul e mai prost:
+cele 192 de prinderi în plus (2.769) sunt stoc×96, promisiune×64, livrare×12, curier×11, plată×6,
+promoție×3 — lucruri pe care SYSTEM le interzice explicit unui DRAFT. **B, care e defectul real, a
+rămas neschimbat pe ambele populații.** Pragul lui A a fost re-etalonat pe mărimea nouă (29,3% + 5,3pp
+= headroom-ul absolut al perechii vechi), iar seria veche se raportează ca notă, ca să nu se piardă.
+Re-măsurat la aplicare (16-sep, după ce s-au unit toate patch-urile rundei): **29,5%** pe oglinda live
+(24,2% pe seria veche) — cele 0,2pp în plus sunt verbele de status străine adăugate în paralel, deci
+adevărat-pozitive; B a rămas 0,1%. Pragul rămâne 34,5 (ancorat în 29,3), cu 5,0pp headroom real.
 
 #### Termenul: definiția, nu intuiția
 

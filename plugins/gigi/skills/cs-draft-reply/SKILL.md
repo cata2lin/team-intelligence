@@ -166,7 +166,7 @@ Toate rulează **după** generare, pe textul FINAL, și pe **toate** limbile în
 
 | Gardă | Funcții | Ce face |
 |---|---|---|
-| anti-halucinare | `hallu_hits`, `HALLU`, `term_excused` | prinde lookup („am verificat"), status („predat curierului"), TERMEN („în 3 zile") și dimensiuni **inventate**, în fiecare limbă. Scutiri: termenul de politică (1-3 zile livrare, 14/30 zile retur **în context de retur**), prețul/dimensiunea din catalogul reclamei, pozele văzute efectiv, faptele din registrul de incidente |
+| anti-halucinare | `hallu_hits`, `HALLU`, `term_excused`, `status_excused` | prinde lookup („am verificat"), status („predat curierului"), TERMEN („în 3 zile") și dimensiuni **inventate**, în fiecare limbă. Scutiri: termenul de politică (1-3 zile livrare, 14/30 zile retur **în context de retur**), prețul/dimensiunea din catalogul reclamei, pozele văzute efectiv, faptele din registrul de incidente; **STATUSUL scris ca politică generală** („Pošiljke obično dostavljamo…" = pluralul generic + marcaj de obișnuință din `_POLICY_ADV`, vetat de orice referință personală din `_REF_PERSONALA`) — aceeași asimetrie pe care `term_excused` o rezolvă la termene |
 | canal public | `public_pii`, `public_pii_leaks`, `redact_public_pii` | scoate din draftul public telefoanele clientului și numerele de comandă; se cheamă pe textul final, deci și pe drafturile regenerate |
 | registru de politețe | `register_rule`, `informal_register_hits`, `ctx_lang` | pl/hu **nu** se adresează la plural; draftul informal se REGENEREAZĂ (dacă și regenerarea iese informală, se păstrează originalul — nu ciuntim) |
 | emoji | `emoji_allowed`, `strip_emoji` | fără emoji pe escaladare / ton negativ |
@@ -174,6 +174,24 @@ Toate rulează **după** generare, pe textul FINAL, și pe **toate** limbile în
 | callback | tag `de-sunat` + `add_private_note` | numărul clientului stă în nota INTERNĂ, nu în draftul public |
 | catalogul reclamei | `cs_photo.ad_block(..., store_hint=…)` | prețul/stocul vin de pe brandul REAL al tichetului, cu prag de încredere |
 | incidente | `load_incidents`, `incident_facts`, `incident_block`, `unbacked_claims` | vezi mai jos |
+| **starea căutării** | `lookup_orders(..., raport=)`, `bloc_fara_comenzi`, `FARA_LOOKUP_BLK` / `CAUTAT_ZERO_BLK` / `LOOKUP_ESUAT_BLK` | **TREI** stări, nu două: «n-am căutat» / «am căutat și nu există» / «căutarea A EȘUAT». Doar a doua dă voie draftului să spună că nu găsim comanda; a treia interzice orice afirmație despre existența ei. Vezi mai jos |
+| **comandă cu date, nu doar rând** | `has_order_data`, `_rand_are_date` | un rând gol (`status=?, curier=?, AWB=—, produse=`) **nu** mai trece drept „avem comanda" — altfel dezarma toate gărzile de mai sus, fiindcă `fabricari` rulează doar sub `if not has_orders` |
+
+### Starea căutării de comenzi: absența DATELOR ≠ absența COMENZII
+`lookup_orders` întorcea `[]` **tăcut** pe fiecare mod de eșec — `pg8000` lipsă, `DATABASE_URL_METRICS`
+gol, baza inaccesibilă, `profitability.db` absent — adică exact ce întoarce și o căutare reușită fără
+rezultate. Steagul „am căutat" se ridica **înainte** de apel, deci o cădere de infrastructură ajungea
+la client ca afirmație sigură: *„nu aveți nicio comandă la noi"*.
+
+Acum `lookup_orders` primește un `raport` (`{"ok", "motive", "fara_status"}`), iar `ok=True` se dă
+**numai** dacă o sursă care putea răspunde chiar a fost interogată cap-coadă (metrics pentru
+email/telefon/nr-comandă, `profit_orders` pentru AWB — dacă mesajul are un AWB și acea sursă lipsește,
+căutarea NU e completă nici când metrics a răspuns). Eșecul e **vizibil**: avertisment pe `stderr` per
+tichet + două linii în raportul de final (`CĂUTARE EȘUATĂ`, `FĂRĂ STATUS`).
+
+Măsurat pe 162 de tichete reale, cu baza de comenzi picată (simulare de incident): **83 (51,2%)**
+aveau în context „AM CĂUTAT ȘI NU EXISTĂ" — toate false. După reparație: **0**; aceleași 83 primesc
+blocul de eșec, care interzice explicit orice afirmație despre comandă.
 
 ### Registrul de incidente (`CS_INCIDENTS_FILE`)
 Când avem o problemă reală de la noi (lot greșit, întârziere de depozit), draftul **nu deflectează** —
@@ -192,6 +210,86 @@ recunoaște deschis și spune ce facem. Faptele vin dintr-un fișier, nu din LLM
   iar draftul recunoaște incidentul **fără** să confirme că persoana din comentariu e client
   (magazinul vine DOAR din pagină sau din domeniul cutiei, **niciodată** din comenzile persoanei);
 - doar faptele din registru sunt scutite de anti-halucinare (`incident_backed` / `unbacked_claims`).
+
+### Acoperirea PIEȚELOR STRĂINE — ce componentă de context există și ce nu (16-sep-2026)
+Pe BG/SK/HU/PL **nu există CS uman** (măsurat pe oglindă: 316 din 321 de tichete fără niciun răspuns),
+deci alternativa la un draft e TĂCEREA. Tabelul de mai jos e verificarea, componentă cu componentă, a
+faptului că motorul chiar are din ce construi un răspuns acolo. Se completează când se adaugă o piață.
+
+| Componentă (unde e în cod) | BG · Duppo BG | BG · Bonhaus BG | SK · Bonhaus SK | HU · Bonhaus HU | PL · Bonhaus PL |
+|---|---|---|---|---|---|
+| magazin din pagina FB (`PAGE_STORE`) | ✅ | ✅ | ✅ *corectat* | ✅ *corectat* | ✅ |
+| limbă scrisă de client (`detect_lang`) | ✅ chirilic→bg | ✅ | ✅ `ľĺŕôä` | ✅ `őű`+lexic | ✅ `łąężśźń` |
+| limba pieței ca plasă (`STORE_LANG`) | ✅ bg | ✅ bg | ✅ sk | ✅ hu | ✅ pl |
+| țara / planul de numerotație (`STORE_CC`) | ✅ BG | ✅ BG | ✅ SK | ✅ HU | ✅ PL |
+| site unde trimitem clientul (`STORE_URL`) | ✅ duppo.bg | ✅ bonhaus.bg | ✅ bonhaus.sk | ✅ bonhaus.hu | ✅ bonhaus.pl |
+| telefon LOCAL (`STORE_PHONE`) | ⛔ nu publică | ✅ 088… | ⛔ nu publică | ⛔ nu publică | ⛔ *serie RO, scos* |
+| **catalog: produs + preț** | ✅ 187/189 · preț 187 | ✅ 37/38 · preț 17 | ✅ 23/24 · preț 21 | ✅ 19/20 · preț 18 | ✅ 33/36 · preț 16 |
+| moneda pieței (`brand_currency`) | ✅ EUR | ✅ EUR | ✅ EUR | ✅ Ft | ✅ zł |
+| șablon de siguranță (`SAFE_GREET`/`SAFE_BODY`) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| semnătură în limba pieței (`SIGN_OFF`) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| registru de politețe (`REGISTER`) | ✅ Вие | ✅ | ✅ vykanie | ✅ Ön + p. III sg | ✅ Pan/Pani + p. III sg |
+| cererea identificatorului (`ASK_IDENT`) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| brand din cutia de e-mail (`EMAIL_BRAND`) | ✅ duppo.eu/.bg | ✅ bonhaus.bg | ✅ bonhaus.sk | ✅ bonhaus.hu | ✅ bonhaus.pl |
+| brand din prefixul comenzii (`ORDER_PFX`) | ✅ DUPBG | ✅ BONBG | ✅ SK *adăugat* | ✅ HU *adăugat* | ✅ PL |
+| registru de incidente cu `topic` pe limba pieței | ✅ bg (145 cmd) | ⬜ n-avem incident | ⬜ | ⬜ | ⬜ |
+
+**⛔ „nu publică telefon" e VERIFICAT, nu presupus** (16-sep-2026): `tel:` lipsește și de pe pagina
+principală, și de pe `/pages/contact` la bonhaus.sk, bonhaus.hu și duppo.bg; bonhaus.pl publică
+`tel:0376300646`, serie ROMÂNEASCĂ, adică neformabilă din Polonia. Acolo `tel_block()` spune corect
+„magazinul NU are linie telefonică" și deflectează în privat + pe site.
+
+**⚠️ Rămase neverificate (de semnalat ownerului, NU de inventat):** `nocturna.bg` întoarce **403** la
+orice UA, deci nu se poate confirma că servește un magazin → NU intră în `STORE_URL` (Nocturna BG are
+totuși rută: telefon BG). `bonhaus.hr`, `sk.duppo.eu` și `duppo.hu` nu rezolvă DNS. Bonhaus CZ rămâne
+EXCLUS prin decizie de owner (`AI_SKIP_STORES`) deși are 386 de tichete în oglindă cu ~89% tăcere.
+
+**MĂSURAT pe cele 307 tichete străine REALE din oglindă (16-sep-2026), context construit cap-la-cap:**
+
+| | înainte | după |
+|---|--:|--:|
+| tichete cu un FAPT de produs în context | 252 (82,1%) | **299 (97,4%)** |
+| tichete cu un PREȚ real în context | **0 (0,0%)** | **259 (84,4%)** |
+| — din care preț al produsului EXACT din catalog | 0 | 125 |
+| — din care preț UNIC pe magazin (Duppo BG) | 0 | 134 |
+
+„Înainte" a fost rulat pe codul original, cu `metrics` DISPONIBIL (altfel măsurătoarea ar fi acuzat
+warehouse-ul pe nedrept). Precizia: din 33 de perechi DISTINCTE reclamă→catalog, 32 sunt corecte;
+una leagă un „set de 5 lavete" de o variantă de 10 bucăți, deci prețul poate fi al altui pachet —
+vezi riscul de la §*Catalogul pe piețele străine*.
+
+### Catalogul pe piețele străine — de ce e un INSTANTANEU Shopify, nu warehouse-ul
+`catalog_match` întreabă întâi warehouse-ul `metrics`, apoi (dacă nu iese nimic) **instantaneul local**
+din `cs-photo/cs_catalog.sqlite`. Motivul e măsurat, nu stilistic:
+- în `metrics` **nu există niciun brand „Duppo"**, iar „Bonhaus PL" există ca rând de brand cu **0
+  produse** — un rând de brand fără sincronizare de produse nu dă niciun preț, și așa e de luni de zile;
+- Shopify **live la fiecare tichet** ar încălca regula CS „lookup-urile CS nu lovesc rația Shopify" →
+  instantaneul = UN pull per magazin (`uv run ../cs-photo/cs_photo.py --catalog-build`), apoi zero HTTP;
+- prețul și moneda sunt **ale pieței** (`shop.currencyCode`: EUR/Ft/zł/Kč/MDL), niciodată în lei;
+- **stocul se dă doar dacă e POZITIV** — pe Duppo BG toate cele 113 produse active au
+  `inventoryQuantity` negativ (magazin care nu urmărește stocul), iar „(stoc −17)" ar fi o cifră falsă;
+- unde TOT catalogul are un singur preț (Duppo BG: 113 produse × 12,00 EUR) se scrie în context ca
+  **preț unic pe magazin** — răspunsul la „cât costă?" e cert chiar dacă nu știm exact care model e în reclamă.
+- reîmprospătare: `--catalog-build` (toate) sau `--catalog-build "Bonhaus PL"`; `--catalog-list` arată
+  vechimea fiecărui instantaneu.
+- ⚠️ **risc rămas, măsurat (1 din 33):** pragul cere ≥2 cuvinte potrivite + un cuvânt de OBIECT, dar NU
+  compară CANTITATEA din set — „sada 5 kusov" de lavete a prins varianta de 10 bucăți, al cărei preț e
+  altul. O gardă pe numere a fost încercată și RESPINSĂ: copy-ul din `og:url` vine trunchiat
+  („комплект от 1…" în loc de „11"), deci regula ar fi tăiat potriviri CORECTE. Titlul exact rămâne
+  în context, deci răspunsul poate numi produsul — dar cifra poate fi a altui pachet.
+
+**Cuvintele-cheie se iau din DOUĂ surse, nu din una.** Pe un comentariu străin contextul e în două
+limbi: descrierea reclamei o scrie modelul în ROMÂNĂ, iar copy-ul postării și titlul din catalog sunt
+în limba pieței. Lipite într-un singur text, plafonul de 6 cuvinte-cheie se umplea integral cu partea
+românească — măsurat pe Bonhaus BG, reclama „електрическа кутия за храна 3 в 1" NU prindea produsul cu
+ACELAȘI nume din catalog. De aceea `catalog_match(..., text2=copy)` caută separat și pe copy.
+Tot de aici vine și plierea `_FOLD_SRC`/`_FOLD_DST`: `translate()` din SQL folosea DOAR diacriticele
+românești, deci titlul și cuvântul-cheie se comparau în alfabete diferite pe sk/cz/pl/hu.
+
+**Pe canal PRIVAT (DM/e-mail) nu există postare**, deci `catalog_block(store, textul clientului)` caută
+în catalog după ce scrie CLIENTUL. Activ **doar pe piețele străine** (`STORE_CC != RO`): acolo
+alternativa e tăcerea și câștigul e măsurat, pe cele ~250.000 de tichete românești un bloc nou de
+context ar fi o schimbare nemăsurată.
 
 ### Unde stau datele reale (niciunul în git — repo public)
 | Ce | Unde |

@@ -31,6 +31,7 @@ Utilizare:
 """
 import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -160,13 +161,32 @@ def diff_staged(repo):
 
 
 def linii_fisiere(cai):
-    out = []
+    # ⚠️ Un DIRECTOR dat ca argument facea `open()` sa arunce IsADirectoryError, prins de `except`
+    # si SARIT TACUT — deci `--paths <director>` scana ZERO fisiere si iesea cu 0 = „curat".
+    # Masurat 16-sep-2026: verificarea de dinainte de un commit in repo-ul PUBLIC primea doua
+    # directoare si n-a citit nicio linie din ele; separat, pe 143 de fisiere dintr-un container
+    # a dat „curat" desi contineau 15 numere de comanda reale. O garda care tace e mai rea decat
+    # niciuna. Acum: directoarele se parcurg recursiv, iar ce nu se poate citi se RAPORTEAZA.
+    out, nereusite = [], []
+    fisiere = []
     for c in cai:
+        p = pathlib.Path(c)
+        if p.is_dir():
+            fisiere += [q for q in sorted(p.rglob("*")) if q.is_file()]
+        elif p.exists():
+            fisiere.append(p)
+        else:
+            nereusite.append("%s: nu exista" % c)
+    for q in fisiere:
         try:
-            for l in open(c, encoding="utf-8", errors="replace"):
-                out.append((c, l.rstrip("\n")))
-        except (OSError, UnicodeError):
-            pass
+            with open(q, encoding="utf-8", errors="replace") as f:
+                for l in f:
+                    out.append((str(q), l.rstrip("\n")))
+        except (OSError, UnicodeError) as e:
+            nereusite.append("%s: %s" % (q, e.__class__.__name__))
+    if nereusite:
+        sys.stderr.write("⚠️ pii_guard NU a putut citi %d cale/cai — NU sunt verificate:\n  %s\n"
+                         % (len(nereusite), "\n  ".join(nereusite[:20])))
     return out
 
 
