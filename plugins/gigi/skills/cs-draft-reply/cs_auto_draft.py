@@ -4311,15 +4311,409 @@ def run_cs_action(cmd_args, apply=False, agent=None):
         return 1, "(eroare cs-actions: %s)" % e
 
 
+TOKENURI_META = ("META_PAGES_TOKEN", "META_SYSTEM_TOKEN_3", "META_SYSTEM_TOKEN",
+                 "META_SYSTEM_TOKEN_2", "META_SYSTEM_TOKEN_4", "META_USER_TOKEN")
+
+_PAGINI_CACHE = {}
+_PAGINI_NUME = {}
+
+
+def meta_pagini(refresh=False):
+    """{page_id: token_de_pagină} pentru TOATE paginile system-userului — UN apel `/me/accounts`
+    per token de sistem (32 de pagini azi, fără paginare), cache pe proces.
+
+    De ce nu `/{page-id}?fields=access_token`, ce făcea `fb_page_token`: ăla e un apel Graph PER
+    PAGINĂ, iar cota Meta e partajată cu producția și stă cronic la 100-230%. Aici plătim 1 apel
+    pentru toate paginile, o singură dată pe rulare.
+
+    Pagina care NU apare aici nu e în system user — pentru ea calea Graph pur și simplu NU
+    EXISTĂ, iar selectorul cade pe Richpanel și o LOGHEAZĂ. Așa se vede, din raport, când cineva
+    scoate o pagină din app-ul „Api export": măsurat 16-sep-2026, 4 din 25 de tichete FB deschise
+    sunt pe pagini care nu-s în token.
+    """
+    if _PAGINI_CACHE and not refresh:
+        return _PAGINI_CACHE
+    for key in TOKENURI_META:
+        sys_tok = secret(key)
+        if not sys_tok or sys_tok.startswith("REVOKED"):
+            continue
+        url = ("https://graph.facebook.com/v19.0/me/accounts?fields=id,name,access_token&limit=100"
+               "&access_token=" + urllib.parse.quote(sys_tok))
+        for _ in range(5):        # paginare: azi intră toate într-o pagină, dar nu presupunem
+            try:
+                r = json.loads(urllib.request.urlopen(url, timeout=30).read())
+            except Exception:
+                break
+            for p in (r.get("data") or []):
+                if p.get("id") and p.get("access_token") and p["id"] not in _PAGINI_CACHE:
+                    _PAGINI_CACHE[p["id"]] = p["access_token"]
+                    _PAGINI_NUME[p["id"]] = p.get("name") or ""
+            url = (r.get("paging") or {}).get("next") or ""
+            if not url:
+                break
+    return _PAGINI_CACHE
+
+
+def _graph_post(path, token, **campuri):
+    """POST pe Graph. Întoarce (ok, id_sau_motiv, incert).
+
+    `incert=True` = apelul a picat pe REȚEA (timeout / conexiune ruptă), deci NU știm dacă
+    mesajul a plecat sau nu. Distincția nu e cosmetică: pe „eșec SIGUR" (HTTP 4xx cu payload de
+    eroare de la Meta) avem voie să cădem pe Richpanel; pe „incert" NU avem — o retrimitere peste
+    un mesaj deja livrat înseamnă că îi răspundem aceluiași om de două ori.
+    """
+    data = urllib.parse.urlencode(dict(campuri, access_token=token)).encode()
+    req = urllib.request.Request("https://graph.facebook.com/v19.0/" + path, data=data, method="POST")
+    try:
+        r = json.loads(urllib.request.urlopen(req, timeout=30).read())
+    except urllib.error.HTTPError as e:
+        try:
+            er = (json.loads(e.read().decode() or "{}").get("error") or {})
+            return False, "%s (#%s)" % ((er.get("message") or "")[:150], er.get("code")), False
+        except Exception:
+            return False, "HTTP %s" % e.code, False
+    except Exception as e:
+        return False, "rețea: %s" % str(e)[:110], True
+    if isinstance(r, dict) and (r.get("id") or r.get("message_id") or r.get("success") is True):
+        return True, str(r.get("id") or r.get("message_id") or "ok"), False
+    return False, json.dumps(r)[:150], False
+
+
+def candidati_comentariu(comment_id):
+    """Candidații de id de comentariu dintr-un id de tichet Richpanel.
+
+    Forma id-ului de tichet FB e `pageid_postid_postid_commentid` (măsurat: 25 din 25 de tichete
+    `facebook_feed_comment` au fix 4 segmente), iar Graph vrea `postid_commentid` sau doar
+    `commentid`. Lista asta era scrisă de mână în `fb_hide_comment`; e mutată aici ca ASCUNDEREA
+    și RĂSPUNSUL să nu ajungă vreodată să vorbească despre comentarii diferite.
+    Măsurat pe tichete reale: 17 din 17 adresabile nimeresc pe PRIMUL candidat.
+    """
+    segs = str(comment_id or "").split("_")
+    c = []
+    if len(segs) >= 2:
+        c += [segs[-2] + "_" + segs[-1], segs[-1]]
+    c.append(str(comment_id or ""))
+    return [x for i, x in enumerate(c) if x and x not in c[:i]]
+
+
+def graph_public_dict(comment_id, page_id, message, ig=False):
+    """RĂSPUNS PUBLIC sub comentariul clientului, în forma de dict pe care o consumă selectorul.
+
+    Trimiterea propriu-zisă e UNA singură — `fb_public_reply` (definită mai jos): ea citește
+    ÎNTÂI prin GET care candidat de comment-id există și ce declară Graph (`can_comment`), și abia
+    apoi POSTEAZĂ o singură dată. O buclă care POSTEAZĂ pe toți candidații e inofensivă la
+    ascundere (`is_hidden=true` de două ori e tot ascuns), dar nu și la un mesaj către client: un
+    răspuns pierdut la citire ar însemna mesaj trimis A DOUA OARĂ. Aici se decide doar CINE ajunge
+    la ea.
+
+    Rute DIFERITE, măsurate pe v21.0: FB `POST /{comment-id}/comments`, IG
+    `POST /{ig-comment-id}/replies` (pe IG `/comments` dă 400 „does not support this operation").
+    Calea FB e DOVEDITĂ live (16-sep-2026) pe o postare NEPUBLICATĂ a noastră, cu un comentariu
+    al nostru, șters după — niciun client atins.
+    ⚠️ IG rămâne NEDOVEDIT: 0 din 3 id-uri de comentarii IG din tichete reale sunt adresabile cu
+    tokenul nostru; acolo selectorul cade pe Richpanel și o raportează ca atare.
+
+    `incert` = nu știm dacă a plecat (rețea ruptă / timeout). Atunci NU se cade pe Richpanel.
+    """
+    if not (message or "").strip():
+        return {"ok": False, "incert": False, "id": "", "motiv": "mesaj gol"}
+    r = fb_public_reply(comment_id, page_id, message, ig=ig)
+    return {"ok": bool(r.ok), "incert": bool(getattr(r, "incert", False)),
+            "id": getattr(r, "id", "") or "", "motiv": getattr(r, "motiv", "") or str(r)}
+
+
+def ig_public_reply(comment_id, page_id, message):
+    """Răspuns public la un comentariu INSTAGRAM (`POST /{ig-comment-id}/replies`).
+
+    E intrarea NUMITĂ pentru IG, ca să se vadă în cod că ruta e alta decât pe Facebook; trimiterea
+    o face tot `fb_public_reply`, care rutează după `ig=True`.
+
+    ⚠️ NEDOVEDIT în producție, și o spun aici ca să nu se creadă altceva: din id-urile de
+    comentarii IG din tichete REALE, 0 din 3 sunt adresabile cu tokenul nostru (16-sep-2026, doar
+    CITIRE) — par emise pentru integrarea Richpanel. Până se schimbă asta, selectorul cade pe
+    Richpanel și o raportează ca atare."""
+    return graph_public_dict(comment_id, page_id, message, ig=True)
+
+
+_PSID_STRIKES = {}
+
+
+def psid_adresabil(psid, page_id):
+    """PSID-ul clientului (`from.id` din tichet) e adresabil de app-ul NOSTRU? O CITIRE ieftină.
+
+    PSID-urile sunt SCOPED PER APP. Cele din tichetele Richpanel sunt emise pentru app-ul LOR,
+    nu pentru „Api export". Măsurat 16-sep-2026, doar cu GET (nu s-a trimis nimic nimănui):
+    0 din 25 de PSID-uri de pe `facebook_message` se rezolvă cu tokenul nostru de pagină.
+
+    De asta calea de DM prin Graph NU trimite orbește: întâi întreabă dacă destinatarul există
+    pentru noi. Fără verificarea asta, un Send API pe un id străin ori eșuează, ori — mult mai rău
+    — nimerește alt om. După 3 eșecuri pe aceeași pagină nu mai întrebăm deloc (cotă Meta).
+    """
+    pg = str(page_id or "")
+    if not (psid and pg):
+        return False
+    if _PSID_STRIKES.get(pg, 0) >= 3:
+        return False
+    tok = meta_pagini().get(pg) or fb_page_token(pg)
+    if not tok:
+        return False
+    try:
+        u = "https://graph.facebook.com/v19.0/%s?fields=id&access_token=%s" % (
+            urllib.parse.quote(str(psid)), urllib.parse.quote(tok))
+        r = json.loads(urllib.request.urlopen(u, timeout=30).read())
+        if isinstance(r, dict) and r.get("id"):
+            return True
+    except Exception:
+        pass
+    _PSID_STRIKES[pg] = _PSID_STRIKES.get(pg, 0) + 1
+    return False
+
+
+def fb_send_dm(page_id, psid, message):
+    """DM prin Send API (POST /{page-id}/messages), DOAR către un PSID verificat ca al nostru.
+    `messaging_type=RESPONSE` = răspuns la un mesaj al clientului (fereastra de 24h)."""
+    if not (message or "").strip():
+        return {"ok": False, "incert": False, "id": "", "motiv": "mesaj gol"}
+    if not psid_adresabil(psid, page_id):
+        return {"ok": False, "incert": False, "id": "",
+                "motiv": "PSID neadresabil de app-ul nostru (id emis pentru altă integrare)"}
+    tok = meta_pagini().get(str(page_id or "")) or fb_page_token(page_id)
+    ok, info, incert = _graph_post("%s/messages" % urllib.parse.quote(str(page_id)), tok,
+                                   recipient=json.dumps({"id": str(psid)}),
+                                   messaging_type="RESPONSE",
+                                   message=json.dumps({"text": message}))
+    return {"ok": ok, "incert": incert, "id": info if ok else "", "motiv": info}
+
+
+# ── SELECTORUL DE CALE ────────────────────────────────────────────────────────────────────
+# Canal -> unde iese răspunsul. FB/IG merg DIRECT prin Meta Graph (fără Richpanel); emailul are
+# o singură cale posibilă, Richpanel, fiindcă pe Gmail avem doar `gmail.readonly` (citire).
+CANAL_GRAPH_PUBLIC = {"facebook_feed_comment": "fb", "instagram_comment": "ig"}
+CANAL_GRAPH_DM = {"facebook_message": "fb", "messenger": "fb",
+                  "instagram_message": "ig", "instagram_dm": "ig"}
+CANAL_DOAR_RICHPANEL = ("email", "email_from_widget", "chat", "sms", "whatsapp")
+TAG_INCERT = "ai-trimitere-incerta"
+
+
+def alege_cale(canal, page_id="", cid="", psid="", cale="auto"):
+    """CE cale de ieșire are tichetul ăsta — și DE CE. NU trimite nimic, doar decide.
+
+    Întoarce (cale, motiv), cale ∈ {"graph_public", "graph_dm", "richpanel"}.
+    `cale="graph"` / `"richpanel"` forțează una singură (probe, depanare); `"auto"` = implicit.
+    """
+    ch = (canal or "").strip().lower()
+    if cale == "richpanel":
+        return "richpanel", "forțat prin --cale richpanel"
+    if ch in CANAL_DOAR_RICHPANEL:
+        # Nu e o preferință, e singura cale: pe Gmail avem doar gmail.readonly.
+        return "richpanel", "canal %s — Richpanel e singura cale de trimitere" % (ch or "?")
+    if ch in CANAL_GRAPH_PUBLIC:
+        if not page_id:
+            return "richpanel", "comentariu public fără page_id (to.id lipsă) — Graph n-are pagină"
+        if str(page_id) not in meta_pagini():
+            return "richpanel", "pagina %s NU e în system user — calea Graph nu există pentru ea" % page_id
+        return "graph_public", "comentariu public %s pe pagina %s (%s)" % (
+            CANAL_GRAPH_PUBLIC[ch], _PAGINI_NUME.get(str(page_id)) or "?", page_id)
+    if ch in CANAL_GRAPH_DM:
+        if not page_id:
+            # Măsurat: 25 din 25 de tichete `messenger` n-au DELOC câmpul `to` — deci nici pagină,
+            # deci nici token, deci nicio cale Graph. `facebook_message` are page_id la 25 din 25.
+            return "richpanel", "DM fără page_id (tichetul %s n-are câmpul `to`)" % (ch or "?")
+        if str(page_id) not in meta_pagini():
+            return "richpanel", "pagina %s NU e în system user — calea Graph nu există pentru ea" % page_id
+        if not psid:
+            return "richpanel", "DM fără PSID (from.id lipsă)"
+        return "graph_dm", "DM %s pe pagina %s (%s)" % (
+            CANAL_GRAPH_DM[ch], _PAGINI_NUME.get(str(page_id)) or "?", page_id)
+    if cale == "graph":
+        return "richpanel", "canal necunoscut (%s) — Graph nu știe unde să scrie" % (ch or "?")
+    return "richpanel", "canal necunoscut (%s) — cade pe Richpanel, ca înainte" % (ch or "?")
+
+
+def marcheaza_richpanel(mcp, cid, text, cale, gid, inchide=True):
+    """Tichetul a primit răspuns PE GRAPH — Richpanel n-are de unde să ȘTIE asta.
+
+    Fără pasul ăsta tichetul rămâne OPEN, intră în lotul următor și îi scriem aceluiași om A DOUA
+    OARĂ. E capcana centrală a întregii schimbări, nu un detaliu de raportare.
+
+    Ordinea contează, de la cea mai ieftină plasă la cea mai scumpă:
+      1. TAG   — se vede în coadă și oprește redraftarea prin `--skip-tagged`;
+      2. NOTĂ  — urma pentru agent: textul EXACT plecat + calea + id-ul Graph (Richpanel nu are
+                 mesajul, deci fără notă agentul vede un tichet închis fără răspuns);
+      3. CLOSED.
+    Întoarce dict cu ce a reușit, ca să se poată raporta onest o închidere eșuată.
+    """
+    rez = {"tag": False, "nota": False, "inchis": False}
+    try:
+        add_tags(mcp, cid, [t for t in (AI_TAG, "ai-sent", "ai-sent-graph") if t])
+        rez["tag"] = True
+    except Exception:
+        pass
+    nota = ("🤖 RĂSPUNS TRIMIS PRIN META GRAPH (%s), nu prin Richpanel — de asta nu apare ca mesaj\n"
+            "în fir. Graph id: %s\n\n--- text trimis ---\n%s" % (cale, gid or "?", text))
+    r = mcp.call("add_private_note", {"conversation_id": cid, "body": nota})
+    rez["nota"] = not (isinstance(r, dict) and r.get("_error"))
+    if inchide:
+        c = mcp.call("update_conversation_status", {"conversation_id": cid, "status": "CLOSED"})
+        rez["inchis"] = not (isinstance(c, dict) and c.get("_error"))
+    return rez
+
+
+def trimite_raspuns(mcp, canal, text, cid, page_id="", psid="", cale="auto",
+                    tags_curente=(), inchide=True, conv_no=None, magazin=""):
+    """SELECTORUL: alege calea de ieșire după CANAL, trimite, și întoarce un rezultat VERIFICABIL.
+
+    Gărzile (trimitere_permisa / trimite_pe_piata / not is_esc) stau ÎNAINTEA lui — funcția asta
+    nu le cunoaște și nu le poate slăbi.
+
+    Întoarce {"cale", "ok", "incert", "motiv", "id", "cazut", "marcaj"}:
+      cale   — calea chiar folosită ("graph_public" / "graph_dm" / "richpanel")
+      cazut  — Graph a eșuat SIGUR și am căzut pe Richpanel (se raportează, nu se ascunde)
+      incert — nu știm dacă a plecat: NU se cade pe Richpanel (ar fi al doilea răspuns), NU se
+               închide tichetul; se pune tag + notă ca să-l verifice un om.
+    """
+    text = (text or "").strip()
+    if not text or not cid:
+        return {"cale": "-", "ok": False, "incert": False, "cazut": False, "id": "",
+                "motiv": "fără draft sau fără conversation_id", "marcaj": {}}
+    if TAG_INCERT in (tags_curente or ()):
+        # Plasa care închide gaura lăsată de „incert": tichetul a rămas deschis fiindcă nu știm
+        # dacă i-a plecat un răspuns. A-l retrimite automat e exact dublarea de care ne ferim.
+        return {"cale": "-", "ok": False, "incert": True, "cazut": False, "id": "",
+                "motiv": "tichet marcat %s la o rulare anterioară — îl preia un om" % TAG_INCERT,
+                "marcaj": {}}
+
+    aleasa, motiv = alege_cale(canal, page_id, cid, psid, cale)
+    rez = {"cale": aleasa, "ok": False, "incert": False, "cazut": False, "id": "",
+           "motiv": motiv, "marcaj": {}, "stare": ""}
+
+    if aleasa != "richpanel":
+        plat = (CANAL_GRAPH_PUBLIC.get((canal or "").lower())
+                or CANAL_GRAPH_DM.get((canal or "").lower()) or "fb")
+        if aleasa == "graph_public":
+            def _trimite_graph():
+                g = graph_public_dict(cid, page_id, text, ig=(plat == "ig"))
+                if g["incert"]:
+                    # NU „eșec": un timeout nu e dovadă că mesajul N-A plecat. Ridicat ca excepție,
+                    # `trimite_cu_jurnal` îl trece pe starea `necunoscut`, care BLOCHEAZĂ
+                    # retrimiterea până se uită un om (`--jurnal` / `--jurnal-elibereaza`).
+                    raise RuntimeError("INCERT pe Graph: %s" % g["motiv"])
+                return (g["ok"], g["id"], g["motiv"])
+            stare, gid, det = trimite_cu_jurnal(
+                "graph", cid, _trimite_graph,
+                verifica=lambda o: graph_verifica_comentariu(o, page_id, cid),
+                tichet=(conv_no if conv_no is not None else ""), tichet_id=cid,
+                magazin=magazin, canal=canal, text=text)
+        else:
+            def _trimite_dm():
+                g = fb_send_dm(page_id, psid, text)
+                if g["incert"]:
+                    raise RuntimeError("INCERT pe Graph (DM): %s" % g["motiv"])
+                return (g["ok"], g["id"], g["motiv"])
+            stare, gid, det = trimite_cu_jurnal(
+                "graph_dm", psid or cid, _trimite_dm,
+                tichet=(conv_no if conv_no is not None else ""), tichet_id=cid,
+                magazin=magazin, canal=canal, text=text)
+        rez["stare"] = stare
+        if stare in ("trimis", "neconfirmat", "duplicat"):
+            rez.update(ok=(stare != "duplicat"), id=gid,
+                       motiv="%s → %s%s" % (motiv, det, "" if stare == "trimis" else " [%s]" % stare))
+            # Richpanel NU știe că am răspuns pe Graph: fără marcaj tichetul rămâne OPEN cu
+            # `last_message_sender_type = customer` — exact criteriul de listare — deci lotul
+            # următor l-ar alege din nou și i-am scrie omului a doua oară.
+            rez["marcaj"] = marcheaza_richpanel(mcp, cid, text, aleasa, gid, inchide=inchide)
+            return rez
+        if stare == "necunoscut":
+            rez.update(incert=True,
+                       motiv="Graph INCERT (%s) — NU cad pe Richpanel, ar fi al doilea răspuns" % det)
+            try:
+                add_tags(mcp, cid, [t for t in (AI_TAG, TAG_INCERT) if t])
+            except Exception:
+                pass
+            mcp.call("add_private_note", {"conversation_id": cid, "body":
+                     "⚠️ TRIMITERE INCERTĂ pe Meta Graph (%s): %s\nNU știm dacă răspunsul a plecat."
+                     " Tichetul rămâne DESCHIS și NU se mai retrimite automat — verifică pe pagină"
+                     " și răspunde manual dacă nu e nimic acolo.\n\n--- text ---\n%s"
+                     % (aleasa, det, text)})
+            return rez
+        if stare == "fara_jurnal":
+            # Fără urmă nu există idempotență → nu trimitem pe NICIO cale (nici pe cea de rezervă).
+            rez["motiv"] = "jurnal inaccesibil (%s) — NU trimit pe nicio cale" % det
+            return rez
+        if cale == "graph":
+            rez["motiv"] = "Graph a eșuat (%s) și --cale graph interzice căderea pe Richpanel" % det
+            return rez
+        # eșec SIGUR pe Graph (API-ul a RĂSPUNS și a refuzat) → cădem pe Richpanel, dar o SPUNEM
+        rez["cazut"] = True
+        rez["motiv"] = "Graph a eșuat (%s) → am căzut pe Richpanel" % det
+        aleasa = rez["cale"] = "richpanel"
+
+    def _trimite_rp():
+        r = mcp.call("send_message", {"conversation_id": cid, "body": text})
+        return (not (isinstance(r, dict) and r.get("_error")), (r or {}).get("id") or "",
+                json.dumps(r)[:200] if isinstance(r, dict) else str(r)[:200])
+    stare, rid, det = trimite_cu_jurnal(
+        "richpanel", cid, _trimite_rp,
+        verifica=((lambda _o, _n=conv_no: richpanel_confirma(mcp, _n)) if conv_no is not None else None),
+        tichet=(conv_no if conv_no is not None else ""), tichet_id=cid,
+        magazin=magazin, canal=canal, text=text)
+    rez["stare"] = stare
+    _pre = (rez["motiv"] + " | ") if rez["cazut"] else ""
+    if stare == "duplicat":
+        rez["motiv"] = _pre + "deja în jurnal (%s) — NU retrimit" % det
+        return rez
+    if stare == "fara_jurnal":
+        rez["motiv"] = _pre + "jurnal inaccesibil (%s) — NU trimit" % det
+        return rez
+    if stare == "necunoscut":
+        rez.update(incert=True, motiv=_pre + "trimitere de stare NECUNOSCUTĂ (%s) — o verifică un om" % det)
+        return rez
+    if stare == "esec":
+        rez["motiv"] = _pre + "send_message a eșuat: %s" % det
+        return rez
+    rez["ok"] = True
+    rez["id"] = rid
+    if stare == "neconfirmat":
+        rez["motiv"] = _pre + "⚠️ NECONFIRMAT (citirea înapoi nu vede răspunsul în fir)"
+    try:
+        add_tags(mcp, cid, [t for t in (AI_TAG, "ai-sent") if t])
+        rez["marcaj"]["tag"] = True
+    except Exception:
+        pass
+    if inchide:
+        c = mcp.call("update_conversation_status", {"conversation_id": cid, "status": "CLOSED"})
+        rez["marcaj"]["inchis"] = not (isinstance(c, dict) and c.get("_error"))
+    return rez
+
+
+def raport_trimitere(rez):
+    """O singură linie, citibilă în log, din care se vede CALEA, nu doar succesul."""
+    if rez.get("ok"):
+        m = rez.get("marcaj") or {}
+        coada = "" if m.get("inchis", True) else " ⚠️ tichetul NU s-a închis — verifică, altfel se redraftează"
+        return "📤 TRIMIS pe %s [%s]%s%s" % (
+            rez["cale"], rez.get("motiv") or "", " (CĂDERE de pe Graph)" if rez.get("cazut") else "", coada)
+    if rez.get("stare") == "duplicat":
+        return "⏭️  DEJA TRIMIS (jurnal) pe %s: %s — NU retrimit" % (rez["cale"], rez.get("motiv"))
+    if rez.get("incert"):
+        return "⚠️ INCERT pe %s: %s — tichet lăsat DESCHIS, marcat pentru om" % (rez["cale"], rez.get("motiv"))
+    return "⚠️ NETRIMIS (%s): %s — NU închid, NU marchez (se reia next run)" % (rez["cale"], rez.get("motiv"))
+
+
 _PAGE_TOK_CACHE = {}
 def fb_page_token(page_id):
-    """Token de PAGINĂ pt page_id. Încearcă pe rând tokenurile de sistem (un cont vede doar paginile lui).
+    """Token de PAGINĂ pt page_id. Întâi harta din `/me/accounts` (un apel pt toate paginile),
+    apoi, doar dacă pagina nu e acolo, vechea cale per-pagină.
     Întoarce token de pagină REAL doar dacă vreun token chiar are acces la pagină; altfel None (NU minți callerul)."""
     if not page_id:
         return None
     if page_id in _PAGE_TOK_CACHE:
         return _PAGE_TOK_CACHE[page_id]
-    for key in ("META_PAGES_TOKEN", "META_SYSTEM_TOKEN_3", "META_SYSTEM_TOKEN", "META_SYSTEM_TOKEN_2", "META_SYSTEM_TOKEN_4", "META_USER_TOKEN"):
+    din_harta = meta_pagini().get(str(page_id))
+    if din_harta:
+        _PAGE_TOK_CACHE[page_id] = din_harta
+        return din_harta
+    for key in TOKENURI_META:
         sys_tok = secret(key)
         if not sys_tok or sys_tok.startswith("REVOKED"):
             continue
@@ -4357,11 +4751,7 @@ def fb_hide_comment(comment_id, page_id, hide=True):
     tok = fb_page_token(page_id)
     if not tok:
         return "(fără token Meta în KB)"
-    segs = str(comment_id).split("_")
-    cands = []
-    if len(segs) >= 2:
-        cands += [segs[-2] + "_" + segs[-1], segs[-1]]
-    cands.append(str(comment_id))
+    cands = candidati_comentariu(comment_id)
     last = ""
     for c in cands:
         try:
@@ -4376,31 +4766,199 @@ def fb_hide_comment(comment_id, page_id, hide=True):
     return "⚠️ hide eșuat (scope token / format comment-id de validat): %s" % last[:200]
 
 
-def fb_private_reply(comment_id, page_id, message):
-    """Trimite un MESAJ PRIVAT (DM) ca răspuns la un comentariu public FB/IG (Graph private_replies).
-    Constrângeri FB: 1 singur private reply / comentariu, în fereastra de 7 zile, token pagină cu scope de mesagerie."""
+# ── TRIMITERE PRIN META GRAPH (public + privat) ───────────────────────────────────────────
+# Până aici motorul DOAR citea prin Graph (text de postare) și ASCUNDEA (`fb_hide_comment`).
+# Trimiterea propriu-zisă pe FB/IG se face DIRECT prin Graph, nu prin Richpanel — Richpanel
+# rămâne singura cale doar pe email (avem doar gmail.readonly). Gărzile NU se schimbă: cine are
+# voie să trimită se decide în continuare din `trimite_pe_piata`, `not is_esc` și
+# `trimitere_permisa` — funcțiile de aici sunt doar ȚEAVA, nu poarta.
+GRAPH_VER = "v21.0"
+GRAPH_URL = "https://graph.facebook.com/%s/" % GRAPH_VER
+
+
+class RezGraph(str):
+    """Rezultatul unei operații Graph — se PRINTEAZĂ ca text (call-site-urile vechi merg
+    neschimbat, inclusiv `res.startswith("✅")`), dar se poate și VERIFICA:
+    `.ok` (a reușit), `.id` (obiectul CREAT), `.motiv` (de ce nu), `.cod` (codul Graph),
+    și `bool(rez)` / `if not rez:`.
+
+    De ce nu un simplu șir: un apelant nu poate deosebi „⚠️ ... eșuat" de „✅ ..." decât
+    ghicind după emoji. O funcție care eșuează tăcut și raportează succes e mai rea decât una
+    care lipsește — aici succesul are OBLIGATORIU id-ul obiectului creat în spate."""
+
+    def __new__(cls, ok, text, obj_id=None, motiv="", cod=None, incert=False):
+        o = str.__new__(cls, text)
+        o.ok, o.id, o.motiv, o.cod = bool(ok), obj_id, motiv, cod
+        # `incert` = apelul a picat pe REȚEA (status 0), deci NU știm dacă Meta a primit cererea.
+        # Nu e totuna cu un 4xx: pe 4xx avem voie să reîncercăm pe altă cale, pe incert NU.
+        o.incert = bool(incert)
+        return o
+
+    def __bool__(self):
+        return self.ok
+
+
+def graph_http(url, data=None, method=None, ct=None):
+    """(status, json) de la Graph — CITEȘTE ȘI CORPUL ERORII.
+
+    `urllib.request.urlopen` aruncă `HTTPError` pe 4xx; prinsă într-un `except Exception` și
+    trecută prin `str(e)`, rămâne doar „HTTP Error 400: Bad Request" — adică exact motivul real
+    (scope lipsă, fereastră de mesagerie expirată, comment-id greșit) se PIERDE. Ăsta era
+    defectul lui `fb_private_reply`. Aici corpul erorii se citește mereu."""
+    heads = {"Content-Type": ct} if ct else ({"Content-Type": "application/x-www-form-urlencoded"} if data else {})
+    req = urllib.request.Request(url, data=data, method=method, headers=heads)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status, json.loads(r.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode("utf-8", "replace"))
+        except Exception:
+            return e.code, {"error": {"message": "răspuns necitibil de la Graph"}}
+    except Exception as e:
+        return 0, {"error": {"message": "%s: %s" % (type(e).__name__, e)}}
+
+
+def graph_get(path, tok, **p):
+    p["access_token"] = tok
+    return graph_http(GRAPH_URL + urllib.parse.quote(str(path)) + "?" + urllib.parse.urlencode(p))
+
+
+def graph_post(path, tok, **p):
+    p["access_token"] = tok
+    return graph_http(GRAPH_URL + urllib.parse.quote(str(path)), urllib.parse.urlencode(p).encode(), "POST")
+
+
+def graph_eroare(r):
+    """(mesaj, cod) din răspunsul Graph — mesajul REAL, nu „Bad Request"."""
+    e = ((r or {}).get("error") or {}) if isinstance(r, dict) else {}
+    msg = e.get("message") or (json.dumps(r, ensure_ascii=False) if r else "fără răspuns")
+    return msg[:220], e.get("code")
+
+
+def e_comentariu_ig(comment_id):
+    """Comentariu Instagram? Id-urile IG sunt un singur bloc de cifre (17-18), cele FB au `_`.
+    MĂSURAT: IG `17863348383678172` · FB `122129979633096190_1264796259088661` · tichet
+    Richpanel `pageid_postid_postid_commentid`."""
+    s = str(comment_id or "")
+    return s.isdigit() and len(s) >= 15
+
+
+def fb_comment_candidati(comment_id):
+    """Candidații de comment-id, ACEEAȘI construcție ca în `fb_hide_comment`: id-ul tichetului
+    Richpanel are 4 segmente, iar Graph vrea `postid_commentid`."""
+    # UN SINGUR loc: `candidati_comentariu` (mai sus) e folosit și de `fb_hide_comment`, ca
+    # ascunderea și răspunsul să nu ajungă vreodată să vorbească despre comentarii diferite.
+    return candidati_comentariu(comment_id)
+
+
+# `can_*` = ce declară Graph că se POATE face cu comentariul. Le citim ÎNAINTE de POST.
+CAPS_FB = "id,can_comment,can_hide,can_reply_privately"
+
+
+def fb_rezolva_comentariu(comment_id, tok, ig=None):
+    """(id_real, caps, motiv) — rezolvă prin GET care candidat EXISTĂ, înainte de orice POST.
+
+    Două motive, amândouă costisitoare altfel:
+      · nu consumăm cotă pe POST-uri oarbe pe id-uri inexistente (cota Meta e partajată cu
+        producția și stă cronic la 100-230%);
+      · o buclă care POSTEAZĂ pe candidați poate TRIMITE DE DOUĂ ORI la client dacă prima cerere
+        reușește la Meta dar răspunsul se pierde (timeout). La ascundere e inofensiv
+        (`is_hidden=true` de două ori e tot ascuns); la un mesaj către client, nu e.
+
+    Pe IG câmpurile `can_*` NU EXISTĂ și, cerute, fac întregul GET să pice — MĂSURAT:
+    „(#100) Tried accessing nonexisting field (can_comment)". Deci acolo cerem doar `id`."""
+    if ig is None:
+        ig = e_comentariu_ig(comment_id)
+    fields = "id" if ig else CAPS_FB
+    ultim = "necunoscut"
+    for c in fb_comment_candidati(comment_id):
+        st, r = graph_get(c, tok, fields=fields)
+        if st == 200 and isinstance(r, dict) and r.get("id"):
+            return r["id"], r, ""
+        ultim = graph_eroare(r)[0]
+    return None, {}, "comentariul nu a putut fi citit prin Graph (%s)" % ultim
+
+
+def fb_public_reply(comment_id, page_id, message, ig=None):
+    """RĂSPUNS PUBLIC sub un comentariu FB/IG, cu token de PAGINĂ. Întoarce `RezGraph`.
+
+    RUTE DIFERITE, nu una singură (MĂSURAT pe v21.0, pe obiecte ale noastre, șterse după):
+        FB  POST /{comment-id}/comments        → 200 {"id": "<id răspuns>"}
+        IG  POST /{ig-comment-id}/replies      → 200 {"id": "<id răspuns>"}
+        IG  POST /{ig-comment-id}/comments     → 400 „does not support this operation"
+    Adică o implementare FB-only ar fi eșuat pe TOT Instagramul, cu un mesaj de eroare care
+    seamănă leit cu „id greșit".
+
+    ⚠️ Public = vizibil pentru oricine. Cine are voie să ajungă aici se decide în afara funcției
+    (`trimite_pe_piata`, `not is_esc`, `trimitere_permisa`) — funcția nu-și dă singură voie."""
+    msg = (message or "").strip()
+    if not msg:
+        return RezGraph(False, "(fără mesaj de trimis)", motiv="mesaj gol")
     tok = fb_page_token(page_id)
     if not tok:
-        return "(fără token Meta în KB)"
-    if not (message or "").strip():
-        return "(fără mesaj de trimis)"
-    segs = str(comment_id).split("_")
-    cands = []
-    if len(segs) >= 2:
-        cands += [segs[-2] + "_" + segs[-1], segs[-1]]
-    cands.append(str(comment_id))
-    last = ""
-    for c in cands:
-        try:
-            u = "https://graph.facebook.com/v19.0/%s/private_replies" % urllib.parse.quote(c)
-            data = urllib.parse.urlencode({"message": message, "access_token": tok}).encode()
-            r = json.loads(urllib.request.urlopen(urllib.request.Request(u, data=data, method="POST"), timeout=30).read())
-            if isinstance(r, dict) and (r.get("id") or r.get("message_id")):
-                return "✅ mesaj privat (DM) trimis pentru comentariul %s" % c
-            last = json.dumps(r)
-        except Exception as e:
-            last = str(e)
-    return "⚠️ private reply eșuat (scope token / fereastră 7 zile / format comment-id de validat): %s" % last[:200]
+        return RezGraph(False, "(fără token de pagină Meta pentru %s)" % page_id,
+                        motiv="fără token de pagină")
+    if ig is None:
+        ig = e_comentariu_ig(comment_id)
+    cid, caps, motiv = fb_rezolva_comentariu(comment_id, tok, ig=ig)
+    if not cid:
+        return RezGraph(False, "⚠️ răspuns public NEtrimis: %s" % motiv, motiv=motiv)
+    if caps.get("can_comment") is False:      # doar FB declară asta; pe IG e None = necunoscut
+        m = "Graph declară can_comment=False (comentariu închis/șters) — nu mai încerc POST"
+        return RezGraph(False, "⚠️ răspuns public NEtrimis pentru %s: %s" % (cid, m), motiv=m)
+    st, r = graph_post("%s/%s" % (cid, "replies" if ig else "comments"), tok, message=msg)
+    new_id = r.get("id") if isinstance(r, dict) else None
+    if st == 200 and new_id:
+        return RezGraph(True, "✅ răspuns PUBLIC postat sub comentariul %s (id %s)" % (cid, new_id),
+                        obj_id=new_id)
+    m, cod = graph_eroare(r)
+    return RezGraph(False, "⚠️ răspuns public EȘUAT pentru %s: %s" % (cid, m), motiv=m, cod=cod, incert=(st == 0))
+
+
+def fb_private_reply(comment_id, page_id, message, ig=None):
+    """MESAJ PRIVAT (DM) ca răspuns la un comentariu public FB/IG. Întoarce `RezGraph`.
+
+    RUTE DIFERITE (MĂSURAT):
+        FB  POST /{comment-id}/private_replies             → {"id": ...}
+        IG  POST /me/messages  {recipient:{comment_id}}     → 200 {"message_id": ...}
+        IG  POST /{ig-user-id}/messages                     → 400 „(#3) Application does not
+            have the capability to make this API call" — ruta din reflex e cea GREȘITĂ.
+
+    Constrângeri Meta: UN SINGUR private reply per comentariu, în fereastra de mesagerie
+    (~7 zile). Când fereastra a expirat, Graph NU spune asta: întoarce „Object with ID ... does
+    not exist, cannot be loaded due to missing permissions, or does not support this operation"
+    (code 100, subcode 33) — MĂSURAT, identic cu răspunsul pentru un id inexistent. De aia
+    citim `can_reply_privately` ÎNAINTE: e singurul lucru care deosebește „nu se poate" de
+    „ai greșit id-ul", și scutește și cota."""
+    msg = (message or "").strip()
+    if not msg:
+        return RezGraph(False, "(fără mesaj de trimis)", motiv="mesaj gol")
+    tok = fb_page_token(page_id)
+    if not tok:
+        return RezGraph(False, "(fără token de pagină Meta pentru %s)" % page_id,
+                        motiv="fără token de pagină")
+    if ig is None:
+        ig = e_comentariu_ig(comment_id)
+    cid, caps, motiv = fb_rezolva_comentariu(comment_id, tok, ig=ig)
+    if not cid:
+        return RezGraph(False, "⚠️ mesaj privat NEtrimis: %s" % motiv, motiv=motiv)
+    if caps.get("can_reply_privately") is False:
+        m = ("Graph declară can_reply_privately=False — fereastra de mesagerie a expirat sau "
+             "comentariul nu permite DM (răspunde PUBLIC sau preia un om)")
+        return RezGraph(False, "⚠️ mesaj privat IMPOSIBIL pentru %s: %s" % (cid, m), motiv=m)
+    if ig:
+        body = json.dumps({"recipient": {"comment_id": cid}, "message": {"text": msg}}).encode()
+        st, r = graph_http(GRAPH_URL + "me/messages?access_token=" + urllib.parse.quote(tok),
+                           body, "POST", ct="application/json")
+    else:
+        st, r = graph_post("%s/private_replies" % cid, tok, message=msg)
+    new_id = (r.get("message_id") or r.get("id")) if isinstance(r, dict) else None
+    if st == 200 and new_id:
+        return RezGraph(True, "✅ mesaj PRIVAT (DM) trimis pentru comentariul %s (id %s)" % (cid, new_id),
+                        obj_id=new_id)
+    m, cod = graph_eroare(r)
+    return RezGraph(False, "⚠️ mesaj privat EȘUAT pentru %s: %s" % (cid, m), motiv=m, cod=cod, incert=(st == 0))
 
 
 def do_approve(mcp, conv_no, agent):
@@ -4470,6 +5028,329 @@ def do_approve(mcp, conv_no, agent):
     if applied_ok:  # consumă acțiunile ca să nu se reaplice la o a doua rulare --approve
         p["cmd"] = None; p["hide"] = None; p["applied"] = True
         q[str(conv_no)] = p; save_queue(q)
+
+
+# ── JURNAL DE TRIMITERE + IDEMPOTENȚĂ + VERIFICARE ────────────────────────────────────────
+# De ce: până acum un răspuns trimis nu lăsa NICIO urmă pe care s-o poți citi după („ce a plecat
+# azi, către cine, pe ce cale, cu ce text?"). Pe calea Richpanel urma era tichetul ÎNCHIS; pe
+# calea Graph (comentariu public FB/IG) nu e nici atât.
+#
+# ⚠️ CORECTAT 16-sep-2026, a doua măsurătoare o infirmă pe prima. Scria aici că „după 45 de secunde
+# Richpanel nu ingerase NIMIC". Re-măsurat pe proba end-to-end: la ~3 minute Richpanel avea deja
+# tichetul (#335269) cu AMBELE mesaje — comentariul și răspunsul nostru trimis pe Graph — și
+# `last_message_sender_type = operator`. Deci Richpanel INGEREAZĂ ce pleacă pe Graph, doar cu
+# întârziere. 45 de secunde era prea devreme, nu o dovadă de neingerare.
+#
+# Concluzia NU se schimbă, doar motivul: cât timp ingestia întârzie, o rulare care cade în
+# fereastra aia vede tichetul tot OPEN cu `last_message_sender_type = customer` — exact criteriul
+# după care listarea motorului alege tichetele — deci îl alege DIN NOU și răspunde A DOUA OARĂ.
+# Garda nu e opțională; doar fereastra e de minute, nu infinită.
+# Pe coada reală de azi: 179 de tichete pe piețele unde trimiterea e permisă (BG/PL/HU/SK),
+# din care 132 comentarii PUBLICE. Fără jurnal, alea 132 primesc un al doilea răspuns la următoarea
+# rulare, și încă unul la fiecare rulare de după.
+#
+# Tagul din Richpanel (`--skip-tagged`) NU e garda asta, din trei motive măsurate:
+#   1. e ACELAȘI tag pentru DRAFT și pentru TRIMIS — pe coada reală 46 de tichete publice au deja
+#      `ai-draft` și ZERO din cele 179 au `first_responded_at`, deci tagul e pus pe tichete cărora
+#      nu le-a răspuns nimeni niciodată. Cu `--skip-tagged` alea 46 n-ar mai primi răspunsul.
+#   2. e OPȚIONAL (flag) și depinde de `--tag` — o rulare cu alt tag nu vede marcajul celeilalte.
+#   3. se scrie în Richpanel DUPĂ POST-ul pe Graph; dacă scrierea pică, POST-ul a plecat deja.
+# Jurnalul e local, se scrie ÎNAINTE de trimitere (rezervare) și e cheiat pe DESTINAȚIE, nu pe
+# numărul tichetului.
+#
+# Stă ÎN AFARA repo-ului (repo PUBLIC) fiindcă ține text de client, exact ca `LLM_ERR_LOG`.
+# Convenția (SQLite, `create table if not exists`, conexiune thread-local, stări explicite) e
+# aceeași cu `moderation/jurnal.py` din arona-cs, ca să fie UNA singură, nu două.
+JURNAL_DB = os.environ.get("CS_JURNAL_DB") or os.path.expanduser("~/.arona/cs_trimiteri.db")
+
+JURNAL_SCHEMA = """
+create table if not exists trimitere(
+  cheie text primary key,
+  cand real, cand_iso text,
+  tichet text, tichet_id text, magazin text, canal text, cale text,
+  tinta text, obiect_id text, raspuns text,
+  stare text, confirmat integer default 0, detaliu text);
+create index if not exists ix_trim_cand on trimitere(cand);
+create index if not exists ix_trim_stare on trimitere(stare, cand);
+create index if not exists ix_trim_cale on trimitere(cale, cand);
+"""
+
+# Stările, și DE CE unele blochează retrimiterea iar una nu:
+#   in_curs     — rezervat; POST-ul e pe drum sau procesul a murit între timp → BLOCHEAZĂ
+#   trimis      — plecat ȘI confirmat prin citire înapoi                      → BLOCHEAZĂ
+#   neconfirmat — API-ul a zis 200, dar citirea înapoi nu l-a găsit           → BLOCHEAZĂ
+#   necunoscut  — EXCEPȚIE în timpul trimiterii (timeout / conexiune tăiată / proces omorât):
+#                 nu știm dacă cererea a ajuns la Facebook                    → BLOCHEAZĂ
+#   esec        — API-ul a RĂSPUNS și a REFUZAT: n-a plecat nimic             → se poate relua
+# Diferența dintre `esec` și `necunoscut` e singura care contează aici: „timeout" nu e dovadă că
+# mesajul N-A plecat, exact cum „200" nu e dovadă că a plecat. Ambele necunoscute se rezolvă cu un
+# om (`--jurnal` ca să vadă, `--jurnal-elibereaza` ca să deblocheze), nu cu o presupunere ieftină.
+JURNAL_OCUPAT = ("in_curs", "trimis", "neconfirmat", "necunoscut")
+
+_jurnal_local = None
+
+
+def jurnal_db():
+    """Conexiune la jurnal (thread-local, creată la prima folosire). None dacă nu se poate deschide
+    — jurnalul NU are voie să oprească motorul, dar vezi `jurnal_obligatoriu` la trimitere."""
+    global _jurnal_local
+    import sqlite3, threading
+    if _jurnal_local is None:
+        _jurnal_local = threading.local()
+    c = getattr(_jurnal_local, "conn", None)
+    if c is None:
+        try:
+            os.makedirs(os.path.dirname(JURNAL_DB), exist_ok=True)
+            c = sqlite3.connect(JURNAL_DB, timeout=30)
+            c.row_factory = sqlite3.Row
+            c.executescript(JURNAL_SCHEMA)
+            _jurnal_local.conn = c
+        except Exception as e:
+            sys.stderr.write("⚠️ jurnal de trimitere indisponibil (%s): %s\n" % (JURNAL_DB, str(e)[:120]))
+            return None
+    return c
+
+
+def comentariu_canonic(comment_id):
+    """Forma CANONICĂ a unui id de comentariu: `postid_commentid`.
+
+    Id-ul de tichet Richpanel e `pageid_postid_postid_commentid` — ultimele două segmente sunt
+    exact ce întoarce Graph la POST (măsurat: POST /{post}/comments → `122129979633096190_1611110160747585`).
+    E ACEEAȘI logică de segmente cu `fb_hide_comment`/`fb_private_reply` (primul candidat), doar
+    scoasă la vedere ca să existe O SINGURĂ cheie de jurnal pentru același comentariu."""
+    segs = str(comment_id or "").split("_")
+    return (segs[-2] + "_" + segs[-1]) if len(segs) >= 2 else str(comment_id or "")
+
+
+def jurnal_cheie(cale, tinta):
+    """Cheia de idempotență = DESTINAȚIA, nu numărul tichetului: `cale:obiect`.
+    Pe Graph obiectul e COMENTARIUL (canonizat), pe Richpanel e conversația."""
+    t = comentariu_canonic(tinta) if str(cale).startswith("graph") else str(tinta or "")
+    return "%s:%s" % (cale, t)
+
+
+def jurnal_deja_trimis(cale, tinta):
+    """Rândul existent dacă la destinația asta S-A trimis deja (sau e o trimitere în curs), altfel None.
+
+    `in_curs` blochează DELIBERAT: dacă procesul a murit între POST și confirmare nu știm dacă
+    mesajul a plecat, iar presupunerea ieftină („n-a plecat, retrimit") e exact cea care dublează
+    răspunsul în fața clientului. Se deblochează cu `--jurnal-elibereaza <cheie>`."""
+    c = jurnal_db()
+    if c is None:
+        return None
+    try:
+        # Semnele de întrebare se DERIVĂ din JURNAL_OCUPAT. Scrise de mână, au rămas trei când
+        # stările au devenit patru, sqlite a aruncat, iar `except` de mai jos înghițea eroarea:
+        # garda răspundea „nu s-a trimis nimic" la fiecare apel. O gardă care cade tăcut în
+        # „liber" e mai rea decât niciuna.
+        r = c.execute("select * from trimitere where cheie = ? and stare in (%s)"
+                      % ",".join("?" * len(JURNAL_OCUPAT)),
+                      (jurnal_cheie(cale, tinta),) + tuple(JURNAL_OCUPAT)).fetchone()
+        return dict(r) if r else None
+    except Exception as e:
+        # NU tăcere: dacă garda de idempotență nu poate citi, trebuie să se VADĂ — altfel
+        # `jurnal_rezerva` o prinde oricum (cheie duplicată) și nimic nu pleacă de două ori,
+        # dar nimeni n-ar ști de ce raportul spune „fără jurnal" în loc de „duplicat".
+        sys.stderr.write("⚠️ jurnal: citirea gărzii de idempotență a eșuat: %s\n" % str(e)[:160])
+        return None
+
+
+def jurnal_rezerva(cale, tinta, **meta):
+    """Scrie ÎNAINTE de trimitere, atomic. True = e a mea, pot trimite. False = a luat-o altcineva
+    (altă rulare/alt fir) SAU s-a trimis deja — NU trimit.
+
+    `insert` (nu `insert or ignore`) pe cheie PRIMARY KEY = poarta: a doua inserare pică, deci două
+    rulări simultane nu pot posta amândouă la același comentariu."""
+    c = jurnal_db()
+    if c is None:
+        return False
+    import time as _t
+    k = jurnal_cheie(cale, tinta)
+    val = (_t.time(), _t.strftime("%Y-%m-%dT%H:%M:%S"), str(meta.get("tichet") or ""),
+           str(meta.get("tichet_id") or ""), str(meta.get("magazin") or ""),
+           str(meta.get("canal") or ""), str(cale), str(tinta or ""), str(meta.get("text") or ""))
+    try:
+        # Un EȘEC anterior (API-ul a REFUZAT: n-a plecat nimic) se poate relua — altfel o eroare
+        # trecătoare ar interzice pe veci răspunsul la comentariul ăla. `in_curs` / `trimis` /
+        # `neconfirmat` NU se rescriu: acolo nu știm (sau știm că da) dacă mesajul a plecat.
+        # Rândul e ȚINTIT pe cheie ȘI pe starea `esec` — nu atinge nimic altceva.
+        cur = c.execute("update trimitere set stare='in_curs', cand=?, cand_iso=?, tichet=?, tichet_id=?, magazin=?, canal=?, cale=?, tinta=?, raspuns=?, obiect_id='', detaliu='', confirmat=0 where cheie=? and stare='esec'", val + (k,))
+        if cur.rowcount == 1:
+            c.commit()
+            return True
+        c.execute("insert into trimitere(cand,cand_iso,tichet,tichet_id,magazin,canal,cale,"
+                  "tinta,raspuns,cheie,stare) values(?,?,?,?,?,?,?,?,?,?,'in_curs')", val + (k,))
+        c.commit()
+        return True
+    except Exception:
+        try:
+            c.rollback()
+        except Exception:
+            pass
+        return False   # cheie deja ocupată (rezervat/trimis/neconfirmat) sau DB indisponibil
+
+
+def jurnal_incheie(cale, tinta, stare, obiect_id="", detaliu=""):
+    """Starea FINALĂ a unei trimiteri rezervate."""
+    c = jurnal_db()
+    if c is None:
+        return
+    try:
+        c.execute("update trimitere set stare=?, obiect_id=?, detaliu=?, confirmat=? where cheie=?",
+                  (stare, str(obiect_id or ""), str(detaliu or "")[:400],
+                   1 if stare == "trimis" else 0, jurnal_cheie(cale, tinta)))
+        c.commit()
+    except Exception:
+        pass
+
+
+def jurnal_elibereaza(cheie):
+    """Deblochează manual o rezervare rămasă `in_curs` (proces omorât între POST și confirmare).
+    Se face de un OM, după ce s-a uitat pe Facebook dacă răspunsul e acolo sau nu."""
+    c = jurnal_db()
+    if c is None:
+        return 0
+    cur = c.execute("delete from trimitere where cheie = ? and stare in ('in_curs','necunoscut')", (cheie,))
+    c.commit()
+    return cur.rowcount
+
+
+def jurnal_raport(de_la=None):
+    """Numărătoare pe (cale, stare) pentru raportul de final de rulare."""
+    c = jurnal_db()
+    if c is None:
+        return []
+    try:
+        if de_la is None:
+            return [dict(r) for r in c.execute(
+                "select cale, stare, count(*) n from trimitere group by cale, stare")]
+        return [dict(r) for r in c.execute(
+            "select cale, stare, count(*) n from trimitere where cand >= ? group by cale, stare", (de_la,))]
+    except Exception:
+        return []
+
+
+def graph_verifica_comentariu(obiect_id, page_id, parinte_id=""):
+    """VERIFICARE DUPĂ TRIMITERE: răspunsul chiar EXISTĂ pe comentariu?
+
+    Un 200 nu e dovadă. Citim înapoi din Graph, pe două căi (măsurat 16-sep pe o probă proprie,
+    ambele funcționează): lista copiilor părintelui, și obiectul direct — care mai și confirmă
+    `parent.id`, adică e atârnat de comentariul CORECT, nu de postare.
+    True = confirmat · False = NEconfirmat (nu „eșuat": poate fi lag de Graph)."""
+    tok = fb_page_token(page_id)
+    if not tok or not obiect_id:
+        return False
+    if parinte_id:
+        try:
+            u = ("https://graph.facebook.com/v19.0/%s/comments?fields=id&limit=50&access_token=%s"
+                 % (urllib.parse.quote(comentariu_canonic(parinte_id)), urllib.parse.quote(tok)))
+            r = json.loads(urllib.request.urlopen(u, timeout=30).read())
+            if any(str(x.get("id")) == str(obiect_id) for x in (r.get("data") or [])):
+                return True
+        except Exception:
+            pass
+    try:
+        u = ("https://graph.facebook.com/v19.0/%s?fields=id,parent{id}&access_token=%s"
+             % (urllib.parse.quote(str(obiect_id)), urllib.parse.quote(tok)))
+        r = json.loads(urllib.request.urlopen(u, timeout=30).read())
+        if str((r or {}).get("id")) != str(obiect_id):
+            return False
+        if parinte_id:
+            return str(((r.get("parent") or {}).get("id") or "")) == comentariu_canonic(parinte_id)
+        return True
+    except Exception:
+        return False
+
+
+def trimite_cu_jurnal(cale, tinta, trimite, verifica=None, **meta):
+    """Poarta UNICĂ prin care pleacă orice răspuns — pe Graph SAU prin Richpanel.
+
+    Ordinea nu e negociabilă: REZERVĂ în jurnal → trimite → CITEȘTE ÎNAPOI → încheie jurnalul.
+    Rezervarea e înainte fiindcă exact între POST și scrierea marcajului se pierde adevărul când
+    cade procesul; un marcaj scris DUPĂ nu poate apăra nimic.
+
+    `trimite()` → (ok, obiect_id, detaliu). `verifica(obiect_id)` → True/False (opțional).
+    Întoarce (stare, obiect_id, detaliu), stare ∈ duplicat/trimis/neconfirmat/necunoscut/esec/fara_jurnal.
+
+    Forma pentru calea GRAPH (răspuns public la un comentariu FB/IG), ca să existe O SINGURĂ
+    convenție de jurnal, nu două:
+
+        def _posteaza():
+            # POST /{postid_commentid}/comments — calea dovedită (vezi moderation/moderate.py)
+            st, r = ...
+            return (st == 200 and bool(r.get("id")), r.get("id") or "", json.dumps(r)[:200])
+
+        stare, obiect_id, det = trimite_cu_jurnal(
+            "graph", cid, _posteaza,
+            verifica=lambda oid: graph_verifica_comentariu(oid, page_id, cid),
+            tichet=no, tichet_id=cid, magazin=store_name, canal=channel, text=draft.strip())
+
+    `cid` e id-ul de tichet Richpanel întreg (`pageid_postid_postid_commentid`) — cheia îl
+    canonizează singură, deci NU-l tăia înainte.
+    """
+    vechi = jurnal_deja_trimis(cale, tinta)
+    if vechi:
+        return ("duplicat", vechi.get("obiect_id") or "", "deja %s la %s" % (vechi.get("stare"), vechi.get("cand_iso")))
+    if not jurnal_rezerva(cale, tinta, **meta):
+        # ori a luat-o alt fir/altă rulare între timp, ori jurnalul nu se poate scrie. În ambele
+        # cazuri NU trimitem: fără jurnal nu există idempotență, iar „trimit oricum" e fix dublura.
+        return ("fara_jurnal", "", "rezervare eșuată (duplicat concurent sau jurnal inaccesibil)")
+    try:
+        ok, obiect_id, detaliu = trimite()
+    except Exception as e:
+        # NU „eșec": o excepție nu spune dacă cererea a ajuns sau nu la destinație. Rămâne blocat
+        # până se uită un om — o retrimitere „că sigur n-a plecat" e exact dublura pe care o apărăm.
+        jurnal_incheie(cale, tinta, "necunoscut", "", "excepție: %s" % str(e)[:200])
+        return ("necunoscut", "", str(e)[:200])
+    if not ok:
+        jurnal_incheie(cale, tinta, "esec", obiect_id or "", detaliu)
+        return ("esec", obiect_id or "", detaliu)
+    stare = "trimis"
+    if verifica is not None:
+        try:
+            if not verifica(obiect_id):
+                stare = "neconfirmat"
+        except Exception as e:
+            stare = "neconfirmat"
+            detaliu = "verificare eșuată: %s" % str(e)[:120]
+    jurnal_incheie(cale, tinta, stare, obiect_id, detaliu)
+    return (stare, obiect_id, detaliu)
+
+
+def raport_trimiteri(de_la, oprite):
+    """RAPORTUL de final de rulare: ce a plecat, pe ce cale, ce n-a plecat și DE CE.
+    Se citește fără să deschizi codul."""
+    randuri = jurnal_raport(de_la)
+    total_oprite = sum(oprite.values())
+    if not randuri and not total_oprite:
+        return ""
+    ETICHETA = {"trimis": "confirmate", "neconfirmat": "NECONFIRMATE (API a zis ok, citirea înapoi nu le-a găsit)",
+                "esec": "eșuate (API a refuzat — se pot relua)",
+                "necunoscut": "STARE NECUNOSCUTĂ (excepție în timpul trimiterii — verifică manual)",
+                "in_curs": "rămase în curs (proces întrerupt)"}
+    MOTIV = {"piata": "gardă PIAȚĂ (există CS uman pe piața aia)",
+             "escaladare": "gardă ESCALADARE (le preia un om)",
+             "nearmat": "gardă ARMARE (CS_TRIMITERE_LIVE nesetat)",
+             "idempotenta": "gardă IDEMPOTENȚĂ (deja trimis — jurnal)",
+             "fara_jurnal": "jurnal inaccesibil (nu trimit fără urmă)"}
+    out = ["\n  📒 TRIMITERI în rularea asta (jurnal: %s)" % JURNAL_DB]
+    if randuri:
+        pe_cale = {}
+        for r in randuri:
+            pe_cale.setdefault(r["cale"], {})[r["stare"]] = r["n"]
+        for cale in sorted(pe_cale):
+            det = pe_cale[cale]
+            out.append("     %-10s %s" % (cale, ", ".join(
+                "%d %s" % (det[s], ETICHETA.get(s, s))
+                for s in ("trimis", "neconfirmat", "necunoscut", "esec", "in_curs") if det.get(s))))
+    else:
+        out.append("     (nicio trimitere)")
+    if total_oprite:
+        out.append("     OPRITE de gărzi: %d" % total_oprite)
+        for k in sorted(oprite, key=lambda x: -oprite[x]):
+            if oprite[k]:
+                out.append("       · %-14s %d — %s" % (k, oprite[k], MOTIV.get(k, k)))
+    return "\n".join(out)
 
 
 # ── GARDĂ DE TRIMITERE LIVE ───────────────────────────────────────────────────────────────
@@ -4558,7 +5439,21 @@ def garda_public_fara_dm(comments, no_comments, auto_hide, channel_filter):
     sys.exit(2)
 
 
-def do_send(mcp, conv_no, agent):
+def richpanel_confirma(mcp, conv_no):
+    """VERIFICARE DUPĂ TRIMITERE pe calea Richpanel: tichetul chiar nu mai așteaptă răspuns de la noi?
+
+    Criteriul e EXACT cel după care listarea alege tichetele (`last_message_sender_type ==
+    customer`). Dacă după trimitere tichetul e tot „ultimul mesaj e al clientului", mesajul nostru
+    nu e acolo — sau cel puțin nu se vede, ceea ce pentru rularea următoare e același lucru:
+    tichetul reintră în coadă. False = NEconfirmat, nu eșec."""
+    r = mcp.call("get_conversation", {"conversation_number": str(conv_no), "mode": "compact"})
+    t = (r or {}).get("ticket") if isinstance(r, dict) else None
+    if not t:
+        return False
+    return (t.get("last_message_sender_type") or "").lower() != "customer"
+
+
+def do_send(mcp, conv_no, agent, cale="auto"):
     """TRIMITE LIVE răspunsul (draftul din coadă) la client prin send_message. Customer-facing, ireversibil.
     Doar per-tichet, explicit. Refuză escaladările (acelea cer om) și retrimiterea."""
     garda_trimitere("--send")
@@ -4570,6 +5465,16 @@ def do_send(mcp, conv_no, agent):
         print("#%s a fost deja TRIMIS — nu retrimit (evit dublarea)." % conv_no); return
     if p.get("escalate"):
         print("#%s e ESCALADAT → preia un om, NU trimit automat (draftul e doar mesaj de așteptare)." % conv_no); return
+    if not trimite_pe_piata(p.get("store") or "", bool(p.get("is_public"))):
+        # ACEEAȘI gardă ca la `--apply-send` (`trimite_pe_piata(store_name, is_public)`), care
+        # lipsea AICI. Măsurat: armat, `--send <nr>` pe un tichet Esteban.ro chema `send_message`
+        # și închidea tichetul — pe o piață unde răspunde un COLEG, iar calitatea măsurată a
+        # draftului e 21% „bun de trimis" / 43% „nu se trimite". Faptul că trimiterea e per tichet
+        # nu schimbă motivul gărzii: nu numărul de tichete e problema, ci că textul e mai prost
+        # decât omul pe care l-ar înlocui. Magazinul NErezolvat („magazinul nostru") cade implicit
+        # pe RO, deci tot aici se oprește — fără magazin nu știm nici piața, nici cine preia.
+        print("#%s e pe o piață CU CS uman (%s) → NU trimit automat (draftul rămâne salvat)."
+              % (conv_no, p.get("store") or "magazin NErezolvat")); return
     if p.get("is_public"):
         # ACELAȘI refuz ca la --apply-send (`not is_public`): un comentariu FB/IG e vizibil pentru
         # oricine, deci răspunsul public rămâne al unui om. Fără linia asta, `--send <nr>` posta public.
@@ -4580,17 +5485,19 @@ def do_send(mcp, conv_no, agent):
     cid = p.get("cid")
     if not draft or not cid:
         print("#%s nu are draft/conversation_id de trimis." % conv_no); return
-    res = mcp.call("send_message", {"conversation_id": cid, "body": draft})
-    ok = not (isinstance(res, dict) and res.get("_error"))
-    if ok:
-        print("📤 TRIMIS LIVE la client #%s (send_message)." % conv_no)
-        add_tags(mcp, cid, [AI_TAG, "ai-sent"])
-        # tichetul a primit răspuns → îl ÎNCHIDEM (să nu rămână open)
-        cres = mcp.call("update_conversation_status", {"conversation_id": cid, "status": "CLOSED"})
-        print("   ✅ Tichet ÎNCHIS (CLOSED) după răspuns." if not (isinstance(cres, dict) and cres.get("_error")) else "   ⚠️ close eșuat: %s" % cres)
+    # SELECTOR DE CALE + POARTA DE JURNAL: comentariu public FB/IG → Meta Graph DIRECT (fără
+    # Richpanel); email → Richpanel (singura cale: pe Gmail avem doar `gmail.readonly`).
+    # Fiecare trimitere, pe orice cale, trece prin `trimite_cu_jurnal`: REZERVARE în jurnal
+    # ÎNAINTE de POST, apoi citire înapoi. Fără asta, un răspuns plecat pe Graph nu lasă nicio
+    # urmă pe care Richpanel s-o vadă, iar rularea următoare l-ar trimite a doua oară.
+    rez = trimite_raspuns(mcp, p.get("channel") or "", draft, cid,
+                          page_id=p.get("page_id") or "", psid=p.get("psid") or "", cale=cale,
+                          conv_no=conv_no, magazin=p.get("store") or "")
+    print("#%s %s" % (conv_no, raport_trimitere(rez)))
+    if rez["ok"]:
+        # `sent` se pune DOAR pe succes real. Pe „incert" NU: tichetul e marcat în Richpanel
+        # (tag + notă) și îl preia un om — dar aici nu mințim coada că ar fi plecat.
         p["sent"] = True; q[str(conv_no)] = p; save_queue(q)
-    else:
-        print("⚠️ send_message a EȘUAT pentru #%s: %s" % (conv_no, res))
 
 
 def escalation_note(level, reason, problem, name, phone, email, order_line, elsewhere, sent, suggested):
@@ -4641,7 +5548,13 @@ def main():
     ap.add_argument("--close-spam", action="store_true", help="închide (CLOSED) + tag 'spam' tichetele detectate ca spam/notificare automată")
     ap.add_argument("--tag", default="ai-draft", help="tag-ul pus pe tichetele tratate de AI (ex. --tag ai-live pt o rulare live)")
     ap.add_argument("--only", default=None, help="procesează DOAR aceste numere de conversație (lista separată prin virgulă) — pt regenerare țintită")
-    ap.add_argument("--send", default=None, help="nr conversație: TRIMITE LIVE răspunsul (draftul din coadă) la client via send_message — customer-facing, IREVERSIBIL (refuză escaladări/hide/retrimitere)")
+    ap.add_argument("--send", default=None, help="nr conversație: TRIMITE LIVE răspunsul (draftul din coadă) la client — customer-facing, IREVERSIBIL (refuză escaladări/hide/retrimitere)")
+    ap.add_argument("--cale", choices=("auto", "graph", "richpanel"), default="auto",
+                    help="CALEA de ieșire a răspunsului: auto = după canal (comentariu FB/IG → Meta Graph direct, "
+                         "email → Richpanel); graph = forțează Graph și NU cade pe Richpanel (probe/depanare); "
+                         "richpanel = forțează Richpanel, ca înainte. Implicit: auto.")
+    ap.add_argument("--jurnal", action="store_true", help="arată JURNALUL de trimiteri (ce a plecat, pe ce cale, confirmat sau nu) și iese")
+    ap.add_argument("--jurnal-elibereaza", default=None, metavar="CHEIE", help="deblochează o rezervare rămasă `in_curs` (proces întrerupt între POST și confirmare) — DUPĂ ce un om a verificat pe Facebook dacă răspunsul e acolo")
     a = ap.parse_args()
     global AI_TAG
     AI_TAG = a.tag
@@ -4653,10 +5566,30 @@ def main():
     ALLOWED = set(x.strip().lower() for x in a.actions.split(",") if x.strip() and x.strip().lower() != "none")
     mcp = MCP(secret("RICHPANEL_MCP_TOKEN"))
 
+    if a.jurnal:
+        randuri = jurnal_raport(None)
+        print("📒 JURNAL DE TRIMITERE — %s" % JURNAL_DB)
+        if not randuri:
+            print("   (gol: n-a plecat nimic prin poarta de jurnal)")
+        for r in sorted(randuri, key=lambda x: (x["cale"], x["stare"])):
+            print("   %-10s %-12s %d" % (r["cale"], r["stare"], r["n"]))
+        c = jurnal_db()
+        if c is not None:
+            print("\n   ultimele 15:")
+            for r in c.execute("select cand_iso,cale,tichet,magazin,canal,stare,obiect_id from"
+                               " trimitere order by cand desc limit 15"):
+                print("   %s %-9s #%-8s %-14s %-22s %-12s %s" % (r["cand_iso"], r["cale"], r["tichet"],
+                      (r["magazin"] or "")[:14], (r["canal"] or "")[:22], r["stare"], r["obiect_id"] or ""))
+        return
+    if a.jurnal_elibereaza:
+        n = jurnal_elibereaza(a.jurnal_elibereaza)
+        print("🔓 eliberat %d rezervare(ări) `in_curs` pentru %r." % (n, a.jurnal_elibereaza)
+              if n else "nimic de eliberat pentru %r (cheia nu e `in_curs`)." % a.jurnal_elibereaza)
+        return
     if a.approve:
         do_approve(mcp, a.approve, a.agent); return
     if a.send:
-        do_send(mcp, a.send, a.agent); return
+        do_send(mcp, a.send, a.agent, cale=a.cale); return
 
     ONLY = [x.strip().lstrip("#") for x in (a.only or "").split(",") if x.strip()]
     picked = []
@@ -4700,6 +5633,10 @@ def main():
     n_lookup_esuat = 0          # căutări de comenzi care AU EȘUAT (≠ „clientul nu are comenzi")
     n_lookup_fara_status = 0    # comenzi găsite, dar FĂRĂ status/AWB/produse (profitability.db absent)
     n_cautare_tarzie = 0        # căutări pornite de categoria triajului, pe care hint-ul NU le ceruse
+    cai_folosite = {}           # pe ce CALE a ieșit fiecare răspuns (Graph vs Richpanel vs căderi)
+    import collections as _col
+    oprite_trimitere = _col.Counter()   # câte răspunsuri a oprit FIECARE gardă (raport final)
+    start_rulare = time.time()          # fereastra rulării, pt raportul din jurnal
 
     for i, t in enumerate(picked, 1):
         if t.get("_stub"):   # --only: ia tichetul ACUM (incremental), nu upfront → fără burst de citiri
@@ -5140,6 +6077,11 @@ def main():
         ctx_hide_note = "(comentariu propus la ASCUNDERE — context nefolosit, nu s-a generat răspuns)"
         cact = idn.get("comment_action") or "none"
         page_id = ((t.get("to") or {}).get("id") if isinstance(t.get("to"), dict) else "") or ""
+        # PSID-ul clientului pe Messenger/IG. Măsurat: 25/25 tichete `messenger` n-au deloc `to`
+        # (deci nici pagină), iar 0/25 PSID-uri de pe `facebook_message` sunt adresabile de app-ul
+        # nostru — de asta DM-ul cade azi pe Richpanel, dar câmpul se duce mai departe ca ziua în
+        # care devin adresabile calea să pornească fără altă schimbare.
+        psid = ((t.get("from") or {}).get("id") if isinstance(t.get("from"), dict) else "") or ""
         if is_public and cact == "hide":
             hide_obj = {"comment_id": cid, "page_id": page_id, "mode": "hide"}
             if a.auto_hide:
@@ -5462,6 +6404,9 @@ def main():
                               # calea de APROBARE regenerează draftul: fără astea n-ar putea ști că e canal
                               # public (deci ce are voie să scrie) și pe ce context să verifice halucinările.
                               "is_public": is_public, "phone_order": phone_order, "cust_name": name,
+                              # selectorul de cale are nevoie de ele și pe calea `--send <nr>`,
+                              # care altfel n-ar ști nici canalul, nici pagina, nici destinatarul.
+                              "channel": channel, "page_id": page_id, "psid": psid,
                               "has_orders": has_order_data(od_ctx)}
             rows.append({"no": no, "store": store_name, "channel": channel, "cat": cat, "escalate": is_esc,
                          "language": lang, "cust_msg": (last_cust or first or subj or "")[:240],
@@ -5469,6 +6414,24 @@ def main():
                          "comment_action": (hide_obj or {}).get("mode"), "callback": wants_callback, "draft": draft.strip()})
         if cmd or hide_obj:
             print("  → aprobă:  uv run cs_auto_draft.py --approve %s%s" % (no, " --agent <Nume>" if cmd else ""))
+
+        # ---- verdictul GĂRZILOR de trimitere, numărat (pt raportul de final de rulare) ----
+        # Se calculează AICI, separat de ramura care chiar trimite, ca raportul să poată spune DE CE
+        # n-a plecat un răspuns. Gărzile sunt funcții pure, deci evaluarea a doua oară nu costă
+        # nimic și nu poate divergea de decizia reală.
+        verdict_trimitere = ""
+        if a.apply_send:
+            if not trimitere_permisa():
+                verdict_trimitere = "nearmat"
+            elif is_esc:
+                verdict_trimitere = "escaladare"
+            elif not trimite_pe_piata(store_name, is_public):
+                verdict_trimitere = "piata"
+            elif jurnal_deja_trimis("richpanel", cid) or (
+                    is_public and jurnal_deja_trimis("graph", cid)):
+                verdict_trimitere = "idempotenta"
+            if verdict_trimitere:
+                oprite_trimitere[verdict_trimitere] += 1
 
         # ---- scrieri în Richpanel (doar cu --create-draft) ----
         if a.create_draft and cid:
@@ -5518,14 +6481,31 @@ def main():
                 # întârzierea. Rămân DRAFT + prioritate HIGH + notă internă, și așteaptă un om.
                 #
                 # Garda de mai sus a exclus deja draftul invalid/suprimat.
-                res = mcp.call("send_message", {"conversation_id": cid, "body": draft.strip()})
-                ok = not (isinstance(res, dict) and res.get("_error"))
-                if ok:
-                    add_tags(mcp, cid, [t for t in (AI_TAG, "ai-sent") if t])
-                    mcp.call("update_conversation_status", {"conversation_id": cid, "status": "CLOSED"})
-                    print("  📤 TRIMIS LIVE la client + tichet ÎNCHIS.")
-                else:
-                    print("  ⚠️ send_message EȘUAT → NU închid, NU marchez: %s" % res)
+                # SELECTOR DE CALE + POARTA DE JURNAL. Comentariu public FB/IG → Meta Graph,
+                # DIRECT (fără Richpanel); DM → Graph doar cu un destinatar adresabil de app-ul
+                # nostru; email → Richpanel (singura cale: avem doar `gmail.readonly`).
+                # Vezi `alege_cale` (CE cale și DE CE) și `trimite_cu_jurnal` (rezervare ÎNAINTE
+                # de POST → trimitere → citire înapoi → încheiere).
+                #
+                # ⚠️ Când răspunsul pleacă pe Graph, Richpanel NU știe că am răspuns: tichetul ar
+                # rămâne OPEN și l-am redrafta, adică i-am scrie omului a doua oară. De asta
+                # `trimite_raspuns` marchează tichetul (tag + notă cu textul exact + CLOSED) chiar
+                # și pe calea Graph — v. `marcheaza_richpanel` — iar jurnalul îl blochează
+                # independent de orice scriere în Richpanel.
+                rez = trimite_raspuns(mcp, channel, draft.strip(), cid,
+                                      page_id=page_id, psid=psid, cale=a.cale,
+                                      tags_curente=cur_tags, conv_no=no, magazin=store_name)
+                print("  " + raport_trimitere(rez))
+                _k = rez["cale"] if rez["ok"] else ("incert" if rez["incert"] else "eșec")
+                cai_folosite[_k] = cai_folosite.get(_k, 0) + 1
+                if rez.get("cazut"):
+                    cai_folosite["căderi Graph→Richpanel"] = cai_folosite.get("căderi Graph→Richpanel", 0) + 1
+                if rez.get("stare") == "duplicat" and verdict_trimitere != "idempotenta":
+                    # numai dacă verdictul gărzilor de mai sus NU l-a numărat deja: acela vede
+                    # cheile `richpanel:` și `graph:`, dar nu și `graph_dm:` (DM prin Send API).
+                    oprite_trimitere["idempotenta"] += 1
+                elif rez.get("stare") == "fara_jurnal":
+                    oprite_trimitere["fara_jurnal"] += 1
             else:
                 res = mcp.call("create_draft", {"conversation_id": cid, "body": draft.strip()})
                 ok = not (isinstance(res, dict) and res.get("_error"))
@@ -5535,6 +6515,8 @@ def main():
         time.sleep(a.sleep)
 
     save_queue(queue)
+    if cai_folosite:
+        print("\n  🔀 Căi de ieșire: %s." % ", ".join("%s=%d" % kv for kv in sorted(cai_folosite.items())))
     if hidden_now or hide_fail:
         print("\n  🙈 Moderare: %d comentarii ascunse%s." % (
             hidden_now, (", %d eșuate (token de pagină lipsă sau comentariu șters)" % hide_fail) if hide_fail else ""))
@@ -5560,6 +6542,9 @@ def main():
               " fiindcă nu s-a găsit nicio comandă în context. Rulează cu --ground (căutare ieftină în DB)"
               " sau verifică DATABASE_URL_METRICS / PROFIT_DB." % (n_fara_fapte, ", ".join(sorted(COMANDA_CATS))))
     print("\n  🚫 Spam/automat: %d %s." % (n_spam, "închise (CLOSED+tag spam)" if a.close_spam else "excluse din draft (rulează --close-spam ca să le închizi)"))
+    _rt = raport_trimiteri(start_rulare, oprite_trimitere)
+    if _rt:
+        print(_rt)
     _rc = raport_cost()
     if _rc:
         print(_rc)
