@@ -3301,6 +3301,11 @@ def raport_cost():
     return cap + "\n" + "\n".join(linii) + coada
 
 
+# Un nume de model care apartine VIZIBIL celuilalt furnizor, pus din greseala in variabila
+# acestuia. Nu acopera orice greseala de config — doar clasa care ne-a costat un lot intreg.
+_MODEL_STRAIN = re.compile(r"^(claude|anthropic)[-.]", re.I)
+_MODEL_STRAIN_OPENAI = re.compile(r"^(gpt|o\d|text-|davinci)", re.I)
+
 # Brațe de furnizor scoase la nivel de FUNCȚIE, ca să poată fi încercate pe rând. Fiecare
 # întoarce (text, etichetă-motor) sau ridică LLMEroare.
 def _llm_anthropic(system, user, js=False):
@@ -3309,7 +3314,12 @@ def _llm_anthropic(system, user, js=False):
         return None
     # PROMPT CACHING: system-ul e IDENTIC la toate tichetele → cache_control ephemeral îl taxează la 0.1× după primul apel (5 min TTL).
     # NB prag minim de cache: Haiku 4.5 = 4096 tok, Sonnet 4.6 = 2048 tok. SYSTEM~2.6k / IDENTIFY~1.3k → se cache-uiește pe SONNET (SYSTEM), NU pe Haiku (sub prag). Inofensiv (nicio taxă în plus dacă nu prinde).
-    body = {"model": os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6"), "max_tokens": 900,
+    _am = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+    # simetricul gărzii din brațul OpenAI — vezi motivul acolo
+    if _MODEL_STRAIN_OPENAI.match(_am):
+        raise LLMEroare(0, "config", "ANTHROPIC_MODEL=%s e un model OPENAI, iar variabila asta e "
+                        "citită de brațul ANTHROPIC. Pune-l în DRAFT_MODEL." % _am, cont=True)
+    body = {"model": _am, "max_tokens": 900,
             "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             "messages": [{"role": "user", "content": user}]}
     r = _llm_http("https://api.anthropic.com/v1/messages", body,
@@ -3326,6 +3336,17 @@ def _llm_openai(system, user, js=False):
     if not ok:
         return None
     mdl = os.environ.get("DRAFT_MODEL", "gpt-5-mini")
+    # Cele două brațe citesc variabile DIFERITE (`DRAFT_MODEL` aici, `ANTHROPIC_MODEL` dincolo), deci
+    # un nume de model pus în variabila greșită ajunge la furnizorul greșit. MĂSURAT 16/17-sep-2026:
+    # `DRAFT_MODEL=claude-haiku-4-5-…` a fost IGNORAT de Anthropic (care își ia modelul din altă
+    # variabilă), deci rularea manuală a mers și părea corectă; noaptea, când Anthropic a rămas fără
+    # credit, failover-ul a comutat pe OpenAI — care a primit un nume de model Claude și a răspuns
+    # 404 pe TOT restul lotului. 1030 de tichete au așteptat degeaba, iar eroarea („model does not
+    # exist") nu spunea nicăieri că vina e o variabilă de mediu. Acum o spune, o dată, clar.
+    if _MODEL_STRAIN.match(mdl):
+        raise LLMEroare(0, "config", "DRAFT_MODEL=%s e un model ANTHROPIC, iar variabila asta e "
+                        "citită de brațul OPENAI. Pune-l în ANTHROPIC_MODEL și lasă în DRAFT_MODEL "
+                        "un model OpenAI (ex. gpt-4o-mini)." % mdl, cont=True)
     body = {"model": mdl,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
     # gpt-5* REFUZĂ orice temperature != 1 („Unsupported value: 'temperature' does not support 0.2
