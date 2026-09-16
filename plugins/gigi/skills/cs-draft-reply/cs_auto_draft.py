@@ -330,6 +330,23 @@ PIETE_FARA_CS_UMAN = frozenset(("BG", "PL", "HU", "SK"))
 def are_cs_uman(store):
     """Există pe piața magazinului un coleg de CS care poate prelua/suna? (implicit DA — RO)"""
     return STORE_CC.get(store, "RO") not in PIETE_FARA_CS_UMAN
+
+
+def trimite_pe_piata(store, is_public):
+    """Are voie `--apply-send` să TRIMITĂ LIVE pe magazinul ăsta, pe canalul ăsta?
+
+    DOAR pe piețele fără CS uman. Pe RO răspunde un om, iar calitatea măsurată e 21% „bun de
+    trimis" / 43% „nu se trimite" — trimiterea automată ar înlocui omul cu un text prost.
+    Magazinul NErezolvat („magazinul nostru", 17,4% din propuneri) cade implicit pe RO, deci NU
+    se trimite: fără magazin nu știm nici limba, nici piața, nici dacă există cineva care preia.
+
+    `is_public` e primit explicit, nu ignorat: pe piețele fără CS uman se trimite pe AMBELE canale
+    (public 0,8% drafturi rele din 251, privat 9,8% din 41), fiindcă un răspuns public care invită
+    în privat e o promisiune goală dacă în privat nu răspunde nimeni. Pe piețele CU CS uman nu se
+    trimite pe niciunul. Deci azi parametrul nu schimbă verdictul — dar dacă vreodată se pornește
+    trimiterea pe RO, aici e locul unde canalul trebuie să conteze, nu la call-site.
+    """
+    return not are_cs_uman(store)
 # Prefixele poloneze se ENUMERĂ, pentru că acolo discriminantul e PERECHEA de cifre: Polonia n-are
 # prefix de trunchi, are fix 9 cifre, iar seria 37x nu există deloc. O regulă de tip „prima cifră
 # 4-8" descrie doar seriile MOBILE și ar fi lăsat să treacă exact numărul care ne-a ars.
@@ -5479,9 +5496,28 @@ def main():
                 print("  ⛔ draft invalid (eroare LLM / gol) → NU salvez (sar tichetul).")
             elif mod_public == "doar-moderare":
                 print("  🔇 comentariu PUBLIC: fără draft (lipsește --comments); moderarea a rulat normal.")
-            elif a.apply_send and trimitere_permisa() and not is_esc and not is_public:
-                # LIVE: trimite răspunsul la client + închide tichetul. NUMAI ne-escaladat + ne-comentariu
-                # (escaladările + comentariile rămân DRAFT, le ia un om). Garda de mai sus a exclus deja draft invalid.
+            elif a.apply_send and trimitere_permisa() and not is_esc and trimite_pe_piata(store_name, is_public):
+                # LIVE: trimite răspunsul la client + închide tichetul.
+                #
+                # DOUĂ condiții, decise de owner pe 16-sep-2026, fiecare cu măsurătoarea ei:
+                #
+                # 1. NUMAI pe piețele FĂRĂ CS uman (BG/PL/HU/SK). Pe RO există agenți care răspund, iar
+                #    calitatea măsurată acolo e 21% „bun de trimis" / 43% „nu se trimite" — deci trimiterea
+                #    automată ar înlocui un om care face treaba cu un text prost. Pe piețele străine
+                #    alternativa NU e un agent mai bun, e TĂCEREA: 316 din 321 de tichete fără niciun
+                #    răspuns (98,4%). Acolo pragul e „mai bun decât nimic", și e atins: 228 din 292.
+                #
+                # 2. Comentariile PUBLICE se trimit, DM-urile la fel — dar numai împreună. Garda veche
+                #    excludea publicul (`not is_public`) și lăsa privatul, adică EXACT invers față de date:
+                #    public 2 drafturi rele din 251 (0,8%), privat 4 din 41 (9,8%). Iar un răspuns public
+                #    care spune „scrieți-ne în privat" e o promisiune goală dacă în privat nu răspunde
+                #    nimeni — de aia cele două canale merg împreună sau deloc (vezi `--comments`).
+                #
+                # ESCALADĂRILE NU se trimit niciodată automat (`not is_esc`), tot decizie de owner: un
+                # mesaj automat greșit către cineva care amenință cu КЗП/ANPC costă mai mult decât
+                # întârzierea. Rămân DRAFT + prioritate HIGH + notă internă, și așteaptă un om.
+                #
+                # Garda de mai sus a exclus deja draftul invalid/suprimat.
                 res = mcp.call("send_message", {"conversation_id": cid, "body": draft.strip()})
                 ok = not (isinstance(res, dict) and res.get("_error"))
                 if ok:
