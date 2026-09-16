@@ -7,3 +7,11 @@
 .learned_playbook.md
 __pycache__/
 *.pyc
+
+# backupuri LOCALE ale motorului (*.bak, *.bak2, *.bak_aplicator_…): le face skill-ul/agenții
+# înainte de o modificare și conțin CONTEXT REAL de tichet (telefoane, numere de comandă).
+# Repo-ul e PUBLIC → nu au voie să ajungă niciodată într-un commit.
+*.bak
+*.bak[0-9]
+*.bak_*
+*.bak[a-z]

@@ -47,10 +47,23 @@ MIRROR_IMPLICIT = os.environ.get("CS_MIRROR_DB") or os.path.expanduser(
 # a gărzii (5 promisiuni prinse în plus, 16,1% → 19,7%) se citește ca REGRESIE.
 PRAG_FP_POLITICA = 3.0        # B: prins DEȘI un draft conform ar fi avut voie să scrie asta.
                               # Ăsta e DEFECTUL. Măsurat 15-sep: 0,7% (1 din 137).
-PRAG_DIVERGENTA_AGENT = 25.0  # A: prins ORICE a scris agentul. Informativ, alarmă de derivă.
-                              # 15,3% → 27,7% (regresia rundei 1) → 16,1% → 19,7% acum.
-                              # 25% prinde încă regresia rundei 1, fără să numească
-                              # adevăratele-pozitive „fals-pozitive".
+PRAG_DIVERGENTA_AGENT = 34.5  # A: prins ORICE a scris agentul. Informativ, alarmă de derivă.
+                              # 15,3% → 27,7% (regresia rundei 1) → 16,1% → 19,7%.
+                              # ⚠️ RE-ETALONAT 16-sep: indicatorul măsura `hallu_hits`, dar producția
+                              # cheamă `fabricari`. S-a schimbat MĂRIMEA MĂSURATĂ, nu calitatea —
+                              # diferența sunt gărzile noi (`fapte_inventate` + `angajament_hits`),
+                              # pe care indicatorul NU LE VEDEA. Măsurat pe AMBELE oglinzi:
+                              #   cs_mirror.db      (137 răspunsuri): 19,7% → 27,0%
+                              #   cs_mirror_live.db (2.769 răspunsuri): 24,2% → 29,5%
+                              # (cifra pe oglinda live a urcat 29,3 → 29,5 cât a durat runda, din
+                              # verbele de status străine adăugate în paralel — adevărat-pozitive,
+                              # B a rămas 0,1%. Pragul NU se mișcă după ea: rămâne ancorat în 29,3.)
+                              # Pragul = baza cea mai mare la etalonare (29,3%) + EXACT headroom-ul
+                              # absolut al perechii vechi (25,0 − 19,7 = 5,3pp) = 34,6 → 34,5. La
+                              # 29,5% măsurat azi headroom-ul real rămas e 5,0pp. Nu e coborât ca
+                              # să treacă: fals-pozitivul (B), care e defectul REAL, a rămas
+                              # neschimbat pe ambele populații (0,7% / 0,1%).
+                              # Seria veche rămâne raportată ca notă, ca să nu se piardă istoricul.
 SCAPARI_INCADRARE_ACCEPTATE = 1  # promisiuni care scapă în rama personală scrisă de NOI
                                  # (marcajul de politică din frază învinge posesivul).
                                  # Înghețat: poarta pică dacă lista CREȘTE.
@@ -88,6 +101,8 @@ SUITE = [
     ("r3_test_termen-si-emoji.py",    "fisier", "R3 · termen de livrare + sentiment/emoji"),
     ("r3_test_acoperire-straina.py",  "fisier", "R3 · acoperirea gărzilor pe limbile străine"),
     ("r3_test_limba-otravita.py",     "fara",   "R3 · limba citită din mesajul CLIENTULUI"),
+    ("r5_test_garzi-lacome.py",       "root",   "R5 · gărzi prea lacome (fals-pozitive măsurate)"),
+    ("r6_test_minciuna-increzatoare.py", "root", "R6 · eșecul de lookup NU devine afirmație sigură"),
 ]
 # Suite care NU pot fi redirecționate către alt arbore: testează o țintă fixă.
 NEREDIRECTABIL = {"fara", "repo"}
@@ -256,6 +271,19 @@ _H_LOOKUP = re.compile(r"am verificat|am c[ăa]utat|g[ăa]sit|identificat|про
                        r"megn[ée]zt|tal[áa]lt|skontrol|overil|na[šs]iel|na[šs]la|zkontrol|ov[ěe][řr]il|"
                        r"na[šs]el|sprawdzi|znalaz|checked|find|found", re.I)
 _H_TERMEN = re.compile(r"\d|zilele urm|ziua urm|munkanap|dnia robocz|pracovn|radni dan|работен ден", re.I)
+# CLASELE GĂRZILOR NOI (runda de calitate): `fabricari` = `hallu_hits` + `fapte_inventate` +
+# `angajament_hits`, iar ultimele două produc etichete pe care clasificatorul nu le cunoștea. Cădeau
+# toate în ramura implicită „status", unde `fals_pozitiv_de_politica` întoarce False din construcție
+# — adică o groapă în care gărzile noi NU PUTEAU fi niciodată fals-pozitive, deci indicatorul B nu
+# le putea vedea nici dacă se stricau. Matcherele stau ÎNAINTEA lui `_H_LOOKUP`/`_H_TERMEN`, care
+# caută oriunde în text („\d" prinde orice cifră) și le-ar fi înghițit pe cele cu cifre în ele.
+_H_STOC    = re.compile(r"^stoc/disponibilitate inventat:")
+_H_CURIER  = re.compile(r"^curier alocat inventat:")
+_H_PLATA   = re.compile(r"^metod[ăa] de plat[ăa] inventat[ăa]:")
+_H_LIVRARE = re.compile(r"^op[țt]iune/zon[ăa] de livrare inventat[ăa]:")
+_H_PROMO   = re.compile(r"^durata promo[țt]iei inventat[ăa]:")
+_H_PRODUS  = re.compile(r"^afirma[țt]ie despre produs, dar PRODUS lipse[șs]te din context:")
+_H_ANGAJ   = re.compile(r"^promisiune f[ăa]r[ăa] executant:")
 # GENERALITATE — oracolul PORȚII (scris independent de `_POLICY_CTX` din motor; tolerant la greșeli
 # de tastare, fiindcă agenții scriu repede: „Livrareas e face in 2-3 zile" e tot politică generală).
 _G_GENERAL = re.compile(r"de obicei|de regul[ăa]|[îi]n general|livrare\w*\s+\w{0,3}\s?e\s+face|"
@@ -274,12 +302,37 @@ def clasa_hit(h):
     if _H_PRET.match(h):   return "pret"
     if _H_DIM.match(h):    return "dimensiune"
     if _H_TEL.match(h):    return "telefon"
+    if _H_STOC.match(h):    return "stoc"
+    if _H_CURIER.match(h):  return "curier"
+    if _H_PLATA.match(h):   return "plata"
+    if _H_LIVRARE.match(h): return "livrare"
+    if _H_PROMO.match(h):   return "promotie"
+    if _H_PRODUS.match(h):  return "produs"
+    if _H_ANGAJ.match(h):   return "angajament"
     if _H_LOOKUP.search(h): return "lookup"
     if _H_TERMEN.search(h): return "termen"
     return "status"
 
 
-def fals_pozitiv_de_politica(h, mesaj, ctx, telefoane_noastre):
+def _brut(h):
+    """Fragmentul AFIRMAT din motivul gărzii (ce vine după eticheta clasei)."""
+    return h.split(":", 1)[-1].strip()
+
+
+def _segment(motor, mesaj, brut):
+    """Propoziția din jurul fragmentului — aceeași unitate pe care o judecă motorul. Motivele sunt
+    normalizate pe spații (`" ".join(...split())`), deci `find` poate rata; atunci judecăm mesajul
+    întreg, ceea ce poate doar să LĂRGEASCĂ contextul, nu să inventeze o scuză."""
+    i = (mesaj or "").find(brut)
+    if i < 0 or motor is None:
+        return mesaj or ""
+    try:
+        return motor.propozitia_din_jur(mesaj, i, i + len(brut))
+    except Exception:
+        return mesaj[max(0, i - 140): i + len(brut) + 80]
+
+
+def fals_pozitiv_de_politica(h, mesaj, ctx, telefoane_noastre, motor=None):
     """Motivul prins e ceva ce un DRAFT CONFORM ar avea VOIE să scrie?
 
     DA  → fals-pozitiv față de POLITICA NOASTRĂ (defect al gărzii).
@@ -299,6 +352,32 @@ def fals_pozitiv_de_politica(h, mesaj, ctx, telefoane_noastre):
     if c in ("pret", "dimensiune"):
         val = _intreg(h.split(":")[-1])
         return bool(val) and val in {_intreg(x) for x in re.findall(r"\d+(?:[.,\s]\d+)*", ctx or "")}
+    # ---- GĂRZILE NOI: fiecare clasă primește un PREDICAT, nu ramura implicită „nu se poate" ----
+    if c in ("stoc", "plata", "livrare", "promotie", "produs"):
+        # Un draft ARE voie să repete un fapt care i-a fost DAT în context (regula de la preț și
+        # dimensiune). Dacă fragmentul afirmat nu e în context, e politică de magazin pe care
+        # motorul n-are de unde s-o știe — nu e fals-pozitiv, e chiar ce interzice SYSTEM.
+        brut = _brut(h)
+        try:
+            return bool(brut) and motor is not None and motor._in_ctx(brut, re.sub(r"\s+", "", motor.deacc(ctx or "")))
+        except Exception:
+            return False
+    if c == "curier":
+        # Un curier NUMIT ca opțiune permisă (procedura de retur: „puteți trimite prin DPD sau la
+        # easybox") nu e un curier ALOCAT acestui colet. Dacă fraza nu alocă, garda n-avea ce prinde.
+        try:
+            return motor is not None and not motor.curier_alocat(_segment(motor, mesaj, _brut(h)))
+        except Exception:
+            return False
+    if c == "angajament":
+        # O OFERTĂ INTEROGATIVĂ („Doriți să vi-l înlocuim?") sau o frază de POLITICĂ nu angajează
+        # nimic — exact scutirile pe care le are și motorul. Aprinderea pe ele = defect al gărzii.
+        seg = _segment(motor, mesaj, _brut(h))
+        try:
+            return motor is not None and bool(motor.e_intrebare(seg) or motor._ANG_SCUZAT.search(seg)
+                                              or motor._POLICY_CTX.search(seg))
+        except Exception:
+            return False
     return False   # lookup / status: interzise unui draft în ORICE context
 
 
@@ -437,22 +516,31 @@ def indicatori(r, root, mirror, are_mirror):
         tinte = con.execute("SELECT ticket_id, idx, text FROM rp_message "
                             "WHERE is_agent=1 AND length(text)>40 ORDER BY ticket_id, idx").fetchall()
         ale_noastre = set(getattr(d, "STORE_PHONE", {}).values())
-        pop_a, pop_b, clase = 0, [], {}
+        pop_a, pop_b, clase, pop_a_hallu = 0, [], {}, 0
         for tid, idx, text in tinte:
             inainte = con.execute("SELECT text FROM rp_message WHERE ticket_id=? AND idx<? ORDER BY idx",
                                   (tid, idx)).fetchall()
             ctx = "PLATFORMĂ: Email\n" + "\n".join((x[0] or "") for x in inainte)
-            hits = d.hallu_hits(text, ctx)
+            if d.hallu_hits(text, ctx):   # seria ISTORICĂ, ca să rămână comparabilă peste runde
+                pop_a_hallu += 1
+            # `fabricari`, NU `hallu_hits`: producția cheamă `fabricari` (= hallu_hits +
+            # fapte_inventate + angajament_hits) și în `guard_reasons`, și în post-filtru. Poarta
+            # măsura funcția CEA MICĂ, deci indicatorul care trebuia să confirme că gărzile noi
+            # n-au crescut zgomotul NU LE PUTEA VEDEA, prin construcție. `has_orders=False,
+            # has_cmd=False` = exact starea în care producția armează toate gărzile.
+            hits = d.fabricari(text, ctx, "", False, False)
             if not hits:
                 continue
             pop_a += 1
             for h in hits:
                 clase[clasa_hit(h)] = clase.get(clasa_hit(h), 0) + 1
-            fp = [h for h in hits if fals_pozitiv_de_politica(h, text, ctx, ale_noastre)]
+            fp = [h for h in hits if fals_pozitiv_de_politica(h, text, ctx, ale_noastre, motor=d)]
             if fp:
                 pop_b.append((fp[0], " ".join(text.split())[:70]))
         n = max(1, len(tinte))
         rata_a, rata_b = 100.0 * pop_a / n, 100.0 * len(pop_b) / n
+        rata_a_hallu = 100.0 * pop_a_hallu / n
+        r.date["divergenta_hallu_hits_pct"] = round(rata_a_hallu, 1)
         r.date["divergenta_fata_de_agent_pct"] = round(rata_a, 1)
         r.date["fals_pozitiv_de_politica_pct"] = round(rata_b, 1)
         r.date["clase_prinse"] = clase
@@ -462,12 +550,16 @@ def indicatori(r, root, mirror, are_mirror):
                                                    ", ".join("%s×%d" % kv for kv in sorted(clase.items()))))
         for h, txt in pop_b:
             r.nota("fals-pozitiv de politică: %s" % h, txt)
+        r.nota("seria istorică (doar `hallu_hits`, funcția pe care o măsura poarta până la 16-sep)",
+               "%.1f%% — diferența față de %.1f%% sunt gărzile noi (`fapte_inventate` + "
+               "`angajament_hits`), pe care indicatorul NU le vedea" % (rata_a_hallu, rata_a))
         r.cere(rata_a <= PRAG_DIVERGENTA_AGENT,
-               "divergență față de ce a scris AGENTUL ≤ %.0f%% (derivă, NU rată de defect)"
+               "divergență față de ce a scris AGENTUL ≤ %.1f%% (derivă, NU rată de defect)"
                % PRAG_DIVERGENTA_AGENT,
-               "%.1f%% (%d din %d răspunsuri reale) — din care %d sunt fals-pozitive de politică; "
-               "restul sunt lucruri pe care SYSTEM le interzice unui DRAFT (agentul avea datele, "
-               "draftul nu le are)" % (rata_a, pop_a, len(tinte), len(pop_b)))
+               "%.1f%% (%d din %d răspunsuri reale, măsurat pe `fabricari` = ce cheamă producția) — "
+               "din care %d sunt fals-pozitive de politică; restul sunt lucruri pe care SYSTEM le "
+               "interzice unui DRAFT (agentul avea datele, draftul nu le are)"
+               % (rata_a, pop_a, len(tinte), len(pop_b)))
     else:
         r.cere(False, "anti-halucinare pe română (ambele populații)", "NEMĂSURAT (lipsește oglinda CS)")
 
