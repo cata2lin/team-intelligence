@@ -221,6 +221,85 @@ def expeditor_masina(email, subj="", first="", ultim=""):
     return ""
 
 
+# ---- POARTA DE MESAJ OSTIL: mesajul ne ATACĂ pe NOI (phishing / impersonare / somație falsă) ----
+# Lipsea o CATEGORIE întreagă. Toate gărzile de până acum presupun că cel care scrie e un CLIENT:
+# ori unul real, ori o notificare de mașină. Nu exista nimic pentru „mesajul e un ATAC asupra
+# noastră" — și atunci motorul răspunde cu rolurile inversate: pe #333213 (Bonhaus PL) o falsă
+# „notificare Meta" despre dezactivarea paginii a primit „Înțelegem că ați primit o notificare de la
+# Meta… Suntem aici să vă ajutăm! 😊". I-am răspuns POLITICOS escrocului, ca unui client păgubit.
+# ⚠️ DE CE N-A PRINS-O POARTA CARE EXISTĂ: `expeditor_masina` se uită la ADRESA EXPEDITORULUI, nu la
+# conținut, iar pe `facebook_message`/`instagram_comment` adresa e GOALĂ (verificat în oglindă:
+# from_email='' și customer_email='' pe tichetul ăla) → prima linie a funcției iese cu "". Deci
+# poarta de expeditor e STRUCTURAL oarbă exact pe canalul pe care vine atacul.
+# MĂSURAT pe 265.195 de tichete istorice: 277 de mesaje ostile; poarta existentă (expeditor + subiect
+# SaaS) prinde 37 (13,4%), restul de 240 treceau — 115 pe DM FB/IG (fără email) și 125 pe email
+# (adrese-sosie). Zero clienți reali între cele 277 (verificate toate cele 169 de subiecte distincte),
+# și zero aprinderi în plus pe lotul de 40 de drafturi străine.
+# Poarta cere DOUĂ semnale independente (sau unul tare + ultimatum), ca un client care pomenește
+# Facebook sau „contul meu" să nu cadă în ea.
+_ATAC_PLATF = r"meta|facebook|\bfb\b|instagram|whatsapp|google|tiktok|shopify|paypal|microsoft|apple"
+_ATAC_SUPORT = (r"support|suport|asisten[țţt]\w*|policy|polic(?:y|ies)|politic\w*|security|securit\w*|"
+                r"team|echip\w*|notification|notificare|notice|alert|avertis\w*|help\s?cent|centrul de ajutor|"
+                r"уведомлен\w*|поддръжк\w*|екип\w*|сигурност|"
+                r"zesp[oó][lł]\w*|powiadomien\w*|bezpiecze[nń]stw\w*|pomoc\s?technicz\w*|"
+                r"[eé]rtes[ií]t[eé]s|biztons[aá]g\w*|csapat\w*|"
+                r"podpor\w*|ozn[aá]men\w*|bezpe[cč]nos\w*")
+ATAC_IMPERSON = re.compile(r"\b(?:%s)\b[^\n]{0,45}?\b(?:%s)\b|\b(?:%s)\b[^\n]{0,45}?\b(?:%s)\b"
+                           % (_ATAC_PLATF, _ATAC_SUPORT, _ATAC_SUPORT, _ATAC_PLATF), re.I)
+# obiectul amenințat (pagina/contul/profilul/contul de reclame) + sancțiunea
+_ATAC_OBIECT = (r"pagin\w*|page|strona|stron[eęy]\w*|oldal\w*|str[aá]nk\w*|str[aá]nc\w*|"
+                r"cont\b|contul\w*|account|konto|kont[aou]\w*|fi[oó]k\w*|[uú][cč]et\w*|profil\w*|"
+                r"страниц\w*|акаунт\w*|профил\w*|ad(?:s|vertising)?\s?account|reclam\w*|ad\b|ads\b")
+_ATAC_SANCTIUNE = (r"dezactiv\w*|deactivat\w*|disabl\w*|suspend\w*|restric[țţt]\w*|restrict\w*|blocat\w*|block\w*|"
+                   r"[sș]ters\w*|remov\w*|delet\w*|terminat\w*|[iî]nchis\w*|"
+                   r"деактивир\w*|блокир\w*|премахн\w*|ограничен\w*|спрян\w*|"
+                   r"zablokowan\w*|usuni[eę]t\w*|dezaktywow\w*|zawieszon\w*|"
+                   r"letilt\w*|t[oö]r[oö]l\w*|felf[uü]ggeszt\w*|"
+                   r"zru[sš]en\w*|deaktivov\w*|zablokovan\w*|pozastaven\w*")
+ATAC_AMENINTARE = re.compile(r"\b(?:%s)\b[^\n]{0,60}?\b(?:%s)|\b(?:%s)[^\n]{0,60}?\b(?:%s)\b"
+                             % (_ATAC_OBIECT, _ATAC_SANCTIUNE, _ATAC_SANCTIUNE, _ATAC_OBIECT), re.I)
+# cererea de acțiune pe cont: confirmă identitatea / autentifică-te / contestă / codul de verificare
+ATAC_VERIFICARE = re.compile(
+    r"confirm\w*\s+(?:your|-?[țţt]i|-?va|identit|contul|account|the\s+account)|"
+    r"verific[aă]\w*\s+(?:identit|contul|contului|account)|verify\s+(?:your|the)\s+(?:account|identity|page|business)|"
+    r"potwierd[źz]\w*\s+(?:sw|tozsam|to[żz]sam|konto)|zweryfikuj\w*|"
+    r"igazol\w*\s+(?:szem[eé]ly|azonoss)|ellen[oő]rizz\w*\s+(?:a\s+)?fi[oó]k|"
+    r"потвърд\w*\s+(?:самоличност|акаунт|профил)|провер\w*\s+(?:самоличност|акаунт)|"
+    r"\bappeal\b|contesta[țţt]i|odwo[lł]a\w*|fellebbez\w*|обжалв\w*|odvolat\w*|"
+    r"\blog\s?in\b|zaloguj|bejelentkez\w*|prihl[aá]s\w*|влез\w*\s+в\s+(?:акаунт|профил)|"
+    r"parol[aă]|password|has[lł]o|jelsz[oó]|парола|"
+    r"cod\s+de\s+verificare|verification\s+code|kod\s+weryfikacyjny|проверочен\s+код|2fa|two[- ]factor", re.I)
+# ultimatumul — semnal SLAB singur (o promoție „24 de ore" nu e atac), dar decisiv lângă unul tare
+ATAC_TERMEN = re.compile(
+    r"\b(?:12|24|48|72)\s*(?:de\s+)?(?:ore|h\b|hours|hodin|hod[ií]n|godzin|[oó]r[aá]n?|часа|часов)|"
+    r"[iî]n\s+(?:urm[aă]toarele|termen de)\s+\d+|within\s+\d+\s+hours|w\s+ci[aą]gu\s+\d+|"
+    r"в\s+рамките\s+на\s+\d+|\d+\s+napon\s+bel[uü]l", re.I)
+
+
+def mesaj_ostil(text, subject=""):
+    """Motivul pentru care mesajul e un ATAC/o SOMAȚIE adresată NOUĂ ('' = nu e).
+
+    Nu e „spam": spamul se ignoră, ăsta ne vizează pe noi (pagina, contul, reclamele). Pe el NU se
+    generează NICIUN draft — nu există răspuns CS corect către un escroc, iar orice răspuns politic
+    îi confirmă că în spatele paginii răspunde cineva."""
+    t = "%s\n%s" % (subject or "", text or "")
+    if not t.strip():
+        return ""
+    cls = []
+    if ATAC_IMPERSON.search(t):
+        cls.append("impersonare platformă (Meta/Facebook/Google…)")
+    if ATAC_AMENINTARE.search(t):
+        cls.append("amenințare cu dezactivarea paginii/contului")
+    if ATAC_VERIFICARE.search(t):
+        cls.append("cerere de verificare/autentificare/contestație")
+    if ATAC_TERMEN.search(t):
+        cls.append("termen-ultimatum")
+    tari = [c for c in cls if not c.startswith("termen")]
+    if len(tari) >= 2 or (len(tari) == 1 and len(cls) > len(tari)):
+        return " + ".join(cls)
+    return ""
+
+
 def _padded_noise(s):
     """Mesaj format majoritar din caractere invizibile/padding (newslettere/notificări SaaS) — nu e text real de client."""
     if not s or len(s) < 60:
@@ -244,7 +323,10 @@ ANGER_RE = re.compile(r"!!!|\b(escroc|hoti|hotie|hotilor|teap[ăa]|tepui|inselat
 def _real_escalation(text):
     """Semnal REAL de escaladare: ANPC/juridic (ESCAL) SAU furie explicită (insulte/„țeapă") SAU mesaj majoritar MAJUSCULE."""
     dt = deacc(text or "")
-    if ESCAL.search(dt) or ANGER_RE.search(dt):
+    # ESCAL și ANGER_RE sunt scrise în ROMÂNĂ, deci moarte pe BG/PL/HU/SK/CZ/HR — acolo acuzația de
+    # fraudă („измама", „лъжа", „oszustwo", „átverés", „podvod") ieșea `escalate=false` și, prin ea,
+    # cu emoji sub acuzație. `furie_hits` e brațul pe limba pieței, tolerant la greșeli de tipar.
+    if ESCAL.search(dt) or ANGER_RE.search(dt) or furie_hits(dt):
         return True
     letters = [c for c in (text or "") if c.isalpha()]
     return len(letters) >= 12 and sum(1 for c in letters if c.isupper()) / len(letters) > 0.7
@@ -1608,6 +1690,99 @@ def persoana_inventata(draft):
     return ["persoană/gen inventat în vocea magazinului: " + " ".join(m.group(0).split())] if m else []
 
 
+# ---- IDENTITATEA JURIDICĂ A FIRMEI: clasă de fapt pe care NICIO gardă n-o atingea ----
+# #332814 (Duppo BG, comentariu PUBLIC, sub un fir despre „țeapă"): clientul scrie „am aflat că sunt
+# firmă ROMÂNEASCĂ", iar draftul răspunde «Да, Duppo е БЪЛГАРСКА фирма, която предлага качествени
+# парфюми…» — îl contrazice cu „Да," și afirmă PUBLIC ceva ce motorul n-are de unde să știe. În
+# Bulgaria asta e expunere directă la КЗП, iar pe un fir de acuzație publică e cel mai scump text din
+# tot lotul. `hallu_hits` judecă status/termen/preț, `fapte_inventate` judecă stoc/curier/plată/
+# livrare/promoție (și numai în română) — țara, forma de organizare, sediul și înregistrarea firmei nu
+# erau ale nimănui. Motorul nu are informația asta în context ȘI nu e treaba lui: nici s-o confirme,
+# nici s-o nege. Răspunsul onest e „verificăm și revenim", nu o afirmație inventată.
+# MĂSURAT: 1 aprindere pe lotul de 40 (exact draftul raportat) și 0 pe 3.415 mesaje REALE de agent
+# uman + 0 pe cele 818 drafturi din coada reală — deci garda nu taie text bun.
+_IDENT_NAT = (r"rom[aâă]n\w*|rumu[nń]sk\w*|rom[aá]n|rumunjsk\w*|romanian|румънск\w*|"
+              r"bulg[aă]r\w*|bulharsk\w*|bugarsk\w*|bolg[aá]r|bulgarian|българск\w*|"
+              r"polonez\w*|polsk\w*|po[lľ]sk\w*|lengyel|polish|полск\w*|"
+              r"maghiar\w*|ungar\w*|w[eę]giersk\w*|ma[dď]arsk\w*|magyar|hungarian|унгарск\w*|"
+              r"slovac\w*|s[lł]owack\w*|slovensk\w*|szlov[aá]k|slovak|словашк\w*|"
+              r"ceh\w*|czesk\w*|[cč]esk\w*|cseh|czech|чешк\w*|"
+              r"croat\w*|hrvatsk\w*|horv[aá]t|"
+              r"chinez\w*|chi[nń]sk\w*|[cč][ií]nsk\w*|k[ií]nai|chinese|китайск\w*")
+_IDENT_FIRMA = (r"firm[aăey]\w*|companie|compania|companii|societate\w*|societ[aă][țt]i\w*|"
+                r"sp[oó][lł]k\w*|przedsi[eę]biorstw\w*|spolo[cč]nos\w*|spole[cč]nos\w*|"
+                r"tvrtk\w*|poduze[cć]\w*|c[eé]g\w*|v[aá]llalat\w*|"
+                r"фирм\w*|компани\w*|дружеств\w*|"
+                r"company|companies|business|corporation|"
+                r"magazin\w*|sklep\w*|obchod\w*|bolt\w*|üzlet\w*|trgovin\w*|магазин\w*|store|shop|"
+                r"brand\w*|marc[aă]|mark[aąięi]\w*|m[aá]rk[aá]\w*|zna[cč]k\w*|бранд\w*|марк\w*")
+_IDENT_TARA = (r"rom[aâă]nia|rumunia|rom[aá]ni[aá]|rumunsko|rumunjsk[aá]|румъния|"
+               r"bulgaria|bu[lł]gari[ai]|bulharsko|bugarsk[ay]|bulg[aá]ri[aá]|българия|"
+               r"polonia|polska|polsko|lengyelorsz[aá]g|полша|"
+               r"ungaria|w[eę]gry|ma[dď]arsko|magyarorsz[aá]g|унгария|"
+               r"slovacia|s[lł]owacja|slovensko|szlov[aá]kia|словакия|"
+               r"cehia|czechy|[cč]esko|csehorsz[aá]g|чехия|"
+               r"china|chiny|[cč][ií]na|k[ií]na|китай")
+_IDENT_1PL = r"suntem|сме|jeste[sś]my|vagyunk|\bsme\b|\bjsme\b|\bsmo\b|we\s+are|we're"
+
+# „<naționalitate> <firmă>" în oricare ordine, în aceeași frază (max 2 cuvinte între ele)
+IDENT_NAT_FIRMA = re.compile(r"\b(?:%s)\b(?:\W+\w+){0,2}\W+\b(?:%s)\b|\b(?:%s)\b(?:\W+\w+){0,2}\W+\b(?:%s)\b"
+                             % (_IDENT_NAT, _IDENT_FIRMA, _IDENT_FIRMA, _IDENT_NAT), re.I)
+# „firmă DIN <țară>"
+IDENT_FIRMA_TARA = re.compile(r"\b(?:%s)\b(?:\W+\w+){0,3}\W+\b(?:din|de la|от|z|ze|iz|from|v|w)\W+\b(?:%s)\b"
+                              % (_IDENT_FIRMA, _IDENT_TARA), re.I)
+# „NOI SUNTEM <naționalitate/țară>" — inclusiv negația („nu suntem o firmă românească"): nici s-o
+# confirme, nici s-o nege
+IDENT_NOI = re.compile(r"\b(?:%s)\b(?:\W+\w+){0,5}\W+\b(?:%s|%s)\b"
+                       % (_IDENT_1PL, _IDENT_NAT, _IDENT_TARA), re.I)
+# sediul / înregistrarea / codul fiscal
+IDENT_SEDIU = re.compile(
+    r"sediul\s+(?:social|nostru|firmei|companiei)|[iî]nregistrat\w*\s+(?:la|[iî]n)\s+regist|registrul comer[țt]ului|"
+    r"седалище\w*|регистриран\w*\s+(?:в|по)|"
+    r"z\s+siedzib[aą]|zarejestrowan\w*\s+w|"
+    r"sz[eé]khely\w*|bejegyzett\s+c[eé]g|"
+    r"so\s+s[ií]dlom|se\s+s[ií]dlem|zaps[aá]n\w*\s+v\s+obchodn|"
+    r"sa\s+sjedi[sš]tem|"
+    r"registered\s+(?:in|office|company)|"
+    r"\b(?:CUI|ЕИК|I[CČ]O|NIP|KRS|ad[oó]sz[aá]m|VAT)\b\s*[:№#]?\s*\d", re.I)
+
+_IDENT_CLASE = (
+    ("naționalitate/formă a firmei", IDENT_NAT_FIRMA),
+    ("firma „din <țară>”", IDENT_FIRMA_TARA),
+    ("„noi suntem <naționalitate/țară>”", IDENT_NOI),
+    ("sediu/înregistrare a firmei", IDENT_SEDIU),
+)
+
+
+def identitate_firma_hits(draft):
+    """Afirmațiile draftului despre IDENTITATEA JURIDICĂ a comerciantului (țară, naționalitate, formă
+    de organizare, sediu, înregistrare). [] = curat.
+
+    Nu contează dacă afirmația e adevărată: motorul n-o are în context, deci n-o poate susține, iar
+    pe un canal public o afirmație greșită despre comerciant e faptă de protecția consumatorului."""
+    d = draft or ""
+    if not d or d.startswith("(eroare"):
+        return []
+    out = []
+    for eticheta, rx in _IDENT_CLASE:
+        m = rx.search(d)
+        if m:
+            out.append("%s: %s" % (eticheta, " ".join(m.group(0).split())))
+    return out
+
+
+def taie_identitate_firma(draft):
+    """Taie DOAR frazele care afirmă identitatea juridică a firmei. '' dacă n-ar mai rămâne un
+    răspuns — atunci apelantul suprimă draftul (ca la formularul de retur al altui magazin).
+
+    Se taie fraza ÎNTREAGĂ, nu doar potrivirea: pe #332814 potrivirea e „българска фирма", dar
+    mincinos e tot enunțul, cu tot cu „Да," de la început, care îl contrazice pe client."""
+    parts = re.split(r"(?<=[.!?])\s+", (draft or "").strip())
+    keep = [p for p in parts if not identitate_firma_hits(p)]
+    out = " ".join(keep).strip()
+    return out if len(out) >= 20 else ""
+
+
 def fabricari(draft, ctx="", inc_blk="", has_orders=False, has_cmd=False):
     """TOATE motivele de fabricare dintr-un draft: halucinațiile de FAPT (`hallu_hits`), clasele pe
     care acelea nu le acopereau (`fapte_inventate`) și PROMISIUNILE pe care nu le execută nimeni
@@ -2117,6 +2292,263 @@ def vinde_sub_acuzatie(draft):
     return out
 
 
+# ── BLOCANTUL „ȘABLON LIPIT": răspunsul care s-ar lipi pe orice tichet ──────────────────────
+# Măsurat pe lotul de 40 de drafturi străine (BG/PL/HU) generat pe tichete REALE:
+#   • 1 pereche IDENTICĂ literal (#333754 „?" ↔ #333493 „am primit 1 din 3") — ambele = SAFE_PUBLIC["bg"];
+#   • 30 din 40 deflectează în privat, din care 13 FĂRĂ ca răspunsul să aibă nevoie de date personale;
+#   • 10 din 40 (25%) au un FAPT în prima frază — restul deschid cu politețe și amână răspunsul.
+# Poarta de mai jos e DETERMINISTĂ (promptul singur nu ține — v. restul gărzilor din fișier), iar
+# singura ei reparație agresivă e o REGENERARE; nu suprimă niciun draft și nu taie nimic nevalidat.
+
+_SL_ZGOMOT = re.compile(r"[^\w\s]|[\U0001F300-\U0001FAFF☀-➿⬀-⯿️]", re.U)
+
+
+def _sl_norm(s):
+    """Textul redus la scheletul lexical: fără emoji, punctuație, majuscule, spații multiple.
+    Două drafturi care diferă doar prin emoji sau semnul de la final SUNT același șablon."""
+    return " ".join(_SL_ZGOMOT.sub(" ", (s or "").lower()).split())
+
+
+def _sl_sim(a, b):
+    import difflib
+    na, nb = _sl_norm(a), _sl_norm(b)
+    if not na or not nb:
+        return 0.0
+    return difflib.SequenceMatcher(None, na, nb).ratio()
+
+
+# INTENȚIILE mesajului clientului. Discriminantul „mesajele NU sunt la fel" NU poate fi doar
+# similaritatea lexicală: „Поръчахме преди 1 седмица" și „Преди 16 дни поръчах" au 0,30 similaritate
+# dar sunt ACEEAȘI întrebare (unde e coletul), deci același răspuns e corect acolo. Semnalele de mai
+# jos separă întrebarea de formulare.
+_SL_SEMNALE = (
+    ("lipsa", r"вместо\s*\d|само\s+еди|\d\s*бр\.?\s*(?:а|вместо)|получи\w*\s+(?:само\s+)?еди|"
+              r"2\s*\+\s*1|3\s*(?:бр|броя|парф)|трет\w+\s+(?:е\s+)?мираж|уж\s+тряб|"
+              r"tylko\s+jedn|zamiast\s+\d|brakuj|"
+              r"csak\s+egy|hi[áa]nyz|"
+              r"doar\s+un\w*\s+bucat|lipse\w*\s+din\s+colet"),
+    ("intarziere", r"още\s+(?:ги\s+)?няма|не\s+(?:е\s+)?(?:при)?стигна|чакам|преди\s+\d+\s*(?:дни|дена|седмиц)|"
+                   r"нищо\s+не\s+идва|забав|"
+                   r"nie\s+dotar|czekam\s+od|"
+                   r"m[ée]g\s+nem\s+[ée]rkez|"
+                   r"nu\s+a\s+ajuns|a[șs]tept\s+de"),
+    ("acuzatie", r"измам|лъж|прецакв|крад|мошеник|"
+                 r"oszust|kłamst|"
+                 r"[áa]tver|csal[óa]s|"
+                 r"escroc|[țt]ep[ăa]ar|"
+                 r"scam|fraud"),
+    ("lauda", r"страхот|чудесн|доволн|благодар\w*\s+ви\s+за\s+(?:продукт|стокат)|"
+              r"[śs]wietn|super|zadowolon|polecam|u[żz]ywam\s+go|"
+              r"kit[űu]n[őo]|el[ée]gedett|"
+              r"mul[țt]umit|excelent"),
+    ("pret", r"цена|лева|евро|colko|"
+             r"\bcen[aeyę]\b|z[łl]ot|taniej|allegro|"
+             r"[áa]r[ae]?\b|forint|"
+             r"pre[țt]|lei\b"),
+    ("produs", r"как[ъв]\w*\s+(?:модел|цвят|размер|матери)|размер|цвят|материал|грамаж|"
+               r"с\s+как[ъв]\w*\s+куриер|как\s+се\s+(?:произнася|казва)|"
+               r"jaki\w*\s+(?:wtyczk|rozmiar|kolor|materia)|wtyczk|rozmiar|kolor\b|"
+               r"milyen\s+(?:m[ée]ret|sz[íi]n)|m[ée]ret|"
+               r"ce\s+(?:m[ăa]rime|culoare|material)"),
+    ("anulare", r"отказ\w*\s+поръчк|да\s+откажа|анулир|"
+                r"anulowa[ćc]|rezygnuj|"
+                r"lemond|"
+                r"anul(?:ez|are)"),
+    ("retur", r"рекламаци|връщан|върна|възстанов|"
+              r"zwrot|reklamacj|"
+              r"visszak[üu]ld|panasz|"
+              r"retur|rambursar"),
+)
+_SL_SEMNALE = tuple((k, re.compile(p, re.I)) for k, p in _SL_SEMNALE)
+
+
+def sl_semnale(msg):
+    """Setul de INTENȚII al mesajului clientului. 'gol' = mesaj fără niciun conținut utilizabil
+    („?", „Да", „и при мен е така") — care e exact cazul în care șablonul se lipește nevăzut."""
+    t = " ".join((msg or "").split())
+    out = {k for k, rx in _SL_SEMNALE if rx.search(t)}
+    if not out and len(t.split()) <= 4:
+        out.add("gol")
+    return frozenset(out)
+
+
+# DEFLECTAREA: „scrie-ne în privat", în cele 8 limbi pe care le servim.
+SL_DEFLECT = re.compile(
+    r"лично(?:то)?\s+съобщени|лични\s+съобщени|частно\s+съобщени|частен\s+разговор|на\s+лични\b|"
+    r"wiadomo[śs]\w*\s+prywatn|prywatn\w*\s+wiadomo[śs]|"
+    r"priv[áa]t\s+[üu]zenet|priv[áa]tban|"
+    r"[îi]n\s+privat|mesaj\s+privat|"
+    r"soukrom\w*\s+zpr[áa]v|s[úu]kromn\w*\s+spr[áa]v|privatn\w*\s+poruc|"
+    r"private\s+message|\bmessenger\b|\binbox\b|\bdm\b", re.I)
+
+# NEVOIA DE DATE PERSONALE — singura justificare a deflectării. Se citește din MESAJUL clientului:
+# orice trimitere la propria lui tranzacție (a comandat / a primit / a plătit / vrea retur sau
+# anulare / „și la mine la fel") cere comanda lui, deci privatul e răspunsul CORECT.
+SL_NEVOIE_DATE = re.compile(
+    r"пор[ъь]ч\w*|плащ\w*|плати\w*|получи\w*|изпращ\w*|пращ\w*|взех|пратк\w*|доставк\w*|куриер\w*\s+(?:ми|ни)|"
+    r"адрес\w*|рекламаци\w*|отказ\w*|откажа|връщан\w*|върна|възстанов\w*|при\s+мен|и\s+аз\b|"
+    r"\d\s*бр\.?|броя\b|"
+    r"zam[óo]wi\w*|zamawia\w*|otrzyma\w*|przesy[łl]k\w*|dostaw\w*|zwrot\w*|paczk\w*|reklamacj\w*|"
+    r"rendel\w*|kapt\w*|csomag\w*|sz[áa]ll[íi]t\w*|visszak[üu]ld\w*|"
+    r"am\s+comandat|am\s+primit|colet\w*|retur\w*|rambursar\w*|"
+    r"\border\w*|parcel|deliver|refund|return", re.I)
+
+# categoriile în care tichetul ATINGE o comandă prin definiție (deflectarea e legitimă)
+SL_CATS_PERSONALE = frozenset((
+    "livrare_wismo", "retur_rambursare", "anulare", "modificare_comanda",
+    "comanda_noua", "plata", "reclamatie_produs"))
+
+# FAPT în prima frază: o cifră, o afirmație/negație directă, un nume propriu sau un termen citat
+# din context, ori întrebarea care deblochează. Politețea („Съжаляваме…", „Cieszymy się…") NU e fapt.
+SL_AFIRM = re.compile(r"^\s*(да|не|tak|nie|igen|nem|da|ne|yes|no|ano|[áa]no)\s*[,:]", re.I)
+SL_INTREB = re.compile(
+    r"\?|как[ъвато]\w*|\bкой\b|\bкое\b|уточнет\w*|кажете\s+ни|"
+    r"\bjaki\w*|\bkt[óo]r\w*|prosz[eę]\s+o\s+podanie|"
+    r"\bmilyen\b|\bmelyik\b|"
+    r"\bce\s+model|\bcare\s+", re.I)
+SL_CITAT = re.compile(r"[\"“„»«]([^\"“”„»«]{3,40})[\"”“»«]")
+SL_PROPRIU = re.compile(r"\b[A-ZĄĆĘŁŃÓŚŹŻÁÉÍÓÖŐÚÜŰ][a-ząćęłńóśźżáéíóöőúüű]{2,}")
+
+# RECUNOAȘTEREA DESCHISĂ A INCIDENTULUI — lucrul cel mai valoros din lot: 4 drafturi BG care
+# numesc eroarea de la promoția 2+1 pe nume, calm, fără emoji și fără cuvântul „neînțelegere”.
+# Regenerarea NU are voie s-o piardă: dacă draftul vechi o avea și cel nou nu, cel nou e REFUZAT,
+# oricât de bine ar sta la celelalte trei criterii.
+SL_RECUNOASTE = re.compile(
+    r"(?:имали\s+сме|има\w*|имаме)\s+(?:известн?\w*\s+)?"
+    r"(?:случаи|проблем\w*|инцидент\w*|грешк\w*)|"
+    r"грешк\w*\s+при|проблем\w*\s+(?:с|при)\s+(?:изпращ|подготов|обработ)|"
+    r"mieli[śs]my\s+\w*\s*(?:problem|b[łl][ęe]d)|wyst[ąa]pi\w*\s+\w*\s*(?:problem|b[łl][ęe]d|pomy[łl]k)|"
+    r"probl[ée]m\w*\s+(?:volt|ad[óo]dott)|hiba\s+t[öo]rt[ée]nt|el[őo]fordult\s+\w*\s*hib|"
+    r"am\s+avut\s+\w*\s*(?:problem|eroar|erori)|exist[ăa]\s+\w*\s*(?:problem|incident|erori)|"
+    r"we\s+(?:had|have\s+had)\s+\w*\s*(?:issue|problem|error)", re.I)
+
+
+def pierde_incidentul(vechi, nou, inc_blk):
+    """Textul NOU renunță la recunoașterea deschisă a incidentului pe care o avea cel vechi?
+    Doar pe un tichet cu incident ACTIV — altfel întrebarea n-are sens."""
+    return bool(inc_blk) and bool(SL_RECUNOASTE.search(vechi or "")) and not SL_RECUNOASTE.search(nou or "")
+
+
+
+def sl_prima_fraza(draft):
+    t = " ".join((draft or "").split())
+    return re.split(r"(?<=[.!?])\s+", t)[0] if t else ""
+
+
+def fapt_in_prima_fraza(draft):
+    """Prima frază conține RĂSPUNSUL / FAPTUL / întrebarea care deblochează?
+
+    Invitația în privat NU se pune la socoteală, oricâte detalii de produs ar căra după ea:
+    «Proszę napisać do nas w wiadomości prywatnej, a my odpowiemy… lunchboxa 3 w 1» amână
+    răspunsul, nu îl dă."""
+    p = sl_prima_fraza(draft)
+    if not p or p.lstrip().startswith("(eroare"):
+        return False
+    if SL_DEFLECT.search(p):
+        return False
+    if re.search(r"\d", p):
+        return True
+    if SL_AFIRM.search(p) or SL_CITAT.search(p) or SL_INTREB.search(p):
+        return True
+    return bool(SL_PROPRIU.search(p[1:]))   # p[1:] — majuscula de început de frază nu e nume propriu
+
+
+def sablon_lipit(draft, msg, lot, prag_draft=0.93, prag_msg=0.55):
+    """Draftul ăsta e (aproape) draftul altui tichet din ACELAȘI lot, dat unui om care a scris ALTCEVA?
+
+    Pragul e deliberat sus (0,93): pe lot, perechile de sub el sunt răspunsuri care CHIAR se
+    aseamănă fiindcă și mesajele se asemănau (două întârzieri, două acuzații fără detalii).
+    Discriminantul dublu — similaritate lexicală MICĂ *și* set de intenții DIFERIT — e cel care
+    separă «doi oameni au întrebat același lucru» de «șablonul s-a lipit».
+    Întoarce numărul tichetului-geamăn sau ''."""
+    if not draft or draft.lstrip().startswith("(eroare"):
+        return ""
+    sem = sl_semnale(msg)
+    for alt in (lot or ()):
+        if _sl_sim(draft, alt.get("draft")) < prag_draft:
+            continue
+        if _sl_sim(msg, alt.get("msg")) >= prag_msg:
+            continue          # au scris (aproape) același lucru → același răspuns e corect
+        if sem and alt.get("sem") and sem == alt["sem"]:
+            continue          # aceeași intenție, altă formulare → tot corect
+        return str(alt.get("no") or "?")
+    return ""
+
+
+def sablon_lipit_hits(draft, msg, cat, lot=(), is_public=False, inc_blk=""):
+    """Motivele pentru care draftul ăsta s-ar lipi pe orice tichet. [] = curat."""
+    if not draft or draft.lstrip().startswith("(eroare"):
+        return []
+    out = []
+    geaman = sablon_lipit(draft, msg, lot)
+    if geaman:
+        out.append("identic cu draftul tichetului #%s, deși omul a scris altceva" % geaman)
+    if SL_DEFLECT.search(draft) and not (
+            SL_NEVOIE_DATE.search(msg or "") or cat in SL_CATS_PERSONALE or inc_blk):
+        out.append("deflectare în privat pe o întrebare care NU cere date personale")
+    if is_public and not fapt_in_prima_fraza(draft):
+        out.append("prima frază nu conține niciun fapt/răspuns/întrebare care deblochează")
+    return out
+
+
+def taie_deflectarea(draft):
+    """Ultima plasă, VALIDATĂ: scoate DOAR frazele al căror singur conținut e invitația în privat,
+    și numai dacă ce rămâne e tot un răspuns cu FAPT în prima frază.
+
+    Podeaua e aceeași ca la `drop_reoffer_sentences` (un ciot e vizibil pentru omul care aprobă),
+    dar aici condiția e mai tare: fără fapt în ce rămâne, tăierea ar produce exact lucrul de care
+    ne ferim — un răspuns scurt și gol, care e mai rău decât unul lung și onest. '' = nu tăia."""
+    parts = [p for p in re.split(r"(?<=[.!?])\s+", (draft or "").strip()) if p.strip()]
+    keep = [p for p in parts if not SL_DEFLECT.search(p) and re.search(r"\w", p)]
+    out = " ".join(keep).strip()
+    if len(out) < 20 or not fapt_in_prima_fraza(out):
+        return ""
+    return out
+
+
+REGEN_SABLON = (
+    "\n\n⛔ Răspunsul tău anterior e un ȘABLON LIPIT: %s. Rescrie-l ca răspuns la CE A SCRIS OMUL "
+    "ĂSTA („%s”), nu la categoria lui. Reguli, în ordine:\n"
+    "• PRIMA frază conține RĂSPUNSUL, FAPTUL din context sau ÎNTREBAREA scurtă care deblochează — "
+    "nu scuza, nu politețea, nu invitația în privat. Scuza, dacă e cazul, vine DUPĂ.\n"
+    "• Maximum O frază de politețe în tot mesajul.\n"
+    "• NU-l trimite în privat decât dacă răspunsul chiar are nevoie de datele LUI (număr de comandă, "
+    "adresă, plată, retur). La preț, mărime, culoare, material, stoc, compoziție sau curier răspunde "
+    "PUBLIC, cu cifra din context; dacă cifra NU e în context, întreabă-l PUBLIC și scurt ce model îl "
+    "interesează — nu-l muta în privat ca să eviți răspunsul.\n"
+    "• NU inventa nimic: nicio cifră, niciun termen, niciun status și nicio politică din afara contextului.\n"
+    "Scrie DOAR răspunsul.")
+
+
+def _fara_sablon_lipit(draft, msg, cat, lot, is_public, inc_blk, regen_sl, verif=None):
+    """O regenerare; dacă tot iese șablon, se încearcă tăierea VALIDATĂ a deflectării; altfel
+    draftul rămâne cum e.
+
+    Aici suprimarea ar fi greșită, spre deosebire de garda de promisiuni: un răspuns generic e
+    slab, nu periculos, iar pragul pieței străine e „mai bun decât tăcerea". Regenerarea trece
+    prin ACELEAȘI verificări ca restul gărzilor (`verif`), ca să nu schimbăm un șablon pe un
+    status inventat."""
+    hits = sablon_lipit_hits(draft, msg, cat, lot, is_public, inc_blk)
+    if not hits:
+        return draft, ""
+    d2 = ""
+    if regen_sl:
+        try:
+            d2 = (regen_sl(hits) or "").strip()
+        except Exception:
+            d2 = ""
+    if d2 and not d2.lstrip().startswith("(eroare") and not regen_respinsa(d2, verif):
+        h2 = sablon_lipit_hits(d2, msg, cat, lot, is_public, inc_blk)
+        if len(h2) < len(hits) and not pierde_incidentul(draft, d2, inc_blk):
+            return d2, "+șablon-lipit" + ("" if not h2 else "-parțial")
+    taiat = taie_deflectarea(draft)
+    if (taiat and not regen_respinsa(taiat, verif)
+            and not pierde_incidentul(draft, taiat, inc_blk)
+            and len(sablon_lipit_hits(taiat, msg, cat, lot, is_public, inc_blk)) < len(hits)):
+        return taiat, "+deflectare-tăiată"
+    return draft, "+ȘABLON-LIPIT-RĂMAS"
+
+
 def categorize_hint(blob, channel=None):
     t = deacc(blob)
     for cat, pat in RULES:
@@ -2208,9 +2640,150 @@ def neg_hits(t):
     return [w for _, w in _potriviri(t, NEG)]
 
 
+# ---- FURIE / ACUZAȚIE DE FRAUDĂ, TOLERANTĂ LA GREȘELI DE TIPAR ----
+# De ce există blocul ăsta: pe 40 de drafturi STRĂINE reale, 10 ieșeau cu emoji sub o acuzație de
+# fraudă. Garda de emoji NU era vinovată — măsurat, emoji-ul e o funcție PURĂ de `escalate`: din 13
+# tichete escaladate 0 au primit emoji, din 27 neescaladate 23 au. A cedat CLASIFICATORUL din
+# amonte. Trei cauze, toate de-o literă distanță:
+#   • lexiconul NEG bulgar avea „измам" și „боклук", dar NU „лъж" (minciună) — exact cuvântul din
+#     «Лъжа! Получаваш само един, а плащаш два!» — iar „буклуци" (scris cu У) trecea pe lângă „боклук";
+#   • typo-ul: «Az egész egy nagy átvetés» (pentru „átverés") rata TREI garzi deodată — NEG
+#     („atverte"), FRAUD_INTL_RE („atver") și FIR_ACUZATIE_RE („atver") — fiindcă potrivirea e pe
+#     subșir EXACT. O gardă care moare la o literă distanță nu e o gardă: oamenii furioși scriu repede;
+#   • confirmarea scurtă de pagubă («и при мен е така» = „și la mine la fel") n-are NICIUN cuvânt de
+#     furie. E negativă doar prin CONTEXT — firul de acuzații sau incidentul ACTIV al pieței.
+# Rădăcinile se scriu FĂRĂ diacritice (textul trece prin `deacc`); chirilicul trece neatins.
+FURIE_RADACINI = (
+    # bulgară — cuvintele cu care se acuză fraudă pe firele Duppo/Bonhaus BG
+    "измам", "изман", "мошени", "лъж", "лъжц", "излъга", "прецак", "крад", "мамят",
+    "подигравк", "подигра", "боклук", "буклуц", "некоректн", "набутва", "залъгва",
+    # poloneză
+    "oszust", "oszuk", "naciag", "zlodziej",
+    # cehă / slovacă
+    "podvod", "podvad", "zlodej", "okrad",
+    # maghiară — „atveres" e rădăcina prin care brațul TOLERANT prinde typo-ul real „atvetes"
+    "csalas", "csalo", "atver", "atveres", "szelhamos", "hazugsag", "becsapt",
+    # croată
+    "prevara", "lopov",
+    # engleză (pe paginile străine se acuză și în engleză). ⚠️ Rădăcinile ROMÂNEȘTI („teapa",
+    # „inselat", „escroc", „batjocur") NU intră aici: le are deja ANGER_RE, cu graniță de cuvânt.
+    # Duplicate, ele stricau ce mergea — „este ft țeapăn, mulțumesc!" (laudă) ieșea NEGATIV, fiindcă
+    # „teapa" e prefix pentru „țeapăn". Lexiconul ăsta e pentru piețele pe care RO nu le acoperă.
+    "scam", "fraud", "cheat",
+)
+# Pragul de la care o rădăcină intră și în potrivirea TOLERANTĂ la tipar. Sub el se potrivește DOAR
+# exact: o rădăcină scurtă la distanță 1 prinde alt cuvânt („teapa"→„ceapa", „scam"→„scan").
+FURIE_PRAG_TIPAR = 6
+# ⚠️ Poziția MINIMĂ a greșelii de tipar în rădăcină. Fără ea brațul tolerant e un GENERATOR de
+# fals-pozitive, MĂSURAT pe 12.234 de tichete reale din oglinda locală: „atvert"↔„advert" (45 de
+# tichete despre ADVERTISING marcate ca fraudă), „atveres"↔„Averescu" (bulevardul dintr-o adresă),
+# „prevara"↔„prepara", „naciag"↔„nadiag", „крадат"↔„краката" („picioarele"). Toate greșeau în
+# primele litere — adică erau CUVINTE DIFERITE, nu variante scrise greșit; omul care scrie repede
+# greșește în CORPUL cuvântului, nu în atacul lui. Cifrele pe aceleași 12.234 de tichete: fără prag
+# 123 de aprinderi tolerante (majoritatea greșite), cu prag 3 rămân 7 (una discutabilă, „prepara"),
+# cu prag 4 rămân 3 și TOATE sunt reale — „atvetes" (typo-ul maghiar), „боклуци" (У/О) și
+# „мошенници" (Н dublat). Ce pierde pragul 4 („излагате") e deja prins de brațul 2, prin
+# FIR_ACUZATIE_RE. De-aia 4, nu 3: zero fals-pozitive măsurate, zero recall pierdut.
+FURIE_POZ_TIPAR = 4
+_CUV_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
+# text mai lung de-atât nu se mai trece prin brațul tolerant (e cost O(cuvinte × rădăcini), iar un
+# fir citat de 20 de mesaje nu spune nimic în plus despre furia ULTIMULUI mesaj)
+FURIE_MAX_CHR = 4000
+
+
+def _ed1(a, b, poz_min=0):
+    """`a` și `b` diferă prin cel mult o greșeală de tipar, aflată de la poziția `poz_min` încolo?
+
+    O greșeală = o literă schimbată, una în plus, una lipsă sau două litere vecine inversate.
+    `poz_min` cere ca ATACUL cuvântului să fie identic — vezi FURIE_POZ_TIPAR."""
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return False
+    if la == lb:
+        dif = [i for i in range(la) if a[i] != b[i]]
+        if not dif:
+            return True
+        if dif[0] < poz_min:
+            return False
+        if len(dif) == 1:
+            return True
+        # „atverse" pentru „atveres" = două litere vecine inversate, tot o singură greșeală de tipar
+        return (len(dif) == 2 and dif[1] == dif[0] + 1
+                and a[dif[0]] == b[dif[1]] and a[dif[1]] == b[dif[0]])
+    if la > lb:
+        a, b, la, lb = b, a, lb, la
+    i = 0
+    while i < la and a[i] == b[i]:
+        i += 1
+    return i >= poz_min and a[i:] == b[i + 1:]
+
+
+def furie_hits(t):
+    """Rădăcinile de FURIE/FRAUDĂ din `t` (deja trecut prin `deacc`), EXACT sau la o greșeală de tipar.
+
+    Brațul exact folosește aceeași regulă de graniță ca `neg_hits` (început de cuvânt, sufixul liber).
+    Brațul tolerant compară rădăcina cu prefixul cuvântului de lungime L-1/L/L+1, ca să prindă
+    deopotrivă litera greșită, cea lipsă și cea în plus."""
+    gasite = {w for _i, w in _potriviri(t, FURIE_RADACINI)}
+    lungi = [r for r in FURIE_RADACINI if len(r) >= FURIE_PRAG_TIPAR and r not in gasite]
+    if lungi and len(t) <= FURIE_MAX_CHR:
+        for cuv in _CUV_RE.findall(t):
+            if len(cuv) < FURIE_PRAG_TIPAR - 1:
+                continue
+            # cuvânt deja prins EXACT de o rădăcină → nu-l mai numărăm a doua oară prin tipar
+            if any(cuv.startswith(r) for r in FURIE_RADACINI):
+                continue
+            for r in lungi:
+                if r in gasite:
+                    continue
+                L = len(r)
+                if any(_ed1(r, cuv[:k], FURIE_POZ_TIPAR) for k in (L - 1, L, L + 1) if k > 0):
+                    gasite.add(r)
+    return sorted(gasite)
+
+
+def tema_incident_activ(store_name, text):
+    """Textul CLIENTULUI se potrivește cu TEMA unui incident ACTIV al magazinului lui?
+
+    Exact potrivirea pe care o face deja brațul public (`fir_acuzator` / `public_incident_facts`),
+    dar aplicată mesajului PROPRIU al clientului, nu firului din jur. Identitatea se curăță ÎNAINTE
+    (`public_safe_text`), ca la orice potrivire publică: tema, niciodată comanda omului."""
+    t = deacc(public_safe_text(text or ""))
+    if not t.strip():
+        return False
+    for inc in (INCIDENTS_ACTIVE or ()):
+        try:
+            if _store_match(_store_names(inc), store_name) and any(k in t for k in _pub_topics(inc, store_name)):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def furie_ferma(text, store_name=""):
+    """Motivul pentru care tichetul e NEGATIV FERM, indiferent ce spune numărătoarea de cuvinte ('' = nu e).
+
+    Trei brațe, de la cel mai lexical la cel mai independent de lexic:
+      1. rădăcină de FRAUDĂ (exactă sau la o greșeală de tipar);
+      2. CONFIRMARE de pagubă scrisă scurt, fără niciun cuvânt de furie („и при мен е така");
+      3. INCIDENT ACTIV pe piața magazinului, cu tema potrivită pe textul clientului.
+    Brațul 3 e regula tare: lexicul poate greși, dar faptul că există un incident MĂSURAT în registru
+    nu. Pe o piață cu incident activ, un text pe tema lui NU e niciodată teren de emoji."""
+    d = deacc(text or "")
+    h = furie_hits(d)
+    if h:
+        return "frauda: " + ", ".join(h[:3])
+    if FIR_ACUZATIE_RE.search(d) or FIR_INCOMPLET_RE.search(d):
+        return "confirmare de paguba"
+    if tema_incident_activ(store_name, text):
+        return "incident activ pe piata"
+    return ""
+
+
 def sentiment(text):
     t = deacc(text)
-    n = len(neg_hits(t))
+    furie = furie_hits(t)
+    n = len(neg_hits(t)) + len(furie)
     p = 0
     for i, w in _potriviri(t, POS):
         if _NEGATIE.search(t[max(0, i - 12): i]):
@@ -2219,7 +2792,11 @@ def sentiment(text):
             p += 1
     excl = t.count("!"); caps = sum(1 for c in text if c.isupper())
     lab = "negativ" if n > p else ("pozitiv" if p > n else "neutru")
-    score = n + p + excl // 2 + (1 if caps > 15 else 0)
+    # o acuzație de fraudă nu se „echilibrează" cu un cuvânt politicos: «Лъжа! … Благодаря» rămâne
+    # NEGATIVĂ, altfel formula de politețe din final anula acuzația din prima propoziție.
+    if furie:
+        lab = "negativ"
+    score = n + p + excl // 2 + (1 if caps > 15 else 0) + (2 if furie else 0)
     inten = "puternic" if (score >= 3 or excl >= 2 or caps > 20) else ("mediu" if score >= 1 else "slab")
     return lab, inten
 
@@ -2533,6 +3110,231 @@ REGEN_SCUZA = ('\n\n⛔ Răspunsul tău anterior conține o NON-SCUZĂ: „%s". 
                'Scrie DOAR răspunsul, în aceeași limbă.')
 
 
+# ---- SCUZA ȘI MULȚUMIREA PUSE GREȘIT (măsurat pe lotul de 40 de drafturi de piață străină) ----
+# Trei forme, același cost: draftul cere scuze / mulțumește ACOLO UNDE NU TREBUIE, iar pe canal PUBLIC
+# asta confirmă acuzația în fața tuturor cititorilor reclamei.
+#   1. SCUZĂ PE NIMIC — pe un comentariu care e doar „?" draftul răspundea «Съжаляваме за случилото се»,
+#      caracter cu caracter același text ca la un om care chiar descria coletul cu 1 din 3; pe poloneză,
+#      sub un comentariu de PREȚ („pe Allegro iei două cu 50"), «Przykro nam z powodu tej sytuacji» —
+#      ne cerem scuze pentru nimic, PUBLIC. Scuza se pune DOAR când clientul a reclamat ceva sau când
+#      ȘTIM că i-am greșit (comanda LUI e în registrul de incidente).
+#   2. MULȚUMIM PĂGUBAȘULUI — «Благодарим ви, че споделяте! 😊» sub «и при мен е така» („și la mine la
+#      fel"): mulțumim cuiva că ne-a spus că l-am păgubit, cu zâmbet, zero recunoaștere, zero remediu.
+#   3. REÎNCADRAREA CA „NEÎNȚELEGERE" — «Съжаляваме за неразбирателството!» sub «Лъжа!». Numim
+#      „neînțelegere" un incident măsurat pe 146 de colete = minimalizarea unei reclamații întemeiate.
+# Garda e DETERMINISTĂ (promptul singur nu ține — aceeași lecție ca la registru și la non-scuză): o
+# regenerare, iar dacă nu există/eșuează se taie DOAR fraza care e pur formulă, altfel marcaj vizibil.
+SCUZA_RE = re.compile(
+    r"съжаляваме|извиняваме се|извинявайте|извинете"
+    r"|przykro nam|przepraszamy"
+    r"|sajnaljuk|elnezest"
+    r"|ne pare rau|regretam|imi pare rau"
+    r"|zao nam je|ispricavamo se"
+    r"|je nam lito|mrzi nas|omlouvame se|ospravedlnujeme"
+    r"|lutujeme|je nam luto"
+    r"|we (?:are|'re) sorry|we apolog|our apolog", re.I)
+
+# „mulțumim CĂ ne-ați scris/împărtășit" — NU „mulțumim pentru comandă/răbdare": doar forma care
+# transformă reclamația în favoare făcută nouă.
+MULTUMIRE_RE = re.compile(
+    r"благодарим (?:ви|ти|Ви)[^.!?]{0,20}че (?:сподел|нап[ии]с|ни пис|сигнализ|ни уведом|обърнахте)"
+    r"|dziekujemy[^.!?]{0,20}ze (?:napisa|podziel|zglosi|poinformowa)"
+    r"|koszonjuk,? hogy (?:[ií]rt|megosztotta|jelezte|sz[oó]lt)"
+    r"|multumim c[ăa] ne-?a[țt]i (?:scris|semnalat|sesizat|[îi]mp[ăa]rt[ăa][șs]it)"
+    r"|hvala[^.!?]{0,20}sto ste (?:nam javili|podijelili|pisali)"
+    r"|dekujeme,? ze jste[^.!?]{0,20}(?:napsal|upozornil)"
+    r"|dakujeme,? ze ste[^.!?]{0,20}(?:napisal|upozornil)"
+    r"|thank you for (?:sharing|writing|letting us know|reaching out|reporting)", re.I)
+
+# a numi „neînțelegere / confuzie / impresie" ceva ce E o greșeală a noastră
+REINCADRARE_RE = re.compile(
+    r"неразбирател|недоразумен|обърквaне|объркване"
+    r"|nieporozumien|niejasnosc"
+    r"|felreert"
+    r"|nedorozumen"
+    r"|nesporazum"
+    r"|nein[țt]elegere|neintelegere|confuzie|impresi"
+    r"|misunderstanding|confusion", re.I)
+
+# RECLAMAȚIA clientului, pe limbile pieței. Completează `neg_hits` (lista NEG prinde furia, nu
+# ENUNȚUL faptic „am primit 1 din 3" — exact forma cea mai frecventă din lotul bulgar).
+RECLAMATIE_RE = re.compile(
+    r"само (?:един|една|едно|1\b|1 ?бр)|получих само|получавам само|дойде(?: ми)? само|вместо \d"
+    r"|не (?:съм )?(?:получи|получих|пристигна|дойде)|още (?:ги )?няма|нищо не (?:идва|дойде|пристигна)"
+    r"|липсва|повреден|счупен|грешн[ао]|пострадах|не отговар|коректност 0|некоректн"
+    r"|измам|лъж|прецак|набутв|буклу[кц]|подигра|жалб|рекламаци"
+    r"|и при мен|и аз така|и на мен (?:ми )?е така|при мен също"
+    r"|tylko (?:jeden|jedna|jedno|1\b)|zamiast \d|nie (?:dostal|otrzymal|dotarl|przyszl|dziala)"
+    r"|oszust|klamst|uszkodz|reklamacj|opoznien|u mnie tak samo"
+    r"|csak (?:egy|1\b)|helyett|nem (?:kaptam|erkezett|jott)|csalas|atver[ée]s|atvet[ée]s|hibas|panasz|nalam is"
+    r"|jen jeden|iba jeden|namisto|nedostal|neprisl|podvod|poskoz|reklamac"
+    r"|samo jedan|umjesto|nisam dobio|prevar|ostecen|reklamacij"
+    r"|doar (?:un|una|1\b)|in loc de \d|nu am primit|nu a ajuns|escroc|teapa|reclamatie|deteriorat"
+    r"|only (?:one|1\b)|instead of \d|didn'?t receive|not received|scam|fraud|broken|damaged|complaint",
+    re.I)
+
+
+def e_reclamatie(cust_txt, sent_lab=""):
+    """Clientul a RECLAMAT ceva? (sentiment negativ, marcaj NEG de piață, sau enunț faptic de pagubă)"""
+    t = deacc(cust_txt or "")
+    if not t.strip():
+        return False
+    if (sent_lab or "").strip().lower() == "negativ":
+        return True
+    return bool(neg_hits(t)) or bool(RECLAMATIE_RE.search(t))
+
+
+def stim_ca_i_am_gresit(inc_blk="", has_orders=False):
+    """ȘTIM că i-am greșit ACESTUI om = comanda LUI e în registrul de incidente (nu doar incidentul
+    magazinului, care e adevărat pentru oricine trece pe sub reclamă)."""
+    return bool(inc_blk) and bool(has_orders)
+
+
+def scuza_gresita_hits(draft, cust_txt="", sent_lab="", inc_blk="", has_orders=False):
+    """[(fel, fragment)] pentru scuza/mulțumirea/reîncadrarea puse greșit. [] = curat."""
+    if not draft or draft.lstrip().startswith("(eroare"):
+        return []
+    d = deacc(draft)
+    reclamat = e_reclamatie(cust_txt, sent_lab)
+    gresit_noi = stim_ca_i_am_gresit(inc_blk, has_orders)
+    pozitiv = (sent_lab or "").strip().lower() == "pozitiv"
+    out = []
+    # Scuza „pe nimic" se deduce din ABSENȚA unei reclamații — deci are nevoie de textul omului.
+    # Fără el (apelanții cu 3 argumente) nu știm ce a scris și NU inferăm nimic: tăcerea datelor nu
+    # e dovadă. Celelalte brațe pornesc de la un semnal PREZENT, deci merg mai departe ca până acum.
+    stim_ce_a_scris = bool((cust_txt or "").strip())
+    if stim_ce_a_scris and not reclamat and not gresit_noi:
+        for m in SCUZA_RE.finditer(d):
+            out.append(("scuza-pe-nimic", " ".join(m.group(0).split())[:50]))
+            break
+    if (reclamat or gresit_noi or bool(inc_blk)) and not pozitiv:
+        for m in MULTUMIRE_RE.finditer(d):
+            out.append(("multumim-pagubasului", " ".join(m.group(0).split())[:60]))
+            break
+    if reclamat or gresit_noi:
+        for m in REINCADRARE_RE.finditer(d):
+            out.append(("reincadrare-neintelegere", " ".join(m.group(0).split())[:50]))
+            break
+    return out
+
+
+_RX_FEL = {"scuza-pe-nimic": SCUZA_RE, "multumim-pagubasului": MULTUMIRE_RE,
+           "reincadrare-neintelegere": REINCADRARE_RE}
+
+
+def _fraza_pur_formula(fraza):
+    """Fraza e DOAR formula (scuză/mulțumire/reîncadrare) + umplutură, fără conținut propriu?
+    Pragul de 30 de caractere e cel care lasă «Съжаляваме за случилото се.» să cadă, dar ține
+    «Съжаляваме, но нямаме наличност от този продукт.» (acolo tăierea ar pierde răspunsul)."""
+    rest = fraza
+    for rx in _RX_FEL.values():
+        rest = rx.sub(" ", rest)
+    rest = re.sub(r"[^\w\s]", " ", rest, flags=re.UNICODE)
+    return len(re.sub(r"\s+", " ", rest).strip()) <= 30
+
+
+def taie_scuza_gresita(draft, hits):
+    """Ultima plasă, deterministă: taie DOAR frazele care sunt PUR formula greșită; dacă fraza mai
+    poartă conținut (ex. recunoașterea incidentului), taie doar SUBORDONATA de reîncadrare. ''
+    dacă n-ar mai rămâne un răspuns — atunci apelantul marchează vizibil, nu ciopârțește."""
+    if not draft or not hits:
+        return ""
+    fel = {f for f, _ in hits}
+    parts = re.split(r"(?<=[.!?])\s+", draft.strip())
+    out = []
+    for p in parts:
+        dp = deacc(p)
+        lovit = [f for f in fel if _RX_FEL[f].search(dp)]
+        if not lovit:
+            out.append(p)
+            continue
+        if _fraza_pur_formula(dp):
+            continue                      # fraza dispare întreagă
+        if lovit == ["reincadrare-neintelegere"]:
+            m = REINCADRARE_RE.search(dp)
+            taiat = re.sub(r"\s*[,;—-]\s*[^,;]*$", "", p[:m.start()]).strip()
+            if len(taiat) >= 25:
+                out.append(taiat + ("" if taiat[-1:] in ".!?" else "."))
+                continue
+        return ""                         # nu putem tăia curat → apelantul marchează
+    rez = " ".join(x.strip() for x in out if x.strip()).strip()
+    return rez if len(rez) >= 25 else ""
+
+
+MARK_SCUZA_LOC = "⚠️ SCUZĂ/MULȚUMIRE NEPOTRIVITĂ:"
+_ETICHETA_FEL = {
+    "scuza-pe-nimic": "cere scuze deși clientul n-a reclamat nimic și nu știm să-i fi greșit",
+    "multumim-pagubasului": "mulțumește clientului că ne-a spus că l-am păgubit",
+    "reincadrare-neintelegere": 'numește „neînțelegere/impresie” o greșeală reală a noastră',
+}
+
+
+def mark_scuza_gresita(draft, hits):
+    """Marcaj VIZIBIL când nici regenerarea, nici tăierea n-au mers. Idempotent."""
+    if not draft or draft.lstrip().startswith(MARK_SCUZA_LOC):
+        return draft
+    motive = "; ".join('%s („%s”)' % (_ETICHETA_FEL.get(f, f), t) for f, t in hits[:3])
+    return ("%s draftul de mai jos %s. Rescrieți: scuza se pune doar pentru ce am greșit NOI, "
+            "la o întrebare se răspunde la întrebare, iar un incident real se numește pe nume.\n\n%s"
+            % (MARK_SCUZA_LOC, motive, draft))
+
+
+REGEN_SCUZA_LOC = ('\n\n⛔ Răspunsul tău anterior pune scuza sau mulțumirea GREȘIT: %s. Rescrie TOT răspunsul '
+                   'după regulile astea: (a) cere scuze DOAR dacă clientul a reclamat ceva sau dacă știm din '
+                   'FAPTE VERIFICATE că i-am greșit — la o simplă întrebare răspunde la ÎNTREBARE, fără scuze; '
+                   '(b) NU mulțumi („mulțumim că ne-ați scris/împărtășit") unui om care spune că l-am păgubit — '
+                   'recunoaște și spune ce facem; (c) NU numi „neînțelegere", „confuzie" sau „impresie" un lucru '
+                   'care e în FAPTE VERIFICATE — e greșeala noastră și se numește pe nume. Scrie DOAR răspunsul, '
+                   'în aceeași limbă.')
+
+
+# ---- FORMULE de piață: BULGARA (singura limbă din lot care NU suna nativ) ----
+# Două calcuri, ambele numărate pe lot: «…, което сте изпитали» (10 drafturi) — „изпитвам" în bulgară
+# e jena/stinghereala TRĂITĂ de om, nu neplăcerea CAUZATĂ de noi; și numele canalului privat
+# «свържете се с нас НА лично съобщение» (verbul cere «чрез/по»; forma uzuală e «пишете ни на лично
+# съобщение»). Se repară DETERMINIST, după generare — tiparele sunt chirilice, deci nu ating pl/hu/ro.
+FORMULE_BG = (
+    (re.compile(r"(съжаляваме|извиняваме се) за (?:неприятностите|неприятността|неудобството"
+                r"|неудобствата|неприятното преживяване)(?:,)?\s*(?:които|което|която|който)\s+сте\s+изпитали",
+                re.I), r"\1 за причиненото неудобство"),
+    (re.compile(r"\s*,?\s*(?:които|което|която|който)\s+сте\s+изпитали", re.I), ""),
+    (re.compile(r"свържете се с нас на (?:лични съобщения|лично съобщение|лични|лично)", re.I),
+     "пишете ни на лично съобщение"),
+    (re.compile(r"изпратете ни съобщение на лични(?: съобщения)?", re.I), "пишете ни на лично съобщение"),
+    (re.compile(r"в частен съобщение", re.I), "в лично съобщение"),
+    (re.compile(r"в частен разговор", re.I), "в лично съобщение"),
+)
+
+
+def fix_formule_bg(draft):
+    """Repară calcurile bulgare de mai sus. Idempotent (a doua trecere nu mai schimbă nimic)."""
+    if not draft:
+        return draft
+    d = draft
+    for rx, rep in FORMULE_BG:
+        d = rx.sub(rep, d)
+    return re.sub(r" +([.,!?])", r"\1", d)
+
+
+FORMULE_PIATA = {
+    "bg": ('\nFORMULE BG (obligatoriu — ultimul lot a ieșit calchiat): scuza se scrie „Съжаляваме за '
+           'причиненото неудобство." / „Извиняваме се за забавянето." — NICIODATĂ „…, което сте изпитали" '
+           '(„изпитвам" e jena TRĂITĂ de om, nu neplăcerea cauzată de noi). Canalul privat se numește '
+           '„пишете ни на лично съобщение" sau „изпратете ни лично съобщение" — NU „свържете се с нас НА '
+           'лично съобщение" (verbul cere „чрез/по"), NU „на лични", NU „в частен съобщение".'),
+}
+REGULA_SCUZA = ('\nSCUZA ȘI MULȚUMIREA: cere scuze DOAR dacă clientul a reclamat ceva sau dacă știm din FAPTE '
+                'VERIFICATE că i-am greșit; la o simplă întrebare răspunde la ÎNTREBARE, fără scuze. NU mulțumi '
+                '(„mulțumim că ne-ați scris/împărtășit") unui om care spune că l-am păgubit — recunoaște și spune '
+                'ce facem. NU numi „neînțelegere", „confuzie" sau „impresie" un lucru care e în FAPTE VERIFICATE: '
+                'e greșeala noastră și se numește pe nume.')
+
+
+def regula_formule(lang):
+    """Blocul de formule pentru promptul limbii curente + regula (comună) a scuzei/mulțumirii."""
+    return FORMULE_PIATA.get((lang or "").strip().lower(), "") + REGULA_SCUZA
+
+
 def mark_registru(draft, hits):
     """Marchează VIZIBIL un draft rămas în registrul informal (regenerarea a eșuat sau n-a existat).
     Fără marcaj, agentul CS vede un draft normal și îl trimite așa. Idempotent."""
@@ -2789,6 +3591,15 @@ def _garzi_identitate(draft, lang, store, suf, valori=None, regen_prom=None, ver
                     "".join(suf) + "+retur-strain")
         draft = d
         suf.append("+retur-strain")
+    if identitate_firma_hits(draft):
+        # Fără regenerare: e o clasă de MINCIUNĂ, nu una de ton — se taie, determinist. Dacă tăierea
+        # nu lasă un răspuns, NICIUN draft e mai bine decât unul care afirmă public ce nu știm.
+        d = taie_identitate_firma(draft)
+        if not d:
+            return ("(eroare: draft SUPRIMAT — afirma identitatea juridică/țara firmei: %s)"
+                    % "; ".join(identitate_firma_hits(draft)[:2]), "".join(suf) + "+identitate-firma")
+        draft = d
+        suf.append("+identitate-firma-taiata")
     if placeholder_hits(draft):
         d = completeaza_placeholdere(draft, valori)
         if d != draft:
@@ -2810,7 +3621,25 @@ NO_ANSWER_RE = re.compile(
     r"|nikt nie (?:odpowiada|odbiera|odpisuje)|brak odpowiedzi|nie odpowiadacie"
     r"|nikdo neodpov|nikto neodpov|bez odpovedi|bez odpovede|neodpovidate|neodpovídáte|neodpovedate"
     r"|senki nem (?:valaszol|válaszol|veszi fel)|nem valaszol|nem válaszol|nincs valasz|nincs válasz"
-    r"|nitko ne odgovara|bez odgovora|ne odgovarate", re.I)
+    r"|nitko ne odgovara|bez odgovora|ne odgovarate"
+    # PERSOANA A III-A + „canalul NU EXISTA". Tot ce e mai sus e scris la persoana a II-a („voi nu
+    # raspundeti") — forma de pe canal PRIVAT, unde clientul ni se adreseaza NOUA. Pe un comentariu
+    # PUBLIC el nu vorbeste cu noi, ci AVERTIZEAZA ALTI CUMPARATORI, deci scrie la persoana a III-a
+    # („lor nu le raspund") sau reclama direct ca acel canal nu exista („nu au telefon"). Masurat pe
+    # lotul de 40 de drafturi straine: garda prindea 0 — inclusiv #333479, care spune explicit
+    # «Няма телефон за обратна връзка, на имейл не отговарят». Aceeasi boala ca [[garda-intr-o-limba-e-moarta-in-alta]],
+    # doar ca aici difera PERSOANA VERBULUI, nu limba.
+    r"|не отговарят|не отговаря на|не вдигат|не пишат|не връщат отговор"
+    r"|няма телефон|нямат телефон|няма как да се свърж|няма връзка с тях|няма кой да отговор"
+    r"|nie odpowiadaja|nie odpowiadają|nie odbieraja|nie odbierają|nie odpisuja|nie odpisują"
+    r"|nie ma telefonu|brak telefonu|brak kontaktu|nie ma kontaktu"
+    r"|neodpovedaju|neodpovídají|neodpovidaji|nedvihaju|nezdvihaju"
+    r"|nie je telefon|nemaju telefon|nemaji telefon|neni telefon|zadny kontakt|ziadny kontakt"
+    r"|nem veszik fel|nem hivjak vissza|nem hívják vissza|nincs telefonszam|nincs telefonszám|nincs telefon"
+    r"|ne odgovaraju|nemaju telefon"
+    r"|nu au telefon|nu exista telefon|nu raspunde nimeni|nu au niciun telefon"
+    r"|they (?:don\'t|dont|do not|never) (?:answer|repl|respond|pick up)"
+    r"|there(?:\'s| is) no (?:phone|number|contact)|no (?:phone|contact) (?:number|at all)", re.I)
 CHANNEL_HINT = {
     "telefon": r"telefon|sun de|am sunat|va sun|suna nimeni|apel|\bphone\b|\bcall(?:ed|ing)?\b|телефон|звъня|обажда"
                r"|dzwoni|telefonu|volal|volam|volám|hiv|hív|zovem|nazvao",
@@ -3003,7 +3832,8 @@ def regen_respinsa(d2, verif):
 
 
 def apply_post_guards(draft, emoji_ok, claimed, regen=None, lang=None, regen_reg=None, verif=None, store=None,
-                      regen_scuza=None, valori=None, regen_prom=None):
+                      regen_scuza=None, valori=None, regen_prom=None,
+                      cust_txt="", sent_lab="", inc_blk="", has_orders=False, regen_loc=None):
     """Gărzile DETERMINISTE de după generare, într-un singur loc — se aplică pe AMBELE prompturi (SYSTEM
     și HOLDING): emoji interzis pe teren negativ/escaladat + canalul reclamat nu se re-oferă (o regenerare,
     apoi tăierea frazei) + registrul informal pl/hu se regenerează. Întoarce (draft, sufix pt eticheta engine).
@@ -3024,6 +3854,17 @@ def apply_post_guards(draft, emoji_ok, claimed, regen=None, lang=None, regen_reg
         if clean != draft:
             draft = clean
             suf.append("+fara-emoji")
+    # FORMULE de piață (bg): calcurile „което сте изпитали" + numele greșit al canalului privat.
+    _bg = fix_formule_bg(draft)
+    if _bg != draft:
+        draft = _bg
+        suf.append("+formule-bg")
+    # SCUZA / MULȚUMIREA puse greșit — ÎNAINTEA celorlalte gărzi, ca să treacă și rezultatul ei prin
+    # registru, non-scuză și identitate (o regenerare de aici poate reintroduce exact ce filtrează ele).
+    draft, _sg = _fara_scuza_gresita(draft, emoji_ok, claimed, lang, regen_loc, verif,
+                                     cust_txt, sent_lab, inc_blk, has_orders)
+    if _sg:
+        suf.append(_sg)
     if claimed and reoffered_channels(draft, claimed):
         d2 = ""
         if regen:
@@ -3077,6 +3918,32 @@ def apply_post_guards(draft, emoji_ok, claimed, regen=None, lang=None, regen_reg
     if _s:
         suf.append(_s)
     return _garzi_identitate(draft, lang, store, suf, valori, regen_prom, verif, claimed)
+
+
+def _fara_scuza_gresita(draft, emoji_ok, claimed, lang, regen_loc, verif,
+                        cust_txt="", sent_lab="", inc_blk="", has_orders=False):
+    """Garda SCUZĂ/MULȚUMIRE PUSE GREȘIT: o regenerare (verificată cu aceleași `verif` ca restul),
+    altfel tăierea frazei pur-formulă, altfel marcaj vizibil. Aceeași formă ca `_fara_non_scuza`."""
+    hits = scuza_gresita_hits(draft, cust_txt, sent_lab, inc_blk, has_orders)
+    if not hits:
+        return draft, ""
+    motive = ", ".join('%s: „%s”' % (f, t) for f, t in hits[:3])
+    d2 = ""
+    if regen_loc:
+        try:
+            d2 = (regen_loc(motive) or "").strip()
+        except Exception:
+            d2 = ""
+    if (d2 and not scuza_gresita_hits(d2, cust_txt, sent_lab, inc_blk, has_orders)
+            and not non_scuza_hits(d2) and not informal_register_hits(d2, lang)
+            and not (claimed and reoffered_channels(d2, claimed))):
+        rau = regen_respinsa(d2, verif)
+        if not rau:
+            return (d2 if emoji_ok else strip_emoji(d2)), "+scuza-loc"
+    taiat = taie_scuza_gresita(draft, hits)
+    if taiat and not scuza_gresita_hits(taiat, cust_txt, sent_lab, inc_blk, has_orders):
+        return taiat, "+scuza-loc-taiat"
+    return mark_scuza_gresita(draft, hits), "+SCUZA-LOC-NEREPARATA"
 
 
 def _fara_non_scuza(draft, emoji_ok, claimed, lang, regen_scuza, verif):
@@ -3532,7 +4399,7 @@ IMPORTANT — răspundem la ULTIMUL mesaj al clientului (marcat cu „>>> ULTIMU
 SARCASM/IRONIE: un comentariu aparent neutru/pozitiv dar critic (ex. persistență mică „au persistat 4 ore 😅" la un parfum reclamat 12h, „super... 🙄", emoji 😅😂🙄 + reproș) NU e `recenzie_feedback` — e NEMULȚUMIRE (`problema_produs` sau `comentariu_social`), sentiment NEGATIV.
 Citește mesajul clientului + comenzile + istoricul și IDENTIFICĂ exact problema. Întoarce STRICT JSON:
 {"problem":"<1 frază concretă: ce vrea / ce s-a întâmplat>",
- "category":"livrare_wismo|retur|schimb_swap|anulare|modificare_comanda|problema_produs|refuz_livrare|plata_factura|presale_intrebare|comanda_noua|recenzie_feedback|comentariu_social|spam_automat|altele",
+ "category":"livrare_wismo|retur|schimb_swap|anulare|modificare_comanda|problema_produs|refuz_livrare|plata_factura|presale_intrebare|comanda_noua|recenzie_feedback|comentariu_social|spam_automat|atac_impersonare|altele",
  "language":"ro|cz|pl|bg|en",
  "severity":"none|HIGH|URGENT",
  "escalate":true|false,
@@ -3545,6 +4412,7 @@ Citește mesajul clientului + comenzile + istoricul și IDENTIFICĂ exact proble
  "comment_action":"hide|public|none",
  "spam":true|false,
  "confidence":0.0-1.0,"missing":["ce date lipsesc"]}
+ATAC_IMPERSONARE (categorie SEPARATă de spam, fiindcă mesajul ne vizează pe NOI, nu încearcă să ne vândă ceva): `category`="atac_impersonare" când mesajul primit de pagină/inbox e un ATAC, nu un client — phishing, fraudă, somație falsă, impersonare Meta/Facebook/Google/Shopify/curier ("Notificare din partea Echipei de Asistență pentru Politicile Meta", "pagina ta va fi dezactivată în 24 de ore", "confirm your identity", "your page will be disabled", linkuri de "contestație"/"autentificare", cereri de parolă/cod). Semnalul e că EXPEDITORUL pretinde că e platforma/autoritatea și AMENINȚĂ pagina/contul NOSTRU. Pe categoria asta NU se generează NICIUN draft — nu există răspuns CS corect către un escroc, iar un răspuns politicos îi confirmă că în spatele paginii răspunde cineva. `escalate`=false, `comment_action`="none".
 SPAM (pe ORICE canal — email, DM FB/IG, comentariu): true dacă mesajul NU necesită răspuns CS — notificări automate (Meta/Facebook business, judge.me „left a review”, newsletter, reset parolă, „do not reply”, out-of-office, confirmări automate), boți, mesaje promoționale nesolicitate / spam evident. Aceste tichete se EXCLUD (nu primesc draft).
 ESCALADARE: URGENT = ANPC/juridic/amenințare (avocat, instanță, dau în judecată, denunț), chargeback, refund PROMIS dar neefectuat, client foarte agresiv. HIGH = reclamație serioasă (produs/livrare) cu client clar SUPĂRAT, SAU client care a scris REPETAT despre ACEEAȘI problemă nerezolvată și e frustrat. Altfel none. ATENȚIE: o reclamație de produs OBIȘNUITĂ (nu funcționează bine, nu e ca în reclamă, defect minor, întrebare de calitate, „cârpa e proastă", SAU parfum/produs spart/deteriorat la livrare — se rezolvă prin retrimitere gratuită, procedură standard) FĂRĂ furie explicită (jigniri, MAJUSCULE agresive, amenințări) și FĂRĂ ANPC/juridic = `problema_produs`/`schimb_swap` rezolvată DIRECT, NU HIGH. Escaladează un produs spart DOAR dacă clientul e explicit furios/amenință, e a DOUA oară pe ACEEAȘI comandă, sau invocă ANPC. „Client clar SUPĂRAT" = furie/jigniri/amenințări explicite, nu simpla nemulțumire. NU presupune „produs greșit" dacă clientul se plânge doar că produsul nu performează cum aștepta — ăla e `problema_produs`, nu „a primit alt produs". ATENȚIE: o simplă întrebare de status (WISMO) politicoasă NU se escaladează — chiar dacă clientul are nr. comandă, multe comenzi sau istoric de tichete (volumul/„a mai scris de N ori" în istoric NU e, singur, motiv de escaladare). Se rezolvă direct. COMENTARII PUBLICE (FB/IG): nemulțumire de produs / „nu funcționează" / „păcălit" / „țeapă" / „mic"/„prost" FĂRĂ ANPC/juridic/amenințare → NU escalada; primește răspuns public scurt + invitație în privat. Escaladează un comentariu public DOAR la semnale URGENT (ANPC/juridic/amenințare/refund promis).
 COMMENT_ACTION (doar comentarii PUBLICE FB/IG; pe celelalte canale = "none"). NU trimitem mesaje private (DM) — răspundem PUBLIC, scurt; dacă e nevoie de rezolvare, INVITĂM clientul să ne scrie în privat sau să sune:
@@ -3580,6 +4448,7 @@ PROCEDURI:
 - DESCRIE PRODUSUL POTRIVIT CATEGORIEI (NU generic): parfumuri (Esteban/GT/Nubra/Gento) → miros/arome inspirate din branduri cunoscute/persistență/preț accesibil — NU „aspect plăcut" (e parfum, nu obiect); genți/încălțări → piele ecologică/aspect frumos; casă/covoare (Grandia/Carpetto/Covoria) → calitate/utilitate. Evită lauda generică „produse de calitate bună și aspect plăcut" care nu se potrivește categoriei.
 - COMANDĂ / „vreau să comand": recomandă clientului să SUNE pentru a plasa comanda, la numărul magazinului — dacă apare în context ca `TELEFON_COMANDĂ`, dă-l explicit („ne puteți suna la <număr> pentru comandă"); altfel îndrumă-l să comande de pe site / să lase un număr ca să-l sunăm.
 - CERERE DE CALLBACK (INVERSUL punctului de mai sus) — clientul cere să fie SUNAT DE NOI, de regulă lăsându-și numărul: ro „sunați-mă / vă rog un telefon / contactați-mă telefonic / aștept un telefon", pl „proszę o kontakt telefoniczny / proszę o telefon / proszę zadzwonić / proszę o oddzwonienie", bg „моля, обадете ми се / очаквам обаждане / звъннете ми", hu „kérem, hívjanak vissza / hívjon vissza / visszahívást kérek", sk „prosím, zavolajte mi / prosím o telefonát / spätné volanie", cz „prosím, zavolejte mi / zpětné volání / čekám na telefonát", en „please call me back". Atunci CONFIRMĂ că îl SUNĂM NOI („am notat solicitarea, vă contactează telefonic un coleg cât mai curând") — NU întoarce cererea („sunați-ne la…"), NU-i da `TELEFON_COMANDĂ` (pe piețele străine e numărul altui magazin/altei țări) și NU-i repeta numărul în răspuns. Dacă NU a lăsat niciun număr, cere-i POLITICOS un număr la care să-l sunăm.
+⛔ IDENTITATEA FIRMEI — NU E TREABA TA ȘI NU E ÎN CONTEXTUL TĂU: nu afirma NIMIC despre țara, naționalitatea, forma de organizare, sediul, înregistrarea sau codul fiscal al comerciantului — nici să CONFIRMI, nici să NEGI, nici măcar ca răspuns direct la întrebarea clientului sau la o afirmație a lui („am aflat că sunt firmă românească/bulgărească/chinezească"). N-ai informația în context, deci orice „Da, suntem…" / „Nu, nu suntem…" e inventat, iar pe un canal PUBLIC o afirmație greșită despre comerciant e faptă de protecția consumatorului (КЗП / UOKiK / ANPC). Ce faci în schimb: răspunzi la PROBLEMA lui (comanda, produsul, banii) și, dacă insistă pe întrebarea despre firmă, spui onest că verifici și revii — fără să numeri vreo țară și fără să comentezi ce a auzit el.
 PRODUSE — ONESTITATE: multe produse ARONA sunt REPLICI/imitații, NU originale. Parfumurile sunt INSPIRATE din branduri cunoscute (la o fracțiune din preț), nu sunt parfumurile originale. Genți/accesorii „din piele" sunt de regulă PIELE ECOLOGICĂ / imitație, nu piele naturală. La întrebări de tip „e original?", „e piele adevărată?" → răspunde ONEST și pozitiv: spune sincer că e imitație/piele ecologică/parfum inspirat — NU pretinde că e original sau piele naturală, dar valorifică (calitate bună, aspect frumos, preț accesibil).
 COMENTARII PUBLICE (FB/IG) — CALD, NU robotic, SCURT (1-2 fraze), cu maximum 1-2 emoji potrivite (😊❤️🙏🔥🌸) DOAR dacă în context scrie „EMOJI: permise"; dacă scrie „EMOJI: INTERZIS" (client nemulțumit/furios, acuzație de înșelătorie, caz escaladat) NU pune NICIUN emoji — un 😊 sub „Коректност 0!!!" sau un 🙏 sub o acuzație publică se citesc ca BATJOCURĂ. Răspunde la SPIRITUL comentariului. REGULĂ CS FERMĂ pt TOATE răspunsurile la comentarii: NU începe cu „Bună ziua!" / „Bună!" / „Salut" / niciun salut de deschidere — intră DIRECT în mesaj (ex. „Ne pare rău că...", „Mă bucur că...", „Da, sunt foarte apreciate..."). Salut + semnătură DOAR pe email, niciodată pe comentarii. SARCASM/IRONIE: dacă un comentariu pare neutru/pozitiv dar e de fapt un REPROȘ (ex. „au persistat 4 ore 😅" la un parfum dat ca 12h, „merge perfect... 🙄", emoji 😅😂🙄 + critică) → NU răspunde ca la o laudă („Ne bucurăm..."); recunoaște cu TACT nemulțumirea (la parfumuri: persistența variază după tipul pielii, cantitate, zona de aplicare, familia olfactivă), FĂRĂ justificări defensive, și oferă ajutor / invită în privat. Laudă / „subscriu" / tag de prieten / entuziasm → mulțumire caldă + entuziasm, FĂRĂ să împingi inutil „scrieți-ne în privat". Întrebare reală / nemulțumire → răspuns scurt la obiect, apoi INVITĂ CLIENTUL să ne scrie în privat (inbox/Messenger/DM) SAU să ne SUNE la `TELEFON_COMANDĂ` (dacă apare în context, dă numărul explicit). NU spune „v-am scris în privat" / „ți-am trimis detalii" — NOI nu trimitem DM; clientul ne contactează. La o întrebare SIMPLĂ (preț, dimensiune, disponibilitate) NU împinge automat „în privat": dacă ai informația, dă-o pe loc în comentariu; dacă NU o ai (nu știi produsul exact), întreabă SCURT chiar în comentariu la ce produs se referă, sau invită-l să sune/comande — „scrieți-ne în privat" doar când chiar e nevoie de date personale. Dacă în context apare „POSTAREA/RECLAMA la care comentează", folosește-o ca să identifici PRODUSUL și răspunde la obiect (NU mai întreba „ce produs", clientul comentează exact la acel produs). Dacă reclamă un canal care nu merge (ex. „sun de zile și nu răspunde nimeni"), recunoaște problema și asigură-l că revenim noi, nu-l trimite înapoi la același canal. Evită formula seacă „Vă mulțumim pentru comentariu! Dacă aveți nevoie… scrieți-ne în privat".
 ⚠️ NU deflecta în privat o întrebare PUBLICĂ simplă la care SE POATE răspunde: „câte bucăți/bidoane la X lei?" → spune oferta (din POSTAREA/RECLAMA, dacă apare); „ce preț are?" → dacă prețul e în reclamă/îl știi, dă-l, altfel îndrumă scurt spre site/produsul din reclamă; „dați-mi numărul de telefon (ca să comand)" → DĂ numărul `TELEFON_COMANDĂ` direct (NU „e pe site"); „cum comand?" → spune concret (de pe site SAU sunând la `TELEFON_COMANDĂ`). „Scrieți-ne în privat" se folosește DOAR când e nevoie de date personale (o comandă anume, o problemă pe cont), NU la întrebări generale de produs/ofertă/preț.
@@ -4140,7 +5009,7 @@ def public_incident_facts(store_name, text="", active=None):
     if not active or not store_name or store_name == "magazinul nostru":
         return ""
     t = deacc(public_safe_text(text))
-    descs = []
+    descs, remedii = [], []
     for inc in active:
         if not _store_match(_store_names(inc), store_name):
             continue
@@ -4152,13 +5021,65 @@ def public_incident_facts(store_name, text="", active=None):
         d = _safe_desc(inc.get("description"), True)
         if d:
             descs.append(d)
+            remedii.append(stare_remediu(inc))   # starea AGREGATA a remediului, nu comenzile
     if not descs:
         return ""
     return ("INCIDENT CUNOSCUT (DESPRE NOI, nu despre persoana care scrie): %s\n"
+            "%s"
             "REGULI CANAL PUBLIC: recunoaște DESCHIS incidentul, la general, și cere-ți scuze — dar NU confirma că "
             "persoana care scrie e clientul nostru și NU spune „comanda dumneavoastră”/„v-am găsit comanda”/"
-            "„am verificat comanda dumneavoastră”. FĂRĂ număr de comandă, AWB, dată, sumă sau alt detaliu personal. "
-            "Invit-o în privat cu numărul comenzii ca să verificăm exact cazul ei." % " | ".join(sorted(set(descs))))
+            "„am verificat comanda dumneavoastră”. FĂRĂ număr de comandă, AWB, dată, sumă sau alt detaliu personal.\n"
+            "PAS CONCRET (obligatoriu, nu te opri la «scrieți-ne în privat»): cere-i NUMĂRUL COMENZII în privat ȘI "
+            "spune-i explicit CE primește în schimb — îi spunem exact ce s-a întâmplat cu comanda LUI. Un răspuns "
+            "care doar îl trimite în privat, fără să-i spună ce să trimită și ce află, NU e bun."
+            % (" | ".join(sorted(set(descs))), bloc_remediu_public(remedii)))
+
+
+# ---- REMEDIUL, AGREGAT, PE CANAL PUBLIC ----
+# De ce: pe cele 40 de drafturi straine masurate, ZERO ofereau un remediu — fiindca blocul public
+# trimitea in prompt DOAR `description`, adica doar PROBLEMA. Registrul stie insa si ce am FACUT
+# (`remediated` / `remediation_awb` / `remediation_delivered` per comanda). Masurat pe registrul
+# real: 94 din 145 de comenzi afectate RETRIMISE, 0 livrate inca.
+# Ce iese public e o stare AGREGATA despre NOI (retrimitem / am retrimis / nimic inca) — fara cifre,
+# fara comenzi, fara AWB, fara date. Deci nu spune nimic despre persoana care comenteaza si nu
+# schimba raspunsul dupa cine e ea: blocul e IDENTIC pentru oricine comenteaza pe pagina aia, exact
+# invarianta pe care o apara `public_incident_facts`.
+# ⛔ Cand registrul nu arata NICIUN remediu executat, blocul INTERZICE explicit promisiunea: un
+# remediu pe care nu-l executa nimeni e mai rau decat tacerea.
+def stare_remediu(inc):
+    """(total, retrimise, livrate) pe comenzile unui incident. (0,0,0) daca registrul n-are `orders`."""
+    o = (inc or {}).get("orders") or {}
+    if not isinstance(o, dict):
+        return 0, 0, 0
+    ents = [e for e in o.values() if isinstance(e, dict)]
+    return (len(ents),
+            sum(1 for e in ents if e.get("remediated")),
+            sum(1 for e in ents if e.get("remediation_delivered")))
+
+
+def bloc_remediu_public(remedii):
+    """Linia de REMEDIU pentru promptul public, din starile agregate ale incidentelor potrivite.
+    '' daca nu stim nimic (niciun `orders` in registru) → promptul ramane exact cel de azi."""
+    tot = sum(t for t, _r, _l in remedii)
+    rem = sum(r for _t, r, _l in remedii)
+    liv = sum(l for _t, _r, l in remedii)
+    if not tot:
+        return ""
+    if rem == 0:
+        return ("REMEDIU: NU există încă niciun remediu executat pentru incidentul ăsta.\n"
+                "    ⛔ NU promite retrimitere, rambursare, reducere, compensație sau vreun termen — nimeni nu a decis "
+                "încă ce oferim, iar un remediu pe care nu-l execută nimeni e mai rău decât tăcerea. Recunoaște "
+                "incidentul, cere-ți scuze și oprește-te acolo.\n")
+    ln = ["REMEDIU REAL (fapt despre NOI, verificat în registru — îl POȚI spune public, la general):"]
+    if rem >= tot:
+        ln.append("    • bucățile lipsă AU FOST retrimise pe comenzile afectate.")
+    else:
+        ln.append("    • bucățile lipsă SE RETRIMIT; o parte dintre comenzile afectate au fost deja retrimise.")
+        ln.append("    ⛔ NU spune că s-a retrimis deja pentru toată lumea.")
+    if liv == 0:
+        ln.append("    ⛔ NU afirma că retrimiterea a AJUNS/a fost livrată — încă nu e livrată niciuna.")
+    ln.append("    ⛔ FĂRĂ cifre (câte comenzi, câte bucăți) și FĂRĂ vreun termen de livrare — nu le avem.")
+    return "\n".join(ln) + "\n"
 
 
 PUBLIC_PERSON_REDACT = "(canal public — nu legăm persoana de comenzile/tichetele noastre)"
@@ -4297,6 +5218,9 @@ def guard_reasons(draft, ctx, inc_blk="", has_orders=False, is_public=False, pho
         # public era verificată doar pe telefon/comandă/AWB.
         bad += public_pii_leaks(d, phone_order, cust_name)
     bad += ["non-scuză: %s" % h for h in non_scuza_hits(d)]
+    # identitatea juridică a firmei — NU depinde de `has_orders`: nu e un fapt despre comanda
+    # clientului, e un fapt despre NOI, pe care motorul nu-l are în context pe niciun tichet.
+    bad += ["identitate firmă: %s" % h for h in identitate_firma_hits(d)]
     return bad
 
 
@@ -5657,6 +6581,9 @@ def main():
     cai_folosite = {}           # pe ce CALE a ieșit fiecare răspuns (Graph vs Richpanel vs căderi)
     import collections as _col
     oprite_trimitere = _col.Counter()   # câte răspunsuri a oprit FIECARE gardă (raport final)
+    # registrul ȘABLOANELOR deja scoase în rularea asta: {no, draft, msg, sem}. Fără el,
+    # fiecare tichet e judecat singur și nimeni nu vede că același text a plecat de două ori.
+    lot_sabloane = []
     start_rulare = time.time()          # fereastra rulării, pt raportul din jurnal
 
     for i, t in enumerate(picked, 1):
@@ -5794,6 +6721,19 @@ def main():
         if store_name == "magazinul nostru":   # email: derivă brandul din domeniul adresei magazinului (ex. contact@esteban.ro)
             _to_email = (t.get("to") or {}).get("email") if isinstance(t.get("to"), dict) else ""
             store_name = brand_from_email(_to_email) or store_name
+
+        # REGULA care NU depinde de lexic: pe o piață cu INCIDENT ACTIV în registru, un text care se
+        # potrivește cu TEMA incidentului e NEGATIV chiar dacă numărătoarea de cuvinte n-a găsit
+        # nimic — la fel o acuzație de fraudă scrisă cu typo sau o confirmare scurtă de pagubă
+        # („și la mine la fel"). Sentimentul e intrarea gărzii de emoji și a instrucțiunii de ton,
+        # deci aici se oprește 🙏-ul de sub acuzație, în amonte, unde e defectul.
+        _furie_motiv = furie_ferma(cust_txt, store_name)
+        if _furie_motiv and sent_lab != "negativ":
+            print("  🔥 #%s — sentiment FORȚAT negativ (%s); clasificatorul de cuvinte spunea „%s”."
+                  % (no, _furie_motiv, sent_lab), file=sys.stderr)
+            sent_lab = "negativ"
+            if sent_int == "slab":
+                sent_int = "mediu"
 
         orders, other = [], []
         elsewhere = "necunoscut (fără email/telefon real — pe comentarii publice nu se poate lega)"
@@ -5978,17 +6918,26 @@ def main():
         # mesaj ȘTERS și fără text păstrat (nici subiect utilizabil, nici replică anterioară): n-avem
         # la ce răspunde, iar un draft ar fi un răspuns la nimic → rămâne pentru CS, fără draft.
         _sters_fara_text = (_stare_sters == "fara-text")
-        if bool(idn.get("spam")) or cat == "spam_automat" or _non_customer or _judgeme or _saas or _bounce or _padded or _sters_fara_text:
+        # MESAJ OSTIL (atac asupra NOASTRĂ): poartă DETERMINISTĂ pe CONȚINUT — nu depinde nici de
+        # triajul LLM (care pe #333213 a zis „altele", escalate=false), nici de adresa expeditorului
+        # (goală pe DM/comentariu, unde vine atacul). Se verifică și când LLM-ul a spus deja `spam`.
+        _atac = mesaj_ostil((first or "") + "\n" + (last_cust or ""), subj)
+        if _atac:
+            cat = "atac_impersonare"
+        if _atac or bool(idn.get("spam")) or cat == "spam_automat" or _non_customer or _judgeme or _saas or _bounce or _padded or _sters_fara_text:
             n_spam += 1
             print("\n" + "─" * 92)
-            _tagn = ("EXPEDITOR NON-CLIENT (curier/app)" if _non_customer else
+            _tagn = ("ATAC/IMPERSONARE (mesaj împotriva NOASTRĂ)" if _atac else
+                     "EXPEDITOR NON-CLIENT (curier/app)" if _non_customer else
                      "NOTIFICARE judge.me (recenzie)" if _judgeme else
                      "RAPORT/NOTIFICARE SaaS/social" if _saas else
                      "BOUNCE email (mailer-daemon)" if _bounce else
                      "ZGOMOT (padding invizibil)" if _padded else
                      "MESAJ ȘTERS (fără text păstrat)" if _sters_fara_text else "SPAM/automat")
             print("  [%d/%d] #%s · %s · %s · 🚫 %s → EXCLUS (fără draft)" % (i, len(picked), no, store_name, channel, _tagn))
-            print("  motiv: %s" % (("expeditor non-client: %s%s" % (email, (" — " + _masina) if _masina else "")) if _non_customer else ("notificare recenzie judge.me" if _judgeme else (idn.get("problem") or " ".join((first or subj).split())[:70]))))
+            print("  motiv: %s" % (("atac asupra noastră: " + _atac) if _atac else ("expeditor non-client: %s%s" % (email, (" — " + _masina) if _masina else "")) if _non_customer else ("notificare recenzie judge.me" if _judgeme else (idn.get("problem") or " ".join((first or subj).split())[:70]))))
+            if _atac:
+                print("  → NU se generează draft: nu există răspuns CS corect către un escroc.")
             if _sters_fara_text:
                 print("  → mesaj șters fără text păstrat: NU e spam — rămâne DESCHIS pentru CS.")
             elif a.close_spam and cid:
@@ -6191,8 +7140,8 @@ def main():
         # comentariu furios — ambele se decid AICI, determinist, nu din regula generică a promptului.
         emoji_ok = emoji_allowed(sent_lab, is_esc, blob + " " + tr) and not fir_sig
         claimed_ch = complained_channels(blob + " " + tr)
-        learned_blk += "\nREGISTRU (%s): %s\n%s\nEMOJI: %s" % (
-            lang, register_rule(lang), NO_CALQUE,
+        learned_blk += "\nREGISTRU (%s): %s\n%s%s\nEMOJI: %s" % (
+            lang, register_rule(lang), NO_CALQUE, regula_formule(lang),
             "permise (maximum 1-2, potrivite)" if emoji_ok else "INTERZIS — niciun emoji (client nemulțumit/acuzație/escaladare)")
         if claimed_ch:
             learned_blk += ("\nCANAL RECLAMAT de client ca NEFUNCȚIONAL: %s → NU-l re-oferi în răspuns; "
@@ -6356,6 +7305,9 @@ def main():
             regen_reg=lambda hits: llm(sys_prompt, ctx + REGEN_REGISTRU % (", ".join(hits), register_rule(lang)))[0],
             regen_scuza=lambda hits: llm(sys_prompt, ctx + REGEN_SCUZA % ", ".join(hits))[0],
             regen_prom=lambda hits: llm(sys_prompt, ctx + REGEN_PROMISIUNE % ", ".join(hits))[0],
+            regen_loc=lambda motive: llm(sys_prompt, ctx + REGEN_SCUZA_LOC % motive)[0],
+            cust_txt=cust_txt, sent_lab=sent_lab, inc_blk=inc_blk,
+            has_orders=has_order_data(od_ctx),
             verif=_verif_regen, store=store_name,
             # valorile REALE pe care le are deja `main` — cu ele, un placeholder de șablon se
             # COMPLETEAZĂ, nu mai omoară draftul. `phone_order` = linia publică de CS a magazinului
@@ -6364,7 +7316,22 @@ def main():
                     "email": "" if is_public else (email or ""),
                     "phone": phone_order or "", "store": store_name or ""})
         engine += _guard
-        # PLASA pe mesajul de AȘTEPTARE: promptul singur nu ține (măsurat 172 din 173 fără cerere),
+        # BLOCANTUL „ȘABLON LIPIT" — se rulează DUPĂ apply_post_guards (ca să judece textul final,
+        # inclusiv regenerările lui) și ÎNAINTE de redactarea publică, ca draftul regenerat să treacă
+        # și el prin garda de date personale. `_verif_regen` e aceeași verificare ca pe calea de
+        # generare: o regenerare care scapă de șablon dar inventează un status NU e acceptată.
+        draft, _sl = _fara_sablon_lipit(
+            draft, cust_txt, cat, lot_sabloane, is_public, inc_blk,
+            regen_sl=lambda hits: llm(sys_prompt, ctx + REGEN_SABLON % (
+                "; ".join(hits),
+                " ".join(((public_safe_text(cust_txt) if is_public else cust_txt) or "").split())[:200]))[0],
+            verif=_verif_regen)
+        if _sl:
+            engine += _sl
+            print("  ♻️ șablon lipit: %s" % _sl.lstrip("+"))
+        if not draft.lstrip().startswith("(eroare"):
+            lot_sabloane.append({"no": no, "draft": draft, "msg": cust_txt,
+                                 "sem": sl_semnale(cust_txt)})
         # deci dacă tot lipsește, fraza se adaugă determinist — fără încă un apel LLM. DOAR pe canal
         # ne-public: pe un comentariu FB/IG „dați-ne numărul de telefon" ar împinge clientul să-și
         # publice datele, exact ce redactarea publică de mai jos încearcă să prevină.
