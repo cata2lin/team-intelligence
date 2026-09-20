@@ -69,4 +69,23 @@ souqshop **10906** (max 1,2 mld!) vs site-uri reale (Bonami median 3, aosom 43, 
   `catalog.product_state_changes`, ~30M rânduri cu old/new preț și stoc); matching și cu alte
   branduri (nu doar Grandia).
 - `--parser` acceptă acum și slug-ul magazinului (`bonami`), nu doar numele afișat.
+
+## Cum citești cifrele (3 capcane reale)
+
+1. **„Viteza pe 30 de zile" nu e pe 30 de zile.** `ads30_cal` împarte unitățile la fereastra
+   OBSERVATĂ, nu la 30. Capturarea stocului a pornit pe 2026-09-09..09-16, deci **44 din 48 de
+   magazine au sub 30 de zile** de istoric (faunusplant: 11). Scriptul te avertizează acum,
+   per magazin și pe toată flota. Ordin de mărime, nu o lună de istoric.
+2. **Prima citire după o pauză e o vânzare falsă.** Vânzările sunt deduse din scăderile de
+   stoc, deci dacă stocul a fost necitit N zile, tot golul se înregistrează într-o singură zi
+   (faunusplant, produsul 123581: **3.376 unități pe 2026-09-10**, adică 9 zile comprimate).
+   Pentru un număr curat, calculează diferențe zilnice din `catalog.run_observations` pe
+   intervalul cu citiri consecutive.
+3. **Magazin care întoarce 0 rânduri ≠ magazin fără vânzări.** Garda de stoc placeholder
+   elimină magazinul întreg dacă stocul median depășește `--placeholder-stock` (500).
+   faunusplant are median **18.518** → era ascuns complet. Scriptul explică acum motivul și
+   îți dă flag-urile (`--include-placeholder --max-stock 99999`). Afectează 7 din 48 magazine.
+
+Clonele `_clone_freegift` (Shopify, cadou) sunt excluse implicit: împart inventarul cu produsul
+părinte, deci dublau viteza și apăreau pereche în top (`--include-clones` le aduce înapoi).
 - Conexiune: secrete KB `DATABASE_URL_ARONA_BI` + `DATABASE_URL_GRANDIA` (pt --vs-grandia). Sheet: `GOOGLE_OAUTH_TOKEN_JSON`.

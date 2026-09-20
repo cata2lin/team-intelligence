@@ -150,6 +150,8 @@ def main():
     ap.add_argument("--match-threshold", type=int, default=72, help="prag scor peste care consideram ca avem deja produsul")
     ap.add_argument("--stockout", action="store_true",
                     help="DOAR produse la care competiția a rămas fără stoc (latest_stock=0) dar încă au viteză = cerere neacoperită")
+    ap.add_argument("--include-clones", action="store_true",
+                    help="NU exclude clonele _clone_freegift (care dublează viteza produsului părinte)")
     ap.add_argument("--sheet", action="store_true")
     args = ap.parse_args()
     if args.gap_only:
@@ -161,6 +163,42 @@ def main():
     cutoff = max_day - timedelta(days=args.days)
     fresh = str(max_day)
 
+    # ads30_cal divides by the OBSERVED span, not by 30. Stock capture only began across the
+    # fleet on 2026-09-09..09-16, so a "30-day" velocity can rest on a handful of days, and
+    # the first reading after a blind period books the whole gap as one day's sales. Say so
+    # rather than letting the number pass as a month of history.
+    if args.parser:
+        # per store, because the fleet-wide span is skewed by the few shops that started early
+        cur.execute("""SELECT count(DISTINCT o.observed_at::date)
+                         FROM catalog.run_observations o
+                         JOIN catalog.products p ON p.id = o.product_id
+                         JOIN control.scrapers sc ON sc.id = p.scraper_id
+                        WHERE o.stock_quantity IS NOT NULL
+                          AND o.observed_at > CURRENT_DATE - 30
+                          AND (lower(sc.slug) = lower(%s) OR lower(sc.display_name) = lower(%s))""",
+                    (args.parser, args.parser))
+        row = cur.fetchone()
+        stock_days, scope = (row[0] if row else 0) or 0, args.parser
+    else:
+        cur.execute("""SELECT count(*) FILTER (WHERE d < 30), count(*) FROM (
+                         SELECT count(DISTINCT o.observed_at::date) d
+                           FROM catalog.run_observations o
+                           JOIN catalog.products p ON p.id = o.product_id
+                          WHERE o.stock_quantity IS NOT NULL
+                            AND o.observed_at > CURRENT_DATE - 30
+                          GROUP BY p.scraper_id) x""")
+        thin, total = cur.fetchone()
+        stock_days, scope = None, None
+        if thin:
+            print(f"ATENȚIE: {thin} din {total} magazine au sub 30 de zile de stoc observat, "
+                  f"deci „viteza pe 30 de zile\" se împarte la fereastra reală, nu la 30. "
+                  f"Capturarea stocului a început 2026-09-09..09-16.", file=sys.stderr)
+    if stock_days is not None and stock_days < 30:
+        print(f"ATENȚIE: pentru „{scope}\" viteza „30 zile\" se sprijină pe doar "
+              f"{stock_days} zile de stoc observat — ordin de mărime, nu o lună de istoric. "
+              f"Prima citire după o pauză înregistrează tot golul ca vânzări într-o zi.",
+              file=sys.stderr)
+
     where = ["m.ads30_cal > %s", "m.latest_stock <= %s", "m.last_sold_day >= %s"]
     params = [max(args.min_vel, 0.0001), args.max_stock, cutoff]
     if not args.include_placeholder:
@@ -170,6 +208,11 @@ def main():
         params.append(args.placeholder_stock)
     if not args.include_vivre:
         where.append("lower(m.scraper_name) <> 'vivre'")
+    if not args.include_clones:
+        # Shopify free-gift clones share the parent product's inventory, so the same stock
+        # drop is counted twice and the pair lands side by side at the top of the ranking
+        # (faunusplant: "Colagenus Frumusețe" at 115.7 and 114.2/day — one product).
+        where.append("m.url NOT LIKE '%_clone_freegift'")
     if args.stockout:  # competiția e ruptă de stoc dar produsul încă se vindea = cerere neacoperită
         where.append("m.latest_stock = 0")
     if args.search:
@@ -197,6 +240,23 @@ def main():
 
     cur.execute(sql, params)
     rows = cur.fetchall()
+
+    if not rows and args.parser and not args.include_placeholder:
+        # Silent zero rows read as "this shop sells nothing". Usually it is the placeholder
+        # guard: a shop publishing five-figure stock has a median far above the threshold and
+        # is dropped whole (faunusplant's median is 18,518 against a default of 500).
+        cur.execute("""SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY latest_stock)
+                         FROM reporting.best_sellers_ranked
+                        WHERE ads30_cal > 0 AND (lower(scraper_slug) = lower(%s)
+                                                 OR lower(scraper_name) = lower(%s))""",
+                    (args.parser, args.parser))
+        med = cur.fetchone()
+        med = med[0] if med else None
+        if med is not None and med > args.placeholder_stock:
+            print(f"0 rânduri pentru „{args.parser}\": magazinul e exclus de garda de stoc "
+                  f"placeholder (stoc median {med:,.0f} > {args.placeholder_stock}). "
+                  f"Rulează cu --include-placeholder --max-stock 99999 ca să-l vezi.",
+                  file=sys.stderr)
     conn.close()
 
     catalog = scorer = None
