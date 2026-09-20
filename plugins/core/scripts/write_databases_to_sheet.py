@@ -20,7 +20,7 @@ SPREADSHEET_ID = "1uhKzZ1jXfNuZ_szvm8jz8uUU-JfZlN7MDu78w2Imh68"
 
 # (database, size_pretty, size_bytes, mapped_app, notes)
 ROWS = [
-    ("test",                          "79 GB",   84825907200, "arona-bi",          "Primary DB for arona-bi (DATABASE_URL points here)"),
+    ("test",                          "79 GB",   84825907200, "arona-bi (RETIRED)", "Frozen 2026-08-10; superseded by arona_scraper on 161.97.64.11 (bi.arona.ro:5433)"),
     ("trendyol",                      "77 GB",   82678120000, "(unmapped)",        "Marketplace scraper data"),
     ("InventorySync",                 "3151 MB", 3303604224,  "grandia-inventory", "Likely current grandia DB"),
     ("Profitabilitate-Livrabilitate", "1590 MB", 1667235840,  "(unmapped)",        "RO: Profitability / Deliverability"),

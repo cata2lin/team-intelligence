@@ -10,10 +10,10 @@
 # ]
 # ///
 """
-grandia_pricematch.py — Grandia <-> arona-bi price-match (production).
+grandia_pricematch.py — Grandia <-> scraper-platform price-match (production).
 
 Matches each ACTIVE Grandia product to competitor products scraped in the
-arona-bi warehouse, using IMAGE matching so it works even when Grandia
+scraper platform (arona_scraper), using IMAGE matching so it works even when Grandia
 re-hosts / re-shoots the photo:
 
   MATCH  = ( pHash Hamming distance <= --phash-max )        # free exact-photo boost
@@ -27,8 +27,8 @@ re-hosts / re-shoots the photo:
 CLIP embeddings via fastembed (Qdrant/clip-ViT-B-32-vision, ONNX, CPU, no torch).
 
 Candidate-gen: from the Grandia title take the most distinctive tokens, query
-arona-bi products (image NOT NULL, ILIKE top-token AND (t2 OR t3)), LIMIT ~100,
-joined to parsers (name) + latest price from mv_latest_price. Excludes stale
+scraper-platform products (image NOT NULL, live, ILIKE top-token AND (t2 OR t3)), LIMIT ~100,
+joined to control.scrapers (slug) + latest price from catalog.product_current_state. Excludes stale
 sources (price_seen_at older than --max-age-days) and the placeholder-stock
 `atMag` parser. Wide net; image matching does the precision.
 
@@ -249,14 +249,16 @@ def candidates(conn, toks, max_age_days):
         return {}, []
     with conn.cursor() as bc:
         base = '''
-            SELECT p.id, p.name, p.image, p.url, pa.name AS parser,
-                   lp.price, lp.price_seen_at
-            FROM products p
-            JOIN parsers pa       ON pa.id = p.parser_id
-            JOIN mv_latest_price lp ON lp.product_id = p.id
-            WHERE p.image IS NOT NULL
-              AND pa.name <> %s
-              AND lp.price_seen_at >= (now() - %s::interval)
+            SELECT p.id, p.name, p.image_url, p.canonical_url, pa.slug AS parser,
+                   lp.price, lp.observed_at AS price_seen_at
+            FROM catalog.products p
+            JOIN control.scrapers pa ON pa.id = p.scraper_id
+            JOIN catalog.product_current_state lp ON lp.product_id = p.id
+            WHERE p.image_url IS NOT NULL
+              -- the ported catalogue keeps ~4M retired rows; only live ones are real candidates
+              AND p.presence_state IN ('seen', 'reappeared')
+              AND pa.slug <> %s
+              AND lp.observed_at >= (now() - %s::interval)
               AND p.name ILIKE %s
               {extra}
             LIMIT 100'''

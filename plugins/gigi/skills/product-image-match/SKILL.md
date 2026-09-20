@@ -21,15 +21,19 @@ cataloage au poze diferite / re-găzduite.
   - match-urile doar-CLIP cer și **overlap de tokeni** în nume (`--clip-min-overlap` 2) → 0 false positives
     pe mărfuri de tip commodity pe fundal alb (unde CLIP dă fals ~0.92 pe produse diferite).
 
-## Rulare (mod built-in: Grandia ↔ arona-bi)
+## Rulare (mod built-in: Grandia ↔ platforma de scraping)
 ```bash
-# dry (nu scrie): matchează produse Grandia active cu catalogul de competiție arona-bi
+# dry (nu scrie): matchează produse Grandia active cu catalogul de competiție (arona_scraper)
 uv run product_image_match.py --limit 50 --max-age-days 45
 
 # scrie mapările în Grandia prc_competitor_products + prc_competitor_prices
 uv run product_image_match.py --max-age-days 45 --apply
 ```
 Creds (via `arona_pg.secret`, env-first + KB): `DATABASE_URL_GRANDIA` (write), `DATABASE_URL_ARONA_BI` (read).
+
+> Candidații vin din `catalog.products` + `catalog.product_current_state`, filtrați pe
+> `presence_state IN ('seen','reappeared')` — catalogul păstrează ~4M rânduri retrase din
+> importul legacy, iar fără filtru matching-ul le-ar prinde pe acelea.
 
 ## Parametri de calibrare
 | Flag | Default | Efect |

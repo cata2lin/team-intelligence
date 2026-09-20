@@ -103,7 +103,7 @@ stored in the DB and reused. *(Most other Google-Sheet/Drive skills already use 
 | metrics | `DATABASE_URL_METRICS` | ✅ `postgres-metrics` | BI warehouse: ad spend, orders, `cache.*` | most CS/BI/ads skills |
 | grandia | `DATABASE_URL_GRANDIA` | ✅ `postgres-grandia` | Grandia store, RMA, profitability | grandia-*, returns/rma, product-quality |
 | tom_wms | `DATABASE_URL_TOM` | ✅ `postgres-tom` | warehouse / WMS | tom, stock |
-| arona-bi | `DATABASE_URL_ARONA_BI` | ✅ `postgres-arona-bi` | competitive intel (50+ sites, `mv_best_sellers_ranked`, 213k products) | `sourcing-radar`, pricewatch |
+| scraper platform (ex arona-bi) | `DATABASE_URL_ARONA_BI` | ✅ `postgres-arona-bi` | competitive intel — `arona_scraper` pe `bi.arona.ro:5433`, 64 magazine, ~848k produse live, `reporting.best_sellers_ranked`; rol `arona_bi_reader` read-only peste TLS (vede doar `catalog`, `reporting`, `control.scrapers`) | `sourcing-radar`, `product-image-match`, pricewatch |
 | scentum | `DATABASE_URL_SCENTUM` | ✅ `postgres-scentum` | Scentum app | scentum-specific |
 | AWBprint | `DATABASE_URL_AWBPRINT` | ❌ DSN only | **delivery/transport source of truth** (Frisbo/AWB) | fulfillment-analytics, deliverability, cross-sell, product-sales, awb-track |
 | inventorysync | `DATABASE_URL_INVENTORYSYNC` | ❌ DSN only | inventory-sync app | sync tooling |

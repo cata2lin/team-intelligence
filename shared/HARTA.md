@@ -49,6 +49,14 @@
 - **Saturație audiență / refresh creative (Meta+TikTok)** → `gigi:creative-fatigue` (freq↑+CTR↓/CPA↑ la nivel de cont; drill per-creativ via meta-ads/tiktok-ads).
 - **Promo COD (2+1) face bani?** → `gigi:promo-profitability` (contribuție netă/comandă pe unități/comandă, AWBprint delivered, COGS pe toate unitățile incl gratis).
 - **COGS/preț/stoc Shopify** → `gigi:shopify-stores`.
+- **Preț / stoc / catalog la COMPETIȚIE (64 magazine RO scrape-uite zilnic)** → platforma de scraping,
+  DB `arona_scraper` pe `bi.arona.ro:5433` (MCP `postgres-arona-bi`, DSN `DATABASE_URL_ARONA_BI`,
+  rol `arona_bi_reader` read-only peste TLS). Viteză de vânzare estimată → `reporting.best_sellers_ranked`;
+  catalog → `catalog.products` (filtrează `presence_state IN ('seen','reappeared')`); preț/stoc curent →
+  `catalog.product_current_state`; istoric → `catalog.product_state_changes`; per magazin →
+  `reporting.store_analytics`. Skill-uri: `gigi:sourcing-radar`, `gigi:product-image-match`.
+  ⚠️ Baza VECHE (`test` pe 38.242.226.83) e RETRASĂ — ultimele date 2026-08-10, iar
+  `mv_best_sellers_ranked` a înghețat pe 2026-07-16. Răspundea fără eroare, cu date vechi de 2 luni.
 
 ## 🎯 Target CPA + VERDICT PE PROFIT per magazin
 > ⚠️ **Reașezat pe PROFIT (9-iul-2026):** CPA-target agresiv (15/20) eticheta greșit PMax profitabil drept „scump". Pt **scale/cut pe PMax/Shopping/all-channel judecă pe PROFIT vs breakeven REAL**, nu pe CPA-target.

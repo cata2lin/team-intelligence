@@ -5,9 +5,15 @@ description: Radar de SOURCING / descoperire de produse din motorul de competiti
 
 # Sourcing radar (descoperire de produse din competiție)
 
-Cel mai mare activ neexploatat al echipei: **arona-bi** scrape-uiește zilnic 50+ site-uri RO
-(127M rânduri preț + 127M stoc, ~13 luni istoric) și pre-calculează `mv_best_sellers_ranked`
-(213k produse cu **viteză de vânzare inferată** `ads30_cal`, din scăderile reale de stoc).
+Cel mai mare activ neexploatat al echipei: **platforma de scraping** (`arona_scraper` pe
+`bi.arona.ro:5433`) scrape-uiește zilnic 64 magazine RO și pre-calculează
+`reporting.best_sellers_ranked` (~848k produse cu **viteză de vânzare inferată** `ads30_cal`,
+din scăderile reale de stoc).
+
+> ⚠️ **Baza veche e retrasă.** Până pe 2026-09-20 acest skill citea `test` pe 38.242.226.83
+> (`public.mv_best_sellers_ranked`). Acea bază NU mai primește date din 2026-08-10, iar
+> materialized view-ul înghețase pe 2026-07-16 — răspundea fără eroare, cu date vechi de două
+> luni. Nu o mai interoga.
 Acest skill îl minează ca să găsești **ce se vinde cel mai repede la competiție** → idei de
 sourcing (mai ales Grandia/home-garden/commodity).
 
@@ -59,6 +65,8 @@ souqshop **10906** (max 1,2 mld!) vs site-uri reale (Bonami median 3, aosom 43, 
   pe NUME DE PRODUS (specific), nu pe categorie — deci „—" la un covor rugvista înseamnă „n-avem ACEST covor",
   nu „n-avem covoare". Reglează cu `--match-threshold`. Doar catalogul **Grandia** (brandul de commodity);
   numele EN (vevor) nu se potrivesc cu catalogul RO → apar ca gap.
-- **v2 rămas:** alerte de stockout-steal / price-cut la competiție (din `stock_history`/`price_history`,
-  127M rânduri); matching și cu alte branduri (nu doar Grandia).
+- **v2 rămas:** alerte de stockout-steal / price-cut la competiție (din
+  `catalog.product_state_changes`, ~30M rânduri cu old/new preț și stoc); matching și cu alte
+  branduri (nu doar Grandia).
+- `--parser` acceptă acum și slug-ul magazinului (`bonami`), nu doar numele afișat.
 - Conexiune: secrete KB `DATABASE_URL_ARONA_BI` + `DATABASE_URL_GRANDIA` (pt --vs-grandia). Sheet: `GOOGLE_OAUTH_TOKEN_JSON`.

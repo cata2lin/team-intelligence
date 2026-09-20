@@ -8,11 +8,11 @@
 # ]
 # ///
 """
-sourcing_radar.py — Radar de SOURCING din motorul de competitive-intelligence (arona-bi):
+sourcing_radar.py — Radar de SOURCING din motorul de competitive-intelligence:
 ce produse se vând cel mai REPEDE la competiție (din 50+ site-uri RO scrape-uite zilnic),
 ca să decizi ce să aduci/lansezi. Viteza (ads30_cal) e inferată din scăderile de stoc.
 
-Sursă: arona-bi public.mv_best_sellers_ranked (213k produse cu viteză live, fresh azi).
+Sursă: arona-bi reporting.best_sellers_ranked (213k produse cu viteză live, fresh azi).
 NU e pricewatch (ăla = listă de URL-uri urmărite manual); ăsta minează tot motorul.
 
 ANTI-ZGOMOT (cheia ca să fie util): unele site-uri raportează STOC PLACEHOLDER (jysk
@@ -29,6 +29,13 @@ Usage:
 """
 import argparse, json, os, subprocess, sys
 from datetime import timedelta
+import sys
+
+# Windows consoles are cp1252: printing Romanian diacritics raises UnicodeEncodeError
+# and kills the run after the query has already succeeded.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
 def _find_kb():
@@ -149,7 +156,7 @@ def main():
         args.vs_grandia = True
 
     conn = bi_conn(); cur = conn.cursor()
-    cur.execute("SELECT max(last_sold_day) FROM public.mv_best_sellers_ranked")
+    cur.execute("SELECT max(last_sold_day) FROM reporting.best_sellers_ranked")
     max_day = cur.fetchone()[0]
     cutoff = max_day - timedelta(days=args.days)
     fresh = str(max_day)
@@ -157,18 +164,20 @@ def main():
     where = ["m.ads30_cal > %s", "m.latest_stock <= %s", "m.last_sold_day >= %s"]
     params = [max(args.min_vel, 0.0001), args.max_stock, cutoff]
     if not args.include_placeholder:
-        where.append("""m.parser_name NOT IN (
-            SELECT parser_name FROM public.mv_best_sellers_ranked WHERE ads30_cal>0
-            GROUP BY parser_name HAVING percentile_cont(0.5) WITHIN GROUP (ORDER BY latest_stock) > %s)""")
+        where.append("""m.scraper_name NOT IN (
+            SELECT scraper_name FROM reporting.best_sellers_ranked WHERE ads30_cal>0
+            GROUP BY scraper_name HAVING percentile_cont(0.5) WITHIN GROUP (ORDER BY latest_stock) > %s)""")
         params.append(args.placeholder_stock)
     if not args.include_vivre:
-        where.append("lower(m.parser_name) <> 'vivre'")
+        where.append("lower(m.scraper_name) <> 'vivre'")
     if args.stockout:  # competiția e ruptă de stoc dar produsul încă se vindea = cerere neacoperită
         where.append("m.latest_stock = 0")
     if args.search:
         where.append("m.name ~* %s"); params.append(args.search)
     if args.parser:
-        where.append("lower(m.parser_name) = lower(%s)"); params.append(args.parser)
+        # the new platform keys a store by slug; accept either so old invocations still work
+        where.append("(lower(m.scraper_slug) = lower(%s) OR lower(m.scraper_name) = lower(%s))")
+        params.extend([args.parser, args.parser])
     if args.vendor:
         where.append("lower(m.vendor) = lower(%s)"); params.append(args.vendor)
     if args.min_price is not None:
@@ -177,9 +186,9 @@ def main():
         where.append("m.price <= %s"); params.append(args.max_price)
 
     sql = f"""
-      SELECT m.parser_name, m.vendor, m.name, m.price, m.latest_stock,
+      SELECT m.scraper_name, m.vendor, m.name, m.price, m.latest_stock,
              round(m.ads30_cal,1), m.last_sold_day::text, m.url
-      FROM public.mv_best_sellers_ranked m
+      FROM reporting.best_sellers_ranked m
       WHERE {' AND '.join(where)}
       ORDER BY m.ads30_cal DESC LIMIT %s"""
     # cu --gap-only multe rânduri pică (le avem deja) → tragem un pool mai mare
@@ -203,7 +212,7 @@ def main():
     if args.min_price or args.max_price: flt.append(f"preț {args.min_price or 0}-{args.max_price or '∞'}")
     if args.vs_grandia: flt.append("vs Grandia" + (" (gap-only)" if args.gap_only else ""))
     if args.stockout: flt.append("STOCKOUT (rupt la competiție)")
-    print(f"Radar sourcing · arona-bi (date la zi {fresh[:10]}) · {', '.join(flt) or 'fără filtre'} · "
+    print(f"Radar sourcing · arona_scraper (date la zi {fresh[:10]}) · {', '.join(flt) or 'fără filtre'} · "
           f"placeholder excluși: {not args.include_placeholder}", file=sys.stderr)
 
     vs = args.vs_grandia
