@@ -242,7 +242,7 @@ INSERT INTO secrets (key, value, service, kind, is_sensitive, description) VALUE
   ('PG_PORT',                '5432',          'postgres', 'config', false, 'Postgres port'),
   ('PG_USER',                'scraper',       'postgres', 'config', false, 'Postgres user'),
   ('PG_PASSWORD',            NULL,            'postgres', 'secret', true,  'Postgres password'),
-  ('DATABASE_URL_ARONA_BI',     NULL, 'postgres', 'secret', true, 'arona-bi DB (test)'),
+  ('DATABASE_URL_ARONA_BI',     NULL, 'postgres', 'secret', true, 'scraper platform DB (arona_scraper on bi.arona.ro:5433, read-only role)'),
   ('DATABASE_URL_TOM',          NULL, 'postgres', 'secret', true, 'tom DB (tom_wms)'),
   ('DATABASE_URL_AWBPRINT',     NULL, 'postgres', 'secret', true, 'AWBprint DB (read-only catalog)'),
   ('DATABASE_URL_GRANDIA',      NULL, 'postgres', 'secret', true, 'grandia-inventory DB (Grandia)'),

@@ -38,10 +38,10 @@ Beyond price, `listing`/`compare` extract a product's **title, description lengt
 - **History**: append-only in `~/.cache/arona-pricewatch/prices.db`. `check` flags 🔻 (price dropped vs last) and 🔴 (below our price = we're undercut).
 
 ## How to use for Grandia
-1. Take Grandia's price-sensitive / best-selling SKUs (their prices live in our `arona-bi` / `grandia` DB — `products` + `price_history`).
+1. Take Grandia's price-sensitive / best-selling SKUs (their prices live in the `grandia` DB; competitor prices live in the scraper platform — `catalog.products` + `catalog.product_current_state`).
 2. Find the competitor listing(s) for each (eMAG etc.), `add` them with `--our <Grandia price>`.
 3. Run `check` on a **cron** (daily/weekly) → wire significant changes (🔴 undercut / 🔻 drop) to a **ClickUp task** (we use ClickUp for alerts) so the team reprices.
 
 ## Caveats / v2
 - Hardened sites (eMAG/Notino have anti-bot) may block a plain fetch → `add`/`check` prints "neextras"; fall back to **Firecrawl MCP** or the `library:scraper-construction` escalation ladder (proxies/Selenium).
-- v2: auto-seed `--our` from the Grandia DB (`price_history`) and a competitor-URL matcher; push undercut alerts straight into ClickUp.
+- v2: auto-seed `--our` from the Grandia DB and a competitor-URL matcher; push undercut alerts straight into ClickUp.

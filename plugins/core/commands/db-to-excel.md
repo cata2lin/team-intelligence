@@ -89,7 +89,7 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/kb.py" \
   never print it.
 - **Write outputs under `$NAS_ROOT/exports/`.** Parent dirs are created
   automatically.
-- Avoid `SELECT *` on large tables (`test`, `trendyol`) — name columns, add a
+- Avoid `SELECT *` on large tables (`catalog.products`, `trendyol`) — name columns, add a
   `LIMIT`.
 
 ## Related

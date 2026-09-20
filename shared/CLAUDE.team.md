@@ -23,9 +23,11 @@ You are **{$EMPLOYEE_HANDLE}** on this machine.
 ## What you have
 - **Every teammate's skills**, namespaced by author: `core:*`, `iulian:*`,
   `catalin:*`, … . Invoke by describing the task or with `/<author>:<skill>`.
-- **Read-only Postgres** access to the 5 app DBs via MCP servers
+- **Read-only Postgres** access to the app DBs via MCP servers
   (`postgres-metrics`, `postgres-grandia`, `postgres-tom`, `postgres-arona-bi`,
-  `postgres-scentum`). They run every query in a READ ONLY transaction.
+  `postgres-scentum`, `postgres-emag`). They run every query in a READ ONLY transaction.
+  `postgres-arona-bi` now points at the scraper platform (`arona_scraper` on
+  `bi.arona.ro:5433`), NOT the retired `test` DB on 38.242.226.83.
 - The **knowledge base** (`core:knowledge-base` skill → `kb.py`): the team's
   shared memory of activity, files, secrets, and reference links.
 

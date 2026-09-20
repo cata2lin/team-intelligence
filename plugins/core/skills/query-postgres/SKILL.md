@@ -16,7 +16,7 @@ plugin; they run every query in a READ ONLY transaction:
 | metrics | `metrics` | `postgres-metrics` |
 | grandia-inventory | `Grandia` | `postgres-grandia` |
 | tom | `tom_wms` | `postgres-tom` |
-| arona-bi | `test` | `postgres-arona-bi` |
+| scraper platform (ex arona-bi) | `arona_scraper` | `postgres-arona-bi` (rol `arona_bi_reader`, read-only, TLS; schemele `catalog` / `reporting` / `control.scrapers`) |
 | scentum | `Parfum_Iulian` | `postgres-scentum` |
 
 Just ask the relevant MCP server to run your `SELECT`. Their connection strings
@@ -48,5 +48,6 @@ conn.set_session(readonly=True)
   first, show the row count, and ask before mutating. Writes go only to an app's
   own DB.
 - Never `DROP`/`TRUNCATE`/alter schema without explicit confirmation.
-- Avoid `SELECT *` on large tables (`test`, `trendyol`) -- name columns + `LIMIT`.
+- Avoid `SELECT *` on large tables (`catalog.products` has ~4.9M rows, `trendyol`) -- name columns + `LIMIT`.
+- `catalog.products` keeps RETIRED rows: filter `presence_state IN ('seen','reappeared')` for the live catalogue (~848k), or you are querying the 2026-08-18 legacy import.
 - Never paste a secret value into chat.
