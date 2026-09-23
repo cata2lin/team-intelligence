@@ -6,6 +6,66 @@ argument-hint: "pull --machine uzina2 | plan --machine uzina2 --by-sku | open --
 
 # print-queue — coada de print, per STAȚIE
 
+> ## 🔴 PE STAȚIE: ia coada din SECOND BRAIN, nu rula scriptul local
+>
+> **Dacă ești Claude-ul unei stații de depozit (uzina2 / depozit), NU rula `print_queue.py` local** și nu
+> încerca să repari cheile de acolo. `~/.aac/input.json` de pe stații ține chei xConnector vechi; ele
+> **expiră la 90 de zile** (ultima oară pe 22-sep-2026, 19 din 23 de magazine deodată) și primești `401`.
+> Serverul are mereu cheile proaspete — întreabă-l pe el:
+>
+> ```
+> run_skill("depozit:print-queue", action="pull", params={"machine": "uzina2"})   # reîmprospătează, ~15s
+> run_skill("depozit:print-queue", action="plan", params={"machine": "uzina2"})   # instant, din cache
+> ```
+> (MCP-ul `second-brain`; înlocuiește cu `"depozit"` pe cealaltă stație.) Rulează `pull` ÎNTÂI, apoi `plan`.
+> Dacă `plan` răspunde „Nimic in DB pt filtru", n-ai rulat `pull`.
+>
+> ### ⚠️ Filtrul de magazin merge pe DOMENIU, nu pe numele brandului
+> `shop="grandia"` întoarce **zero** și pare că n-ai nimic de printat. `shop="n12w89-yy"` întoarce 39.
+> Tradu întotdeauna numele spus de operator:
+>
+> | brand | domeniu | | brand | domeniu |
+> |---|---|---|---|---|
+> | Grandia | `n12w89-yy` | | Apreciat | `8e3700-d9` |
+> | Ofertele Zilei | `ofertelezilei` | | Covoria | `bb4nmc-pb` |
+> | Reduceri Bune | `audusp-rf` | | MagDeal | `covoareauto-ro` |
+> | Casa Ofertelor | `bonhaus` | | Carpetto | `nxfer1-n4` |
+> | Gento | `cn54vk-uz` | | Nocturna / Lux | `1eee37-2d` / `de51c5-b8` |
+> | Orice Redus | `oriceredus` | | Esteban / GT | `6f9e22-9d` / `ix5bxc-hr` |
+> | Ce Pat Ai | `ce-pat-ai` | | Nubra / Lab Noir | `bmuwvv-jy` / `31k0py-bi` |
+> | Bonhaus CZ / PL | `vthuzq-7j` / `f0yrmh-ia` | | Bonhaus BG / HU / SK | `ux1x6n-n2` / `63e901-2f` / `16w7xv-0w` |
+>
+> Alte filtre, la fel: `params={"machine":"uzina2","sku":"HA-0002"}` · `{"items": 3}`.
+>
+> ### Pe CATEGORII (așa lucrează depozitul)
+> ```
+> run_skill("depozit:print-queue", action="plan", params={"machine":"uzina2","by_category": true})
+> ```
+> Dă categoriile (AȘTERNUTURI / OGLINZI / COVOARE / BAIE / HA / LAVETE / MIXT), fiecare cu bucățile și
+> cu **în câte PDF-uri se taie** — exact planul de print. Formă reală:
+> ```
+> == BAIE: 18 buc ==
+>    BAIE-ALBASTRU_x1     9 buc
+>    BAIE-ROSU_x1         5 buc
+>    DIVERSE              4 buc
+>    ...
+>    AȘTERNUTURI  12 (1 PDF) · OGLINZI 11 (2 PDF) · COVOARE 16 (3 PDF) · BAIE 18 (3 PDF) · MIXT 112 (6 PDF)
+> ```
+> Un SKU primește PDF propriu de la `threshold` bucăți în sus (implicit **3**); restul intră în `DIVERSE`.
+> Schimbi pragul cu `{"threshold": 5}`. Variante înrudite: `{"by_qty": true}` (parfumuri, grupat pe
+> cantitate) și `{"by_sku": true}` (detergenți, FĂRĂ/CU lavete).
+>
+> ⚠️ Prin Second Brain poți **planifica** pe categorii, dar nu poți **printa** pe categorii — vezi mai jos.
+>
+> ### Ce NU merge (încă) prin Second Brain
+> **`open`** — ar descărca etichetele PE SERVER, le-ar marca `downloaded` (deci ies din coada tuturor
+> stațiilor) și PDF-urile tot n-ar ajunge la operator. Deci prin SB **doar numeri și planifici**.
+> Pentru etichetele propriu-zise e nevoie de modul-server al scriptului (`PRINT_QUEUE_SERVER`, cere ZIP de
+> la VPS) — vezi „MOD SERVER" mai jos. Până e configurat pe stație, escaladează la Gigi.
+>
+> **De ce așa:** stația nu trebuie să țină secrete. Fiecare cheie pusă pe un laptop de tură e o pană
+> programată peste 90 de zile, într-un loc unde nimeni nu se uită. Vezi [[xconnector-chei-expira-la-90-zile]].
+
 > 🏷️ **Numele canonic de echipă = `depozit:print-queue`** (Second Brain). ACESTA (`plugins/gigi/skills/print-queue/`)
 > e SURSA DE COD — aici se fac update-urile (PR), stațiile le iau prin plugin-update / `git pull` (NU editați copii
 > locale pe stații). Rămâne în plugin-ul `gigi` fiindcă `print_queue.py` importă `xconnector.py` ca frate. `gigi:print-queue`
