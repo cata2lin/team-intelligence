@@ -113,7 +113,7 @@ def _pull(sh, dfrom, dto):
         q += 1
         cid = doc.get("connectorId"); trk = X.doc_tracking(doc)
         lurl = doc.get("url") or doc.get("awbPdfUrl") or (
-            X.XBASE + "/api/document/shipping-label?connectorId=%s&trackingNumber=%s" % (cid, up.quote(str(trk or ""))))
+            X.XBASE + "/api/documents/shipping-labels?connectorId=%s&trackingNumber=%s" % (cid, up.quote(str(trk or ""))))
         for sku in ([s for s in (o.get("skus") or []) if s] or [None]):
             rows.append((sh["shopDomain"], info["name"], info["country"], info["type"], o.get("orderName"),
                          str(o.get("orderId")), sku, int(o.get("totalItemsCount") or 0),
@@ -257,7 +257,7 @@ def cmd_print(a):
                     done_ids.append(oid); continue  # descărcat/printat între timp → doar marchez printat
                 cid = doc.get("connectorId"); trk = X.doc_tracking(doc)
                 url = doc.get("url") or doc.get("awbPdfUrl") or (
-                    X.XBASE + "/api/document/shipping-label?connectorId=%s&trackingNumber=%s" % (cid, up.quote(str(trk or ""))))
+                    X.XBASE + "/api/documents/shipping-labels?connectorId=%s&trackingNumber=%s" % (cid, up.quote(str(trk or ""))))
                 req = urllib.request.Request(url, headers={"Authorization": xc.h["Authorization"]}) if url.startswith(X.XBASE) else urllib.request.Request(url)
                 data = urllib.request.urlopen(req, timeout=60).read()
                 fp = os.path.join(outdir, "%s.pdf" % nm)

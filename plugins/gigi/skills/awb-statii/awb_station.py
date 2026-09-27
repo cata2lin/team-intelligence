@@ -12,7 +12,7 @@ def build_and_send(eticheta, orders):
         if not o or not doc:
             sarite.append(od); continue
         url = doc.get("url") or doc.get("awbPdfUrl") or (
-            A.X.XBASE + "/api/document/shipping-label?connectorId=%s&trackingNumber=%s"
+            A.X.XBASE + "/api/documents/shipping-labels?connectorId=%s&trackingNumber=%s"
             % (doc.get("connectorId"), urllib.parse.quote(str(trk or ""))))
         try:
             with urllib.request.urlopen(url, timeout=90) as r: pdf = r.read()

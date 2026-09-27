@@ -74,7 +74,7 @@ def eticheta_pdf(xc, o):
     if url:
         incearca.append((url, False))
     if trk:
-        incearca.append((X.XBASE + "/api/document/shipping-label?connectorId=%s&trackingNumber=%s"
+        incearca.append((X.XBASE + "/api/documents/shipping-labels?connectorId=%s&trackingNumber=%s"
                          % (doc.get("connectorId"), urllib.parse.quote(str(trk))), True))
     for u, cu_token in incearca:
         try:

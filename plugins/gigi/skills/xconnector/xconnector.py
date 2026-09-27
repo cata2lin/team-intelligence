@@ -4546,7 +4546,7 @@ def cmd_awb_label(a):
         print("  %s nu are AWB." % a.order); return
     cid, trk = doc.get("connectorId"), doc_tracking(doc)
     url = doc.get("url") or doc.get("awbPdfUrl") or (
-        XBASE + "/api/document/shipping-label?connectorId=%s&trackingNumber=%s" % (cid, urllib.parse.quote(str(trk or ""))))
+        XBASE + "/api/documents/shipping-labels?connectorId=%s&trackingNumber=%s" % (cid, urllib.parse.quote(str(trk or ""))))
     print("  %s (%s) · AWB %s · connector %s" % (a.order, sh["shopDomain"], trk, cid))
     print("  etichetă: %s" % url)
     if doc.get("downloaded") is False:
