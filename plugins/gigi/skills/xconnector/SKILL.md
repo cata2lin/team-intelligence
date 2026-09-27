@@ -1,6 +1,6 @@
 ---
 name: xconnector
-description: Punte spre xConnector (curierat) pt magazinele ARONA, pe TOATE cele 19 magazine. CITEȘTE comenzile fără AWB cu adresă WRONG/UNKNOWN + adresa curentă + sugestia validatorului, le CORECTEAZĂ automat conservator (ai-correct-address) pe cele sigure (cron `correct`), ȘI operează AWB direct prin API: `awb-make` (creează AWB cu parcelCount/curier), `awb-void` (anulează), `awb-regen` (anulează+refă cu alt nr de colete/curier), `awb-label` (link etichetă), `connectors` (listă curieri/facturare). Use pt „corectează adresele proaste", „xconnector address issues", „fă AWB / anulează AWB / regenerează AWB cu 2 colete prin xconnector", „comenzi fără awb cu adresă greșită". Scrierile AWB sunt dry-run by default (POST real doar cu --apply).
+description: Punte spre xConnector (curierat) pt magazinele ARONA, pe TOATE cele 19 magazine. CITEȘTE comenzile fără AWB cu adresă WRONG/UNKNOWN + adresa curentă + sugestia validatorului, le CORECTEAZĂ automat conservator (address-correction) pe cele sigure (cron `correct`), ȘI operează AWB direct prin API: `awb-make` (creează AWB cu parcelCount/curier), `awb-void` (anulează), `awb-regen` (anulează+refă cu alt nr de colete/curier), `awb-label` (link etichetă), `connectors` (listă curieri/facturare). Use pt „corectează adresele proaste", „xconnector address issues", „fă AWB / anulează AWB / regenerează AWB cu 2 colete prin xconnector", „comenzi fără awb cu adresă greșită". Scrierile AWB sunt dry-run by default (POST real doar cu --apply).
 ---
 
 # /xconnector
@@ -55,7 +55,7 @@ Comenzile din app-ul **COD Form (Releaseit)** au **line items BLOCATE** (nu se p
 - **`correct`** (cron-ul) — pt fiecare comandă fără AWB cu adresă `WRONG`/`UNKNOWN`:
   - tag **„duplicata"** (Shopify) → **skip** (nu corectez, nu trimit la AWB — se anulează separat);
   - **corectabilă** (gate aac: UN candidat cu zip/oraș/județ ≥0.95 + stradă ≥0.90 + `/zip-code` confirmă +
-    număr casă păstrat) → `ai-correct-address` (cu `--apply`) → adresa devine VALID → gata de AWB;
+    număr casă păstrat) → `address-correction` (cu `--apply`) → adresa devine VALID → gata de AWB;
   - **grea** (rural fără stradă / fără număr / garbage / ambiguu) → **triaj CS** (cu motiv).
   Fără `--apply` = **dry-run** (arată ce ar face). `--min-age-hours N` sare comenzile mai noi de N ore
   (le lasă sweep-ului de validare al xConnector să le rezolve — vezi „Validarea e async" mai jos);
@@ -198,7 +198,7 @@ PL `f0yrmh-ia`, BG `ux1x6n-n2`, HU `63e901-2f`, SK `16w7xv-0w`**) primesc `WRONG
 dispatcher: CZE→`cz_addresses`, POL→`pl_addresses`, BGR→`bg_localities`, **HUN/SVK→`geonames_localities`+`geonames_streets`**),
 apoi **HERE Geocoding** ca fallback (`here_validate`, cheie KB `HERE_API_KEY`): geocodează adresa în `countryCode` și dacă
 `queryScore ≥ 0.9` (`HERE_MIN_SCORE`) → face AWB; sub prag (sau eroare HERE) → **fail-closed** = lasă la CS, nu face AWB.
-Curier = **DPD Romania** (livrează cross-border, ca toate). Externele **NU intră** în corecția de text RO (`ai-correct-address`).
+Curier = **DPD Romania** (livrează cross-border, ca toate). Externele **NU intră** în corecția de text RO (`address-correction`).
 Test CZ (dry-run): din 52 unfulfilled, 31 validate HERE → AWB, 21 chiar proaste → CS. Cheile lor rămân utile și pt AWB/facturi.
 
 **HU/SK nomenclator (`geonames_nomenclator.py`, 2026-07-27)** — sursă **GeoNames postal** (`geonames_localities`: HU 3571 + SK 5233)
@@ -279,6 +279,21 @@ sunt dashboard-only** — sunt expuse sync prin `POST /api/actions/*` (`create-s
 pe merchant + permisiuni per-cheie (`API_CREATE_SHIPPING_LABEL` etc.) — fără ele = 403. Toate cele 19 chei le au
 (17 permisiuni, inclusiv `API_ADDRESS_VALIDATE`). Skill-ul **implementează** acțiunile de scriere (`awb-make/void/regen`,
 facturi, `order-cancel`, `addr-set`) + cron-ul `fulfill` care face AWB peste/în completarea Shopify Flow.
+
+### Rute canonice (aliasurile vechi au sunset pe 2-oct-2026)
+Ghid: **https://xconnector.app/api-migration.html**. Scriptul folosește DOAR rutele canonice; id-ul din cale e
+id-ul **Shopify** (`OrderDTO.orderId`), același trimis înainte în query/corp:
+
+| Alias vechi (retras) | Rută canonică | Diferență |
+|---|---|---|
+| `GET /api/orders/by-id?orderId=<id>` | `GET /api/orders/<id>/address-detail` | doar ruta; corp identic (adresă, `addressStatus`, cele 3 hash-uri, istoric). Ca înainte, **NU** întoarce `documents`. |
+| `POST /api/orders/ai-correct-address` | `POST /api/orders/<id>/address-correction` | `orderId` iese din corp și intră în cale; restul corpului (adresa COMPLETĂ, `expected*Hash`, `idempotencyKey`) identic. 200 = aplicat / `alreadyApplied`, 409 = starea s-a schimbat. |
+| `GET /api/merchant/connectors` | `GET /api/connectors` | doar ruta; tot listă JSON. |
+
+În cod: `XC.by_id()` (address-detail), `XC.address_correction()` (corecția), `XC.list_connectors()`.
+**Comanda nu există** = DOAR `404` cu `errorCode: order_not_found`. Un `404` fără `order_not_found` înseamnă
+rută lipsă (endpoint retras), nu comandă lipsă — `by_id` îl scrie pe stderr. După 2-oct, un val de erori
+xConnector înseamnă întâi „a rămas un alias undeva”, nu „xConnector e jos”.
 
 ## `fulfill` — safety-net auto-AWB peste Shopify Flow (cron 15 min)
 `uv run xconnector.py fulfill [--max-age-min 15] [--exclude …] [--apply]` — pt comenzile **open + unfulfilled mai vechi
