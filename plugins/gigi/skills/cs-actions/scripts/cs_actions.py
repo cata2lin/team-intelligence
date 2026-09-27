@@ -523,7 +523,7 @@ def op_invoice(a, agent):
         n = li["node"]
         products.append({"name": n["title"][:200], "isService": False, "measuringUnitName": "buc", "currency": "RON",
                          "quantity": n["quantity"], "price": float(n["originalUnitPriceSet"]["shopMoney"]["amount"]),
-                         "isTaxIncluded": True, "taxName": "Normala", "taxPercentage": 19, "saveToDb": False})
+                         "isTaxIncluded": True, "taxName": "Normala", "taxPercentage": 21, "saveToDb": False})
     body = {"companyVatCode": c["cif"], "seriesName": c.get("series", ""), "isDraft": False,
             "issueDate": datetime.date.today().isoformat(),
             "client": {"name": cname, "vatCode": "", "isTaxPayer": False, "country": "Romania",
