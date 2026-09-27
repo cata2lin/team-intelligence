@@ -248,7 +248,7 @@ def cmd_print(a):
             xc = xcs.get(dom)
             try:
                 # RE-INTEROGHEAZĂ comanda ACUM (AWB-ul poate s-a schimbat între sync și print) — nu folosi URL-ul vechi
-                s, d = xc.get("/api/orders/by-id", "orderId=%s" % oid)
+                s, d = xc.get("/api/orders/%s/address-detail" % oid)   # fostul by-id (sunset 2-oct-2026)
                 o = d if (isinstance(d, dict) and d.get("orderId")) else ((d.get("order") if isinstance(d, dict) else None) or d)
                 doc = X.awb_doc(o) if o else None
                 if not doc:
@@ -296,7 +296,7 @@ def cmd_printed(a):
     xcs = {s["shopDomain"]: X.XC(s["apiKey"]) for s in X.load_shops()}
     def chk(oid, dom, store):
         try:
-            s, d = xcs[dom].get("/api/orders/by-id", "orderId=%s" % oid)
+            s, d = xcs[dom].get("/api/orders/%s/address-detail" % oid)   # fostul by-id (sunset 2-oct-2026)
             o = d if (isinstance(d, dict) and d.get("orderId")) else ((d.get("order") if isinstance(d, dict) else None) or d)
             doc = X.awb_doc(o) if o else None
             return (store, doc.get("downloaded") if doc else None)
