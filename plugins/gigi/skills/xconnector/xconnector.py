@@ -1982,7 +1982,7 @@ def customer_history_addr(order_name, ad):
         # comandă anterioară LIVRATĂ — owner (după reflecție): mai sigur LIVRATĂ decât doar plecată (coletul a
         # AJUNS → adresa sigur funcționează; plecată-dar-refuzată putea fi adresă proastă). delivered = livrat.
         prior = con.run("select o.order_number, o.shipping_address, o.aggregated_status from orders o "
-                        "where regexp_replace(o.shipping_address->>'phone','\D','','g') like :p "
+                        r"where regexp_replace(o.shipping_address->>'phone','\D','','g') like :p "
                         "and o.order_number <> :n and o.aggregated_status = 'delivered' "
                         "order by o.id desc limit 40",
                         p="%" + p9, n=order_name)
