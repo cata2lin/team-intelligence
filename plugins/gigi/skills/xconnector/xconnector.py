@@ -3453,20 +3453,36 @@ def _ask_connector(cons):
 
 # Grandia: produse voluminoase (după productType) → curier DRAGON_STAR; restul → DPD (default).
 GRANDIA_DOMAIN = "n12w89-yy.myshopify.com"
-GRANDIA_BULKY_TYPES = {"magazii de grădină", "lavoare", "mese și măsuțe", "oglinzi led"}
+GRANDIA_BULKY_TYPES = {"magazii de grădină", "lavoare", "oglinzi led"}
+# Din „Mese și măsuțe" pleacă pe Dragon Star DOAR măsuțele de CAFEA (ownerul, 27-sep-2026: „masutele doar de cafea,
+# nu alte masute") — masa pliabilă VERDA sau măsuța de laptop merg pe DPD. Aceeași regulă ca în Order Hub
+# (shipment_rules 3/4: tipul/tag-ul măsuțelor + „cafea" în titlu).
+GRANDIA_MASUTE_TYPE = "mese și măsuțe"
 GRANDIA_HOLD_TYPES = {"magazii de grădină"}   # EXCLUS de la AWB (plată parțială) → HOLD, le duce CS manual
+
+
+def _order_lines(shop, token, name):
+    """(productType lower, titlu lower) pentru fiecare linie a comenzii din Shopify."""
+    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ lineItems(first:100){ edges{ node{ '
+         'title product{ productType } } } } } } } }') % (name or "").replace('"', "")
+    d = shopify_gql(shop, token, q)
+    edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
+    if not edges:
+        return []
+    li = ((edges[0]["node"].get("lineItems") or {}).get("edges")) or []
+    return [(((e["node"].get("product") or {}).get("productType") or "").strip().lower(),
+             (e["node"].get("title") or "").strip().lower()) for e in li]
 
 
 def order_product_types(shop, token, name):
     """Set de productType (lower) ale liniilor comenzii din Shopify."""
-    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ lineItems(first:100){ edges{ node{ '
-         'product{ productType } } } } } } } }') % (name or "").replace('"', "")
-    d = shopify_gql(shop, token, q)
-    edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
-    if not edges:
-        return set()
-    li = ((edges[0]["node"].get("lineItems") or {}).get("edges")) or []
-    return {((e["node"].get("product") or {}).get("productType") or "").strip().lower() for e in li}
+    return {tip for tip, _titlu in _order_lines(shop, token, name)}
+
+
+def grandia_pe_dragon(shop, token, name):
+    """Comanda Grandia are un produs care pleacă pe Dragon Star (voluminos sau măsuță de cafea)?"""
+    return any(tip in GRANDIA_BULKY_TYPES or (tip == GRANDIA_MASUTE_TYPE and "cafea" in titlu)
+               for tip, titlu in _order_lines(shop, token, name))
 
 
 def order_connector_id(shop, token, name):
@@ -3506,7 +3522,7 @@ def route_connector(sh, st, order_name, cons, default_con):
     if not st:
         return default_con
     if sh and sh.get("shopDomain") == GRANDIA_DOMAIN:
-        if order_product_types(st["shopDomain"], st["adminToken"], order_name) & GRANDIA_BULKY_TYPES:
+        if grandia_pe_dragon(st["shopDomain"], st["adminToken"], order_name):
             ds = [c for c in cons if (c.get("type") or "").upper() == "DRAGON_STAR" and c.get("active")]
             if ds:
                 return ds[0]

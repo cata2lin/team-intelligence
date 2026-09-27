@@ -89,8 +89,10 @@ AWB-uri de 1 colet când trebuiau 2-3 (sursă frecventă de eșec/etichetă gre�
 
 ### Curier default + Grandia/Dragon Star (auto-rutat)
 `awb-make`/`awb-regen`/`fulfill` aleg implicit **DPD Romania** dacă nu dai `--connector`. **Grandia auto-rutează după
-`productType`:** comenzile cu produs voluminos (`Magazii de grădină`, `Lavoare`, `Mese și măsuțe`, `Oglinzi LED`) →
-**Dragon Star** [24257]; restul → DPD [20673]. (`route_connector`/`GRANDIA_BULKY_TYPES`, citește line items din Shopify.)
+`productType`:** comenzile cu produs voluminos (`Magazii de grădină`, `Lavoare`, `Oglinzi LED`) și, din `Mese și măsuțe`,
+**DOAR măsuțele de CAFEA** („cafea" în titlu; ownerul, 27-sep-2026) → **Dragon Star** [24257]; restul (inclusiv alte mese/
+măsuțe, ex. masa pliabilă VERDA, măsuța de laptop) → DPD [20673]. (`route_connector`/`grandia_pe_dragon`, citește line
+items din Shopify — aceeași regulă ca în Order Hub.)
 Dacă forțezi `--connector`, rutarea e ignorată. `order-cancel` folosește connectorul cu care s-a emis AWB-ul.
 
 ### `not-downloaded` — etichete neprintate / ghost
