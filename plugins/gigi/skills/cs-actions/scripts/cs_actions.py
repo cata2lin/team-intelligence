@@ -116,7 +116,7 @@ def srest(prefix, method, path, body=None):
 
 # ───────────────────────── adresă pt swap/resend ─────────────────────────
 def addr_from_xconnector(order_name):
-    """GT: adresa din xConnector (by_id după ce găsesc orderId în fereastră)."""
+    """GT: adresa din xConnector (address-detail după ce găsesc orderId în fereastră)."""
     raw = _kb_secret("XCONNECTOR_SHOPS")
     try:
         shops = json.loads(raw) if raw.startswith("[") else []
@@ -141,7 +141,10 @@ def addr_from_xconnector(order_name):
             break
     if not oid:
         return None
-    s, d = _http("GET", XBASE + "/api/orders/by-id?orderId=%s" % oid, h)
+    # ruta canonică; aliasul `/api/orders/by-id?orderId=` are sunset pe 2-oct-2026 (același corp, același id Shopify)
+    if not str(oid).isdigit():
+        return None
+    s, d = _http("GET", XBASE + "/api/orders/%s/address-detail" % oid, h)
     a = (d or {}).get("shippingAddress") or {}
     if not a.get("address1"):
         return None
