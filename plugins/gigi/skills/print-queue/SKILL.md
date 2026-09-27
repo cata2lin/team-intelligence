@@ -6,6 +6,15 @@ argument-hint: "pull --machine uzina2 | plan --machine uzina2 --by-sku | open --
 
 # print-queue — coada de print, per STAȚIE
 
+> ## 🔴 ÎNTÂI: etichetele făcute de ORDER HUB nu sunt aici
+>
+> Din 24–25 sep 2026 AWB-urile DPD ale magazinelor (Ofertele, MagDeal, CasaOfertelor, Reduceri, Bonhaus, Bucsa, Grandia,
+> Gento, Nocturna, Covoria, Carpetto, ROSSI, Duppo…) se fac din **Order Hub** pe contul `dpd-ro-arona`. xConnector nu le
+> cunoaște, deci `pull`/`plan`/`open` de aici **nu le văd** — coada pare mai mică decât e. Spune-i operatorului să printeze
+> din **Order Hub → Printing** (https://orderhub.arona.ro/app/printing), cu stația lui. Coada Order Hub are tot (inclusiv
+> etichetele xConnector, fără dubluri). Măsurat pe 27-sep: din 24 de etichete Order Hub căutate în xConnector, 0 existau acolo.
+> Skill-ul ăsta rămâne doar pentru etichetele încă făcute în xConnector, până la oprirea lui (2-oct-2026).
+
 > ## 🔴 PE STAȚIE: ia coada din SECOND BRAIN, nu rula scriptul local
 >
 > **Dacă ești Claude-ul unei stații de depozit (uzina2 / depozit), NU rula `print_queue.py` local** și nu
