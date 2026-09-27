@@ -116,7 +116,7 @@ def srest(prefix, method, path, body=None):
 
 # ───────────────────────── adresă pt swap/resend ─────────────────────────
 def addr_from_xconnector(order_name):
-    """GT: adresa din xConnector (by_id după ce găsesc orderId în fereastră)."""
+    """GT: adresa din xConnector (address-detail după ce găsesc orderId în fereastră)."""
     raw = _kb_secret("XCONNECTOR_SHOPS")
     try:
         shops = json.loads(raw) if raw.startswith("[") else []
@@ -141,7 +141,10 @@ def addr_from_xconnector(order_name):
             break
     if not oid:
         return None
-    s, d = _http("GET", XBASE + "/api/orders/by-id?orderId=%s" % oid, h)
+    # ruta canonică; aliasul `/api/orders/by-id?orderId=` are sunset pe 2-oct-2026 (același corp, același id Shopify)
+    if not str(oid).isdigit():
+        return None
+    s, d = _http("GET", XBASE + "/api/orders/%s/address-detail" % oid, h)
     a = (d or {}).get("shippingAddress") or {}
     if not a.get("address1"):
         return None
@@ -520,7 +523,7 @@ def op_invoice(a, agent):
         n = li["node"]
         products.append({"name": n["title"][:200], "isService": False, "measuringUnitName": "buc", "currency": "RON",
                          "quantity": n["quantity"], "price": float(n["originalUnitPriceSet"]["shopMoney"]["amount"]),
-                         "isTaxIncluded": True, "taxName": "Normala", "taxPercentage": 19, "saveToDb": False})
+                         "isTaxIncluded": True, "taxName": "Normala", "taxPercentage": 21, "saveToDb": False})
     body = {"companyVatCode": c["cif"], "seriesName": c.get("series", ""), "isDraft": False,
             "issueDate": datetime.date.today().isoformat(),
             "client": {"name": cname, "vatCode": "", "isTaxPayer": False, "country": "Romania",

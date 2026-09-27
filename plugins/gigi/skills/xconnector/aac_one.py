@@ -2,9 +2,9 @@
 # requires-python = ">=3.10"
 # dependencies = []
 # ///
-"""aac pe O comandă (după orderName): by-id + TOȚI matcherii + evaluarea porților aac
+"""aac pe O comandă (după orderName): address-detail (fostul by-id) + TOȚI matcherii + evaluarea porților aac
 (candidat unic ≥0.95 pe core + număr păstrat + /zip-code confirmă) + payload would-apply.
-Cu `--apply` cheamă ai-correct-address (DOAR dacă trece porțile) + verifică post-apply. """
+Cu `--apply` cheamă address-correction (fostul ai-correct-address; DOAR dacă trece porțile) + verifică post-apply. """
 import json, sys, re, datetime
 import xconnector as X
 

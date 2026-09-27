@@ -113,7 +113,7 @@ def _pull(sh, dfrom, dto):
         q += 1
         cid = doc.get("connectorId"); trk = X.doc_tracking(doc)
         lurl = doc.get("url") or doc.get("awbPdfUrl") or (
-            X.XBASE + "/api/document/shipping-label?connectorId=%s&trackingNumber=%s" % (cid, up.quote(str(trk or ""))))
+            X.XBASE + "/api/documents/shipping-labels?connectorId=%s&trackingNumber=%s" % (cid, up.quote(str(trk or ""))))
         for sku in ([s for s in (o.get("skus") or []) if s] or [None]):
             rows.append((sh["shopDomain"], info["name"], info["country"], info["type"], o.get("orderName"),
                          str(o.get("orderId")), sku, int(o.get("totalItemsCount") or 0),
@@ -248,7 +248,7 @@ def cmd_print(a):
             xc = xcs.get(dom)
             try:
                 # RE-INTEROGHEAZĂ comanda ACUM (AWB-ul poate s-a schimbat între sync și print) — nu folosi URL-ul vechi
-                s, d = xc.get("/api/orders/by-id", "orderId=%s" % oid)
+                s, d = xc.get("/api/orders/%s/address-detail" % oid)   # fostul by-id (sunset 2-oct-2026)
                 o = d if (isinstance(d, dict) and d.get("orderId")) else ((d.get("order") if isinstance(d, dict) else None) or d)
                 doc = X.awb_doc(o) if o else None
                 if not doc:
@@ -257,7 +257,7 @@ def cmd_print(a):
                     done_ids.append(oid); continue  # descărcat/printat între timp → doar marchez printat
                 cid = doc.get("connectorId"); trk = X.doc_tracking(doc)
                 url = doc.get("url") or doc.get("awbPdfUrl") or (
-                    X.XBASE + "/api/document/shipping-label?connectorId=%s&trackingNumber=%s" % (cid, up.quote(str(trk or ""))))
+                    X.XBASE + "/api/documents/shipping-labels?connectorId=%s&trackingNumber=%s" % (cid, up.quote(str(trk or ""))))
                 req = urllib.request.Request(url, headers={"Authorization": xc.h["Authorization"]}) if url.startswith(X.XBASE) else urllib.request.Request(url)
                 data = urllib.request.urlopen(req, timeout=60).read()
                 fp = os.path.join(outdir, "%s.pdf" % nm)
@@ -296,7 +296,7 @@ def cmd_printed(a):
     xcs = {s["shopDomain"]: X.XC(s["apiKey"]) for s in X.load_shops()}
     def chk(oid, dom, store):
         try:
-            s, d = xcs[dom].get("/api/orders/by-id", "orderId=%s" % oid)
+            s, d = xcs[dom].get("/api/orders/%s/address-detail" % oid)   # fostul by-id (sunset 2-oct-2026)
             o = d if (isinstance(d, dict) and d.get("orderId")) else ((d.get("order") if isinstance(d, dict) else None) or d)
             doc = X.awb_doc(o) if o else None
             return (store, doc.get("downloaded") if doc else None)

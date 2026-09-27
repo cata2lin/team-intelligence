@@ -15,7 +15,7 @@ API DE SCRIERE — EXPUS din 2026-06-24 (docs: https://xconnector.app/api-docs.h
 Creare AWB / dispatch / facturi NU mai sunt dashboard-only. Endpoint-uri sync: POST /api/actions/
 create-shipping-label, cancel-shipping-label, dispatch-order, estimate-shipping-price, create-invoice
 (+ create-invoice-payment/cancel-invoice/revert-invoice), locker-notification; POST /api/v1/picking-lists/
-add-order; GET /api/orders/by-tracking-number. BLOCAJ real: toate /api/actions/* + ai-correct-address cer
+add-order; GET /api/orders/by-tracking-number. BLOCAJ real: toate /api/actions/* + address-correction cer
 rolul ROLE_AUTOMATION pe merchant + permisiuni per-cheie (API_CREATE_SHIPPING_LABEL etc.) — fără ele = 403.
 Pe GT (ix5bxc-hr) ROLE_AUTOMATION e încă DE ACTIVAT de vendor; până atunci AWB-ul rămâne pe Shopify Flow.
 
@@ -250,9 +250,32 @@ class XC:
             sys.stderr.write("  ⚠️ paginare oprită la plafonul de %d pagini (%s→%s) — POSIBIL TRUNCHIAT, restrânge fereastra\n" % (MAXP, dfrom, dto))
         return out
 
+    # Rutele canonice (ghid: https://xconnector.app/api-migration.html). Aliasurile vechi
+    # `GET /api/orders/by-id?orderId=`, `POST /api/orders/ai-correct-address` și `GET /api/merchant/connectors`
+    # au sunset pe 2-oct-2026. Id-ul din cale e id-ul SHOPIFY (`OrderDTO.orderId`), exact cel trimis înainte.
     def by_id(self, oid):
-        s, d = self.get("/api/orders/by-id", "orderId=%s" % oid)
+        """Detaliul de adresă al comenzii: `GET /api/orders/{shopifyOrderId}/address-detail` (același corp ca
+        vechiul `by-id`). {} la orice non-200. Comandă inexistentă = 404 cu errorCode `order_not_found`; un 404
+        FĂRĂ el înseamnă că lipsește RUTA, nu comanda — îl semnalez pe stderr ca să nu treacă drept „nu există"."""
+        sid = str(oid if oid is not None else "").strip()
+        if not sid.isdigit():
+            return {}   # id nenumeric: și aliasul vechi răspundea 400 → {}
+        s, d = self.get("/api/orders/%s/address-detail" % sid)
+        if s == 404 and str((d.get("errorCode") if isinstance(d, dict) else "") or "").lower() != "order_not_found":
+            sys.stderr.write("  ⚠️ xConnector address-detail -> 404 fără order_not_found (rută lipsă?): %s\n"
+                             % str(d)[:160])
         return d if s == 200 and isinstance(d, dict) else {}
+
+    def address_correction(self, oid, body):
+        """`POST /api/orders/{shopifyOrderId}/address-correction` (fostul `ai-correct-address`). Comanda e în
+        CALE, nu în corp; restul corpului (adresa completă, hash-urile de precondiție, idempotencyKey) rămâne
+        identic. 200 = aplicat sau deja aplicat (aceeași cheie de idempotență); 409 = starea s-a schimbat.
+        Întoarce (status, text) — ca `http()`, pe care îl înlocuiește la apelanți."""
+        sid = str(oid if oid is not None else "").strip()
+        if not sid.isdigit():
+            return 400, "orderId nenumeric: %r" % (oid,)
+        body = {k: v for k, v in (body or {}).items() if k != "orderId"}
+        return http("POST", XBASE + "/api/orders/%s/address-correction" % sid, self.h, body)
 
     def post(self, path, body):
         """POST /api/actions/* sau alt endpoint de scriere. Întoarce (status, json|text)."""
@@ -268,7 +291,7 @@ class XC:
         if getattr(self, "_conn_cache", None):
             return self._conn_cache
         for attempt in range(4):
-            s, d = self.get("/api/merchant/connectors")
+            s, d = self.get("/api/connectors")   # canonic; aliasul /api/merchant/connectors: sunset 2-oct-2026
             if s == 200 and isinstance(d, list) and d:
                 self._conn_cache = d
                 return d
@@ -1959,7 +1982,7 @@ def customer_history_addr(order_name, ad):
         # comandă anterioară LIVRATĂ — owner (după reflecție): mai sigur LIVRATĂ decât doar plecată (coletul a
         # AJUNS → adresa sigur funcționează; plecată-dar-refuzată putea fi adresă proastă). delivered = livrat.
         prior = con.run("select o.order_number, o.shipping_address, o.aggregated_status from orders o "
-                        "where regexp_replace(o.shipping_address->>'phone','\D','','g') like :p "
+                        r"where regexp_replace(o.shipping_address->>'phone','\D','','g') like :p "
                         "and o.order_number <> :n and o.aggregated_status = 'delivered' "
                         "order by o.id desc limit 40",
                         p="%" + p9, n=order_name)
@@ -2095,14 +2118,13 @@ def correct_address(xc, o, shop_domain, apply=False):
         vdetail = "[valid-suggest] %s, %s %s" % (vapplied.get("address1"), vapplied.get("city"), vapplied.get("zip"))
         if not apply:
             return "would-correct", vapplied, vdetail
-        vbody = {"orderId": oid,
-                 "idempotencyKey": "vsug-%s-%s-%s" % (_digest(shop_domain, 8), oid, _digest(vapplied, 12)),
+        vbody = {"idempotencyKey": "vsug-%s-%s-%s" % (_digest(shop_domain, 8), oid, _digest(vapplied, 12)),
                  "appliedShippingAddress": vapplied,
                  "expectedAddressHash": d.get("addressHash"), "expectedStatusHash": d.get("statusHash"),
                  "expectedEvidenceHash": d.get("evidenceHash"), "agentClaimedConfidence": 0.9,
                  "agentRationale": "xConnector stored validation identified the street (noise lowered score); cleaned same street, number preserved.",
                  "modelName": "gigi-xconnector", "mcpClientId": "gigi-xconnector"}
-        vs, _vb = http("POST", XBASE + "/api/orders/ai-correct-address", xc.h, vbody)
+        vs, _vb = xc.address_correction(oid, vbody)
         if vs == 200:
             shopify_push_corrected(shop_domain, d.get("orderName"), vapplied)   # tine Shopify sincron
         return ("corrected" if vs == 200 else "error:%s" % vs), vapplied, vdetail
@@ -2140,15 +2162,14 @@ def correct_address(xc, o, shop_domain, apply=False):
     detail = "%s, %s %s (%s)" % (new_a1, applied.get("city"), czip, applied.get("province"))
     if not apply:
         return "would-correct", applied, detail
-    body = {"orderId": oid,
-            "idempotencyKey": "aac-%s-%s-%s-%s" % (_digest(shop_domain, 8), oid,
+    body = {"idempotencyKey": "aac-%s-%s-%s-%s" % (_digest(shop_domain, 8), oid,
                               _digest({k: _fold(str(v)) for k, v in ad.items()}, 12), _digest(applied, 12)),
             "appliedShippingAddress": applied,
             "expectedAddressHash": d.get("addressHash"), "expectedStatusHash": d.get("statusHash"),
             "expectedEvidenceHash": d.get("evidenceHash"), "agentClaimedConfidence": 0.96,
             "agentRationale": "Single canonical candidate, all core fields >=0.95, zip confirmed, house number preserved.",
             "modelName": "gigi-xconnector", "mcpClientId": "gigi-xconnector"}
-    s, b = http("POST", XBASE + "/api/orders/ai-correct-address", xc.h, body)
+    s, b = xc.address_correction(oid, body)
     if s == 200:
         shopify_push_corrected(shop_domain, d.get("orderName"), applied)   # tine Shopify sincron
     return ("corrected" if s == 200 else "error:%s" % s), applied, detail
@@ -2204,9 +2225,8 @@ def metrics_cursor_live():
 
 
 def _nomen_write(xc, oid, d, ad, applied, shop_domain):
-    """POST ai-correct-address cu adresa `applied` + push în Shopify. True dacă 200."""
-    body = {"orderId": oid,
-            "idempotencyKey": "nom-%s-%s-%s-%s" % (_digest(shop_domain, 8), oid,
+    """POST address-correction cu adresa `applied` + push în Shopify. True dacă 200."""
+    body = {"idempotencyKey": "nom-%s-%s-%s-%s" % (_digest(shop_domain, 8), oid,
                               _digest({k: _fold(str(v)) for k, v in ad.items()}, 12), _digest(applied, 12)),
             "appliedShippingAddress": applied,
             "expectedAddressHash": d.get("addressHash"), "expectedStatusHash": d.get("statusHash"),
@@ -2214,7 +2234,7 @@ def _nomen_write(xc, oid, d, ad, applied, shop_domain):
             "agentRationale": "RO nomenclature (romania_addresses v8.3.1): deterministic ZIP<->street reconciliation, "
                               "house number preserved, real customer streets never overwritten.",
             "modelName": "gigi-nomenclator", "mcpClientId": "gigi-xconnector"}
-    s, b = http("POST", XBASE + "/api/orders/ai-correct-address", xc.h, body)
+    s, b = xc.address_correction(oid, body)
     if s == 200:
         shopify_push_corrected(shop_domain, d.get("orderName"), applied)   # ține Shopify sincron
     return s == 200
@@ -2742,7 +2762,7 @@ def intl_nomen(country, cur, ad):
 
 
 def intl_correct_write(xc, o, shop_domain, corr):
-    """Scrie corecția intl (city/zip/address1/address2) în comandă via ai-correct-address. True dacă 200."""
+    """Scrie corecția intl (city/zip/address1/address2) în comandă via address-correction. True dacă 200."""
     try:
         oid = o["orderId"]; d = xc.by_id(oid); ad = d.get("shippingAddress") or {}
         applied = dict(ad)
@@ -2757,14 +2777,13 @@ def intl_correct_write(xc, o, shop_domain, corr):
             _d5 = re.sub(r"\D", "", str(applied.get("zip") or ""))
             if len(_d5) == 5:
                 applied["zip"] = _d5[:3] + " " + _d5[3:]
-        body = {"orderId": oid,
-                "idempotencyKey": "intlnom-%s-%s-%s" % (_digest(shop_domain, 8), oid, _digest(applied, 12)),
+        body = {"idempotencyKey": "intlnom-%s-%s-%s" % (_digest(shop_domain, 8), oid, _digest(applied, 12)),
                 "appliedShippingAddress": applied, "expectedAddressHash": d.get("addressHash"),
                 "expectedStatusHash": d.get("statusHash"), "expectedEvidenceHash": d.get("evidenceHash"),
                 "agentClaimedConfidence": 0.95,
                 "agentRationale": "National address nomenclature (RÚIAN/PRG) reconciliation: postal code + locality confirmed.",
                 "modelName": "gigi-intl-nomen", "mcpClientId": "gigi-xconnector"}
-        s, b = http("POST", XBASE + "/api/orders/ai-correct-address", xc.h, body)
+        s, b = xc.address_correction(oid, body)
         if s == 200:
             shopify_push_corrected(shop_domain, (d or {}).get("orderName") or (o or {}).get("orderName"), applied)
         return s == 200
@@ -2900,7 +2919,7 @@ def ro_phone_norm(ph):
 
 
 def ro_phone_fix(xc, o, shop_domain):
-    """Normalizeaza telefonul RO la 07xxxxxxxx via ai-correct-address. True daca a schimbat ceva."""
+    """Normalizeaza telefonul RO la 07xxxxxxxx via address-correction. True daca a schimbat ceva."""
     try:
         ad = (xc.by_id(o.get("orderId")) or {}).get("shippingAddress") or {}
     except Exception:
@@ -3061,7 +3080,7 @@ def _order_has_email(shop, token, name):
 def dpd_intl_sanitize(xc, o, shop_domain, name, country, st=None):
     """Repară FORMATUL câmpurilor pentru DPD pe o comandă intl: zip curățat de gunoi (+ city canonic din
     nomenclatorul național), addressLine1>35 împărțit în a1/a2 pe cuvânt, city scurtat la 35.
-    Scrie o singură dată via ai-correct-address. Întoarce True dacă a schimbat ceva."""
+    Scrie o singură dată via address-correction. Întoarce True dacă a schimbat ceva."""
     try:
         ad = (xc.by_id(o.get("orderId")) or {}).get("shippingAddress") or {}
     except Exception:
@@ -3172,7 +3191,7 @@ def dpd_intl_sanitize(xc, o, shop_domain, name, country, st=None):
 
 def cmd_correct(a):
     """CRON (model order-created): comenzile fără AWB cu adresă WRONG/UNKNOWN →
-    tag 'duplicata' = skip · corectabilă = aac ai-correct-address (cu --apply) · grea = triaj CS.
+    tag 'duplicata' = skip · corectabilă = aac address-correction (cu --apply) · grea = triaj CS.
     Fără --apply = dry-run (arată ce ar face). Corecția face adresa VALID → gata de AWB (bulk dashboard)."""
     import datetime
     dto = datetime.date.today().isoformat()
@@ -3368,8 +3387,8 @@ def resolve_order(name, a, days=60):
         for o in xc.orders(dfrom, dto, {"sort": "date", "sortDir": "desc"}):
             if o.get("orderName") == name:
                 return sh, xc, o
-    # 2) FALLBACK comenzi vechi / volum mare (în afara ferestrei): Shopify orderName→orderId → xConnector by-id.
-    # (by-id NU întoarce `documents` → fără info AWB pe această cale; awb-make e protejat: xConnector respinge dublul.)
+    # 2) FALLBACK comenzi vechi / volum mare (în afara ferestrei): Shopify orderName→orderId → xConnector address-detail.
+    # (address-detail, ca fostul by-id, NU întoarce `documents` → fără info AWB pe această cale; awb-make e protejat: xConnector respinge dublul.)
     toks = {t.get("shopDomain"): t for t in load_shopify_tokens()}
     for sh in scan:
         st = toks.get(sh["shopDomain"])
@@ -4527,7 +4546,7 @@ def cmd_awb_label(a):
         print("  %s nu are AWB." % a.order); return
     cid, trk = doc.get("connectorId"), doc_tracking(doc)
     url = doc.get("url") or doc.get("awbPdfUrl") or (
-        XBASE + "/api/document/shipping-label?connectorId=%s&trackingNumber=%s" % (cid, urllib.parse.quote(str(trk or ""))))
+        XBASE + "/api/documents/shipping-labels?connectorId=%s&trackingNumber=%s" % (cid, urllib.parse.quote(str(trk or ""))))
     print("  %s (%s) · AWB %s · connector %s" % (a.order, sh["shopDomain"], trk, cid))
     print("  etichetă: %s" % url)
     if doc.get("downloaded") is False:
@@ -4594,7 +4613,7 @@ def cmd_links(a):
         # STATUS (ce se întâmplă cu comanda) — fără Shopify: xConnector + AWBprint
         deliv = awbprint_status(o.get("orderName"))  # status livrare REAL (aggregated_status)
         disp = "expediat" if o.get("dispatched") else "neexpediat"
-        if "documents" not in o:   # rezolvat prin fallback by-id (Shopify→ID) → DTO-ul n-are documents
+        if "documents" not in o:   # rezolvat prin fallback address-detail (Shopify→ID) → DTO-ul n-are documents
             has = "AWB: vezi dashboard (comandă veche, rezolvată prin ID)"
         else:
             has = "AWB făcut" if awb_doc(o) else "FĂRĂ AWB"
@@ -5989,7 +6008,7 @@ def _do_awb(xc, sh, st, cons, con, name, o, notify):
             msg = (d.get("errorMessage") if isinstance(d, dict) else str(d)) or ""
             transient = s in (429, 500, 502, 503, 504) or (s == 422 and "was not created" in msg)
     fails = _awb_failcount_bump(name)   # câte ture la rând a picat AWB-ul acestei comenzi
-    # A PICAT DPD de 2 ori → rulează VALIDAREA/CORECȚIA AGENTICĂ xConnector (match-address + ai-correct-address,
+    # A PICAT DPD de 2 ori → rulează VALIDAREA/CORECȚIA AGENTICĂ xConnector (match-address + address-correction,
     # conservator: 1 candidat, core ≥0.95, zip confirmat, nr casă păstrat). RO-only (match e pe „Romania").
     # Corectată → adresa devine VALID → reîncearcă tura viitoare (după sync), NU hold. O SINGURĂ dată (la fails==2).
     if fails == 2 and sh["shopDomain"] not in HERE_COUNTRY:
@@ -6576,7 +6595,7 @@ def cmd_fulfill(a):
                 if nres is not None and nres.get("status") in ("valid", "corrected", "cs"):
                     if nres["status"] == "cs":
                         hard += 1; bad_addr.append(name); continue   # chiar fără număr casă → HOLD (bad-address)
-                    # NU scriem corecția intl PROACTIV (chiar dacă nomen zice „corrected"): apelul ai-correct-address
+                    # NU scriem corecția intl PROACTIV (chiar dacă nomen zice „corrected"): apelul address-correction
                     # (AI_CORRECTION) pune comanda într-o stare unde DPD cere EMAIL destinatar obligatoriu, iar COD-urile
                     # n-au email + Shopify blochează scrierea PII (order/customer email = null fără eroare) → BLOCAJ
                     # definitiv. DOVADĂ: comenzi CZ FULFILLED 1/20 au AI_CORRECTION, cele BLOCATE 2/2 → corecția le strică.
@@ -8127,7 +8146,7 @@ def main():
     ap.add_argument("--address1"); ap.add_argument("--address2"); ap.add_argument("--city")
     ap.add_argument("--zip"); ap.add_argument("--province"); ap.add_argument("--phone"); ap.add_argument("--country")
     ap.add_argument("--make-awb", action="store_true", dest="make_awb", help="addr-set: după setarea adresei, fă AWB.")
-    ap.add_argument("--correct", action="store_true", help="awb-auto: corectează conservator adresele proaste (xConnector ai-correct-address)")
+    ap.add_argument("--correct", action="store_true", help="awb-auto: corectează conservator adresele proaste (xConnector address-correction)")
     # Filtre server-side getOrders (xConnector, adăugate 2026-06) — pt comanda `orders` (+ `--sort` pe not-downloaded):
     ap.add_argument("--sku", action="append", help="orders: SKU exact (repetabil sau CSV). Mai multe → vezi --sku-mode.")
     ap.add_argument("--sku-mode", dest="sku_mode", choices=["ANY", "ALL"], help="orders: ANY (oricare, implicit) / ALL (toate SKU-urile).")
