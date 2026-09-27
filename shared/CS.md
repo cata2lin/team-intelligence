@@ -54,7 +54,15 @@
 | comandă nouă COD / swap / resend gratis | `gigi:cs-actions` | rezolvă clientul + plasează/înlocuiește |
 
 ## 5. 🖨️ PRINT etichete în depozit (Windows + Chrome)
-**Tool canonic = `depozit:print-queue`** (rulează LOCAL pe stație, live din xConnector, per-STAȚIE: fiecare mașină vede DOAR magazinele ei via `--machine depozit|uzina2`). Operatorul vorbește, agentul rulează `pull` (refresh ~15s) + `plan` (instant) → spune NUMĂRUL; la print, `open` descarcă etichetele filtrate + le deschide în Chrome (operatorul apasă Ctrl+P).
+> 🔴 **Din 24–25 sep 2026 AWB-urile DPD se fac din ORDER HUB (contul `dpd-ro-arona`), nu din xConnector.** Etichetele astea
+> **NU apar în `depozit:print-queue`** — xConnector nu le cunoaște. Se printează DOAR din **Order Hub → Printing**
+> (https://orderhub.arona.ro/app/printing), alegând stația (Bartolomeu / Uzina 2 / Parfumuri). Coada din Order Hub le are pe
+> TOATE (și pe cele încă făcute în xConnector — Esteban/GT/Nubra/Lab Noir), fără dubluri: ce se descarcă în xConnector e marcat
+> printat și în Order Hub în max. 30 de minute. Măsurat pe 27-sep: din 24 de etichete Order Hub căutate în
+> xConnector, 0 existau acolo. `depozit:print-queue` rămâne doar ca rezervă pentru etichetele xConnector, până la oprirea
+> xConnector (2-oct-2026).
+
+**Rezervă (doar etichete xConnector) = `depozit:print-queue`** (rulează LOCAL pe stație, live din xConnector, per-STAȚIE: fiecare mașină vede DOAR magazinele ei via `--machine depozit|uzina2`). Operatorul vorbește, agentul rulează `pull` (refresh ~15s) + `plan` (instant) → spune NUMĂRUL; la print, `open` descarcă etichetele filtrate + le deschide în Chrome (operatorul apasă Ctrl+P).
 **Exemple:**
 - câte AWB-uri am de printat: `pull --machine <depozit|uzina2>` apoi `plan` → total + pe magazine
 - HA-0002: `pull --machine depozit` apoi `open --sku HA-0002 --machine depozit`
