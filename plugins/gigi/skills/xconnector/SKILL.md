@@ -277,7 +277,7 @@ deranja CS-ul; nu bloca expedierea doar pe baza lui `WRONG`. Coada „grea" real
 Docs: **https://xconnector.app/api-docs.html** (spec `/api-spec.yaml`). Creare AWB / dispatch / facturi **NU mai
 sunt dashboard-only** — sunt expuse sync prin `POST /api/actions/*` (`create-shipping-label`, `cancel-shipping-label`,
 `dispatch-order`, `estimate-shipping-price`, `create-invoice` + payment/cancel/revert, `locker-notification`),
-`POST /api/v1/picking-lists/add-order`, `GET /api/orders/by-tracking-number`. **Gate:** cer rolul `ROLE_AUTOMATION`
+`POST /api/picking-lists/{id}/add-order`, `GET /api/orders/by-tracking-number`. **Gate:** cer rolul `ROLE_AUTOMATION`
 pe merchant + permisiuni per-cheie (`API_CREATE_SHIPPING_LABEL` etc.) — fără ele = 403. Toate cele 19 chei le au
 (17 permisiuni, inclusiv `API_ADDRESS_VALIDATE`). Skill-ul **implementează** acțiunile de scriere (`awb-make/void/regen`,
 facturi, `order-cancel`, `addr-set`) + cron-ul `fulfill` care face AWB peste/în completarea Shopify Flow.
@@ -291,8 +291,20 @@ id-ul **Shopify** (`OrderDTO.orderId`), același trimis înainte în query/corp:
 | `GET /api/orders/by-id?orderId=<id>` | `GET /api/orders/<id>/address-detail` | doar ruta; corp identic (adresă, `addressStatus`, cele 3 hash-uri, istoric). Ca înainte, **NU** întoarce `documents`. |
 | `POST /api/orders/ai-correct-address` | `POST /api/orders/<id>/address-correction` | `orderId` iese din corp și intră în cale; restul corpului (adresa COMPLETĂ, `expected*Hash`, `idempotencyKey`) identic. 200 = aplicat / `alreadyApplied`, 409 = starea s-a schimbat. |
 | `GET /api/merchant/connectors` | `GET /api/connectors` | doar ruta; tot listă JSON. |
+| `GET /api/document/shipping-label` | `GET /api/documents/shipping-labels` | doar ruta; aceiași parametri (`connectorId`, `trackingNumber`); PDF sau `204` gol (un AWB inexistent dă `400 bad_request`, la fel ca pe alias — măsurat 30-sep). La noi e DOAR ruta de rezervă (`awb-label`, `print_queue_central`, `awb-statii`) — calea normală e URL-ul semnat din `documents[].url`. |
+| `GET /api/document/invoice` | `GET /api/documents/invoices` | doar ruta (parametrul rămâne `serie`). Nefolosit azi. |
+| `POST /api/document/invoice/link` | `POST /api/orders/<id>/documents` | ALT spațiu de id: aliasul lua id-ul INTERN (`merchantOrderId`), ruta canonică ia id-ul Shopify; corp JSON `{"type":"invoice","connectorId","series","number"}`; `201 created` / `200 already_linked` / `422 invoice_not_found`. Nefolosit azi. |
+| `POST /api/v1/picking-lists/add-order` | `POST /api/picking-lists/<id>/add-order` | lista trebuie să existe (id în cale); corp `{"shopifyOrderId": …}`, fără `merchantOrderId`; `409` dacă e deja într-o listă. Nefolosit azi. |
+
+Doar cele 7 aliasuri de mai sus poartă antetele `X-Deprecated: true` + `Sunset: Fri, 02 Oct 2026 23:59:59 GMT`
+(și pe răspunsurile de eroare, deci se văd și cu un `GET` fără cheie → `401`). Restul rutelor pe care le folosim
+(`/api/orders`, `/api/orders/by-tracking-number`, `/api/actions/*`, `/api/token`, validatorul de adrese) NU sunt retrase.
 
 În cod: `XC.by_id()` (address-detail), `XC.address_correction()` (corecția), `XC.list_connectors()`.
+**Plasa:** `uv run test_rute_canonice.py` (în folderul ăsta, fără rețea) pică dacă o rută retrasă reapare în codul
+repo-ului sau dacă o scriere de corecție trimite alt corp decât cel din spec. Copiile „flat” de pe VPS nu vin din git:
+`awb_zilnic.py` (cron L-V 07:05), `awb_station.py`, `awb_fast.py` și `xc_preview/xconnector.py` au fost migrate pe loc
+pe 30-sep-2026 (backup `*.bak-rute-canonice-20260930_004833`).
 **Comanda nu există** = DOAR `404` cu `errorCode: order_not_found`. Un `404` fără `order_not_found` înseamnă
 rută lipsă (endpoint retras), nu comandă lipsă — `by_id` îl scrie pe stderr. După 2-oct, un val de erori
 xConnector înseamnă întâi „a rămas un alias undeva”, nu „xConnector e jos”.
