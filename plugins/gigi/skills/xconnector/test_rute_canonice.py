@@ -42,6 +42,9 @@ RUTE_RETRASE = {
 FRAGMENTE = ("orders/by-id", "orders/ai-correct-address", "merchant/connectors",
              "document/shipping-label", "document/invoice", "v1/picking-lists")
 SARITE = {".git", "node_modules", ".venv", "venv", "__pycache__"}
+# Fișiere care POARTĂ aliasurile ca date, nu ca apeluri: testele (fixturi) și plasa de pe VPS, care le caută în
+# copiile plate de acolo (shared/scripturi-tools/xc_rute_watch.py — acest test vede doar git-ul).
+PURTATOARE = ("xc_rute_watch.py",)
 SHELL = (".sh", ".ps1", ".js", ".ts", ".mjs", ".gs")
 
 # AiCorrectAddressCanonicalRequest din https://xconnector.app/api-spec.yaml
@@ -121,7 +124,7 @@ def t_niciun_alias_in_repo():
         dirs[:] = [x for x in dirs if x not in SARITE]
         for f in fisiere:
             cale = os.path.join(d, f)
-            if cale == eu or not (f.endswith(".py") or f.endswith(SHELL)):
+            if cale == eu or not (f.endswith(".py") or f.endswith(SHELL)) or f.startswith("test_") or f in PURTATOARE:
                 continue
             try:
                 with open(cale, encoding="utf-8", errors="replace") as h:
