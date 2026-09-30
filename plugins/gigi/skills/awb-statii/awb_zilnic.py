@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """Trimite ZILNIC (L-V) pe grupul de AWB etichetele facute pe Bonhaus.hu, Bonhaus.sk si Orice Redus.
 
-CATE UN PDF PE STATIE (Bartolomeu / Uzina 2), niciodata cate un fisier pe comanda: omul face un
-Ctrl+P per statie, nu N descarcari ([[awb-send-single-pdf]]).
+UN SINGUR PDF, pentru BARTOLOMEU. Lotul Uzinei 2 a fost OPRIT pe 8-sep-2026, si iata de ce:
+premisa pe care s-a construit cronul asta (25-27 aug) — „magazinele astea n-au coada de print pe
+statie, deci WhatsApp e singurul drum spre depozit" — era deja FALSA de trei saptamani. Commit-ul
+93931a2 (3-aug) pusese HU/SK/ORC in `SPLIT_STORES_M`, deci coada Uzinei 2 le avea oricum. Mai rau:
+descarcarea etichetei o marcheaza `downloaded` in xConnector, exact flagul dupa care statia decide
+„mai e de printat" — deci lotul de dimineata FURA etichetele din coada Uzinei 2. Bartolomeu ramane
+pe WhatsApp fiindca acolo cronul chiar aduce ceva.
 
 Rutarea pe statii NU e rescrisa aici — se IMPORTA din `print_queue.py`, care e sursa unica.
 HU/SK/ORC sunt in `SPLIT_STORES_M`: HA+LAVETE -> Bartolomeu, restul -> Uzina 2, decis dupa PRIMUL
@@ -10,6 +15,8 @@ sku al comenzii (`primary()`), exact cum ruteaza coada de print azi.
 
 Trimite DOAR etichetele coletelor care NU au plecat inca (status `generated` la curier). Starea
 vine din `awb_track.py`, nu din `dispatched`-ul xConnector, care e bugat.
+
+Cu `--dry` nu se descarca NIMIC (descarcarea ar scoate eticheta din coada de print).
 
 Tine evidenta in `/root/awb_zilnic_trimise.json` — o eticheta nu pleaca de doua ori, deci scriptul
 se poate relua fara grija. Rulat cu `--dry` doar listeaza.
@@ -31,7 +38,9 @@ _spec = _il.spec_from_file_location("print_queue", _PQ_PATH)
 PQ = _il.module_from_spec(_spec)
 _spec.loader.exec_module(PQ)
 
-STATII = ("BARTOLOMEU", "UZINA2")
+# Uzina 2 isi trage singura etichetele din coada de print (`print_queue --machine uzina2`);
+# daca le-am descarca aici, i le-am scoate din coada. Vezi docstring-ul.
+STATII = ("BARTOLOMEU",)
 
 
 def statia(o):
@@ -151,8 +160,14 @@ def main():
     # eticheta `downloaded` in xConnector si o scoate din coada de print a statiei, deci nu vrem
     # s-o atingem pe una pe care n-o trimitem oricum.
     stare = stare_curier([c[5] for c in candidati])
-    bucati, rezumat, plecate, nesigure = [], [], [], []
+    bucati, rezumat, plecate, nesigure, altele = [], [], [], [], []
     for slug, nume, cheie, xc, o, trk in candidati:
+        statie_o = statia(o)
+        if statie_o not in STATII:
+            # NU descarca: descarcarea scoate eticheta din coada de print a statiei careia ii
+            # apartine. Statia si-o ia singura.
+            altele.append("%s->%s" % (nume, statie_o))
+            continue
         st = stare.get(str(trk).split("-")[0]) if trk else None
         if st in ("in_transit", "delivered", "returned", "refused"):
             plecate.append("%s(%s)" % (nume, st))
@@ -161,12 +176,21 @@ def main():
             # tracker mort / AWB necunoscut: TRIMIT totusi. O eticheta in plus e o suparare;
             # una lipsa e un colet care nu pleaca. Dar o spun tare, sa nu treaca tacut.
             nesigure.append("%s(%s)" % (nume, st or "fara raspuns"))
+        if DRY:
+            # --dry chiar NU atinge nimic: descarcarea marcheaza eticheta `downloaded` in
+            # xConnector si o scoate din coada de print. O comanda de "listare" nu are voie
+            # sa aiba efect ireversibil.
+            bucati.append((nume, None, statie_o, cheie))
+            rezumat.append("%s %s" % (MAGAZINE[slug], nume))
+            continue
         pdf = eticheta_pdf(xc, o)
         if not pdf:
             print("  %-12s %s — n-am putut lua eticheta" % (slug, nume))
             continue
-        bucati.append((nume, pdf, statia(o), cheie))
+        bucati.append((nume, pdf, statie_o, cheie))
         rezumat.append("%s %s" % (MAGAZINE[slug], nume))
+    if altele:
+        print("lasate in coada statiei lor (nu le descarc): %d — %s" % (len(altele), ", ".join(altele)))
     if plecate:
         print("sarite, deja plecate: %d — %s" % (len(plecate), ", ".join(plecate)))
     if nesigure:
