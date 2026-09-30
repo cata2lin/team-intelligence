@@ -325,6 +325,37 @@ class XC:
 SHOPIFY_API = "2026-04"
 
 
+def _mint_din_marcaj(shop, marcaj):
+    """Rezolva un marcaj `OAUTH:<NUME>_CLIENT_ID+SECRET` din SHOPIFY_STORES_CSV intr-un token Shopify.
+
+    Sase magazine (BUC, ORC, SK, HU, MD, DUPBG) n-au token static: app-ul lor da grant
+    `client_credentials`, tokenul tine ~24h si se EMITE la cerere din cele doua secrete KB pe care
+    marcajul le numeste. Inainte, marcajul era trimis direct ca token si fiecare apel dadea
+    401 "Invalid API key" — parea un token expirat, dar nu era nimic de reinnoit.
+    None daca marcajul e malformat, secretele lipsesc sau app-ul nu e instalat. NU printeaza tokenul."""
+    import time as _t
+    c = _ARONA_TOK.get(shop)
+    if c and c[1] > _t.time() + 300:
+        return c[0]
+    m = re.match(r"^OAUTH:([A-Z0-9_]+)_CLIENT_ID\+SECRET$", (marcaj or "").strip())
+    if not m:
+        return None
+    cid, _ = _kb_secret(m.group(1) + "_CLIENT_ID")
+    csec, _ = _kb_secret(m.group(1) + "_CLIENT_SECRET")
+    if not (cid and csec):
+        return None
+    try:
+        st, b = http("POST", "https://%s/admin/oauth/access_token" % shop, {"Content-Type": "application/json"},
+                     {"client_id": cid, "client_secret": csec, "grant_type": "client_credentials"})
+        d = json.loads(b) if b else {}
+        if st == 200 and d.get("access_token"):
+            _ARONA_TOK[shop] = (d["access_token"], _t.time() + (d.get("expires_in") or 86400))
+            return d["access_token"]
+    except Exception:
+        pass
+    return None
+
+
 def _stores_csv_tokens():
     """[{prefix, shopDomain, adminToken}] din SHOPIFY_STORES_CSV (canonic, TOATE magazinele; col prefix/shop/token).
     Sursă: env SHOPIFY_STORES_CSV (path sau text) sau KB. NUB = OAuth-rotation (token static mort, merge pe VPS).
@@ -397,10 +428,10 @@ def _prefix_for_domain(dom):
     return ""
 
 
-def load_shopify_tokens():
-    """[{prefix, shopDomain, adminToken}] pt TOATE magazinele: bază din SHOPIFY_STORES_CSV (canonic),
-    suprascris de SHOPIFY_ADMIN_TOKENS (env/KB) pt override-uri/tokenuri proaspete. Pt magazinele ARONA-only
-    din XCONNECTOR_SHOPS fără token static → EMITE token via ARONA Assistant (client_credentials). NU se printează."""
+def _tokenuri_statice():
+    """{shopDomain: {prefix, shopDomain, adminToken}} din SHOPIFY_STORES_CSV (canonic), suprascris de
+    SHOPIFY_ADMIN_TOKENS (env/KB). Fără emitere: un rând din CSV poate purta marcajul `OAUTH:<NUME>_CLIENT_ID+SECRET`
+    în loc de token (SK/HU/ORC…) — îl rezolvă _token_viu_sau_emis. NU se printează."""
     by_dom = {t["shopDomain"]: t for t in _stores_csv_tokens()}
     raw = os.environ.get("SHOPIFY_ADMIN_TOKENS")
     if not raw:
@@ -415,6 +446,14 @@ def load_shopify_tokens():
                 by_dom[t["shopDomain"]] = t
     except Exception:
         pass
+    return by_dom
+
+
+def load_shopify_tokens():
+    """[{prefix, shopDomain, adminToken}] pt TOATE magazinele: bază din SHOPIFY_STORES_CSV (canonic),
+    suprascris de SHOPIFY_ADMIN_TOKENS (env/KB) pt override-uri/tokenuri proaspete. Pt magazinele ARONA-only
+    din XCONNECTOR_SHOPS fără token static → EMITE token via ARONA Assistant (client_credentials). NU se printează."""
+    by_dom = _tokenuri_statice()
     # ARONA-only (Lab Noir etc.): magazin în XCONNECTOR_SHOPS fără token static → mint on-demand.
     try:
         for sh in load_shops():
@@ -7139,10 +7178,14 @@ def _scan_all_orders(xc, dfrom, dto, depth=0):
 # `inv-bulk --shop all --days 60 --apply` pornit de pe o stație a dublat 2.068 de facturi OH. De aici: garda e în
 # git, acoperă și inv-make / inv-regen (garda_oh_comanda), iar `inv-bulk --apply` rulează doar pe VPS
 # (_refuz_inv_bulk_apply).
-# Facturile emise MANUAL din OH nu primesc tag. Citit în baza OH pe 29-sep-2026: toate facturile OH vii fără tag
-# erau 4 (lotul manual din 26–27 sep, pe etichete xConnector). Numele comenzilor NU stau în repo-ul public: vin din
-# env XC_OH_FACTURATE="NUME1,NUME2" sau, fără env, din secretul KB cu același nume. Rest de risc: o factură manuală
-# NOUĂ din OH pe o etichetă xConnector — OH o stornează singur când apare dublura (factura_storno, `storno_dubluri`).
+# Facturile emise MANUAL din OH nu primesc tag. Pe 29-sep, în baza OH, toate facturile OH vii fără tag erau 4 (lotul
+# manual din 26–27 sep). Pe 30-sep trei dintre comenzi au primit și factură xConnector, iar OH și-a stornat-o pe a lui
+# (storno-dubla-xconnector). Acolo factura bună e acum cea xConnector, deci numele lor NU intră în listă: inv-regen
+# le-ar refuza. Pe a patra o prinde regula 5 (tracking-ul ei viu e AWB-ul OH). Lista e deci GOALĂ. Dacă va trebui din
+# nou: env XC_OH_FACTURATE="NUME1,NUME2"; fără env, secretul KB cu același nume, care ajunge doar pe stații. Cronul VPS
+# n-are KB_DATABASE_URL, deci acolo lista se exportă din xc_invoice.sh (KB inaccesibil = avertisment, listă goală).
+# Numele comenzilor NU stau în repo-ul public. Rest de risc: o factură manuală NOUĂ din OH pe o etichetă xConnector —
+# OH o stornează singur pe a lui când apare dublura (storno-dubla-xconnector).
 # SĂRITE FĂRĂ STĂPÂN: 3 și 5 prind și etichetele făcute în afara ambelor sisteme (DragonStar/DPD din portalul
 # curierului — „observat" în OH), pe care OH le socotește ale xConnector și nu le facturează. Înainte de gardă
 # le factura cronul. Nu se ghicește aici (o greșeală = factură dublă): motivele din OH_GUARD_DE_VERIFICAT se
@@ -7157,9 +7200,13 @@ OH_GUARD_MOTIVE = {
     "fara_eticheta_xc": "fără etichetă în listarea xConnector (a OH sau din afară)",
     "tracking_xc_necitit": "eticheta xConnector fără număr citibil",
     "eticheta_vie_nu_e_xc": "altă etichetă vie decât cea xConnector (OH sau din afară)",
+    "token_respins": "token Shopify respins (401), iar altul nu s-a putut emite",
+    "token_lipsa": "niciun token Shopify pt magazin, iar unul nu s-a putut emite",
 }
 # motivele după care comanda NU e sigur a OH → lista întreagă, de verificat în OH (garda_vs_oh.py)
 OH_GUARD_DE_VERIFICAT = ("fara_eticheta_xc", "eticheta_vie_nu_e_xc", "tracking_xc_necitit", "taguri_necitite")
+# fără token Shopify acceptat (doar inv-make / inv-regen; inv-bulk sare magazinul întreg): reîncercarea nu ajută
+OH_GUARD_TOKEN = ("token_respins", "token_lipsa")
 _TRK_SEP = re.compile(r"[-,;/|]+")
 
 
@@ -7187,12 +7234,19 @@ def xc_label_trackings(o):
 
 def _oh_facturate_fara_tag():
     """Comenzile cu factură OH MANUALĂ (fără tag): env XC_OH_FACTURATE="NUME1,NUME2"; fără env, secretul KB cu
-    același nume (o dată pe proces). KB inaccesibil = listă goală — rămân regulile pe tag și pe etichetă."""
-    global _OH_FACTURATE_KB
+    același nume (o dată pe proces). Secret absent = listă goală, fără zgomot (azi lista e goală). KB inaccesibil
+    (cronul VPS n-are KB_DATABASE_URL) = tot listă goală, dar cu avertisment: acolo lista vine doar din env."""
+    global _OH_FACTURATE_KB, KB_UNREACHABLE
     raw = os.environ.get("XC_OH_FACTURATE")
     if raw is None:
         if _OH_FACTURATE_KB is None:
-            _OH_FACTURATE_KB = _kb_secret("XC_OH_FACTURATE")[0] or ""
+            inainte, KB_UNREACHABLE = KB_UNREACHABLE, False
+            val, ok = _kb_secret("XC_OH_FACTURATE")
+            if not ok and KB_UNREACHABLE:
+                print("⚠ XC_OH_FACTURATE (facturile OH manuale, fără tag) necitit: KB inaccesibil și env nesetat → garda"
+                      " merge fără lista asta (doar pe tag + etichetă). Pe VPS lista se exportă din xc_invoice.sh.")
+            KB_UNREACHABLE = KB_UNREACHABLE or inainte
+            _OH_FACTURATE_KB = val or ""
         raw = _OH_FACTURATE_KB
     extra = {x.strip().upper() for x in (raw or "").split(",") if x.strip()}
     return set(OH_FACTURATE_FARA_TAG) | extra
@@ -7482,17 +7536,58 @@ def motiv_stare_colet(s_, etichete, info, acum, asteptare_h):
         stare, "platita_nelivrata" if _e_ramburs(s_.get("gateways")) else "nelivrat"), d
 
 
+def _shop_accepta(dom, tok):
+    """None = Shopify acceptă tokenul ({ shop { id } }); altfel de ce nu: 'respins' (401 „Invalid API key or access
+    token") sau 'necitit' (fără răspuns citibil: rețea, 5xx)."""
+    d = shopify_gql(dom, tok, "{ shop { id } }") or {}
+    if ((d.get("data") or {}).get("shop") or {}).get("id"):
+        return None
+    err = ("%s %s" % (d.get("errors") or "", d.get("_raw") or "")).lower()
+    return "respins" if (d.get("_status") == 401 or "invalid api key or access token" in err) else "necitit"
+
+
+def _token_viu_sau_emis(dom, tok):
+    """(token, 'ok'|'reemis') dacă Shopify îl acceptă — altfel unul emis acum (client_credentials, din KB).
+    (None, de ce) dacă nu: 'respins' (tokenul dat e respins, 401, și nici reemiterea n-a mers), 'lipsa' (niciun token
+    utilizabil și nici emiterea n-a mers), 'necitit' (Shopify n-a răspuns: se poate reîncerca). Tokenurile de ~24h
+    (SK/HU/ORC/LAB) expiră; marcajul `OAUTH:<NUME>_CLIENT_ID+SECRET` din SHOPIFY_STORES_CSV nu e token: se emite din
+    secretele KB pe care le numește (_mint_din_marcaj). NU se printează tokenul."""
+    tok = str(tok or "").strip()
+    marcaj = tok if tok.startswith("OAUTH:") else ""
+    motiv = "lipsa"
+    if tok and not marcaj:
+        motiv = _shop_accepta(dom, tok)
+        if motiv is None:
+            return tok, "ok"
+    emis = (_mint_din_marcaj(dom, marcaj) if marcaj else None) or _shopify_mint(dom)
+    if emis and emis != tok:
+        m = _shop_accepta(dom, emis)
+        if m is None:
+            return emis, "reemis"
+        motiv = m
+    return None, motiv
+
+
 def garda_oh_comanda(sh, o, name):
     """Garda OH pe O comandă (inv-make / inv-regen) → (motiv|None, s_). Aceleași reguli ca în inv-bulk
     (oh_guard_motiv): tagurile și fulfillment-urile vin din Shopify (un apel, după orderId), eticheta din documentele
-    xConnector ale comenzii. Fail-closed: fără token Shopify / citire picată → „taguri_necitite"; comandă rezolvată
-    prin address-detail (fără `documents`) → „fara_eticheta_xc"."""
+    xConnector ale comenzii. Tokenul e doar al magazinului comenzii (fără emiteri pt celelalte, ca load_shopify_tokens),
+    verificat și reemis când Shopify îl respinge sau e un marcaj OAUTH (_token_viu_sau_emis). Fail-closed: fără token
+    acceptat → „token_respins" / „token_lipsa"; Shopify n-a răspuns → „taguri_necitite"; comandă rezolvată prin
+    address-detail (fără `documents`) → „fara_eticheta_xc"."""
     oid = str((o or {}).get("orderId") or "").rsplit("/", 1)[-1]
     dom = (sh or {}).get("shopDomain")
-    tok = next((t.get("adminToken") for t in load_shopify_tokens() if t.get("shopDomain") == dom), None) if dom else None
-    s_ = (shopify_status_by_ids(dom, tok, [oid]) or {}).get(oid) if (tok and oid) else None
+    s_, mot_token = None, None
+    if dom:
+        tok, stare = _token_viu_sau_emis(dom, (_tokenuri_statice().get(dom) or {}).get("adminToken"))
+        if tok and oid:
+            s_ = (shopify_status_by_ids(dom, tok, [oid]) or {}).get(oid)
+        elif not tok and stare in ("respins", "lipsa"):
+            mot_token = "token_" + stare
     has_lab, xtrk = xc_label_trackings(o or {})
-    return oh_guard_motiv(s_ or {"tags": None}, has_lab, xtrk, name), s_
+    mot = oh_guard_motiv(s_ or {"tags": None}, has_lab, xtrk, name)
+    # lista manuală rămâne primul motiv; „taguri necitite" din lipsă de token se spune pe nume (reîncercarea nu ajută)
+    return (mot_token if (mot == "taguri_necitite" and mot_token) else mot), s_
 
 
 def _garda_oh_refuza(sh, o, name, cmd):
@@ -7501,7 +7596,11 @@ def _garda_oh_refuza(sh, o, name, cmd):
     if not mot:
         return False
     print("  ⛔ GARDA OH — %s refuzat pe %s: %s." % (cmd, name, OH_GUARD_MOTIVE.get(mot, mot)))
-    if mot in OH_GUARD_DE_VERIFICAT:
+    if mot in OH_GUARD_TOKEN:
+        print("     Fără tagurile Shopify nu se poate verifica dacă Order Hub a facturat-o deja. Reîncercarea NU ajută:"
+              " tokenul magazinului %s trebuie reemis (SHOPIFY_STORES_CSV / SHOPIFY_ADMIN_TOKENS sau secretele KB"
+              " client_credentials ale app-ului)." % (sh or {}).get("shopDomain"))
+    elif mot in OH_GUARD_DE_VERIFICAT:
         print("     Nu se poate confirma că factura îi revine xConnector-ului. Verifică în Order Hub: dacă trebuie"
               " facturată, factura se emite de acolo — cine face AWB-ul face și factura.")
     else:
@@ -7511,7 +7610,8 @@ def _garda_oh_refuza(sh, o, name, cmd):
         print("     (comanda a venit prin address-detail, fără documente, deci eticheta nu se poate verifica;"
               " mărește --days ca s-o găsească în listarea xConnector)")
     elif mot == "taguri_necitite":
-        print("     (tagurile / fulfillment-urile din Shopify nu s-au putut citi: token lipsă sau citire picată; reîncearcă)")
+        print("     (tagurile / fulfillment-urile din Shopify nu s-au putut citi: Shopify n-a răspuns sau n-a întors"
+              " comanda; reîncearcă)")
     if cmd == "inv-regen":
         print("     O factură xConnector dublă se scoate cu inv-storno / inv-cancel (garda nu le atinge).")
     return True
@@ -7598,9 +7698,10 @@ def cmd_inv_bulk(a):
                  # fluxul normal de facturare al xConnector care consumă din ACELAȘI bucket SmartBill
     for sh in targets:
         dom = sh["shopDomain"]
-        st = toks.get(dom)
+        st, _st_src = _token_viu_sau_emis(dom, toks.get(dom))
         if not st:
-            print("\n══ %s ══  ⚠ fără token Shopify (SHOPIFY_ADMIN_TOKENS) → skip" % dom); continue
+            print("\n══ %s ══  ⚠ %s → skip" % (dom, "Shopify n-a răspuns la verificarea tokenului" if _st_src == "necitit"
+                                              else "token Shopify absent/respins și nu s-a putut emite altul (KB)")); continue
         xc = XC(sh["apiKey"])
         con, bills = pick_billing(xc, a)
         if not con:

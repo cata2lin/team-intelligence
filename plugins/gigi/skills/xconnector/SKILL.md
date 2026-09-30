@@ -155,6 +155,9 @@ Connector de facturare = tip **SMART_BILL** (ales automat dacă e unul singur; a
   **Garda OH** (aceeași ca la `inv-bulk`, mai jos) refuză comenzile Order Hub — tag `factura-oh`, AWB-ul OH sau din afară,
   taguri necitite — și în dry-run, și cu `--force`. O comandă găsită prin address-detail (în afara ferestrei `--days`) n-are
   documente, deci eticheta nu se poate verifica → refuzată; mărește `--days`.
+  Garda citește Shopify cu tokenul magazinului comenzii (doar al lui). Marcajul `OAUTH:<NUME>_CLIENT_ID+SECRET` din
+  `SHOPIFY_STORES_CSV` (SK/HU/ORC) și tokenul respins de Shopify se reemit din KB (client_credentials). Dacă nici așa nu
+  merge: refuz cu „token Shopify respins (401)" / „niciun token Shopify" — reîncercarea nu ajută, tokenul trebuie reemis.
 - **`inv-cancel`** / **`inv-storno`** — anulează (`cancel-invoice`) / stornează (`revert-invoice`; `--refund-id` pt storno parțial pe un refund).
   Negardate: cu ele se scoate o factură xConnector dublă.
 - **`inv-regen`** — anulează + creează din nou (create gardat pe succesul anulării). Garda OH rulează ÎNAINTE de anulare: pe o
@@ -173,11 +176,18 @@ Connector de facturare = tip **SMART_BILL** (ales automat dacă e unul singur; a
   - 🛡️ **Garda OH** (și la `inv-make` / `inv-regen`; **`--force` nu o ocolește**). Din 27-sep Order Hub facturează singur, prin
     SmartBill direct, comenzile pe care le expediază (AWB DPD făcut de OH) și pune tagul Shopify **`factura-oh`**. Facturile lui
     NU apar în xConnector, deci acolo comenzile par „fără factură". Regula: **cine face AWB-ul face și factura**. Fail-closed,
-    se sare comanda dacă: e în lista facturilor OH manuale (env sau secret KB `XC_OH_FACTURATE=NUME,…`) · tagurile
+    se sare comanda dacă: e în lista facturilor OH manuale fără tag (`XC_OH_FACTURATE`, azi goală — vezi mai jos) · tagurile
     sau fulfillment-urile Shopify nu s-au putut citi · are tag `factura-oh*` · n-are etichetă (SHIPPING_LABEL) în xConnector ·
     eticheta xConnector n-are număr · tracking-ul viu din Shopify nu e al etichetei xConnector (comparat pe numere, inclusiv
     coletele `<AWB>-<colet>`). Se facturează doar comenzile cu **eticheta vie a xConnector-ului**. Sărite care nu sunt sigur ale
     OH = listate întregi („DE VERIFICAT ÎN OH"); `--garda-tsv F` (sau env `XC_INV_GARDA_TSV`) le scrie și într-un TSV.
+    Magazinul al cărui token Shopify e respins și nu se poate reemite e sărit întreg.
+  - 📋 **Lista `XC_OH_FACTURATE=NUME,…`** (facturi OH emise manual, fără tag). Vine din env; fără env, din secretul KB cu același
+    nume, dar **doar pe stații** (la `inv-make` / `inv-regen`). **Cronul VPS nu ajunge la KB** (n-are `KB_DATABASE_URL`): acolo
+    lista se exportă din `xc_invoice.sh`, altfel garda merge fără ea și scrie un avertisment în log. **Azi lista e goală.** Din
+    lotul manual OH din 26–27 sep, trei comenzi au primit pe 30-sep și factură xConnector, iar OH și-a stornat-o pe a lui. Acolo
+    factura bună e acum cea xConnector: nu le pune în listă, fiindcă `inv-regen` le-ar refuza. A patra comandă e prinsă de
+    regula pe etichetă, pentru că tracking-ul ei viu e AWB-ul OH.
   - 📦 **Garda de stare** (doar `inv-bulk`, tot fără ocolire): se facturează doar ce **DPD live** arată **livrat (cod -14)**
     de peste `XC_INV_ASTEPTARE_ORE` (implicit 24h) de la livrare și de la încasare (xConnector facturează singur la livrare).
     Întors (111/123/124, inclusiv „Delivered Back to Sender"), închidere administrativă (129), redirecționat, curier fără
@@ -410,4 +420,6 @@ duplicatele și comenzile proaspete (`--min-age-hours`), scoate triajul CS. Vezi
 deploy. Pereche cu [gigi:cs-address-guard].
 Facturarea: `xc_invoice.sh` (duminică 02:00, flock `/tmp/xc_invoice.lock`) = `capture --days 30 --apply` →
 `inv-bulk --days 30 --apply`, cu garda OH + garda de stare. E singurul loc unde `inv-bulk --apply` rulează fără
-`XC_INV_BULK_PERMIS=1`. Test fără rețea al gărzilor: `uv run test_garda_oh.py`.
+`XC_INV_BULK_PERMIS=1`. Cronul nu ajunge la KB (n-are `KB_DATABASE_URL`): tot ce îi trebuie îl exportă `xc_invoice.sh`,
+inclusiv `XC_OH_FACTURATE` dacă lista nu mai e goală. Nici reemiterea tokenurilor Shopify din KB nu merge acolo.
+Test fără rețea al gărzilor: `uv run test_garda_oh.py`.
