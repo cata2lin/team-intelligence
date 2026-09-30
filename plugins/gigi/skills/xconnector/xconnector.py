@@ -325,6 +325,37 @@ class XC:
 SHOPIFY_API = "2026-04"
 
 
+def _mint_din_marcaj(shop, marcaj):
+    """Rezolva un marcaj `OAUTH:<NUME>_CLIENT_ID+SECRET` din SHOPIFY_STORES_CSV intr-un token Shopify.
+
+    Sase magazine (BUC, ORC, SK, HU, MD, DUPBG) n-au token static: app-ul lor da grant
+    `client_credentials`, tokenul tine ~24h si se EMITE la cerere din cele doua secrete KB pe care
+    marcajul le numeste. Inainte, marcajul era trimis direct ca token si fiecare apel dadea
+    401 "Invalid API key" — parea un token expirat, dar nu era nimic de reinnoit.
+    None daca marcajul e malformat, secretele lipsesc sau app-ul nu e instalat. NU printeaza tokenul."""
+    import time as _t
+    c = _ARONA_TOK.get(shop)
+    if c and c[1] > _t.time() + 300:
+        return c[0]
+    m = re.match(r"^OAUTH:([A-Z0-9_]+)_CLIENT_ID\+SECRET$", (marcaj or "").strip())
+    if not m:
+        return None
+    cid, _ = _kb_secret(m.group(1) + "_CLIENT_ID")
+    csec, _ = _kb_secret(m.group(1) + "_CLIENT_SECRET")
+    if not (cid and csec):
+        return None
+    try:
+        st, b = http("POST", "https://%s/admin/oauth/access_token" % shop, {"Content-Type": "application/json"},
+                     {"client_id": cid, "client_secret": csec, "grant_type": "client_credentials"})
+        d = json.loads(b) if b else {}
+        if st == 200 and d.get("access_token"):
+            _ARONA_TOK[shop] = (d["access_token"], _t.time() + (d.get("expires_in") or 86400))
+            return d["access_token"]
+    except Exception:
+        pass
+    return None
+
+
 def _stores_csv_tokens():
     """[{prefix, shopDomain, adminToken}] din SHOPIFY_STORES_CSV (canonic, TOATE magazinele; col prefix/shop/token).
     Sursă: env SHOPIFY_STORES_CSV (path sau text) sau KB. NUB = OAuth-rotation (token static mort, merge pe VPS).
@@ -397,10 +428,10 @@ def _prefix_for_domain(dom):
     return ""
 
 
-def load_shopify_tokens():
-    """[{prefix, shopDomain, adminToken}] pt TOATE magazinele: bază din SHOPIFY_STORES_CSV (canonic),
-    suprascris de SHOPIFY_ADMIN_TOKENS (env/KB) pt override-uri/tokenuri proaspete. Pt magazinele ARONA-only
-    din XCONNECTOR_SHOPS fără token static → EMITE token via ARONA Assistant (client_credentials). NU se printează."""
+def _tokenuri_statice():
+    """{shopDomain: {prefix, shopDomain, adminToken}} din SHOPIFY_STORES_CSV (canonic), suprascris de
+    SHOPIFY_ADMIN_TOKENS (env/KB). Fără emitere: un rând din CSV poate purta marcajul `OAUTH:<NUME>_CLIENT_ID+SECRET`
+    în loc de token (SK/HU/ORC…) — îl rezolvă _token_viu_sau_emis. NU se printează."""
     by_dom = {t["shopDomain"]: t for t in _stores_csv_tokens()}
     raw = os.environ.get("SHOPIFY_ADMIN_TOKENS")
     if not raw:
@@ -415,6 +446,14 @@ def load_shopify_tokens():
                 by_dom[t["shopDomain"]] = t
     except Exception:
         pass
+    return by_dom
+
+
+def load_shopify_tokens():
+    """[{prefix, shopDomain, adminToken}] pt TOATE magazinele: bază din SHOPIFY_STORES_CSV (canonic),
+    suprascris de SHOPIFY_ADMIN_TOKENS (env/KB) pt override-uri/tokenuri proaspete. Pt magazinele ARONA-only
+    din XCONNECTOR_SHOPS fără token static → EMITE token via ARONA Assistant (client_credentials). NU se printează."""
+    by_dom = _tokenuri_statice()
     # ARONA-only (Lab Noir etc.): magazin în XCONNECTOR_SHOPS fără token static → mint on-demand.
     try:
         for sh in load_shops():
@@ -6857,6 +6896,8 @@ def cmd_inv_make(a):
     sh, xc, o, con = r
     if inv_doc(o):
         print("  ⚠ %s are deja factură — folosește inv-regen ca să o refaci (anulează + creează)." % a.order); return
+    if _garda_oh_refuza(sh, o, a.order, "inv-make"):
+        return
     body = _inv_body(o, con, a)
     print("═" * 60)
     print("  FACTURĂ make · %s (%s) · %s [%s]" % (a.order, sh["shopDomain"], con.get("name"), con.get("id")))
@@ -6887,11 +6928,14 @@ def cmd_inv_storno(a):
 
 
 def cmd_inv_regen(a):
-    """Anulează factura curentă și o reface (ca awb-regen). Create gardat pe succesul cancel-ului."""
+    """Anulează factura curentă și o reface (ca awb-regen). Create gardat pe succesul cancel-ului.
+    Garda OH întâi: pe o comandă a Order Hub nu se anulează și nu se recreează nimic (nici cu --force)."""
     r = _inv_resolve(a)
     if not r:
         return
     sh, xc, o, con = r
+    if _garda_oh_refuza(sh, o, a.order, "inv-regen"):
+        return
     print("═" * 60)
     print("  REGEN FACTURĂ · %s (%s) · %s [%s]" % (a.order, sh["shopDomain"], con.get("name"), con.get("id")))
     print("  pas 1: anulez factura curentă · pas 2: creez una nouă")
@@ -6976,7 +7020,8 @@ def shopify_paid_uninvoiced(shop, token, since_date, max_pages=40):
 
 
 def shopify_status_by_ids(shop, token, ids, batch=50):
-    """{order_id_numeric: {paid, total, refunded, cancelled, name}} pt o LISTĂ de Shopify order IDs.
+    """{order_id_numeric: {paid, total, refunded, cancelled, name, tags, fulfillments_ok, tracking, gateways,
+    platit_la}} pt o LISTĂ de Shopify order IDs (tags/fulfillments_ok/tracking = garda OH, oh_guard_motiv).
     Interoghează DOAR aceste comenzi (nodes by id, în loturi) — minimul de apeluri Shopify, dar fresh.
     Folosit de inv-bulk: candidații vin din xConnector (fără factură), aici verificăm DOAR plata lor,
     în loc să scanăm toate comenzile plătite (≈80% mai puține apeluri pe rația Shopify partajată).
@@ -6992,9 +7037,11 @@ def shopify_status_by_ids(shop, token, ids, batch=50):
     uniq = [str(i) for i in dict.fromkeys(ids) if i]
     if not uniq:
         return out
-    q = ('query($ids:[ID!]!){ nodes(ids:$ids){ ... on Order { id name cancelledAt test '
+    q = ('query($ids:[ID!]!){ nodes(ids:$ids){ ... on Order { id name cancelledAt test tags paymentGatewayNames '
          'displayFinancialStatus currentTotalPriceSet{ shopMoney{ amount } } '
-         'totalRefundedSet{ shopMoney{ amount } } } } }')
+         'totalRefundedSet{ shopMoney{ amount } } '
+         'transactions(first:20){ kind status processedAt } '
+         'fulfillments(first:10){ status trackingInfo(first:5){ number } } } } }')
     pending = list(uniq)
     for _round in range(6):
         if not pending:
@@ -7010,11 +7057,25 @@ def shopify_status_by_ids(shop, token, ids, batch=50):
                 num = _num(n["id"]); got.add(num)
                 total = float((((n.get("currentTotalPriceSet") or {}).get("shopMoney")) or {}).get("amount") or 0)
                 refunded = float((((n.get("totalRefundedSet") or {}).get("shopMoney")) or {}).get("amount") or 0)
+                trk = set()
+                for f in (n.get("fulfillments") or []):
+                    if not isinstance(f, dict) or (f.get("status") or "").upper() in ("CANCELLED", "ERROR", "FAILURE"):
+                        continue
+                    for ti in (f.get("trackingInfo") or []):
+                        trk |= _trk_set((ti or {}).get("number"))
                 out[num] = {
                     "paid": (n.get("displayFinancialStatus") or "").upper() == "PAID",
                     "total": total, "refunded": refunded,
                     "cancelled": bool(n.get("cancelledAt")) or bool(n.get("test")),
                     "name": n.get("name"),
+                    # None = câmpul n-a venit → garda OH tratează comanda ca NEVERIFICATĂ (nu o facturează)
+                    "tags": n.get("tags") if isinstance(n.get("tags"), list) else None,
+                    "fulfillments_ok": isinstance(n.get("fulfillments"), list),
+                    "tracking": trk,
+                    "gateways": [str(g) for g in (n.get("paymentGatewayNames") or [])],
+                    # ultima încasare reușită (SALE/CAPTURE) — garda de stare o folosește ca să nu se ia la
+                    # întrecere cu facturarea automată a xConnector de la încasare/livrare (None = necitită)
+                    "platit_la": _ultima_incasare(n.get("transactions")),
                 }
             still.extend(i for i in chunk_ids if _num(i) not in got)
         if len(still) >= len(pending):
@@ -7098,10 +7159,500 @@ def _scan_all_orders(xc, dfrom, dto, depth=0):
     return _dedup_orders(left + right)
 
 
+# ── GARDA OH (29-sep-2026): xConnector nu facturează ce e al Order Hub — inv-bulk, inv-make, inv-regen ──
+# Din 24-sep OH face singur etichetele DPD (cont dpd-ro-arona) și din 27-sep le facturează singur, prin
+# SmartBill direct. Facturile lui NU apar în listarea xConnector, deci `inv-bulk` le vedea „fără factură"
+# și le factura a doua oară (o astfel de dublură, pe o comandă SK, a trebuit stornată). Regula ownerului (27-sep):
+# cine face AWB-ul face și factura. De aici garda, care NU se poate ocoli cu --force, pe fiecare candidată:
+#   0. factură OH manuală, fără tag (XC_OH_FACTURATE)   → sare (vezi mai jos)
+#   1. taguri Shopify necitite                           → sare (neverificat = nu se facturează)
+#   2. tag `factura-oh*` (pus de facturarea automată OH) → sare
+#   3. nicio etichetă (SHIPPING_LABEL) în xConnector     → sare: eticheta, dacă există, e a OH sau făcută în afara
+#                                                          ambelor sisteme (vezi mai jos: nu o mai ia nimeni automat)
+#   4. eticheta xConnector fără număr citibil            → sare
+#   5. fulfillment-urile Shopify vii au tracking, dar niciun număr nu e al etichetei xConnector → sare
+#      (altă etichetă vie: a OH direct sau făcută în afara xConnector). Compararea e pe NUMERE: eticheta
+#      xConnector cu mai multe colete poartă „<AWB>-<colet>-<colet>", Shopify le listează separat (văzut pe Grandia).
+# Ce rămâne = comenzi cu eticheta vie a xConnector, pe care OH nu le facturează automat niciodată.
+# 30-sep-2026: garda trăia doar în copia de pe VPS. Copia din plugin (stațiile) n-o avea, iar un
+# `inv-bulk --shop all --days 60 --apply` pornit de pe o stație a dublat 2.068 de facturi OH. De aici: garda e în
+# git, acoperă și inv-make / inv-regen (garda_oh_comanda), iar `inv-bulk --apply` rulează doar pe VPS
+# (_refuz_inv_bulk_apply).
+# Facturile emise MANUAL din OH nu primesc tag. Pe 29-sep, în baza OH, toate facturile OH vii fără tag erau 4 (lotul
+# manual din 26–27 sep). Pe 30-sep trei dintre comenzi au primit și factură xConnector, iar OH și-a stornat-o pe a lui
+# (storno-dubla-xconnector). Acolo factura bună e acum cea xConnector, deci numele lor NU intră în listă: inv-regen
+# le-ar refuza. Pe a patra o prinde regula 5 (tracking-ul ei viu e AWB-ul OH). Lista e deci GOALĂ. Dacă va trebui din
+# nou: env XC_OH_FACTURATE="NUME1,NUME2"; fără env, secretul KB cu același nume, care ajunge doar pe stații. Cronul VPS
+# n-are KB_DATABASE_URL, deci acolo lista se exportă din xc_invoice.sh (KB inaccesibil = avertisment, listă goală).
+# Numele comenzilor NU stau în repo-ul public. Rest de risc: o factură manuală NOUĂ din OH pe o etichetă xConnector —
+# OH o stornează singur pe a lui când apare dublura (storno-dubla-xconnector).
+# SĂRITE FĂRĂ STĂPÂN: 3 și 5 prind și etichetele făcute în afara ambelor sisteme (DragonStar/DPD din portalul
+# curierului — „observat" în OH), pe care OH le socotește ale xConnector și nu le facturează. Înainte de gardă
+# le factura cronul. Nu se ghicește aici (o greșeală = factură dublă): motivele din OH_GUARD_DE_VERIFICAT se
+# listează ÎNTREGI în log și, cu --garda-tsv / env XC_INV_GARDA_TSV, într-un TSV pentru garda_vs_oh.py (OH).
+OH_TAG = "factura-oh"
+OH_FACTURATE_FARA_TAG = frozenset()   # gol în git (repo PUBLIC): numele vin din env / KB XC_OH_FACTURATE
+_OH_FACTURATE_KB = None               # secretul KB, citit o singură dată pe proces
+OH_GUARD_MOTIVE = {
+    "factura_oh_manuala": "factură OH manuală fără tag (XC_OH_FACTURATE)",
+    "taguri_necitite": "taguri Shopify necitite (neverificat)",
+    "tag_factura_oh": "tag factura-oh (OH a facturat deja)",
+    "fara_eticheta_xc": "fără etichetă în listarea xConnector (a OH sau din afară)",
+    "tracking_xc_necitit": "eticheta xConnector fără număr citibil",
+    "eticheta_vie_nu_e_xc": "altă etichetă vie decât cea xConnector (OH sau din afară)",
+    "token_respins": "token Shopify respins (401), iar altul nu s-a putut emite",
+    "token_lipsa": "niciun token Shopify pt magazin, iar unul nu s-a putut emite",
+}
+# motivele după care comanda NU e sigur a OH → lista întreagă, de verificat în OH (garda_vs_oh.py)
+OH_GUARD_DE_VERIFICAT = ("fara_eticheta_xc", "eticheta_vie_nu_e_xc", "tracking_xc_necitit", "taguri_necitite")
+# fără token Shopify acceptat (doar inv-make / inv-regen; inv-bulk sare magazinul întreg): reîncercarea nu ajută
+OH_GUARD_TOKEN = ("token_respins", "token_lipsa")
+_TRK_SEP = re.compile(r"[-,;/|]+")
+
+
+def _trk_norm(x):
+    return re.sub(r"\s+", "", str(x or "")).upper()
+
+
+def _trk_set(x):
+    """Numerele dintr-un tracking: șirul întreg + bucățile lui („<AWB>-<colet>-<colet>" → AWB și coletele).
+    Bucățile sub 6 caractere nu contează (niciun AWB/colet real nu e așa scurt; un „1" n-are voie să potrivească)."""
+    s = _trk_norm(urllib.parse.unquote(str(x or "")))
+    if not s:
+        return set()
+    return {s} | {p for p in _TRK_SEP.split(s) if len(p) >= 6}
+
+
+def xc_label_trackings(o):
+    """(are_eticheta_xc, {numere de tracking}) din documentele SHIPPING_LABEL ale listării xConnector."""
+    docs = [d for d in (o.get("documents") or []) if isinstance(d, dict) and d.get("documentType") == "SHIPPING_LABEL"]
+    trk = set()
+    for d in docs:
+        trk |= _trk_set(doc_tracking(d))
+    return bool(docs), trk
+
+
+def _oh_facturate_fara_tag():
+    """Comenzile cu factură OH MANUALĂ (fără tag): env XC_OH_FACTURATE="NUME1,NUME2"; fără env, secretul KB cu
+    același nume (o dată pe proces). Secret absent = listă goală, fără zgomot (azi lista e goală). KB inaccesibil
+    (cronul VPS n-are KB_DATABASE_URL) = tot listă goală, dar cu avertisment: acolo lista vine doar din env."""
+    global _OH_FACTURATE_KB, KB_UNREACHABLE
+    raw = os.environ.get("XC_OH_FACTURATE")
+    if raw is None:
+        if _OH_FACTURATE_KB is None:
+            inainte, KB_UNREACHABLE = KB_UNREACHABLE, False
+            val, ok = _kb_secret("XC_OH_FACTURATE")
+            if not ok and KB_UNREACHABLE:
+                print("⚠ XC_OH_FACTURATE (facturile OH manuale, fără tag) necitit: KB inaccesibil și env nesetat → garda"
+                      " merge fără lista asta (doar pe tag + etichetă). Pe VPS lista se exportă din xc_invoice.sh.")
+            KB_UNREACHABLE = KB_UNREACHABLE or inainte
+            _OH_FACTURATE_KB = val or ""
+        raw = _OH_FACTURATE_KB
+    extra = {x.strip().upper() for x in (raw or "").split(",") if x.strip()}
+    return set(OH_FACTURATE_FARA_TAG) | extra
+
+
+def oh_guard_motiv(s_, xc_has_label, xc_trk, name=None, manuale=None):
+    """None = poate fi facturată de cron; altfel cheia motivului (vezi OH_GUARD_MOTIVE). Fail-closed."""
+    if name and str(name).strip().upper() in (manuale if manuale is not None else _oh_facturate_fara_tag()):
+        return "factura_oh_manuala"
+    tags = s_.get("tags")
+    if tags is None or not s_.get("fulfillments_ok"):
+        return "taguri_necitite"
+    if any(str(t).strip().lower().startswith(OH_TAG) for t in tags):
+        return "tag_factura_oh"
+    if not xc_has_label:
+        return "fara_eticheta_xc"
+    if not xc_trk:
+        return "tracking_xc_necitit"
+    live = s_.get("tracking") or set()
+    if live and not (live & xc_trk):
+        return "eticheta_vie_nu_e_xc"
+    return None
+
+
+def _garda_tsv_rand(f, *campuri):
+    f.write("\t".join(str(c).replace("\t", " ").replace("\n", " ") for c in campuri) + "\n")
+
+
+# ── GARDA DE STARE A COLETULUI (29-sep-2026, v3): se facturează DOAR ce DPD arată LIVRAT ──
+# Garda OH hotărăște CINE facturează (eticheta xConnector), nu DACĂ vânzarea a avut loc. Verificat pe 29-sep în DPD
+# live, pe lista de facturat: colete întoarse marcate PLĂTITE greșit („Delivered Back to Sender"), „Administrative
+# Closure" pe care OH îl ia drept livrat, carduri refuzate și carduri pe drum înapoi („Returned to Office").
+# Capture-ul vechi citea „Delivered Back to Sender" ca livrat: 13–27 sep a marcat PLĂTITE 11 colete nelivrate,
+# iar cronul a facturat 10.
+# Regula, pe FIECARE etichetă xConnector vie a comenzii — ultima operație DPD (api.dpd.ro, live), după COD:
+#   -14 Delivered                       → livrat: se facturează, dar abia după XC_INV_ASTEPTARE_ORE (implicit 24) de la
+#                                         livrare ȘI de la ultima încasare — xConnector facturează singur la livrare;
+#                                         cronul nu se ia la întrecere cu el (idempotența lor nu e dovedită)
+#   111 Return to Sender, 123 Refused by recipient, 124 Delivered Back to Sender, text de refuz → întors: NU
+#   129 Administrative Closure, text „delivered" pe alt cod             → nesigur: NU
+#   115 Redirected (noul AWB nu e accesibil din contul ARONA)           → NU, listată pentru un om
+#   restul (date primite, preluat, în tranzit, la oficiu, de ridicat)  → încă nelivrat: NU, se reia tura următoare
+# Fail-closed: fără credențiale DPD / fără răspuns DPD / curier fără urmărire aici (DragonStar, Sameday…) → NU.
+# Excluderi manuale fără cod: env XC_INV_EXCLUDE="NUME1,NUME2" (motiv propriu, NU „factură OH manuală").
+DPD_LIVRAT = {-14}
+DPD_INTORS = {111, 123, 124}      # Return to Sender · Refused by recipient · Delivered Back to Sender
+DPD_NESIGUR = {129}
+DPD_REDIRECTIONAT = {115}
+ASTEPTARE_ORE_IMPLICIT = 24
+STARE_MOTIVE = {
+    "exclus_manual": "exclusă manual (env XC_INV_EXCLUDE)",
+    "colet_intors": "DPD: colet întors/refuzat — PLĂTITĂ greșit / de rambursat",
+    "colet_mixt": "DPD: AWB-uri cu stări amestecate (un întors + altceva)",
+    "refuz_partial": "tag refuz-partial (ramburs încasat parțial — decide un om)",
+    "stare_nesigura": "DPD: închidere administrativă / cod necunoscut",
+    "platita_nelivrata": "ramburs PLĂTIT, dar DPD nu arată livrarea",
+    "redirectionat": "DPD: redirecționat, livrarea nu se vede din contul ARONA",
+    "curier_fara_urmarire": "etichetă xConnector pe alt curier decât DPD",
+    "dpd_necitit": "DPD n-a răspuns / fără credențiale DPD",
+    "nelivrat": "card: coletul nu e livrat încă (se reia)",
+    "livrat_recent": "livrat de curând (xConnector o poate factura singur)",
+    "platit_recent": "încasată de curând (xConnector o poate factura singur)",
+}
+# motivele cu lista ÎNTREAGĂ în log: plătite în Shopify fără livrare confirmată → le corectează / verifică un om
+STARE_DE_CORECTAT = ("colet_intors", "colet_mixt", "refuz_partial", "stare_nesigura", "platita_nelivrata",
+                     "redirectionat", "curier_fara_urmarire", "dpd_necitit")
+TAG_REFUZ_PARTIAL = "refuz-partial"   # pus de OH (cod_capture) pe comenzile pe mai multe AWB cu o parte refuzată
+# aceleași mărci ca OH (cod_capture._COD_MARKERS) + „xconnector"/„manual" (tranzacțiile de marcare ca plătit)
+_GW_RAMBURS = ("cash on delivery", "cod", "ramburs", "numerar", "la livrare", "xconnector", "manual")
+
+
+def _e_ramburs(gateways):
+    """Ramburs (COD) după gateway-urile Shopify. Gol = ramburs: pe magazinele ARONA plata online are mereu gateway
+    (shopify_payments), iar comenzile plasate din afară (formulare COD) vin fără (OH le vede „unknown")."""
+    g = [str(x).strip().lower() for x in (gateways or []) if str(x).strip()]
+    if not g:
+        return True
+    return any(any(k in x for k in _GW_RAMBURS) for x in g)
+
+
+def _iso_dt(s):
+    """datetime cu fus orar din ISO-ul Shopify („…Z") sau DPD („…+0300"); None dacă lipsește fusul/e ilizibil."""
+    if not s:
+        return None
+    t = str(s).strip().replace("Z", "+00:00")
+    m = re.match(r"^(.*\d{2}:\d{2}:\d{2}(?:\.\d+)?)([+-]\d{2})(\d{2})$", t)
+    if m:
+        t = "%s%s:%s" % m.groups()
+    try:
+        d = datetime.datetime.fromisoformat(t)
+    except Exception:
+        return None
+    return d if d.tzinfo else None
+
+
+def _ultima_incasare(txs):
+    """Cea mai nouă tranzacție REUȘITĂ de încasare (SALE/CAPTURE) sau None."""
+    best = None
+    for t in (txs or []):
+        if not isinstance(t, dict):
+            continue
+        if (t.get("status") or "").upper() != "SUCCESS" or (t.get("kind") or "").upper() not in ("SALE", "CAPTURE"):
+            continue
+        d = _iso_dt(t.get("processedAt"))
+        if d and (best is None or d > best):
+            best = d
+    return best
+
+
+def _asteptare_ore():
+    try:
+        return max(0, int(os.environ.get("XC_INV_ASTEPTARE_ORE") or ASTEPTARE_ORE_IMPLICIT))
+    except ValueError:
+        return ASTEPTARE_ORE_IMPLICIT
+
+
+def _inv_excluse():
+    return {x.strip().upper() for x in (os.environ.get("XC_INV_EXCLUDE") or "").split(",") if x.strip()}
+
+
+def _awb_principal(x):
+    """Primul număr (≥6 caractere) dintr-un tracking „<AWB>-<colet>-<colet>" = AWB-ul expediției."""
+    s = _trk_norm(urllib.parse.unquote(str(x or "")))
+    return next((p for p in _TRK_SEP.split(s) if len(p) >= 6), "") if s else ""
+
+
+def xc_label_awbs(o):
+    """[(curier, awb_principal, {numere})] pt fiecare SHIPPING_LABEL din listarea xConnector (curier = connectorName)."""
+    out = []
+    for d in (o.get("documents") or []):
+        if not isinstance(d, dict) or d.get("documentType") != "SHIPPING_LABEL":
+            continue
+        t = doc_tracking(d)
+        out.append(((d.get("connectorName") or "").strip(), _awb_principal(t), _trk_set(t)))
+    return out
+
+
+def _dpd_op_state(code, desc):
+    """delivered | refused | unknown | redirected | progress — după CODUL operației DPD; textul doar întărește.
+    Livrat = numai codul -14. Un text „delivered" pe alt cod (sau fără cod) nu se ghicește: unknown."""
+    try:
+        c = int(code)
+    except (TypeError, ValueError):
+        c = None
+    txt = _dpd_state(desc)
+    if c in DPD_INTORS or txt == "refused":
+        return "refused"
+    if c in DPD_NESIGUR:
+        return "unknown"
+    if c in DPD_LIVRAT:
+        return "delivered"
+    if c in DPD_REDIRECTIONAT:
+        return "redirected"
+    if txt == "delivered":
+        return "unknown"
+    return "progress"
+
+
+def dpd_last_ops(awbs):
+    """{awb: {code, desc, at, redirect, eroare}} — ultima operație DPD live (api.dpd.ro/v1/track, loturi de 10).
+    Potrivire după `parcelId`: un id invalid LIPSEȘTE din răspuns, deci poziția nu e de încredere (un zip ar da
+    starea altui colet). Lot căzut → reîncercat o dată, apoi AWB cu AWB. Absent din rezultat = necitit."""
+    out = {}
+    u, p = _dpd_creds()
+    uniq = [str(x).strip() for x in dict.fromkeys(awbs or []) if x and str(x).strip()]
+    if not (u and p) or not uniq:
+        return out
+
+    def _cere(lot):
+        body = {"userName": u, "password": p, "language": "EN", "lastOperationOnly": True,
+                "parcels": [{"id": x} for x in lot]}
+        s, b = http("POST", "https://api.dpd.ro/v1/track", {"Content-Type": "application/json"}, body)
+        try:
+            d = json.loads(b)
+        except Exception:
+            return None
+        if not isinstance(d, dict) or d.get("error") or not isinstance(d.get("parcels"), list):
+            return None
+        rez = {}
+        for par in d["parcels"]:
+            if not isinstance(par, dict):
+                continue
+            pid = str(par.get("parcelId") or "").strip()
+            if pid not in lot:
+                continue
+            err = par.get("error")
+            if err:
+                ctx = (err.get("context") or err.get("message") or "") if isinstance(err, dict) else str(err)
+                rez[pid] = {"code": None, "desc": "", "at": None, "redirect": None, "eroare": str(ctx)[:60] or "eroare"}
+                continue
+            ops = [o for o in (par.get("operations") or []) if isinstance(o, dict)]
+            if not ops:
+                continue
+            o = max(ops, key=lambda o: _iso_dt(o.get("dateTime")) or datetime.datetime.min.replace(tzinfo=datetime.timezone.utc))
+            rez[pid] = {"code": o.get("operationCode"), "desc": (o.get("description") or "").strip(),
+                        "at": _iso_dt(o.get("dateTime")), "redirect": o.get("redirectShipmentId"), "eroare": None}
+        return rez
+
+    for i in range(0, len(uniq), 10):
+        lot = uniq[i:i + 10]
+        rez = _cere(lot)
+        if rez is None:
+            time.sleep(1.0)
+            rez = _cere(lot)
+        if rez is None:
+            rez = {}
+            for x in lot:
+                r1 = _cere([x])
+                if r1:
+                    rez.update(r1)
+                time.sleep(0.2)
+        out.update(rez)
+        time.sleep(0.15)
+    # a doua trecere, după o pauză, pe cele rămase fără răspuns (29-sep: 3 AWB-uri RED livrate ieșiseră necitite
+    # dintr-un lot căzut de mai multe ori la rând) — tot fail-closed: ce nu răspunde nici acum rămâne necitit
+    lipsa = [x for x in uniq if x not in out]
+    if lipsa:
+        time.sleep(5.0)
+        for i in range(0, len(lipsa), 10):
+            rez = _cere(lipsa[i:i + 10]) or {}
+            out.update(rez)
+            time.sleep(0.3)
+    return out
+
+
+def stare_din_etichete(stari):
+    """Starea comenzii din stările etichetelor ei [(stare, livrat_la)] → (stare, livrat_la).
+    stare ∈ livrat | intors | mixt | nesigur | redirectionat | necitit | in_curs | fara_eticheta. Fail-closed:
+    o singură etichetă necitită = necitit; livrat = TOATE livrate (livrat_la = cea mai târzie; None dacă una n-are dată);
+    întors = TOATE întoarse; un întors alături de altceva = mixt (ca OH cod_capture.classify: banii s-au încasat
+    cel mult parțial — decide un om)."""
+    if not stari:
+        return "fara_eticheta", None
+    ss = [s for s, _ in stari]
+    if "necitit" in ss:
+        return "necitit", None
+    n_liv, n_int = ss.count("delivered"), ss.count("refused")
+    if n_int == len(ss):
+        return "intors", None
+    if n_int:
+        return "mixt", None
+    if n_liv == len(ss):
+        ats = [at for s, at in stari]
+        return "livrat", (None if any(at is None for at in ats) else max(ats))
+    if "unknown" in ss:
+        return "nesigur", None
+    if "redirected" in ss:
+        return "redirectionat", None
+    return "in_curs", None
+
+
+def motiv_stare_colet(s_, etichete, info, acum, asteptare_h):
+    """(motiv|None, detaliu) pt o comandă care a trecut de garda OH. None = se facturează.
+    etichete = xc_label_awbs(comanda); info = dpd_last_ops(...). Se judecă etichetele xConnector ale căror numere
+    sunt în tracking-ul viu din Shopify (toate, dacă Shopify n-are tracking)."""
+    if any(str(t).strip().lower().startswith(TAG_REFUZ_PARTIAL) for t in (s_.get("tags") or [])):
+        return "refuz_partial", TAG_REFUZ_PARTIAL
+    live = s_.get("tracking") or set()
+    alese = [e for e in etichete if live and (e[2] & live)] or list(etichete)
+    if not alese:
+        return "curier_fara_urmarire", "fără etichetă"
+    stari, det = [], []
+    for cur, awb, _nums in alese:
+        if "dpd" not in (cur or "").lower():
+            return "curier_fara_urmarire", cur or "?"
+        i = info.get(awb) if awb else None
+        if not i or i.get("eroare"):
+            stari.append(("necitit", None))
+            det.append("%s:necitit%s" % (awb or "?", (":" + i["eroare"]) if i and i.get("eroare") else ""))
+            continue
+        st = _dpd_op_state(i.get("code"), i.get("desc"))
+        stari.append((st, i.get("at")))
+        det.append("%s:%s %s@%s" % (awb, i.get("code"), i.get("desc") or "", i["at"].isoformat()[:16] if i.get("at") else "?"))
+    stare, livrat_la = stare_din_etichete(stari)
+    d = "; ".join(det)
+    if stare == "livrat":
+        prag = acum - datetime.timedelta(hours=asteptare_h)
+        if livrat_la is None or livrat_la > prag:
+            return "livrat_recent", d
+        pl = s_.get("platit_la")
+        if pl is not None and pl > prag:
+            return "platit_recent", d
+        return None, d
+    return {"intors": "colet_intors", "mixt": "colet_mixt", "nesigur": "stare_nesigura",
+            "redirectionat": "redirectionat", "necitit": "dpd_necitit",
+            "fara_eticheta": "curier_fara_urmarire"}.get(
+        stare, "platita_nelivrata" if _e_ramburs(s_.get("gateways")) else "nelivrat"), d
+
+
+def _shop_accepta(dom, tok):
+    """None = Shopify acceptă tokenul ({ shop { id } }); altfel de ce nu: 'respins' (401 „Invalid API key or access
+    token") sau 'necitit' (fără răspuns citibil: rețea, 5xx)."""
+    d = shopify_gql(dom, tok, "{ shop { id } }") or {}
+    if ((d.get("data") or {}).get("shop") or {}).get("id"):
+        return None
+    err = ("%s %s" % (d.get("errors") or "", d.get("_raw") or "")).lower()
+    return "respins" if (d.get("_status") == 401 or "invalid api key or access token" in err) else "necitit"
+
+
+def _token_viu_sau_emis(dom, tok):
+    """(token, 'ok'|'reemis') dacă Shopify îl acceptă — altfel unul emis acum (client_credentials, din KB).
+    (None, de ce) dacă nu: 'respins' (tokenul dat e respins, 401, și nici reemiterea n-a mers), 'lipsa' (niciun token
+    utilizabil și nici emiterea n-a mers), 'necitit' (Shopify n-a răspuns: se poate reîncerca). Tokenurile de ~24h
+    (SK/HU/ORC/LAB) expiră; marcajul `OAUTH:<NUME>_CLIENT_ID+SECRET` din SHOPIFY_STORES_CSV nu e token: se emite din
+    secretele KB pe care le numește (_mint_din_marcaj). NU se printează tokenul."""
+    tok = str(tok or "").strip()
+    marcaj = tok if tok.startswith("OAUTH:") else ""
+    motiv = "lipsa"
+    if tok and not marcaj:
+        motiv = _shop_accepta(dom, tok)
+        if motiv is None:
+            return tok, "ok"
+    emis = (_mint_din_marcaj(dom, marcaj) if marcaj else None) or _shopify_mint(dom)
+    if emis and emis != tok:
+        m = _shop_accepta(dom, emis)
+        if m is None:
+            return emis, "reemis"
+        motiv = m
+    return None, motiv
+
+
+def garda_oh_comanda(sh, o, name):
+    """Garda OH pe O comandă (inv-make / inv-regen) → (motiv|None, s_). Aceleași reguli ca în inv-bulk
+    (oh_guard_motiv): tagurile și fulfillment-urile vin din Shopify (un apel, după orderId), eticheta din documentele
+    xConnector ale comenzii. Tokenul e doar al magazinului comenzii (fără emiteri pt celelalte, ca load_shopify_tokens),
+    verificat și reemis când Shopify îl respinge sau e un marcaj OAUTH (_token_viu_sau_emis). Fail-closed: fără token
+    acceptat → „token_respins" / „token_lipsa"; Shopify n-a răspuns → „taguri_necitite"; comandă rezolvată prin
+    address-detail (fără `documents`) → „fara_eticheta_xc"."""
+    oid = str((o or {}).get("orderId") or "").rsplit("/", 1)[-1]
+    dom = (sh or {}).get("shopDomain")
+    s_, mot_token = None, None
+    if dom:
+        tok, stare = _token_viu_sau_emis(dom, (_tokenuri_statice().get(dom) or {}).get("adminToken"))
+        if tok and oid:
+            s_ = (shopify_status_by_ids(dom, tok, [oid]) or {}).get(oid)
+        elif not tok and stare in ("respins", "lipsa"):
+            mot_token = "token_" + stare
+    has_lab, xtrk = xc_label_trackings(o or {})
+    mot = oh_guard_motiv(s_ or {"tags": None}, has_lab, xtrk, name)
+    # lista manuală rămâne primul motiv; „taguri necitite" din lipsă de token se spune pe nume (reîncercarea nu ajută)
+    return (mot_token if (mot == "taguri_necitite" and mot_token) else mot), s_
+
+
+def _garda_oh_refuza(sh, o, name, cmd):
+    """True = garda OH oprește `cmd` pe comanda asta (mesajul e scris aici). Nu se ocolește cu --force."""
+    mot, _s = garda_oh_comanda(sh, o, name)
+    if not mot:
+        return False
+    print("  ⛔ GARDA OH — %s refuzat pe %s: %s." % (cmd, name, OH_GUARD_MOTIVE.get(mot, mot)))
+    if mot in OH_GUARD_TOKEN:
+        print("     Fără tagurile Shopify nu se poate verifica dacă Order Hub a facturat-o deja. Reîncercarea NU ajută:"
+              " tokenul magazinului %s trebuie reemis (SHOPIFY_STORES_CSV / SHOPIFY_ADMIN_TOKENS sau secretele KB"
+              " client_credentials ale app-ului)." % (sh or {}).get("shopDomain"))
+    elif mot in OH_GUARD_DE_VERIFICAT:
+        print("     Nu se poate confirma că factura îi revine xConnector-ului. Verifică în Order Hub: dacă trebuie"
+              " facturată, factura se emite de acolo — cine face AWB-ul face și factura.")
+    else:
+        print("     Order Hub a facturat-o deja (facturile lui nu apar în xConnector): o factură de aici ar fi a DOUA.")
+    print("     Garda nu se ocolește cu --force.")
+    if mot == "fara_eticheta_xc" and "documents" not in (o or {}):
+        print("     (comanda a venit prin address-detail, fără documente, deci eticheta nu se poate verifica;"
+              " mărește --days ca s-o găsească în listarea xConnector)")
+    elif mot == "taguri_necitite":
+        print("     (tagurile / fulfillment-urile din Shopify nu s-au putut citi: Shopify n-a răspuns sau n-a întors"
+              " comanda; reîncearcă)")
+    if cmd == "inv-regen":
+        print("     O factură xConnector dublă se scoate cu inv-storno / inv-cancel (garda nu le atinge).")
+    return True
+
+
+# ── inv-bulk --apply: DOAR pe VPS-ul de facturare (30-sep-2026) ──
+# Marcajul = mediul cronului de duminică (xc_invoice.sh îl citește la fiecare rulare), care există doar pe VPS.
+VPS_FACTURARE_ENV = "/root/Scripturi/.env.xconnector"
+
+
+def _pe_vps_facturare():
+    return os.path.isfile(VPS_FACTURARE_ENV)
+
+
+def _refuz_inv_bulk_apply(a):
+    """Mesajul care oprește `inv-bulk --apply` în afara VPS-ului; None = poate rula. Ocolire DOAR explicită:
+    env XC_INV_BULK_PERMIS=1. Dry-run-ul (fără --apply) nu se refuză nicăieri."""
+    if not getattr(a, "apply", False) or _pe_vps_facturare() or (os.environ.get("XC_INV_BULK_PERMIS") or "").strip() == "1":
+        return None
+    return ("⛔ REFUZ: `inv-bulk --apply` emite facturi fiscale ÎN MASĂ și rulează doar pe VPS-ul de facturare\n"
+            "   (cronul de duminică /root/Scripturi/xc_invoice.sh, sub lacătul /tmp/xc_invoice.lock). Mașina asta nu e VPS-ul.\n"
+            "   De ce: pe 30-sep-2026 un `inv-bulk --shop all --days 60 --apply` pornit de pe o stație, cu o copie fără garda OH,\n"
+            "   a emis ~2.780 de facturi xConnector, dintre care 2.068 DUBLE peste facturile Order Hub, care au trebuit stornate.\n"
+            "   Garda OH e acum și aici, dar o rulare în masă de pe altă mașină nu vede lacătul cronului și se ia la întrecere\n"
+            "   cu el și cu Order Hub.\n"
+            "   Dry-run-ul (fără --apply) merge oriunde. Dacă ownerul a aprobat explicit o rulare de aici:\n"
+            "   XC_INV_BULK_PERMIS=1 uv run xconnector.py inv-bulk … --apply   (întâi fără --apply).")
+
+
 def cmd_inv_bulk(a):
     """Facturează TOATE comenzile plătite din ultimele --days zile (≈2 luni) care NU au factură,
     nu-s anulate/refunded și au încasări > 0. Shipping = inclus automat de SmartBill; data facturii = azi.
-    Dry-run by default; emite facturi DOAR cu --apply."""
+    GARDA OH (mereu activă, nu o ocolește nici --force): sare comenzile facturate de Order Hub și pe cele
+    fără etichetă vie xConnector — vezi oh_guard_motiv; cele care nu-s sigur ale OH se listează întregi
+    (și în TSV cu --garda-tsv). GARDA DE STARE (v3, tot fără ocolire): se facturează doar ce DPD arată LIVRAT
+    de peste XC_INV_ASTEPTARE_ORE — vezi motiv_stare_colet. Dry-run by default; emite facturi DOAR cu --apply,
+    iar --apply rulează doar pe VPS-ul de facturare (altundeva: refuz, vezi _refuz_inv_bulk_apply)."""
+    refuz = _refuz_inv_bulk_apply(a)
+    if refuz:
+        print(refuz)
+        sys.exit(2)
     import datetime
     dto = datetime.date.today().isoformat()
     dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
@@ -7109,6 +7660,12 @@ def cmd_inv_bulk(a):
     if not shops:
         print("Nicio configurație xConnector (KB XCONNECTOR_SHOPS)."); return
     toks = {t.get("shopDomain"): t.get("adminToken") for t in load_shopify_tokens()}
+    asteptare_h = _asteptare_ore()
+    excluse = _inv_excluse()
+    dpd_u, dpd_p = _dpd_creds()
+    if not (dpd_u and dpd_p):
+        print("⛔ fără credențiale DPD (DPD_RO_USERNAME/PASSWORD) → livrarea nu se poate confirma → NU se emite nimic "
+              "(toate candidatele ies „DPD n-a răspuns”).")
     targets = _resolve_target_shops(a.shop, shops)
     if getattr(a, "exclude", ""):
         ex = set(d["shopDomain"] for d in _resolve_target_shops(a.exclude, shops))
@@ -7122,8 +7679,18 @@ def cmd_inv_bulk(a):
     print("FACTURARE ÎN MASĂ · fereastră %s → %s (%d zile) · %s" % (
         dfrom, dto, a.days, "APPLY (emite real)" if a.apply else "DRY-RUN (nimic emis)"))
     print("Criterii: payment=PAID · neanulate · fără refund · încasări>0 · fără factură. Shipping inclus, data=azi.")
+    print("Garda OH (cine facturează) + garda de stare: DPD live = LIVRAT (cod -14) de peste %dh, încasată de peste %dh%s." % (
+        asteptare_h, asteptare_h, (" · excluse manual: %d" % len(excluse)) if excluse else ""))
     print("═" * 64)
-    G = dict(cand=0, inv=0, err=0, skip_inv=0, skip_xc=0, paid=0)
+    G = dict(cand=0, inv=0, err=0, skip_inv=0, skip_xc=0, paid=0, pre_guard=0, garda=0, garda_motive={}, de_verificat=0,
+             stare=0, de_corectat=0)
+    acum = datetime.datetime.now(datetime.timezone.utc)
+    tsv_cale = (getattr(a, "garda_tsv", None) or os.environ.get("XC_INV_GARDA_TSV") or "").strip()
+    tsv = None
+    if tsv_cale:
+        tsv = open(tsv_cale, "w", encoding="utf-8")
+        _garda_tsv_rand(tsv, "magazin", "comanda", "orderId", "motiv", "total", "eticheta_xc", "dispatched_xc",
+                        "tracking_xc", "tracking_shopify", "stare_colet", "plata")
     errmsgs = {}   # mesaj de eroare business → câte ori (ex „Produsul LIVRARE EXPRESS nu are codul specificat")
     # Pacing ADAPTIV pt SmartBill (limită reală ≈30/min, penalizare lipicioasă la depășire).
     # Pornim sub limită și încetinim singuri dacă totuși o atingem; persistă ÎNTRE magazine.
@@ -7131,9 +7698,10 @@ def cmd_inv_bulk(a):
                  # fluxul normal de facturare al xConnector care consumă din ACELAȘI bucket SmartBill
     for sh in targets:
         dom = sh["shopDomain"]
-        st = toks.get(dom)
+        st, _st_src = _token_viu_sau_emis(dom, toks.get(dom))
         if not st:
-            print("\n══ %s ══  ⚠ fără token Shopify (SHOPIFY_ADMIN_TOKENS) → skip" % dom); continue
+            print("\n══ %s ══  ⚠ %s → skip" % (dom, "Shopify n-a răspuns la verificarea tokenului" if _st_src == "necitit"
+                                              else "token Shopify absent/respins și nu s-a putut emite altul (KB)")); continue
         xc = XC(sh["apiKey"])
         con, bills = pick_billing(xc, a)
         if not con:
@@ -7148,10 +7716,16 @@ def cmd_inv_bulk(a):
         except Exception as e:
             print("\n══ %s ══  ⚠ scanare xConnector eșuată (%s) → SKIP magazinul (reia la rularea următoare)" % (dom, str(e)[:120]))
             continue
+        xclabel = {}   # orderName -> (are_eticheta_xc, {tracking})
+        xcawbs = {}    # orderName -> [(curier, awb_principal, {numere})] — pt garda de stare (DPD live)
+        xcdisp = {}    # orderName -> câmpul `dispatched` din listare (informativ, în TSV)
         for o in scanned:
             nm = o.get("orderName")
             if nm:
                 xorders.append((nm, o.get("orderId"), inv_doc(o) is not None))
+                xclabel[nm] = xc_label_trackings(o)
+                xcawbs[nm] = xc_label_awbs(o)
+                xcdisp[nm] = o.get("dispatched")
         n_inv = sum(1 for _, _, hi in xorders if hi)
         uninvoiced = [(nm, oid) for nm, oid, hi in xorders if not hi and oid]
         # 2) Shopify TARGETAT: verifică plata DOAR pt comenzile fără factură (mic + fresh),
@@ -7161,18 +7735,72 @@ def cmd_inv_bulk(a):
             print("\n══ %s ══  ⚠ Shopify auth/empty → skip" % dom); continue
         # 3) păstrează PLĂTITE + neanulate + fără refund + total>0
         todo, n_paid = [], 0
+        pre_guard = 0
+        manuale = _oh_facturate_fara_tag()
+        sarite = {}   # motiv -> [orderName]
+        trecute = []  # (nm, oid, s_) care au trecut de garda OH → garda de stare
         for nm, oid in uninvoiced:
             s_ = stat.get(str(oid).rsplit("/", 1)[-1])
             if not s_ or not s_["paid"] or s_["cancelled"] or s_["refunded"] > 0 or s_["total"] <= 0:
                 continue
+            pre_guard += 1
+            has_lab, xtrk = xclabel.get(nm, (False, set()))
+            mot = "exclus_manual" if str(nm).strip().upper() in excluse else oh_guard_motiv(s_, has_lab, xtrk, nm, manuale)
+            if mot:
+                sarite.setdefault(mot, []).append(nm)
+                if tsv is not None:
+                    _garda_tsv_rand(tsv, dom, nm, oid, mot, "%.2f" % s_["total"], int(has_lab), xcdisp.get(nm),
+                                    "|".join(sorted(xtrk)), "|".join(sorted(s_.get("tracking") or ())), "",
+                                    "ramburs" if _e_ramburs(s_.get("gateways")) else "card")
+                continue
+            trecute.append((nm, oid, s_))
+        # 4) GARDA DE STARE: DPD live pe etichetele xConnector ale celor rămase (fail-closed, vezi motiv_stare_colet)
+        awbs = []
+        for nm, oid, s_ in trecute:
+            live = s_.get("tracking") or set()
+            et = xcawbs.get(nm) or []
+            alese = [e for e in et if live and (e[2] & live)] or et
+            awbs.extend(e[1] for e in alese if e[1] and "dpd" in (e[0] or "").lower())
+        info = dpd_last_ops(awbs) if (dpd_u and dpd_p) else {}
+        n_stare = 0
+        for nm, oid, s_ in trecute:
+            has_lab, xtrk = xclabel.get(nm, (False, set()))
+            mot, det = motiv_stare_colet(s_, xcawbs.get(nm) or [], info, acum, asteptare_h)
+            plata = "ramburs" if _e_ramburs(s_.get("gateways")) else "card"
+            if tsv is not None:
+                _garda_tsv_rand(tsv, dom, nm, oid, mot or "de_facturat", "%.2f" % s_["total"], int(has_lab),
+                                xcdisp.get(nm), "|".join(sorted(xtrk)), "|".join(sorted(s_.get("tracking") or ())), det, plata)
+            if mot:
+                sarite.setdefault(mot, []).append(nm); n_stare += 1
+                continue
             todo.append((nm, oid, s_["total"])); n_paid += 1
+        n_garda = sum(len(v) for v in sarite.values()) - n_stare
         G["cand"] += len(todo); G["skip_inv"] += n_inv; G["paid"] += n_paid
+        G["pre_guard"] += pre_guard; G["garda"] += n_garda; G["stare"] += n_stare
+        for mot, lst in sarite.items():
+            G["garda_motive"][mot] = G["garda_motive"].get(mot, 0) + len(lst)
+            if mot in OH_GUARD_DE_VERIFICAT:
+                G["de_verificat"] += len(lst)
+            if mot in STARE_DE_CORECTAT:
+                G["de_corectat"] += len(lst)
         print("\n══ %s ══  [%s %s]" % (dom, con.get("type"), con.get("id")))
-        print("  comenzi xConnector: %d · cu factură: %d · fără factură: %d · din care PLĂTITE de facturat: %d" % (
-            len(xorders), n_inv, len(uninvoiced), len(todo)))
+        print("  comenzi xConnector: %d · cu factură: %d · fără factură: %d · PLĂTITE fără factură: %d · garda OH sare: %d · garda de stare sare: %d · de facturat: %d" % (
+            len(xorders), n_inv, len(uninvoiced), pre_guard, n_garda, n_stare, len(todo)))
+        for mot, lst in sorted(sarite.items(), key=lambda kv: -len(kv[1])):
+            eticheta = OH_GUARD_MOTIVE.get(mot) or STARE_MOTIVE.get(mot, mot)
+            garda = "garda stare" if mot in STARE_MOTIVE else "garda OH"
+            if mot in OH_GUARD_DE_VERIFICAT or mot in STARE_DE_CORECTAT:
+                # lista ÎNTREAGĂ: OH_GUARD_DE_VERIFICAT = nu le facturează nimeni automat dacă OH nu le are;
+                # STARE_DE_CORECTAT = PLĂTITE fără livrare confirmată (plată de corectat / de rambursat / de verificat)
+                print("    %s · %-54s %5d  %s:" % (garda, eticheta, len(lst),
+                                               "DE VERIFICAT ÎN OH" if mot in OH_GUARD_DE_VERIFICAT else "DE CORECTAT/VERIFICAT"))
+                for k in range(0, len(lst), 10):
+                    print("        " + " ".join(lst[k:k + 10]))
+            else:
+                print("    %s · %-54s %5d  (ex: %s)" % (garda, eticheta, len(lst), ", ".join(lst[:3])))
         # SAFETY: dacă aproape NICIUNA din comenzile plătite găsite în xConnector n-are factură ÎN xConnector,
         # magazinul facturează probabil ALTUNDE (SmartBill direct) → facturile nu apar aici → risc de DUBLĂ factură.
-        matched = n_inv + len(todo)
+        matched = n_inv + pre_guard
         if matched >= 20 and (n_inv / matched) < 0.10:
             print("  🚩 DOAR %.0f%% din comenzile plătite din xConnector au factură ÎN xConnector → %s facturează probabil ALTUNDE" % (
                 100.0 * n_inv / matched, dom))
@@ -7210,8 +7838,21 @@ def cmd_inv_bulk(a):
             done += 1
             time.sleep(pace)   # pacing adaptiv ≈28/min, SUB limita reală SmartBill de 30/fereastră
     print("\n" + "═" * 64)
-    print("TOTAL: candidați plătite-fără-factură=%d · %s · deja facturate(xConnector)=%d · erori=%d" % (
-        G["cand"], ("FACTURATE=%d" % G["inv"]) if a.apply else "DRY-RUN (0 emise)", G["skip_inv"], G["err"]))
+    print("TOTAL: plătite-fără-factură=%d · garda OH a sărit=%d · garda de stare a sărit=%d · candidați de facturat=%d · %s · deja facturate(xConnector)=%d · erori=%d" % (
+        G["pre_guard"], G["garda"], G["stare"], G["cand"], ("FACTURATE=%d" % G["inv"]) if a.apply else "DRY-RUN (0 emise)",
+        G["skip_inv"], G["err"]))
+    for mot, n in sorted(G["garda_motive"].items(), key=lambda kv: -kv[1]):
+        print("  %s · %-54s %6d" % ("garda stare" if mot in STARE_MOTIVE else "garda OH",
+                                   OH_GUARD_MOTIVE.get(mot) or STARE_MOTIVE.get(mot, mot), n))
+    if G["de_verificat"]:
+        print("  ⚠ %d comenzi sărite NU sunt sigur ale OH (listate mai sus, „DE VERIFICAT ÎN OH”): cele pe care OH le"
+              " socotește ale xConnector nu le mai facturează nimeni automat → garda_vs_oh.py le separă." % G["de_verificat"])
+    if G["de_corectat"]:
+        print("  ⚠ %d comenzi PLĂTITE în Shopify fără livrare confirmată de DPD (listate mai sus, „DE CORECTAT/VERIFICAT”):"
+              " ramburs marcat plătit greșit / card de rambursat / curier fără urmărire — NU se facturează." % G["de_corectat"])
+    if tsv is not None:
+        tsv.close()
+        print("  lista (TSV: sărite + de facturat, cu starea DPD): %s" % tsv_cale)
     if errmsgs:
         print("ERORI DE BUSINESS (NU rate-limit — necesită fix config SmartBill/produs, NU se rezolvă prin retry):")
         for msg, n in sorted(errmsgs.items(), key=lambda kv: -kv[1]):
@@ -7308,15 +7949,19 @@ def dpd_track_sync(awbs):
 
 def _dpd_state(desc):
     """Mapează descrierea DPD (EN) în delivered / refused / progress. CONSERVATOR: doar stările FINALE clare.
-    'Returned to Office'/'Prepared for Self-collecting' = ÎN CURS (poate fi redlivrat/ridicat), NU refuz/livrare."""
+    'Returned to Office'/'Prepared for Self-collecting' = ÎN CURS (poate fi redlivrat/ridicat), NU refuz/livrare.
+    RETURUL SE VERIFICĂ ÎNAINTEA LIVRĂRII: „Delivered Back to Sender" conține „delivered" — ordinea veche îl citea ca
+    livrat (29-sep-2026: 11 colete întoarse SK/HU/ORC de marcat PLĂTITE; 13–27 sep, 10 colete întoarse facturate).
+    'Administrative Closure' = închidere administrativă DPD, fără livrare confirmată → ÎN CURS (nu se încasează).
+    Unde există codul operației, folosește _dpd_op_state (livrat = numai codul -14)."""
     d = (desc or "").lower()
-    if any(k in d for k in ("not deliver", "undeliver", "unsuccess", "failed deliver")):
+    if ("back to sender" in d) or ("return to sender" in d) or ("returned to sender" in d) \
+       or ("returning to sender" in d) or ("returned to consignor" in d) or ("refus" in d) or ("reject" in d):
+        return "refused"
+    if any(k in d for k in ("not deliver", "undeliver", "unsuccess", "failed deliver", "administrative closure")):
         return "progress"
     if ("delivered" in d) or ("collected by" in d) or ("self-collected" in d) or ("picked up by" in d):
         return "delivered"
-    if ("refus" in d) or ("reject" in d) or ("returned to sender" in d) or ("return to sender" in d) \
-       or ("returning to sender" in d) or ("returned to consignor" in d):
-        return "refused"
     return "progress"
 
 
@@ -8150,7 +8795,7 @@ def main():
     ap.add_argument("--parcels", type=int, default=None, help="awb-make/regen: FORȚEAZĂ nr de colete (parcelCount). Implicit = AUTO din metafield Shopify (order xconnector.parcel-count, altfel custom.nr_cutii|nr_produse, ceil pe decimal). Parfumurile = 1.")
     ap.add_argument("--type", default="PARCEL", help="awb-make/regen: parcelType (PARCEL/ENVELOPE). Default PARCEL.")
     ap.add_argument("--notify", action="store_true", help="awb-make/regen/order-cancel: notifyCustomer.")
-    ap.add_argument("--force", action="store_true", help="order-cancel: încearcă anularea chiar dacă statusul de curier zice PLECAT (xConnector dă eroare dacă chiar a plecat).")
+    ap.add_argument("--force", action="store_true", help="order-cancel: încearcă anularea chiar dacă statusul de curier zice PLECAT (xConnector dă eroare dacă chiar a plecat). inv-bulk: trece doar peste plasa „<10%% facturate în xConnector”; NU ocolește garda OH / garda de stare (nici la inv-make / inv-regen).")
     ap.add_argument("--refund", action="store_true", help="order-cancel: returnează banii la anulare (OFF by default — COD n-are nevoie; comenzi plătite = decizie explicită).")
     ap.add_argument("--no-restock", action="store_true", dest="no_restock", help="order-cancel: NU repune stocul la anulare (restock ON by default).")
     ap.add_argument("--max-age-min", type=int, default=15, dest="max_age_min", help="fulfill: vârsta minimă în minute a comenzii unfulfilled ca să-i facă AWB (default 15).")
@@ -8158,6 +8803,7 @@ def main():
     ap.add_argument("--held-sweep-hours", type=int, default=HELD_SWEEP_DEFAULT_H, dest="held_sweep_hours", help="fulfill: la câte ore/magazin trece peste comenzile pe HOLD (bad-address/awb-esec) puse de cron → le eliberează pe cele devenite livrabile, ca regulile noi să le deblocheze. Default 6.")
     ap.add_argument("--no-held-sweep", action="store_true", dest="no_held_sweep", help="fulfill: dezactivează sweep-ul peste comenzile pe hold.")
     ap.add_argument("--lang", help="inv-make/regen: languageCode pt factură (ex ro/en).")
+    ap.add_argument("--garda-tsv", dest="garda_tsv", help="inv-bulk: scrie comenzile sărite de gărzi (OH + stare DPD) și cele de facturat într-un TSV (implicit env XC_INV_GARDA_TSV; fără = doar în log). Env: XC_INV_EXCLUDE=NUME,… (excluderi manuale), XC_INV_ASTEPTARE_ORE (implicit 24), XC_OH_FACTURATE=NUME,… (facturi OH manuale, fără tag).")
     ap.add_argument("--refund-id", dest="refund_id", help="inv-storno: Shopify refund ID (storno parțial pe un refund).")
     ap.add_argument("--address1"); ap.add_argument("--address2"); ap.add_argument("--city")
     ap.add_argument("--zip"); ap.add_argument("--province"); ap.add_argument("--phone"); ap.add_argument("--country")
