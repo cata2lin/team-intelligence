@@ -13,11 +13,17 @@ version: 2.0.0
              >> /root/Scripturi/logs/awb_zilnic.log 2>&1
 ```
 `awb_zilnic.sh` → `awb_zilnic.py`. Trimite pe grupul AWB (`120363418826898523@g.us`) etichetele de pe
-**Bonhaus.hu / Bonhaus.sk / Orice Redus** — magazine fără coadă de print pe stație, deci WhatsApp e
-singurul drum spre depozit. Fereastră: 14 zile pe DATA COMENZII (o comandă veche poate primi eticheta azi).
+**Bonhaus.hu / Bonhaus.sk / Orice Redus** care merg la **BARTOLOMEU**. Fereastră: 14 zile pe DATA COMENZII
+(o comandă veche poate primi eticheta azi).
+
+⚠️ **Din 8-sep-2026 NU mai trimite lotul Uzinei 2** (`STATII = ("BARTOLOMEU",)`): HU/SK/ORC sunt în `SPLIT_STORES_M`
+din 3-aug, deci Uzina 2 le vede în coada ei de print (`print_queue --machine uzina2`), iar descărcarea etichetei le
+marca `downloaded` în xConnector și i le FURA din coadă. Comenzile Uzinei 2 se sar fără descărcare („lăsate în coada
+stației lor"), iar `--dry` nu descarcă nimic. Versiunea din git a rămas cu ambele stații până pe 30-sep (VPS-ul avea
+fixul) — o copiere din git pe VPS ar fi repornit furtul din coadă.
 
 **Din 27-aug-2026 face două lucruri în plus:**
-1. **Câte un PDF pe stație** — `AWB-BARTOLOMEU-<n>-<zi>.pdf` + `AWB-UZINA2-<n>-<zi>.pdf`, două mesaje.
+1. **Câte un PDF pe stație** — `AWB-BARTOLOMEU-<n>-<zi>.pdf` (lotul `AWB-UZINA2-…` e oprit din 8-sep, vezi mai sus).
 2. **Trimite doar ce N-A PLECAT** — cere starea la curier (`awb_track.py --json`) și păstrează doar
    `generated`. Înainte nu filtra deloc: pe 27-aug, **11 din 27 de etichete erau pentru colete deja
    predate curierului**.

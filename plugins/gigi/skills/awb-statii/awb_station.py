@@ -11,11 +11,13 @@ def build_and_send(eticheta, orders):
         sh, xc, o, doc, trk, n = A.resolve(od)
         if not o or not doc:
             sarite.append(od); continue
-        url = doc.get("url") or doc.get("awbPdfUrl") or (
+        url = doc.get("url") or doc.get("awbPdfUrl")
+        # rezerva pe ruta canonica cere cheia xConnector (fara ea: 401); URL-ul semnat din document NU primeste antetul
+        req = urllib.request.Request(url) if url else urllib.request.Request(
             A.X.XBASE + "/api/documents/shipping-labels?connectorId=%s&trackingNumber=%s"
-            % (doc.get("connectorId"), urllib.parse.quote(str(trk or ""))))
+            % (doc.get("connectorId"), urllib.parse.quote(str(trk or ""))), headers=dict(getattr(xc, "h", None) or {}))
         try:
-            with urllib.request.urlopen(url, timeout=90) as r: pdf = r.read()
+            with urllib.request.urlopen(req, timeout=90) as r: pdf = r.read()
         except Exception as e:
             sarite.append("%s(dl:%s)" % (od, str(e)[:25])); continue
         if not pdf.startswith(b"%PDF-"):
