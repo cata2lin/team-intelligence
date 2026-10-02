@@ -301,6 +301,15 @@ uv run scripts/shopify_theme.py get snippets/meta-tags.liquid --prefix GRAN --th
 uv run scripts/shopify_theme.py grep "BreadcrumbList" --prefix GRAN --theme <ID>
 uv run scripts/shopify_theme.py put sections/foo.liquid --file /tmp/foo.liquid --prefix GRAN --theme <ID>   # WRITES
 ```
+**`put` now guards itself** (the `ask` risk tier is not a real gate — the team runs approvals in
+seamless mode): it **refuses** a theme whose role is `main` unless you also pass `--allow-live`, it
+**backs up** the previous version to `~/.shopify-theme-backups/<prefix>/<theme>/` and prints the
+revert command, and it **reads the asset back** to confirm it landed. ⚠️ The asset API serves the
+PREVIOUS body for a few seconds after an overwrite, so the read-back retries before reporting a
+difference — a single read reports a mismatch on every successful write. Writing through Second
+Brain: `run_skill('gigi:shopify-stores', action='theme-put', params={'prefix':…,'theme':…,'key':…,'value':…})`
+(pass the full new file contents in `value` — it replaces the asset, it is not a patch).
+
 **SAFETY:** editing the **main** theme edits the LIVE storefront. Duplicate the live theme (admin → Online Store → Themes → Duplicate), edit the COPY, preview with `?preview_theme_id=<ID>`, publish only on explicit confirmation (`PUT themes/<id>.json {"theme":{"id":<id>,"role":"main"}}`; revert by republishing the old one). **Curl on a storefront URL hits Shopify's bot/edge cache → unreliable for QA**; after a theme edit the public URL can serve stale HTML for minutes — verify in a real logged-out browser or via `?preview_theme_id` (preview bypasses the page cache).
 
 **`scripts/publish_blog.py`** — publish an **existing** `.docx` (+ photo `.zip`) as a blog article on any store: uploads images to the Shopify CDN, inlines them per H2, sets SEO meta + an ASCII handle. Defaults to **DRAFT**; `--publish` for live.
