@@ -197,7 +197,8 @@ def main():
     body = """<p>Comenzi unde <b>nr. de colete de pe ultimul AWB</b> difera de ce calculeaza regula acum
     (densitati din <a href="https://scripts.arona.ro/colete">scripts.arona.ro/colete</a>).</p>
     <p><b>%d diferente</b>, din care <b>%d inca reparabile</b> (coletul n-a plecat):<br>
-    <code>uv run xconnector.py awb-regen --order X --parcels N --apply</code></p>
+    <code>uv run xconnector.py awb-regen --order X --parcels N</code> = proba; executia = randul
+    „→ execuție” pe care il afiseaza proba (cere si --awb, eticheta de refacut)</p>
     <table cellpadding=6 style="border-collapse:collapse;font:14px system-ui">
     <tr style="background:#eee"><th>Comanda</th><th>Magazin</th><th>AWB are</th><th>Regula zice</th>
     <th>Status</th><th>Continut</th></tr>%s</table>

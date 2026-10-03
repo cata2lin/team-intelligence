@@ -17,13 +17,23 @@ def _kb(k): return subprocess.run(["uv","run",KB,"secret-get",k],capture_output=
 for s in ("DATABASE_URL_AWBPRINT","DATABASE_URL_METRICS"):
     if not os.environ.get(s): os.environ[s]=_kb(s)
 def _env():
-    e=dict(os.environ); e.pop("VIRTUAL_ENV",None); return e
+    e=dict(os.environ); e.pop("VIRTUAL_ENV",None); e["PYTHONIOENCODING"]="utf-8"; return e
 from mcp.server.fastmcp import FastMCP
 mcp=FastMCP("arona-fulfillment")
 XC=os.path.join(HERE,"xconnector.py"); CS=os.path.join(HERE,"..","cs-360","cs360.py")
 def _run(script, args, timeout=180):
-    r=subprocess.run(["uv","run",script]+args,capture_output=True,text=True,env=_env(),timeout=timeout)
-    return ((r.stdout or "").strip() or "(fără output)")+(("\n[stderr] "+(r.stderr or "")[:400]) if r.returncode!=0 else "")
+    # UTF-8 la ambele capete: cu codecul consolei (cp1252 pe Windows), „═ ✅ ⛔" din ieșire nu se decodau și unealta
+    # întorcea „(fără output)" chiar după o acțiune executată.
+    try:
+        r=subprocess.run(["uv","run",script]+args,capture_output=True,text=True,encoding="utf-8",errors="replace",env=_env(),timeout=timeout)
+    except subprocess.TimeoutExpired as e:   # pe Windows, `uv run` nu-și oprește copilul: ce a apucat să spună rămâne
+        out = e.stdout or ""
+        if isinstance(out, bytes):
+            out = out.decode("utf-8", "replace")
+        return ((out.strip() + "\n") if out.strip() else "") + (
+            "⚠ Comanda a depășit %d s. Dacă era o acțiune cu apply=true, POATE să fi fost executată: verifică starea "
+            "comenzii (apply=false) înainte de a repeta." % timeout)
+    return ((r.stdout or "").strip() or "(fără output)")+(("\n[cod de ieșire %d] %s" % (r.returncode,(r.stderr or "")[:400])) if r.returncode!=0 else "")
 
 # ─────────── CUSTOMER SERVICE (cs-360) ───────────
 @mcp.tool()
@@ -72,18 +82,23 @@ def xc_not_downloaded(min_age_hours: int = 48) -> str:
     return _run(XC,["not-downloaded","--min-age-hours",str(min_age_hours)])
 
 # ─────────── ACȚIUNI (dry-run default) ───────────
+def _cine(agent, motiv): return (['--agent',agent] if agent else [])+(['--motiv',motiv] if motiv else [])
 @mcp.tool()
-def xc_order_cancel(order: str, apply: bool = False, force: bool = False) -> str:
-    """Anulează o comandă (garda „plecată" refuză dacă a fost expediată; force=true forțează). DRY-RUN dacă apply=false."""
-    return _run(XC,["order-cancel","--order",order]+(["--apply"] if apply else [])+(["--force"] if force else []))
+def xc_order_cancel(order: str, apply: bool = False, force: bool = False, agent: str = "", motiv: str = "") -> str:
+    """Anulează o comandă. Întreabă ÎNTÂI Order Hub: el anulează eticheta la curier, apoi comanda, și rambursează singur ce e plătit cu cardul (force nu există acolo); xConnector doar dacă Order Hub nu cunoaște comanda. agent = cine cere (ajunge în istoricul comenzii din Order Hub), motiv = de ce (în nota comenzii). DRY-RUN dacă apply=false; citește planul probei înainte de apply=true."""
+    return _run(XC,["order-cancel","--order",order]+(["--apply"] if apply else [])+(["--force"] if force else [])+_cine(agent,motiv),timeout=300)
 @mcp.tool()
 def xc_awb_make(order: str, apply: bool = False) -> str:
-    """Fă AWB pt o comandă (nr. colete auto din metafield). DRY-RUN dacă apply=false."""
-    return _run(XC,["awb-make","--order",order]+(["--apply"] if apply else []))
+    """Fă AWB prin xConnector. Se refuză pe o comandă care are deja AWB în Order Hub (acolo: xc_awb_regen) și nu eliberează hold-urile puse de Order Hub. Folosește-l doar când Order Hub cere eticheta făcută manual în xConnector. DRY-RUN dacă apply=false."""
+    return _run(XC,["awb-make","--order",order]+(["--apply"] if apply else []),timeout=300)
 @mcp.tool()
-def xc_awb_void(order: str, apply: bool = False) -> str:
-    """Anulează AWB-ul unei comenzi. DRY-RUN dacă apply=false."""
-    return _run(XC,["awb-void","--order",order]+(["--apply"] if apply else []))
+def xc_awb_void(order: str, apply: bool = False, agent: str = "", motiv: str = "") -> str:
+    """OPREȘTE o comandă a Order Hub: anulează AWB-ul și o ține pe hold (se eliberează din Order Hub). Pe o comandă pe care Order Hub n-o cunoaște doar anulează AWB-ul în xConnector. NU e pasul întâi din „anulez și fac alt AWB" — pentru asta e xc_awb_regen. DRY-RUN dacă apply=false."""
+    return _run(XC,["awb-void","--order",order]+(["--apply"] if apply else [])+_cine(agent,motiv),timeout=300)
+@mcp.tool()
+def xc_awb_regen(order: str, parcels: int = 0, awb: str = "", apply: bool = False, agent: str = "", motiv: str = "") -> str:
+    """Reface AWB-ul unei comenzi (anulează + face altul, pe același curier), prin Order Hub. Întâi probă (apply=false): arată eticheta de refăcut și numărul de colete. Execuția (apply=true) cere parcels și awb = eticheta din probă; o cerere repetată pe aceeași etichetă e refuzată, deci nu iese a treia. Se folosește și după o schimbare de adresă pe o comandă care are deja AWB — la 1–2 minute după schimbare, ca adresa nouă să fi ajuns peste tot. Pe o comandă pe care Order Hub n-o cunoaște: anulează + reface prin xConnector."""
+    return _run(XC,["awb-regen","--order",order]+(["--parcels",str(parcels)] if parcels else [])+(["--awb",awb] if awb else [])+(["--apply"] if apply else [])+_cine(agent,motiv),timeout=300)
 @mcp.tool()
 def xc_inv_make(order: str, apply: bool = False) -> str:
     """Creează factură pt o comandă (SmartBill). DRY-RUN dacă apply=false."""

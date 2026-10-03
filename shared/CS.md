@@ -44,14 +44,40 @@
 ## 4. 🛠️ ACȚIUNI (modific / anulez / refac) — `gigi:cs-actions` sau `gigi:xconnector`
 | Vreau să … | Comandă (xConnector) | Exemplu |
 |---|---|---|
-| **anulez** o comandă (sigur, cu gardă „plecată") | `order-cancel` | `xconnector.py order-cancel --order GT44004 --apply` (refuză dacă a plecat; `--force` forțează) |
-| **modific adresa** (la o valoare dată) | `addr-set` | `xconnector.py addr-set --order EST123 --city "Cluj" --zip 400001 --address1 "…" --make-awb --apply` |
-| **schimb conținutul** (COD/Releaseit, line items blocate) | cancel + replace | `order-cancel … --apply` apoi `gigi:cs-actions place` (comandă nouă COD) → AWB din cron |
-| **fac AWB** | `awb-make` | `xconnector.py awb-make --order GT123 --apply` (nr. colete AUTO din metafield) |
-| **refac AWB cu N colete** | `awb-regen` | `xconnector.py awb-regen --order GRAND16613 --parcels 3 --apply` |
-| **anulez AWB** | `awb-void` | `xconnector.py awb-void --order GT123 --apply` |
+| **anulez** o comandă | `order-cancel` | `xconnector.py order-cancel --order GT123 --agent Raluca --motiv "client s-a răzgândit"` = probă; apoi același rând cu `--apply`. Prin Order Hub: eticheta întâi, apoi comanda; refuză dacă a plecat |
+| **modific adresa** (la o valoare dată) | `addr-set` | `xconnector.py addr-set --order EST123 --city "Cluj" --zip 400001 --address1 "…" --apply`. Dacă comanda are deja AWB, eticheta rămâne cu adresa veche → după 1–2 minute, `awb-regen` |
+| **schimb conținutul** (COD/Releaseit, line items blocate) | cancel + replace | `order-cancel … --apply` apoi `gigi:cs-actions place` (comandă nouă COD) → AWB-ul îl face Order Hub |
+| **fac AWB** | Order Hub | AWB-ul îl face Order Hub (singur, sau „Ship now” din Order Hub). `xconnector.py awb-make` doar când Order Hub cere eticheta făcută manual în xConnector: se refuză pe o comandă care are deja AWB și nu eliberează hold-urile puse de Order Hub |
+| **refac AWB** (alt nr. de colete, adresă schimbată) | `awb-regen` | probă: `xconnector.py awb-regen --order GRAND123 --parcels 3`; execuție: rândul „→ execuție” afișat de probă (`… --parcels 3 --awb <eticheta> --apply`) |
+| **opresc** o comandă (anulez AWB, rămâne pe hold) | `awb-void` | `xconnector.py awb-void --order GT123 --apply`. NU e pasul întâi din „anulez și fac alt AWB” (acela e `awb-regen`); hold-ul se eliberează din Order Hub |
 | **factură** (creez/anulez/storno/regen) | `inv-make / inv-cancel / inv-storno / inv-regen` | `xconnector.py inv-make --order GT123 --apply` |
 | comandă nouă COD / swap / resend gratis | `gigi:cs-actions` | rezolvă clientul + plasează/înlocuiește |
+
+> 🔴 **Din 2-oct-2026 acțiunile pe comandă și AWB întreabă ÎNTÂI Order Hub** (`order-cancel`, `awb-void`, `awb-regen`,
+> `awb-make`, `addr-set --make-awb`, `gigi:cs-actions cancel`). Order Hub face etichetele pe toate magazinele — direct la
+> curier, unde xConnector nu le vede, sau prin xConnector — și ține hold-urile (dublură, blocklist, „de confirmat”). O
+> anulare prin xConnector anula comanda în Shopify și lăsa eticheta vie la curier (cinci comenzi, 29-sep). Acum hotărăște
+> Order Hub pe orice comandă pe care o cunoaște: anularea, oprirea și refacerea trec prin xConnector doar când Order Hub
+> răspunde că n-o cunoaște, iar un AWB nou (`awb-make`) doar pe o comandă fără AWB viu în Order Hub.
+> - **Întâi proba** (fără `--apply`): arată planul Order Hub — ce AWB anulează, ce se întâmplă cu stocul și cu banii.
+>   `--agent <Nume>` ajunge în istoricul comenzii, `--motiv "…"` în nota ei (la anulare și la oprire).
+> - **Bani:** o comandă plătită cu cardul e rambursată și i se stornează factura automat (în plan: „Bani: …”). `--refund`,
+>   `--notify` și `--force` nu se aplică. **Stoc:** se repune; `--no-restock` ca să nu.
+> - **Refacerea** (`awb-regen --apply`) cere `--parcels` și `--awb` (eticheta din probă): repetată pe aceeași etichetă,
+>   Order Hub o refuză, deci nu iese a treia etichetă. Reface pe același curier; alt curier → din Order Hub. După o
+>   schimbare de adresă, refă eticheta abia după 1–2 minute (adresa nouă trebuie să fi ajuns peste tot).
+> - **Coduri de ieșire cu `--apply`:** 3 = refuz (plecat, etichetă pe care Order Hub n-o cunoaște, Shopify a refuzat,
+>   hold pus de Order Hub); 2 = nimic scris prin xConnector: fără un răspuns valid de la Order Hub (cheia `OH_CS_TOKEN`
+>   lipsă, eroare, timeout) sau comanda nu s-a putut citi din Shopify — fă acțiunea din https://orderhub.arona.ro/app/orders.
+>   Excepție: la `awb-regen`, un 2 cu „xConnector are altă adresă decât Shopify” înseamnă că adresa nouă n-a ajuns încă
+>   în xConnector — reîncearcă peste 1–2 minute (din Order Hub doar dacă adresa din xConnector e cea bună).
+> - **„Cererea a plecat, dar răspunsul n-a venit”** (tot cod 2): poate să fi fost executată în Order Hub. Rulează proba
+>   înainte de a repeta.
+> - **`shopify_refuz`:** eticheta e anulată la curier, comanda rămâne deschisă în Shopify, Order Hub deschide tichet CS
+>   (azi: Belasil, până se redeschide aplicația Order Hub în admin).
+> - **Ramburs plătit apoi cu cardul:** eticheta fără ramburs o reface Order Hub. Emailul „[COD dublu]” doar raportează
+>   comenzile lui; nu le mai reface de aici.
+> - Facturile (`inv-*`, cu garda OH) și cronul `fulfill` nu trec prin Order Hub.
 
 ## 5. 🖨️ PRINT etichete în depozit (Windows + Chrome)
 > 🔴 **Din 24–25 sep 2026 AWB-urile DPD se fac din ORDER HUB (contul `dpd-ro-arona`), nu din xConnector.** Etichetele astea

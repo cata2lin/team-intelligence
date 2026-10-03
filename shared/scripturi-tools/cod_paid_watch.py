@@ -7,7 +7,9 @@ Semnal (Shopify): gateway COD ('Plată ramburs'/'Ramburs'/'Cash on Delivery') IN
   + o tranzactie SALE/CAPTURE SUCCESS pe card (shopify_payments/stripe/netopia/...) + financial_status=PAID.
 Clasificare (AWBprint aggregated_status):
   - NEPLECAT + are AWB  -> RECUPERABIL: se poate anula AWB-ul si reface FARA ramburs (comanda e platita
-                          => xConnector pune COD din soldul neplatit = 0). Cu --recall executa void+make.
+                          => xConnector pune COD din soldul neplatit = 0). Cu --recall executa void+make, dar DOAR
+                          pe o comanda pe care Order Hub n-o cunoaste: pe ale lui, eticheta fara ramburs o reface
+                          el (services/ramburs_platit_online); aici ramane doar raportul.
   - PLECAT/LIVRAT       -> prea tarziu: curierul incaseaza cash -> REFUND pe card, ramane la CS/finante.
   - fara AWB inca       -> fulfill-ul il va face oricum PREPAID (comanda e platita) -> doar semnalam.
 
@@ -101,22 +103,43 @@ def _dispatched_live(name, shop):
 
 def recall(name, shop):
     """Void AWB + refacere (comanda e platita => AWB nou fara ramburs). Reutilizeaza CLI-ul testat.
-    GARDA: re-verific LIVE ca NU a plecat inainte de void (AWBprint e desincronizat)."""
+    GARDA: re-verific LIVE ca NU a plecat inainte de void (AWBprint e desincronizat).
+    DOAR pe o comandă pe care Order Hub n-o cunoaște. Pe ale lui, rambursul plătit apoi cu cardul îl tratează el
+    (services/ramburs_platit_online: anulează eticheta cu ramburs și o reface fără); o refacere și de aici ar anula, la
+    fiecare rulare, eticheta abia refăcută — poate deja printată. Fără un răspuns valid de la Order Hub nu se știe a
+    cui e eticheta: nu se atinge nimic."""
     if _dispatched_live(name, shop):
         return "PLECAT-skip"          # a plecat intre timp -> nu-l ating, ramane la email/CS
+    OH, r = X._oh_intreaba(lambda OH, tok: OH.stie(name, "cod-paid-watch", token=tok))   # probă, fără nicio scriere
+    if OH is None or r.stare not in (OH.DECIS, OH.NECUNOSCUTA):
+        return "OH-FARA-RASPUNS:" + (r.mesaj if OH is not None else "oh_client.py lipsește de lângă xconnector.py")
+    if r.stare == OH.DECIS:
+        if r.rezultat == "plecat":       # Order Hub a întrebat curierul: coletul a plecat (AWBprint e în urmă)
+            return "PLECAT-skip"
+        return "ORDER-HUB" if r.rezultat == "previzualizare" else "ORDER-HUB:" + (r.rezultat or "?")
     env = dict(os.environ)
     def run(args):
         # 300s: void/make lovesc xConnector cu poll — 120s era prea strâns și un void lent (EST221087,
         # 27-iul) arunca TimeoutExpired care omora tot batch-ul înainte să ajungă la comenzile următoare.
         return subprocess.run([sys.executable, "xconnector.py"] + args, cwd=XCDIR,
                               capture_output=True, text=True, timeout=300, env=env)
-    run(["awb-void", "--order", name, "--apply"])
-    import time; time.sleep(4)
-    run(["awb-make", "--order", name, "--apply"])
+    # Order Hub tocmai a spus că nu cunoaște comanda. awb-void și awb-make îl întreabă din nou înainte de orice scriere.
+    # Anularea contează doar cu „✅ anulat": calea xConnector tipărește „❌ …" la un refuz și iese tot cu 0. Iar eticheta
+    # nouă contează doar dacă diferă de cea veche.
+    cine = ["--agent", "cod-paid-watch"]
+    v = run(["awb-void", "--order", name, "--apply"] + cine)
+    if v.returncode != 0 or "✅ anulat" not in (v.stdout or ""):
+        return None
+    vechi = set(re.findall(r"tracking (\d{9,})", v.stdout or ""))
+    import time
+    for pauza in (4, 8, 12):   # Shopify arată eticheta anulată încă câteva secunde, iar awb-make o ia drept vie (cod 3)
+        time.sleep(pauza)
+        if run(["awb-make", "--order", name, "--apply"] + cine).returncode not in (2, 3):
+            break
     time.sleep(4)
     L = run(["links", "--order", name]).stdout
     m = re.search(r"AWB (\d{9,})", L)
-    return m.group(1) if m else None
+    return m.group(1) if (m and m.group(1) not in vechi) else None
 
 
 def send_email(to, sender, subject, body):
@@ -171,19 +194,34 @@ def main():
             except Exception as e:
                 # IZOLARE PER-COMANDĂ: un timeout/eroare pe O comandă NU mai abortează restul buclei.
                 # (27-iul: void-ul EST221087 a dat TimeoutExpired → a omorât rularea ÎNAINTE de NUBRA10929,
-                #  care a plecat între timp cu ramburs = dublă încasare.) Comanda e platită → fulfill-ul de
-                #  15min reface AWB-ul prepaid oricum; plasa de siguranță (email refund CS) rămâne.
-                recall_note[h["name"]] = "recall EȘUAT (%s) → fulfill-ul de 15min reface prepaid" % type(e).__name__
+                #  care a plecat între timp cu ramburs = dublă încasare.) Plasa de siguranță (email CS) rămâne.
+                recall_note[h["name"]] = ("recall EȘUAT (%s) → stare necunoscută: verificați comanda (eticheta cu ramburs "
+                                          "poate fi încă vie)" % type(e).__name__)
                 print("    ⚠️ %s recall a dat eroare (%s) → continui cu următoarele" % (h["name"], type(e).__name__))
                 continue
             if awb == "PLECAT-skip":
                 recall_note[h["name"]] = "a plecat între timp → NU refăcut (rămâne refund CS)"
                 print("    ⛔ %s a plecat între timp → nu rechem" % h["name"])
+            elif awb == "ORDER-HUB":
+                recall_note[h["name"]] = ("comandă a Order Hub, cu etichetă vie → o tratează el (o reface fără ramburs "
+                                          "sau o trimite la CS); nerefăcut de aici — verificați în Order Hub")
+                print("    ℹ %s e a Order Hub → o tratează el, nu rechem de aici" % h["name"])
+            elif str(awb).startswith("ORDER-HUB:"):
+                recall_note[h["name"]] = ("comandă a Order Hub (%s) → nerefăcut de aici; verificați în Order Hub"
+                                          % awb.split(":", 1)[1])
+                print("    ℹ %s e a Order Hub (%s) → nu rechem de aici" % (h["name"], awb.split(":", 1)[1]))
+            elif str(awb).startswith("OH-FARA-RASPUNS"):
+                motiv = awb.split(":", 1)[1] if ":" in awb else ""
+                recall_note[h["name"]] = ("fără răspuns valid de la Order Hub (%s) → nu se știe a cui e eticheta: "
+                                          "nerefăcut; eticheta cu ramburs poate fi încă vie — verificați în Order Hub"
+                                          % motiv)
+                print("    ⚠️ %s: fără răspuns valid de la Order Hub (%s) → nu rechem" % (h["name"], motiv))
             elif awb:
                 recalled_ok.append(h); recall_note[h["name"]] = "AWB refăcut %s (verificați ramburs pe eticheta DPD)" % awb
                 print("    ↻ %s → AWB nou %s (verificați prepaid pe eticheta DPD)" % (h["name"], awb))
             else:
-                recall_note[h["name"]] = "refacere EȘUATĂ (fulfill-ul de 15min o reface prepaid)"
+                recall_note[h["name"]] = ("refacere EȘUATĂ → verificați comanda: eticheta cu ramburs poate fi încă vie, "
+                                          "sau comanda a rămas fără etichetă")
                 print("    ⚠️ %s refacere eșuată" % h["name"])
 
     # email la CS: plecatele (refund) + toate recuperabilele (fie „refac OFF", fie rezultatul recall-ului,
