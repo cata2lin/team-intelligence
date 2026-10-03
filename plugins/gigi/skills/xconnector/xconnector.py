@@ -535,14 +535,38 @@ def shopify_order_id(name, st):
     return edges[0]["node"].get("legacyResourceId") if edges else None
 
 
+OH_APP = "order hub"   # `heldByApp.title` al hold-urilor puse de Order Hub (măsurat pe 6 magazine, 2-oct-2026)
+
+
+def _holduri_oh(fo):
+    """Notele hold-urilor puse de Order Hub pe un fulfillment order ([] = niciunul)."""
+    return [(h.get("reasonNotes") or "")[:90] for h in (fo.get("fulfillmentHolds") or [])
+            if ((h.get("heldByApp") or {}).get("title") or "").strip().lower() == OH_APP]
+
+
+def shopify_holds_oh(shop, token, name):
+    """Notele hold-urilor puse de Order Hub pe fulfillment order-ele ON_HOLD ale comenzii: [] = niciunul,
+    None = nu s-a putut citi (atunci nu se știe al cui e hold-ul, deci apelantul nu eliberează nimic)."""
+    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ fulfillmentOrders(first:10){ edges{ node{ '
+         'status fulfillmentHolds{ reasonNotes heldByApp{ title } } } } } } } } }') % (name or "").replace('"', "")
+    d = shopify_gql(shop, token, q)
+    edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
+    if not edges or d.get("errors"):
+        return None
+    fos = ((edges[0]["node"].get("fulfillmentOrders") or {}).get("edges")) or []
+    return [x for fo in fos if fo["node"].get("status") == "ON_HOLD" for x in _holduri_oh(fo["node"])]
+
+
 def shopify_release_holds(shop, token, name):
     """Eliberează HOLD-urile de fulfillment ale comenzii (ca să se poată face AWB). (n_eliberate, [motive])."""
     q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ fulfillmentOrders(first:10){ edges{ node{ '
-         'id status fulfillmentHolds{ reason } } } } } } } }') % (name or "").replace('"', "")
+         'id status fulfillmentHolds{ reason reasonNotes heldByApp{ title } } } } } } } } }') % (name or "").replace('"', "")
     d = shopify_gql(shop, token, q)
     edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
     if not edges:
-        return 0, []
+        return 0, [], []
+    if d.get("errors"):   # răspuns parțial: nu se știe al cui e fiecare hold → nu se eliberează niciunul
+        return 0, [], ["hold-uri necitite din Shopify"]
     fos = ((edges[0]["node"].get("fulfillmentOrders") or {}).get("edges")) or []
     # NU elibera hold-uri LEGITIME (fraudă/stoc/plată) — alea NU trebuie expediate automat.
     protected = {"HIGH_RISK_OF_FRAUD", "INVENTORY_OUT_OF_STOCK", "AWAITING_PAYMENT"}
@@ -555,6 +579,10 @@ def shopify_release_holds(shop, token, name):
         if any(r in protected for r in fo_reasons):
             skipped += [r for r in fo_reasons if r in protected]
             continue  # hold legitim → îl las (NU fac AWB peste fraudă/stoc/plată)
+        ale_oh = _holduri_oh(n)
+        if ale_oh:   # pus de Order Hub (dublură, blocklist, „de confirmat", oprire…) → se eliberează doar din Order Hub
+            skipped += ["Order Hub: %s" % (x or "fără notă") for x in ale_oh]
+            continue
         m = ('mutation{ fulfillmentOrderReleaseHold(id:"%s"){ fulfillmentOrder{ status } userErrors{ message } } }') % n["id"]
         r = shopify_gql(shop, token, m)
         errs = (((r.get("data") or {}).get("fulfillmentOrderReleaseHold") or {}).get("userErrors")) or []
@@ -664,6 +692,21 @@ def cmd_awb(a):
         print("  ✅ %d pus în hold." % ok); return
 
     # create = eliberează hold-ul → Flow 'hold released" → Create AWB
+    if not _oh_lasa_awb_nou(a, "awb-create"):
+        return
+    ale_oh = shopify_holds_oh(shop, token, a.order)
+    if ale_oh is None:
+        print("  ⚠ Hold-urile comenzii %s nu s-au putut citi din Shopify → nu se știe dacă e unul pus de Order Hub; nu"
+              " eliberez nimic. Reîncearcă." % a.order)
+        if a.apply:
+            sys.exit(OH_FARA_RASPUNS)
+        return
+    if ale_oh:
+        print("  ⛔ Hold pus de Order Hub (%s) → nu-l eliberez de aici. Se eliberează din Order Hub: %s"
+              % ("; ".join(x or "fără notă" for x in ale_oh), OH_UI_COMENZI))
+        if a.apply:
+            sys.exit(OH_REFUZ)
+        return
     held = [f for f in fos if f["status"] == "ON_HOLD"]
     if not held:
         print("  Comanda NU e în hold → Flow-ul hold-released nu se declanșează.")
@@ -675,12 +718,15 @@ def cmd_awb(a):
 
 
 def release_hold(shop, token, name):
-    """eliberează hold-ul pe fulfillment-order-ele ON_HOLD ale comenzii. (nr eliberate, nr held)"""
+    """eliberează hold-ul pe fulfillment-order-ele ON_HOLD ale comenzii. (nr eliberate, nr held)
+    O comandă cu un hold pus de Order Hub (sau ale cărei hold-uri nu se pot citi) rămâne neatinsă."""
     node = find_order(shop, token, name)
     if not node:
         return 0, 0
     fos = [e["node"] for e in ((node.get("fulfillmentOrders") or {}).get("edges") or [])]
     held = [f for f in fos if f["status"] == "ON_HOLD"]
+    if held and shopify_holds_oh(shop, token, name) != []:
+        return 0, len(held)
     rel = 0
     for f in held:
         m = 'mutation{ fulfillmentOrderReleaseHold(id:"%s"){ userErrors{message} } }' % f["id"]
@@ -720,7 +766,10 @@ def cmd_awb_auto(a):
                 node = find_order(st["shopDomain"], st["adminToken"], name)
                 fos = [e["node"] for e in ((node or {}).get("fulfillmentOrders", {}).get("edges") or [])] if node else []
                 if any(f["status"] == "ON_HOLD" for f in fos):
-                    print("  [dry] aș elibera %s (adresă validă, în hold) → AWB" % name)
+                    if shopify_holds_oh(st["shopDomain"], st["adminToken"], name) != []:
+                        print("  [dry] %s: hold pus de Order Hub (sau necitit) → rămâne în hold" % name)
+                    else:
+                        print("  [dry] aș elibera %s (adresă validă, în hold) → AWB" % name)
                 continue
             r, _ = release_hold(st["shopDomain"], st["adminToken"], name)
             rel += r
@@ -4160,9 +4209,10 @@ def _sku_box_map_get(sku):
         return None
 
 
-def order_parcel_count(shop, token, name):
+def order_parcel_count(shop, token, name, strict=False):
+    """`strict`: None când comanda nu s-a putut citi din Shopify, și la un răspuns parțial (altfel 1, ca până acum)."""
     if not shop or not token or not name:
-        return 1
+        return None if strict else 1
     # nr colete REAL = order xconnector.parcel-count (total deja calculat), altfel cutii din produs.
     # NU folosim `custom.nrproduse` (= nr PRODUSE, există doar pe parfumuri GT/Esteban, care n-au colete multiple → 1).
     q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ '
@@ -4172,8 +4222,8 @@ def order_parcel_count(shop, token, name):
          'k2: metafield(namespace:"custom", key:"nr_produse"){ value } } } } } } } } }') % name.replace('"', "")
     d = shopify_gql(shop, token, q)
     edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
-    if not edges:
-        return 1
+    if not edges or (strict and d.get("errors")):
+        return None if strict else 1
     node = edges[0]["node"]
     # cutii din produs + DEFALCARE PE STAȚIE (Depozit↔Uzina 2) pt magazinele cu stoc împărțit
     slug = (shop or "").split(".")[0].lower()
@@ -4462,6 +4512,9 @@ def awbprint_phone_sibling(fp, order_number, window_hours=48):
 
 
 def cmd_awb_make(a, _resolved=None):
+    # `_resolved` = chemat din addr-set, care a întrebat deja Order Hub
+    if not _resolved and not _oh_lasa_awb_nou(a, "awb-make"):
+        return
     sh, xc, o = _resolved or resolve_order(a.order, a, a.days)
     if not o:
         print("Comanda %s negăsită%s." % (a.order, " în %s" % a.shop if a.shop else " (căutat în toate)")); return
@@ -4474,6 +4527,13 @@ def cmd_awb_make(a, _resolved=None):
     if not con:
         _ask_connector(cons); return
     st = {t.get("shopDomain"): t for t in load_shopify_tokens()}.get(sh["shopDomain"])
+    ale_oh = shopify_holds_oh(st["shopDomain"], st["adminToken"], a.order) if st else []
+    if ale_oh:   # și la probă: altfel planul ar arăta un AWB pe care execuția nu-l face (hold-ul lui nu se eliberează)
+        print("  ⛔ %s e pe hold pus de Order Hub (%s) → nu fac AWB peste el. Se eliberează din Order Hub: %s"
+              % (a.order, "; ".join(x or "fără notă" for x in ale_oh), OH_UI_COMENZI))
+        if a.apply:
+            sys.exit(OH_REFUZ)
+        return
     if st and not getattr(a, "force", False):  # cadou UGC/influencer → NU fac AWB (flux separat); --force dacă chiar vrei
         if any(tg in shopify_order_tags(a.order, {st.get("prefix", ""): st}) for tg in INFLUENCER_TAGS):
             print("  ⛔ %s are tag `influencer` (cadou UGC) → NU fac AWB. Folosește --force dacă chiar vrei." % a.order)
@@ -4516,7 +4576,8 @@ def cmd_awb_make(a, _resolved=None):
     if not ok and st and ("fulfillment" in msg.lower() or "was not created" in msg.lower()):
         nrel, reasons, skipped = shopify_release_holds(st["shopDomain"], st["adminToken"], a.order)
         if skipped:
-            print("  ⛔ HOLD LEGITIM (%s) → NU eliberez / NU fac AWB peste fraudă/stoc/plată." % ", ".join(sorted(set(skipped))))
+            print("  ⛔ HOLD LEGITIM (%s) → NU eliberez / NU fac AWB peste fraudă/stoc/plată sau peste un hold al Order Hub"
+                  " (acela se eliberează din Order Hub)." % ", ".join(sorted(set(skipped))))
         if nrel:
             print("  ⏸️→▶️ comanda era pe HOLD (%s) → eliberat, reîncerc AWB" % (", ".join(reasons) or "fără motiv"))
             time.sleep(1.2)  # lasă Shopify să redeschidă fulfillment order-ul
@@ -4527,7 +4588,345 @@ def cmd_awb_make(a, _resolved=None):
     _label_result(s, d)
 
 
+# ── ORDER HUB ÎNTÂI (2-oct-2026): order-cancel / awb-void / awb-regen / awb-make / awb-create / addr-set ──
+# Order Hub hotărăște pe toate magazinele (validare, dubluri, hold-uri, pauze) și face etichetele: direct la curier
+# (`dpd-ro-arona`), unde xConnector nu le vede, sau prin xConnector (conturile `xconnector-<magazin>`). O anulare
+# cerută de aici anula comanda în Shopify și lăsa eticheta VIE la curier (cinci comenzi, 29-sep-2026).
+# Iar awb-make elibera orice hold care nu e de fraudă/stoc/plată — deci și pe cele puse de Order Hub — și făcea AWB.
+# De aceea, pe orice comandă pe care Order Hub o cunoaște, anularea, oprirea și refacerea le face el, prin rutele lui
+# de serviciu (oh_client); un AWB nou prin xConnector se face doar când n-are niciunul viu, fără să i se elibereze
+# hold-urile. Calea xConnector de mai jos rămâne DOAR pentru 404 „necunoscuta".
+# Coduri de ieșire cu --apply: 2 = fără un răspuns valid de la Order Hub, cerere incompletă sau comandă necitită din
+# Shopify: nu s-a scris nimic prin xConnector; 3 = refuz (al Order Hub sau al gărzilor de aici). --force nu ocolește
+# niciunul.
+OH_UI_COMENZI = "https://orderhub.arona.ro/app/orders"
+OH_FARA_RASPUNS, OH_REFUZ = 2, 3
+
+
+def _oh_cine(a):
+    """(cine, e_agent) — cine cere, pentru istoricul comenzii din Order Hub: --agent, apoi env CS_AGENT /
+    EMPLOYEE_HANDLE. Fără ele (cron, mașină neconfigurată): contul și mașina, ca să se poată da de urmă."""
+    cine = (getattr(a, "agent", None) or os.environ.get("CS_AGENT") or os.environ.get("EMPLOYEE_HANDLE") or "").strip()
+    if cine:
+        return cine, True
+    try:
+        import getpass, socket
+        return "%s@%s" % (getpass.getuser(), socket.gethostname()), False
+    except Exception:
+        return "necunoscut", False
+
+
+def _oh_autor(a):
+    cine, e_agent = _oh_cine(a)
+    if a.apply and not e_agent:
+        print("  ℹ Order Hub va scrie «%s» ca autor. Dă --agent <nume> (sau env CS_AGENT) ca să apară cine a cerut." % cine)
+    return cine
+
+
+_OH_KB_JOS = False   # ultima căutare a cheii în KB a picat pe conexiune (nu „secret absent")
+
+
+def _oh_token(OH):
+    """Cheia de serviciu: env, apoi KB. Marcajul KB_UNREACHABLE rămâne cum era: o cheie negăsită aici nu trebuie să
+    aprindă avertismentul „KB inaccesibil" al celorlalte citiri. Că KB n-a răspuns se ține minte separat, pentru mesaj."""
+    global KB_UNREACHABLE, _OH_KB_JOS
+    tok = (os.environ.get(OH.TOKEN_ENV) or "").strip()
+    _OH_KB_JOS = False
+    if not tok:
+        inainte, KB_UNREACHABLE = KB_UNREACHABLE, False
+        tok = (_kb_secret(OH.TOKEN_ENV)[0] or "").strip()
+        _OH_KB_JOS, KB_UNREACHABLE = KB_UNREACHABLE, inainte
+    return tok
+
+
+def _oh_intreaba(cere):
+    """(OH, Raspuns) — răspunsul Order Hub la `cere(OH, token)`, fără să tipărească nimic.
+    (None, None) dacă oh_client.py lipsește de lângă xconnector.py."""
+    try:
+        import oh_client as OH
+    except ImportError:
+        return None, None
+    r = cere(OH, _oh_token(OH))
+    if r.stare == OH.FARA_CHEIE and _OH_KB_JOS:
+        r.mesaj = "%s nu e în env, iar KB nu răspunde (verifică KB_DATABASE_URL)" % OH.TOKEN_ENV
+    return OH, r
+
+
+def shopify_stare_comanda(st, name):
+    """{id, anulata, awb: [tracking-urile fulfillment-urilor vii]} din Shopify, sau None dacă nu se poate citi."""
+    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ id cancelledAt '
+         'fulfillments(first:10){ status trackingInfo(first:5){ number } } } } } }') % (name or "").replace('"', "")
+    d = shopify_gql(st["shopDomain"], st["adminToken"], q)
+    edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
+    if not edges or d.get("errors"):   # și un răspuns parțial: fără fulfillment-uri citite nu se știe ce etichetă are
+        return None
+    n = edges[0]["node"]
+    awb = [t.get("number") for f in (n.get("fulfillments") or []) if f.get("status") not in ("CANCELLED", "ERROR", "FAILURE")
+           for t in (f.get("trackingInfo") or []) if t.get("number")]
+    return {"id": n.get("id"), "anulata": bool(n.get("cancelledAt")), "awb": awb}
+
+
+def _oh_shopify(a, dom=None):
+    """{shopDomain, adminToken} al magazinului comenzii, cu tokenul verificat (și reemis, dacă e un marcaj OAUTH sau a
+    expirat), sau None. Magazinul: `dom` dat, --shop, apoi prefixul numelui — PREFIX_DOMAIN, apoi cel mai lung `prefix`
+    din SHOPIFY_STORES_CSV (magazinele care lipsesc din PREFIX_DOMAIN: BUC, MD, DUPBG). Doar tokenul magazinului
+    comenzii, fără emiteri pentru celelalte (ca load_shopify_tokens)."""
+    statice = _tokenuri_statice()
+    shop = getattr(a, "shop", None)
+    dom = dom or (shop if (shop and "." in shop) else domain_for_order(a.order))
+    if not dom:
+        m = re.match(r"^([A-Za-z]+)", a.order or "")
+        litere = m.group(1).upper() if m else ""
+        cand = [t for t in statice.values() if t.get("prefix") and litere.startswith(str(t["prefix"]).upper())]
+        dom = max(cand, key=lambda t: len(str(t["prefix"])))["shopDomain"] if cand else None
+    if not dom:
+        return None
+    tok = _token_viu_sau_emis(dom, (statice.get(dom) or {}).get("adminToken"))[0]
+    return {"shopDomain": dom, "adminToken": tok} if tok else None
+
+
+def _oh_etichete_shopify(a, dom=None):
+    """(magazinul cu tokenul lui | None, AWB-urile vii ale comenzii în Shopify). AWB-uri: [] = comanda s-a citit și
+    n-are niciun tracking viu; None = comanda NU s-a putut citi (magazin fără token, comandă negăsită acolo, eroare).
+    Primul merge la Order Hub ca `awb`, celelalte se verifică separat (_oh_alte_etichete): o etichetă făcută în afara
+    lui (de mână, în xConnector) apare în Shopify ca tracking al unui fulfillment, iar dacă Order Hub n-o cunoaște
+    refuză, în loc să anuleze comanda cu o etichetă pe care n-o vede. Nu trece prin xConnector."""
+    try:
+        st = _oh_shopify(a, dom)
+        sp = shopify_stare_comanda(st, a.order) if st else None
+    except Exception:
+        return None, None
+    return st, (list(dict.fromkeys(sp["awb"])) if sp else None)
+
+
+def _oh_eticheta_shopify(a):
+    """(magazinul | None, primul AWB viu din Shopify | "" | None) — vezi _oh_etichete_shopify."""
+    st, awbs = _oh_etichete_shopify(a)
+    return st, ((awbs or [""])[0] if awbs is not None else None)
+
+
+def _oh_alte_etichete(a, cine, awbs):
+    """Etichetele vii din Shopify de după prima, verificate la Order Hub (oh_client.alte_etichete): una pe care el n-o
+    cunoaște ar rămâne vie la curier după anulare / oprire. (motivul opririi, codul de ieșire); ("", 0) = nimic."""
+    if len(awbs or []) < 2:
+        return "", 0
+    try:
+        import oh_client as OH
+    except ImportError:
+        return "etichetele din Shopify n-au putut fi verificate (oh_client.py lipsește)", OH_FARA_RASPUNS
+    necunoscute, neverificate = OH.alte_etichete(a.order, cine, awbs, token=_oh_token(OH))
+    if necunoscute:
+        return "are în Shopify și eticheta %s, pe care Order Hub n-o cunoaște" % ", ".join(necunoscute), OH_REFUZ
+    if neverificate:
+        return "eticheta %s din Shopify n-a putut fi verificată la Order Hub" % ", ".join(neverificate), OH_FARA_RASPUNS
+    return "", 0
+
+
+def _oh_oprit(a, cmd, oprit, cod):
+    """Oprirea venită din _oh_alte_etichete: cererea a plecat doar ca probă. Cu --apply iese cu codul ei."""
+    if not oprit:
+        return
+    print("  ⛔ %s · %s %s → nu s-a executat nimic%s. Verifică eticheta și fă acțiunea din Order Hub (%s)." % (
+        cmd, a.order, oprit, "" if a.apply else " (asta e doar proba)", OH_UI_COMENZI))
+    if a.apply:
+        sys.exit(cod)
+
+
+def _eticheta_acoperita(x, xtrk):
+    """Tracking-ul `x` din Shopify e una din etichetele xConnector (`xtrk`, din xc_label_trackings)? Și codul de colet
+    DPD al uneia dintre ele: 14 cifre care încep cu 81 / 85, primele 10 fiind ale AWB-ului de 11 cifre (regula din
+    `candidati_awb` al Order Hub)."""
+    if _trk_set(x) & xtrk:
+        return True
+    s = _trk_norm(x)
+    return (len(s) == 14 and s.isdigit() and s[:2] in ("81", "85")
+            and any(len(p) == 11 and p.isdigit() and p[:10] == s[:10] for p in xtrk))
+
+
+def _oh_necitita(a, cmd):
+    """Comanda nu s-a putut citi din Shopify, deci eticheta ei n-a putut fi verificată la Order Hub: cererea a plecat
+    doar ca probă. Cu --apply: cod 2, nimic executat."""
+    print("  ⚠ %s nu s-a putut citi din Shopify (magazin fără token, comandă negăsită acolo sau eroare) → nu se poate"
+          " verifica dacă are o etichetă pe care Order Hub n-o cunoaște." % a.order)
+    if a.apply:
+        print("  ⛔ %s: nu s-a executat nimic (a plecat doar proba). Reîncearcă; dacă rămâne așa, fă acțiunea din"
+              " Order Hub (%s)." % (cmd, OH_UI_COMENZI))
+        sys.exit(OH_FARA_RASPUNS)
+
+
+def _oh_adresa_in_urma(a, st, OH, r):
+    """„Shopify: … · xConnector: …" când eticheta vie e pe un cont xConnector, iar copia LUI a comenzii are alt cod
+    poștal sau alt oraș decât Shopify; altfel "". O asemenea etichetă se reface cu adresa pe care o are xConnector,
+    iar el o preia din Shopify cu întârziere: pornită imediat după o schimbare de adresă, refacerea ar scoate eticheta
+    nouă tot cu adresa veche. Aceeași comparație ca în Order Hub (`_xc_are_adresa`), dar fără diacritice; o citire
+    picată nu oprește nimic.
+    `r` = proba care arată etichetele vii."""
+    if not st or not any("cont xconnector-" in v for v in OH.awb_vii(r)):
+        return ""
+    try:
+        gid, sp = shopify_order_address(st["shopDomain"], st["adminToken"], a.order)
+        cheie = next((s_.get("apiKey") for s_ in load_shops() if s_.get("shopDomain") == st["shopDomain"]), None)
+        xa = (XC(cheie).by_id(str(gid).rsplit("/", 1)[-1]).get("shippingAddress") or {}) if (cheie and gid) else {}
+    except Exception:
+        return ""
+    if not xa or not sp:
+        return ""
+
+    def cod(d):
+        return "".join(ch for ch in str(d.get("zip") or d.get("postalCode") or "") if ch.isalnum()).lower()
+
+    def oras(d):   # fără diacritice: „Brașov" și „Brasov" sunt același oraș
+        return _fold(str(d.get("city") or ""))
+    if (cod(sp) and cod(sp) != cod(xa)) or (oras(sp) and oras(sp) != oras(xa)):
+        return "Shopify: %s %s · xConnector: %s %s" % (sp.get("city") or "—", sp.get("zip") or "—", xa.get("city") or "—",
+                                                       xa.get("zip") or xa.get("postalCode") or "—")
+    return ""
+
+
+def _oh_fara_raspuns(a, cmd, OH, r):
+    """Order Hub n-a dat un răspuns valid. Probă: avertisment, apelantul arată planul xConnector (orientativ).
+    --apply: cod 2 și nicio scriere prin xConnector — iar dacă cererea a plecat, starea e necunoscută."""
+    de_ce = r.mesaj if OH else "oh_client.py lipsește de lângă xconnector.py"
+    if OH and r.incert:
+        print("  ⚠ Cererea a plecat spre Order Hub, dar răspunsul n-a venit (%s): POATE să fi fost executată." % de_ce)
+        print("    Nu reîncerca orbește: rulează proba (fără --apply) și vezi starea comenzii în Order Hub (%s)." % OH_UI_COMENZI)
+        sys.exit(OH_FARA_RASPUNS)
+    print("  ⚠ Fără un răspuns valid de la Order Hub (%s) → nu se știe ce etichetă sau ce hold are comanda %s." % (de_ce, a.order))
+    if not a.apply:
+        print("    Planul de mai jos e al căii xConnector, DOAR orientativ: cu --apply se refuză până răspunde Order Hub.")
+        return
+    print("  ⛔ %s refuzat, nu s-a scris nimic: fără răspunsul Order Hub, o scriere prin xConnector poate lăsa eticheta"
+          " vie la curier sau poate ocoli un hold." % cmd)
+    print("     Fă acțiunea din Order Hub (%s). --force nu ocolește." % OH_UI_COMENZI)
+    sys.exit(OH_FARA_RASPUNS)
+
+
+def _oh_arata(a, cmd, OH, r, nota="", indicii=None, neaplicate=()):
+    """Tipărește hotărârea Order Hub. Un refuz cu --apply iese cu cod 3, ca apelanții automați să-l vadă."""
+    print("═" * 60)
+    proba = (" · PROBĂ" + ("" if a.apply else " (fără --apply nu execut)")) if (r.proba or not a.apply) else ""
+    print("  %s · %s%s · prin ORDER HUB%s" % (cmd, a.order, (" (%s)" % r.magazin) if r.magazin else "", proba))
+    for l in OH.linii(r):
+        print("  " + l)
+    refuz = not r.ok and r.rezultat != "deja_anulata"
+    if refuz:
+        print("  ⛔ Order Hub: %s — xConnector nu se atinge." % (r.rezultat or "refuzat"))
+    elif not r.proba and any(not p.get("ok") for p in r.pasi):
+        print("  ⚠ Făcut, dar cu pași neconfirmați (❌ mai sus): verifică în Order Hub.")
+    for l in ((indicii or {}).get(r.rezultat) or OH.URMEAZA.get(r.rezultat), nota if r.proba else ""):
+        if l:
+            print("  ℹ " + l)
+    for steag, de_ce in neaplicate:
+        print("  ℹ %s nu se aplică pe calea Order Hub: %s." % (steag, de_ce))
+    if getattr(a, "force", False):
+        print("  ℹ --force nu există pe calea Order Hub.")
+    if refuz and a.apply:
+        sys.exit(OH_REFUZ)
+
+
+def _oh_intai(a, cmd, cere, nota="", indicii=None, neaplicate=()):
+    """Order Hub ÎNTÂI. Întoarce răspunsul lui când `cmd` se termină aici (Order Hub cunoaște comanda și a hotărât
+    el), sau None pe calea xConnector: Order Hub nu cunoaște comanda (404 „necunoscuta"), ori e o probă fără răspunsul
+    lui. Cu --apply: fără răspuns valid → cod 2, refuz → cod 3; în niciun caz nu se scrie prin xConnector.
+    `cere(OH, token)` face cererea și întoarce un oh_client.Raspuns."""
+    OH, r = _oh_intreaba(cere)
+    if OH is None or r.stare not in (OH.DECIS, OH.NECUNOSCUTA):
+        _oh_fara_raspuns(a, cmd, OH, r)
+        return None
+    if r.stare == OH.NECUNOSCUTA:
+        print("  ℹ Order Hub nu cunoaște %s → calea xConnector." % a.order)
+        return None
+    _oh_arata(a, cmd, OH, r, nota, indicii, neaplicate)
+    return r
+
+
+def _oh_confirma_shopify(a, st, r):
+    """După „anulata": Order Hub știe doar că Shopify a PRIMIT anularea (iar pe un magazin fără token a anulat-o doar
+    la el). Dovada e în Shopify, nu în răspuns. Fără ea se spune — iar „necitit" nu e „neanulată" —, dar codul de
+    ieșire rămâne 0. La fel după „deja anulată”: reîncercarea unei anulări neconfirmate nu trece drept reușită."""
+    if r.proba or not r.ok or r.rezultat not in ("anulata", "deja_anulata", "etichete_anulate"):
+        return
+    sp = None
+    for i in range(3):
+        try:
+            sp = (shopify_stare_comanda(st, a.order) if st else None) or sp   # ultima citire reușită
+        except Exception:
+            pass
+        if sp and sp["anulata"]:
+            print("  ✅ confirmat în Shopify: comanda e anulată")
+            return
+        if i < 2:
+            time.sleep(2)
+    if sp is None:
+        print("  ℹ Neconfirmat în Shopify (comanda nu s-a putut citi): verifică acolo că e anulată.")
+        return
+    print("  ⚠ Order Hub zice „anulată”, dar Shopify arată comanda încă NEANULATĂ: verifică în Shopify și în Order Hub.")
+
+
+def _oh_refuz_awb_nou(OH, r):
+    """De ce nu se face un AWB nou prin xConnector pe o comandă cunoscută de Order Hub (`r` = oh_client.stie), sau ""
+    când se poate: comanda n-are AWB viu — cazul în care Order Hub însuși cere eticheta făcută de om în xConnector."""
+    vii = ", ".join(OH.awb_vii(r))
+    if r.rezultat == "plecat":
+        return "coletul a plecat (%s) — nu se face alt AWB pe comanda asta." % (vii or "vezi Order Hub")
+    if vii:
+        return "are deja AWB: %s. Alt AWB în locul lui = refacere (awb-regen), nu un al doilea prin xConnector." % vii
+    if r.rezultat == "anulata":
+        return "comanda e anulată."
+    if r.rezultat == "fara_awb":
+        return ""
+    return "Order Hub nu lasă un AWB nou acum (%s). Vezi comanda în Order Hub: %s." % (r.mesaj or r.rezultat, OH_UI_COMENZI)
+
+
+def _oh_lasa_awb_nou(a, cmd):
+    """awb-make / awb-create au rămas pe xConnector. True = se poate continua: Order Hub nu cunoaște comanda, sau o
+    cunoaște fără AWB viu. Refuz (False; cu --apply cod 3) pe o comandă cu AWB viu, plecată, anulată sau cu AWB-urile
+    magazinului pe pauză. Întrebarea e o probă: nu scrie nimic în Order Hub."""
+    cine = _oh_cine(a)[0]
+    OH, r = _oh_intreaba(lambda OH, tok: OH.stie(a.order, cine, token=tok))
+    if OH is None or r.stare not in (OH.DECIS, OH.NECUNOSCUTA):
+        _oh_fara_raspuns(a, cmd, OH, r)
+        return True
+    refuz = _oh_refuz_awb_nou(OH, r) if r.stare == OH.DECIS else ""
+    if not refuz:   # fără AWB viu la Order Hub (sau n-o cunoaște): o etichetă făcută de mână apare doar în Shopify
+        awbs = _oh_etichete_shopify(a)[1]
+        if awbs is None:
+            _oh_necitita(a, cmd)   # --apply: cod 2
+        elif awbs:
+            refuz = "Shopify arată AWB viu (%s), pe care Order Hub nu-l are — un AWB nou ar fi al doilea. " % ", ".join(awbs) + (
+                "Vezi comanda în Order Hub (%s)." % OH_UI_COMENZI if r.stare == OH.DECIS else
+                "Dacă tocmai l-ai anulat, reîncearcă peste ~20 s; altfel refă-l cu awb-regen.")
+    if r.stare == OH.NECUNOSCUTA and not refuz:
+        return True
+    if refuz:
+        print("  ⛔ %s · %s: %s" % (cmd, a.order, refuz))
+        if a.apply:
+            sys.exit(OH_REFUZ)
+        return False
+    print("  ℹ Order Hub cunoaște %s, fără AWB viu. AWB prin xConnector doar dacă el nu i-l face (tichet „fă eticheta"
+          " manual”); hold-urile puse de Order Hub nu se eliberează de aici." % a.order)
+    return True
+
+
 def cmd_awb_void(a, _resolved=None):
+    # Order Hub nu are „doar anulează eticheta": are OPRIRE (anulează toate etichetele vii + fulfillment-urile lor și
+    # ține comanda pe hold) și REFACERE. „Anulez și fac altul" = awb-regen; awb-void + awb-make ar ocoli hold-ul.
+    cine = _oh_autor(a)
+    awbs = _oh_etichete_shopify(a)[1]   # None = necitită din Shopify: cererea pleacă doar ca probă
+    awb0 = (awbs or [""])[0] if awbs is not None else None
+    oprit, cod_oprit = _oh_alte_etichete(a, cine, awbs)
+    if _oh_intai(a, "awb-void", lambda OH, tok: OH.anulare(
+            a.order, cine, getattr(a, "motiv", None) or "oprire cerută prin CS", actiune="hold",
+            awb=awb0 or "", aplica=a.apply and awb0 is not None and not oprit, token=tok),
+            nota="awb-void = OPRIRE: comanda rămâne pe hold și nu pleacă. Alt AWB în locul ăstuia = awb-regen.",
+            indicii={"anulata": "Comanda e deja anulată. Dacă i-a rămas o etichetă vie, o anulează order-cancel.",
+                     "partial": "Oprire incompletă. „Hold: NEPUS” poate însemna că era deja pe hold: vezi în Order Hub."},
+            neaplicate=[("--connector", "Order Hub anulează toate etichetele vii ale comenzii")]
+            if getattr(a, "connector", None) else ()):
+        if awb0 is None:
+            _oh_necitita(a, "awb-void")
+        _oh_oprit(a, "awb-void", oprit, cod_oprit)
+        return
     sh, xc, o = _resolved or resolve_order(a.order, a, a.days)
     if not o:
         print("Comanda %s negăsită." % a.order); return
@@ -4550,9 +4949,88 @@ def cmd_awb_void(a, _resolved=None):
 
 def cmd_awb_regen(a):
     """Anulează AWB-ul curent și îl reface cu alte condiții (parcelCount/parcelType/connector)."""
+    # Prin Order Hub refacerea e pe ACELAȘI cont de curier, cu numărul de colete dat. NU e idempotentă: o cerere
+    # repetată după un răspuns pierdut ar anula eticheta nouă și ar face a treia. De aceea execuția cere eticheta de
+    # refăcut (--awb, cea din probă): dacă între timp s-a refăcut, Order Hub refuză (`eticheta_anulata`). Și numărul
+    # de colete se cere explicit: Order Hub îl ține minte pe comandă, iar cel calculat aici e doar o propunere.
+    alt_curier = bool(getattr(a, "connector", None)) or a.type != "PARCEL"
+    cine = _oh_autor(a)
+    st0, awbs = _oh_etichete_shopify(a)
+    awb0 = (awbs or [""])[0] if awbs is not None else None
+    pin = (getattr(a, "awb", None) or "").strip()
+    complet = bool(pin and getattr(a, "parcels", None)) and not alt_curier
+    trimisa = pin or awb0 or ""
+    oprit, cod_oprit = _oh_alte_etichete(a, cine, [trimisa] + [x for x in (awbs or []) if x != trimisa])
+    citite = getattr(a, "parcels", None) or (
+        order_parcel_count(st0["shopDomain"], st0["adminToken"], a.order, strict=True) if st0 else None)
+    if a.apply and complet:   # înaintea execuției: o etichetă făcută prin xConnector se reface cu adresa pe care o are EL
+        OH, re_ = _oh_intreaba(lambda OH, tok: OH.eticheta(a.order, cine, token=tok))
+        difera = _oh_adresa_in_urma(a, st0, OH, re_) if (OH is not None and re_.stare == OH.DECIS) else ""
+        if difera:
+            print("  ⛔ awb-regen · %s: xConnector are altă adresă decât Shopify (%s), iar eticheta asta se reface cu"
+                  " adresa din xConnector → nu s-a executat nimic." % (a.order, difera))
+            print("     După o schimbare de adresă, reîncearcă peste 1–2 minute. Dacă adresa din xConnector e cea bună,"
+                  " refă eticheta din Order Hub (%s)." % OH_UI_COMENZI)
+            sys.exit(OH_FARA_RASPUNS)
+    motiv = getattr(a, "motiv", None) or "refacere AWB cerută prin CS"
+    OH, r = _oh_intreaba(lambda OH, tok: OH.refa(   # fără colete citite, proba pleacă cu 1: execuția cere --parcels
+        a.order, cine, citite or 1, awb=trimisa, motiv=motiv,
+        aplica=a.apply and complet and awbs is not None and not oprit, token=tok))
+    if not pin and awb0 and OH is not None and r.stare == OH.DECIS and r.rezultat == "eticheta_anulata":
+        # Shopify arată încă o etichetă pe care Order Hub a înlocuit-o (fulfillment-ul ei n-a putut fi anulat): proba
+        # se reface pe comandă, ca să arate eticheta vie. Cu --awb dat, refuzul rămâne: el oprește a treia etichetă.
+        print("  ℹ Shopify arată încă eticheta %s, deja înlocuită în Order Hub (%s): proba de mai jos e pe eticheta vie."
+              " Dacă refacerea ai cerut-o chiar tu, nu o repeta." % (awb0, r.mesaj))
+        OH, r = _oh_intreaba(lambda OH, tok: OH.refa(a.order, cine, citite or 1, awb="", motiv=motiv, aplica=False,
+                                                     token=tok))
+    if OH is None or r.stare not in (OH.DECIS, OH.NECUNOSCUTA):
+        _oh_fara_raspuns(a, "awb-regen", OH, r)
+    elif r.stare == OH.NECUNOSCUTA:
+        print("  ℹ Order Hub nu cunoaște %s → calea xConnector." % a.order)
+    elif alt_curier:
+        print("  ⛔ awb-regen · %s: --connector / --type nu se aplică pe o comandă a Order Hub (el reface pe același"
+              " cont). Alt curier sau alt tip de colet: din Order Hub (%s)." % (a.order, OH_UI_COMENZI))
+        if a.apply:
+            sys.exit(OH_REFUZ)
+        return
+    else:
+        _oh_arata(a, "awb-regen", OH, r, neaplicate=[("--notify", "Order Hub nu trimite clientului emailul cu AWB-ul nou")]
+                  if getattr(a, "notify", False) else ())
+        if awbs is None:
+            _oh_necitita(a, "awb-regen")   # --apply: cod 2
+        _oh_oprit(a, "awb-regen", oprit, cod_oprit)
+        if r.proba:
+            vii = OH.awb_vii(r)
+            if not citite:
+                print("  ⚠ Numărul de colete nu s-a putut citi din Shopify (proba a mers cu 1): dă --parcels N, numărul"
+                      " de colete al comenzii.")
+            elif not getattr(a, "parcels", None):
+                print("  ℹ colete: %d, calculat din Shopify — verifică numărul înainte de execuție." % citite)
+            if a.apply:   # cerere incompletă: s-a făcut doar proba
+                print("  ⛔ --apply cere --parcels și --awb (eticheta de refăcut, din probă): altfel o cerere repetată"
+                      " ar face a treia etichetă. Nu s-a executat nimic.")
+            if vii and not oprit and awbs is not None:   # un număr de colete necitit nu se ghicește: rămâne de completat
+                alte = "".join(' --%s "%s"' % (k, str(getattr(a, k)).replace('"', "'"))
+                               for k in ("shop", "agent", "motiv") if getattr(a, k, None))
+                print("  → execuție: xconnector.py awb-regen --order %s --parcels %s --awb %s%s --apply" % (
+                    a.order, citite or "<nr. colete>", vii[0].split()[0], alte))
+            if a.apply:
+                sys.exit(OH_FARA_RASPUNS)
+        return
     sh, xc, o = resolve_order(a.order, a, a.days)
     if not o:
         print("Comanda %s negăsită." % a.order); return
+    if awbs is None:   # Shopify n-a răspuns la început: etichetele se recitesc cu magazinul găsit de xConnector
+        awbs = _oh_etichete_shopify(a, sh["shopDomain"])[1]
+        if awbs is None:
+            _oh_necitita(a, "awb-regen")   # --apply: cod 2
+    straine = [x for x in (awbs or []) if not _eticheta_acoperita(x, xc_label_trackings(o)[1])]
+    if straine:   # o etichetă vie pe care xConnector n-o are ar rămâne vie lângă cea nouă
+        print("  ⛔ awb-regen · %s: Shopify arată eticheta %s, pe care Order Hub n-o cunoaște și xConnector n-o arată →"
+              " nu refac nimic. Anulează întâi eticheta, la cine a făcut-o." % (a.order, ", ".join(straine)))
+        if a.apply:
+            sys.exit(OH_REFUZ)
+        return
     doc = awb_doc(o)
     con, cons = pick_connector(xc, a)
     if not con:
@@ -4823,11 +5301,44 @@ def shopify_order_cancel(shop, token, order_gid, reason="CUSTOMER", refund=False
 
 
 def cmd_order_cancel(a):
-    """Anulează o comandă: dacă e PLECATĂ (preluată de curier) → refuz; dacă e neplecată și are AWB →
-    anulez AWB (xConnector) APOI comanda (Shopify); fără AWB → doar comanda. Dry-run by default."""
+    """Anulează o comandă. Întâi prin Order Hub: el anulează eticheta, apoi comanda. Doar pe o comandă pe care el n-o
+    cunoaște, calea veche: PLECATĂ (preluată de curier) → refuz; neplecată și cu AWB → anulez AWB (xConnector) APOI
+    comanda (Shopify); fără AWB → doar comanda. Dry-run by default."""
+    # Prin Order Hub: eticheta întâi, la cine a emis-o, apoi comanda. Banii nu se cer de aici: ce e plătit cu cardul
+    # se rambursează și i se stornează factura automat (regula butonului din Order Hub); clientul nu e notificat.
+    cine = _oh_autor(a)
+    st0, awbs = _oh_etichete_shopify(a)
+    citita = awbs is not None   # necitită din Shopify: cererea pleacă doar ca probă
+    awb0 = (awbs or [""])[0] if citita else None
+    oprit, cod_oprit = _oh_alte_etichete(a, cine, awbs)
+    r = _oh_intai(a, "order-cancel", lambda OH, tok: OH.anulare(
+        a.order, cine, getattr(a, "motiv", None) or "anulare cerută prin CS", awb=awb0 or "",
+        restock=not getattr(a, "no_restock", False), aplica=a.apply and citita and not oprit, token=tok),
+        neaplicate=[(s_, d_) for s_, d_, pus in (
+            ("--refund", "banii îi hotărăște Order Hub (vezi rândul „Bani” din plan)", getattr(a, "refund", False)),
+            ("--notify", "Order Hub nu trimite clientului emailul de anulare", getattr(a, "notify", False))) if pus])
+    if r:
+        if not citita:
+            _oh_necitita(a, "order-cancel")
+        _oh_oprit(a, "order-cancel", oprit, cod_oprit)
+        _oh_confirma_shopify(a, st0, r)
+        return
     sh, xc, o = resolve_order(a.order, a, a.days)
     if not o:
         print("Comanda %s negăsită." % a.order); return
+    if not citita:   # Shopify n-a răspuns la început: etichetele se recitesc cu magazinul găsit de xConnector
+        awbs = _oh_etichete_shopify(a, sh["shopDomain"])[1]
+        if awbs is None:
+            _oh_necitita(a, "order-cancel")
+    xtrk = xc_label_trackings(o)[1]
+    straine = [x for x in (awbs or []) if not _eticheta_acoperita(x, xtrk)]
+    if straine:   # Shopify arată o etichetă vie pe care xConnector n-o are: anularea ar lăsa-o vie
+        print("  ⛔ %s are în Shopify eticheta %s, pe care Order Hub n-o cunoaște și xConnector n-o arată (sau comanda e"
+              " prea veche pentru căutarea lui) → nu anulez comanda cu eticheta vie. Anulează întâi eticheta, la cine a"
+              " făcut-o." % (a.order, ", ".join(straine)))
+        if a.apply:
+            sys.exit(OH_REFUZ)
+        return
     # „A PLECAT?" = statusul de curier din AWBprint (aggregated_status). xConnector NU expune un status real
     # de expediere (doar `dispatched` boolean — NErelevant — și `downloaded` = status de PRINT). Testul
     # AUTORITATIV final rămâne încercarea de a anula AWB-ul: dacă a plecat, xConnector dă eroare și ne oprim.
@@ -8147,6 +8658,54 @@ def cmd_addr_set(a):
     print("  ADRESĂ set · %s (%s)" % (a.order, sh["shopDomain"]))
     print("  curent: %s, %s %s (%s)" % (cur.get("address1"), cur.get("city"), cur.get("zip"), cur.get("province")))
     print("  nou   : %s, %s %s (%s)" % (new.get("address1"), new.get("city"), new.get("zip"), new.get("province")))
+    # Order Hub: adresa se schimbă în Shopify oricum (el o preia din webhook), dar o etichetă deja făcută rămâne cu
+    # adresa veche — o reface doar la cerere — iar un AWB nou de aici se face doar dacă n-are niciunul viu. Eticheta
+    # se află cu proba unei opriri, care o arată și când AWB-urile magazinului sunt pe pauză; dacă Order Hub nu
+    # cunoaște comanda sau nu răspunde, rămâne ce arată xConnector.
+    cine = _oh_cine(a)[0]
+    OH, re_ = _oh_intreaba(lambda OH, tok: OH.eticheta(a.order, cine, token=tok))
+    stiuta = OH is not None and re_.stare == OH.DECIS
+    necunoscuta = OH is not None and re_.stare == OH.NECUNOSCUTA
+    vii = list(OH.awb_vii(re_)) if stiuta else []
+    try:   # și etichetele pe care Order Hub nu le arată: din xConnector și din Shopify (una făcută de mână)
+        sp = shopify_stare_comanda(st, a.order)
+    except Exception:
+        sp = None
+    alte = [doc_tracking(awb_doc(o)) or ""] + ((sp or {}).get("awb") or [])
+    for x in alte:
+        if x and not any(x.split("-")[0] in v for v in vii):
+            vii.append(x)
+    vii = ", ".join(vii)
+    if stiuta and re_.rezultat == "refuzat":   # eticheta depozitului (Frisbo): depozitul o reface după modificare
+        print("  ℹ Order Hub: %s" % re_.mesaj)
+    elif stiuta and vii and re_.rezultat == "plecat":
+        print("  ⚠ Coletul a plecat (%s): adresa nouă nu mai ajunge pe el." % vii)
+    elif vii:
+        print("  ⚠ Comanda are deja AWB (%s): eticheta rămâne cu adresa VECHE. Refă eticheta cu awb-regen --order %s"
+              " abia după ce adresa nouă a ajuns peste tot (1–2 minute; la o etichetă făcută prin xConnector, awb-regen"
+              " refuză până atunci)." % (vii, a.order))
+    elif not stiuta and not necunoscuta and not a.make_awb:
+        print("  ⚠ Order Hub n-a răspuns (%s): nu se știe dacă %s are o etichetă pe care xConnector n-o vede — dacă are,"
+              " rămâne cu adresa veche (vezi comanda în Order Hub)." % (
+                  re_.mesaj if OH is not None else "oh_client.py lipsește", a.order))
+    awb_refuzat = False
+    if a.make_awb and vii:   # o etichetă vie, din Order Hub, Shopify sau xConnector: un AWB nou ar fi al doilea
+        print("  ℹ --make-awb nu se aplică: comanda are deja AWB (%s) — după schimbare, refă-l cu awb-regen." % vii)
+        a.make_awb, awb_refuzat = False, True
+    if a.make_awb and sp is None:   # Shopify necitit: nu se știe dacă are o etichetă făcută de mână (ca la awb-make)
+        _oh_necitita(a, "addr-set --make-awb")   # --apply: cod 2, nimic scris
+        a.make_awb = False
+    if a.make_awb and not necunoscuta:
+        r = re_
+        if stiuta:   # un AWB nou e hotărât de proba unei refaceri (pauză, comandă anulată, AWB viu)
+            OH, r = _oh_intreaba(lambda OH, tok: OH.stie(a.order, cine, token=tok))
+        if OH is not None and r.stare == OH.DECIS:
+            refuz = _oh_refuz_awb_nou(OH, r)
+            if refuz:
+                print("  ℹ --make-awb nu se aplică: %s" % refuz)
+                a.make_awb, awb_refuzat = False, True
+        else:
+            _oh_fara_raspuns(a, "addr-set --make-awb", OH, r)
     if not a.apply:
         print("  DRY-RUN — aș orderUpdate shippingAddress%s." % ("  + apoi awb-make" if a.make_awb else "")); return
     m = "mutation($input: OrderInput!){ orderUpdate(input:$input){ order{ id } userErrors{ field message } } }"
@@ -8155,6 +8714,9 @@ def cmd_addr_set(a):
     if errs:
         print("  ❌ Shopify orderUpdate: %s" % errs); return
     print("  ✅ adresă actualizată în Shopify")
+    if awb_refuzat:   # adresa s-a schimbat, AWB-ul cerut nu s-a făcut: apelantul trebuie să afle
+        print("  ⚠ AWB-ul cerut cu --make-awb NU s-a făcut (vezi mai sus).")
+        sys.exit(OH_REFUZ)
     if a.make_awb:
         print("  → aștept ca xConnector să resincronizeze adresa nouă, apoi fac AWB...")
         target = (str(new.get("zip") or ""), (new.get("city") or "").lower(), (new.get("address1") or "").lower())
@@ -8791,12 +9353,14 @@ def main():
                     help="correct: sare comenzile mai noi de N ore (validarea xConnector e async/batch — multe se auto-validează). 0 = oprit.")
     ap.add_argument("--exclude", default="",
                     help="domenii myshopify de SĂRIT (separate prin virgulă) — ex magazinele externe (Bonhaus CZ/PL/BG) pe care validatorul RO nu le acoperă.")
-    ap.add_argument("--connector", help="awb-make/void/regen: connectorId curier (din `connectors`). Obligatoriu dacă sunt mai mulți curieri activi.")
-    ap.add_argument("--parcels", type=int, default=None, help="awb-make/regen: FORȚEAZĂ nr de colete (parcelCount). Implicit = AUTO din metafield Shopify (order xconnector.parcel-count, altfel custom.nr_cutii|nr_produse, ceil pe decimal). Parfumurile = 1.")
+    ap.add_argument("--connector", help="awb-make/void/regen: connectorId curier (din `connectors`). Obligatoriu dacă sunt mai mulți curieri activi. awb-make îl folosește și pe o comandă a Order Hub fără AWB viu; awb-void / awb-regen pe o comandă a Order Hub nu-l aplică (awb-regen îl refuză).")
+    ap.add_argument("--parcels", type=int, default=None, help="awb-make/regen: FORȚEAZĂ nr de colete (parcelCount). Implicit = AUTO din metafield Shopify (order xconnector.parcel-count, altfel custom.nr_cutii|nr_produse, ceil pe decimal). Parfumurile = 1. La awb-regen pe o comandă a Order Hub e obligatoriu cu --apply.")
     ap.add_argument("--type", default="PARCEL", help="awb-make/regen: parcelType (PARCEL/ENVELOPE). Default PARCEL.")
-    ap.add_argument("--notify", action="store_true", help="awb-make/regen/order-cancel: notifyCustomer.")
-    ap.add_argument("--force", action="store_true", help="order-cancel: încearcă anularea chiar dacă statusul de curier zice PLECAT (xConnector dă eroare dacă chiar a plecat). inv-bulk: trece doar peste plasa „<10%% facturate în xConnector”; NU ocolește garda OH / garda de stare (nici la inv-make / inv-regen).")
-    ap.add_argument("--refund", action="store_true", help="order-cancel: returnează banii la anulare (OFF by default — COD n-are nevoie; comenzi plătite = decizie explicită).")
+    ap.add_argument("--notify", action="store_true", help="awb-make și calea xConnector a awb-regen / order-cancel: notifyCustomer. Pe calea Order Hub nu se aplică.")
+    ap.add_argument("--force", action="store_true", help="order-cancel: încearcă anularea chiar dacă statusul de curier zice PLECAT (xConnector dă eroare dacă chiar a plecat) — doar pe calea veche, nu prin Order Hub. inv-bulk: trece doar peste plasa „<10%% facturate în xConnector”; NU ocolește garda OH / garda de stare (nici la inv-make / inv-regen).")
+    ap.add_argument("--agent", help="order-cancel/awb-void/awb-regen: cine cere (agentul CS) — ajunge în istoricul comenzii din Order Hub. Implicit env CS_AGENT / EMPLOYEE_HANDLE, altfel contul și mașina.")
+    ap.add_argument("--motiv", help="order-cancel/awb-void: motivul, scris de Order Hub în nota comenzii (și a hold-ului). La awb-regen nu se păstrează.")
+    ap.add_argument("--refund", action="store_true", help="order-cancel: returnează banii la anulare (OFF by default — COD n-are nevoie; comenzi plătite = decizie explicită). Pe o comandă a Order Hub nu se aplică: el rambursează singur ce e plătit cu cardul.")
     ap.add_argument("--no-restock", action="store_true", dest="no_restock", help="order-cancel: NU repune stocul la anulare (restock ON by default).")
     ap.add_argument("--max-age-min", type=int, default=15, dest="max_age_min", help="fulfill: vârsta minimă în minute a comenzii unfulfilled ca să-i facă AWB (default 15).")
     ap.add_argument("--max-run-min", type=int, dest="max_run_min", help="fulfill: buget de timp/rulare în minute. Peste el se oprește curat și SALVEAZĂ cursorul → tura viitoare CONTINUĂ cu magazinele rămase (round-robin). Fără el = fără limită. Ignorat cu --shop.")
@@ -8818,7 +9382,7 @@ def main():
     ap.add_argument("--sort", choices=["sku", "totalItemsCount", "lineItemsCount", "date", "fulfillmentDate"], help="orders/not-downloaded: câmp de sortare.")
     ap.add_argument("--sort-dir", dest="sort_dir", choices=["asc", "desc"], help="orders: direcția sortării (implicit desc).")
     # links (CS „du-mă la comanda X" — totul prin xConnector, fără rația Shopify):
-    ap.add_argument("--awb", help="links: caută comanda după AWB/tracking (xConnector by-tracking-number).")
+    ap.add_argument("--awb", help="links: caută comanda după AWB/tracking (xConnector by-tracking-number). awb-regen: eticheta de refăcut (cea din probă) — obligatorie cu --apply pe o comandă a Order Hub.")
     ap.add_argument("--open", action="store_true", help="links: deschide linkurile în browser.")
     # print-batch (PRINT depozit: descarcă etichete nedescărcate, grupate pe produs/cantitate/dată, deschide print):
     ap.add_argument("--from", dest="from_date", help="print-batch/orders: data de început (yyyy-MM-dd sau DD/MM/YYYY).")
