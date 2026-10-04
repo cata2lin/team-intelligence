@@ -4671,7 +4671,7 @@ def shopify_stare_comanda(st, name):
     """{id, name, anulata, awb: [tracking-urile fulfillment-urilor vii]} din Shopify, sau None dacă nu se poate citi.
     `name` = numele canonic al comenzii găsite (căutarea `name:` e largă: vezi nume_comanda_potrivit)."""
     q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ id name cancelledAt '
-         'fulfillments(first:10){ status trackingInfo(first:5){ number } } } } } }') % (name or "").replace('"', "")
+         'fulfillments(first:10){ status updatedAt trackingInfo(first:5){ number } } } } } }') % (name or "").replace('"', "")
     d = shopify_gql(st["shopDomain"], st["adminToken"], q)
     edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
     if not edges or d.get("errors"):   # și un răspuns parțial: fără fulfillment-uri citite nu se știe ce etichetă are
@@ -4681,7 +4681,22 @@ def shopify_stare_comanda(st, name):
         return None
     awb = [t.get("number") for f in (n.get("fulfillments") or []) if f.get("status") not in ("CANCELLED", "ERROR", "FAILURE")
            for t in (f.get("trackingInfo") or []) if t.get("number")]
-    return {"id": n.get("id"), "name": n["name"], "anulata": bool(n.get("cancelledAt")), "awb": awb}
+    inlocuite = []   # (AWB, acum câte minute): fulfillment-uri anulate de curând — urma unei refaceri
+    for f in (n.get("fulfillments") or []):
+        minute = _minute_de_la(f.get("updatedAt")) if f.get("status") == "CANCELLED" else None
+        if minute is not None and minute <= REGEN_RECENT_MIN:
+            inlocuite += [(t.get("number"), int(minute)) for t in (f.get("trackingInfo") or []) if t.get("number")]
+    return {"id": n.get("id"), "name": n["name"], "anulata": bool(n.get("cancelledAt")), "awb": awb,
+            "inlocuite": inlocuite}
+
+
+def _minute_de_la(cand):
+    """Câte minute au trecut de la un moment ISO 8601 din Shopify („2026-10-05T10:00:00Z”), sau None."""
+    try:
+        t = datetime.datetime.fromisoformat(str(cand).replace("Z", "+00:00"))
+        return max(0.0, (datetime.datetime.now(datetime.timezone.utc) - t).total_seconds() / 60)
+    except (TypeError, ValueError):
+        return None
 
 
 def _nume_norm(s):
@@ -4777,6 +4792,7 @@ def _oh_etichete_shopify(a, dom=None):
         return None, None
     if sp:   # Order Hub primește numele canonic, nu ce s-a tastat (altă comandă → cod 2)
         _oh_nume_canonic(a, sp["name"])
+        a.inlocuite_recent = sp.get("inlocuite") or []
     return st, (list(dict.fromkeys(sp["awb"])) if sp else None)
 
 
@@ -4864,6 +4880,62 @@ def _oh_adresa_in_urma(a, st, OH, r):
     return ""
 
 
+# Jurnalul local al refacerilor (awb-regen prin Order Hub). O execuție se notează ÎNAINTE să plece („fara_raspuns”) și
+# rămâne așa până când Order Hub răspunde hotărât — deci și când procesul e oprit înainte de răspuns (timeoutul uneltei
+# MCP îl omoară). Cât e „fara_raspuns”, o execuție cu ALT --awb e refuzată: ar putea fi chiar eticheta nouă a cererii
+# fără răspuns, iar refacerea ei ar face a treia. După „refacut” rămâne REGEN_RECENT_MIN minute, ca proba să spună că
+# refacerea e gata (agentul poate să nu fi văzut răspunsul: clientul MCP renunță după 60 s, scriptul nu).
+REGEN_JURNAL = os.path.join(os.path.expanduser("~"), ".xconnector", "awb_regen_jurnal.json")
+REGEN_FARA_RASPUNS_ORE = 24
+REGEN_RECENT_MIN = 30
+REGEN_NEHOTARAT = ("", "eroare", "in_curs", "partial")   # răspunsuri Order Hub după care nu se știe ce s-a făcut
+
+
+def _regen_jurnal():
+    """{cheie comandă: intrare} — fără intrările expirate. Un jurnal lipsă sau necitit = gol."""
+    try:
+        with open(REGEN_JURNAL, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    acum = time.time()
+    return {k: v for k, v in (d.items() if isinstance(d, dict) else []) if isinstance(v, dict) and acum - float(
+        v.get("la") or 0) <= (REGEN_FARA_RASPUNS_ORE * 3600 if v.get("stare") == "fara_raspuns" else REGEN_RECENT_MIN * 60)}
+
+
+def _regen_scrie(cheie, intrare):
+    """Pune (sau scoate, cu intrare None) o comandă din jurnal. Scrierea e atomică (fișier temporar + os.replace)."""
+    d = _regen_jurnal()
+    if intrare is None:
+        if cheie not in d:
+            return
+        d.pop(cheie)
+    else:
+        d[cheie] = intrare
+    os.makedirs(os.path.dirname(REGEN_JURNAL), exist_ok=True)
+    tmp = REGEN_JURNAL + ".%d.tmp" % os.getpid()
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False)
+    os.replace(tmp, REGEN_JURNAL)
+
+
+def _regen_dupa_raspuns(a, cheie, OH, r, inainte):
+    """După execuție: jurnalul arată ce se știe acum. `inainte` = intrarea „fara_raspuns” găsită înainte de cerere."""
+    if OH is not None and r.stare == OH.DECIS and r.rezultat in ("refacut", "eticheta_anulata"):
+        intrare = {"stare": "refacut", "comanda": a.order, "la": time.time(), "awb": (getattr(a, "awb", None) or "").strip(),
+                   "awb_nou": str(r.corp.get("awb_nou") or "")}
+    elif OH is not None and (r.stare == OH.NECUNOSCUTA or (r.stare == OH.DECIS and r.rezultat not in REGEN_NEHOTARAT)):
+        intrare = None   # Order Hub a hotărât: nimic refăcut, nici acum, nici înainte (altfel ar fi zis eticheta_anulata)
+    elif inainte is None and not (OH is not None and (r.incert or r.stare == OH.DECIS)):
+        intrare = None   # cererea asta n-a apucat să fie executată (cheie lipsă, 4xx), iar alta fără răspuns nu era
+    else:
+        return           # răspuns pierdut sau nehotărât: rămâne „fara_raspuns”
+    try:
+        _regen_scrie(cheie, intrare)
+    except OSError as e:
+        print("  ⚠ jurnalul local al refacerilor (%s) nu s-a putut actualiza: %s" % (REGEN_JURNAL, e))
+
+
 def _regen_de_repetat(a):
     """Execuția awb-regen tocmai trimisă, cu aceleași valori (--awb numit inclus), gata de repetat: fiecare argument
     trece prin shlex.quote."""
@@ -4889,6 +4961,8 @@ def _oh_fara_raspuns(a, cmd, OH, r):
             print("    NU lua --awb dintr-o probă nouă după un răspuns pierdut sau după un timeout: proba ar arăta eticheta"
                   " nouă, iar refacerea ei ar anula-o și ar face a treia.")
             print("    → repetă: %s" % _regen_de_repetat(a))
+            print("    Până atunci, pe mașina asta, o refacere a comenzii cu alt --awb e refuzată, iar proba nu mai tipărește"
+                  " rândul de execuție.")
         else:
             print("    Nu reîncerca orbește: rulează proba (fără --apply) și vezi starea comenzii în Order Hub (%s)." % OH_UI_COMENZI)
         sys.exit(OH_FARA_RASPUNS)
@@ -5076,9 +5150,30 @@ def cmd_awb_regen(a):
                   " refă eticheta din Order Hub (%s)." % OH_UI_COMENZI)
             sys.exit(OH_FARA_RASPUNS)
     motiv = getattr(a, "motiv", None) or "refacere AWB cerută prin CS"
+    executa = bool(a.apply and complet and awbs is not None and not oprit)
+    cheie = _nume_norm(a.order)
+    jurnal = _regen_jurnal().get(cheie)
+    fara_raspuns = jurnal if (jurnal or {}).get("stare") == "fara_raspuns" else None
+    if executa and fara_raspuns and fara_raspuns.get("awb") != trimisa:
+        print("  ⛔ awb-regen · %s: refacerea cerută pe --awb %s (acum %d min, de pe mașina asta) n-a primit răspuns —"
+              " POATE să fi fost executată, iar %s poate fi chiar eticheta ei nouă → nu s-a trimis nimic." % (
+                  a.order, fara_raspuns.get("awb"), (time.time() - float(fara_raspuns.get("la") or 0)) // 60, trimisa))
+        print("    Repet-o întâi, identic: dacă s-a făcut, Order Hub o refuză (eticheta_anulata) și nu iese a treia"
+              " etichetă; dacă nu, o face o singură dată.")
+        print("    → repetă: %s" % fara_raspuns.get("repeta"))
+        sys.exit(OH_FARA_RASPUNS)
+    if executa:   # notată ÎNAINTE să plece: un proces oprit fără răspuns (timeoutul MCP) lasă urma în jurnal
+        try:
+            _regen_scrie(cheie, {"stare": "fara_raspuns", "comanda": a.order, "awb": trimisa, "la": time.time(),
+                                 "repeta": _regen_de_repetat(a)})
+        except OSError as e:
+            print("  ⛔ awb-regen · %s: jurnalul local al refacerilor (%s) nu s-a putut scrie (%s) → nu s-a trimis nimic:"
+                  " fără el, o refacere al cărei răspuns se pierde n-ar mai putea fi recunoscută." % (a.order, REGEN_JURNAL, e))
+            sys.exit(OH_FARA_RASPUNS)
     OH, r = _oh_intreaba(lambda OH, tok: OH.refa(   # fără colete citite, proba pleacă cu 1: execuția cere --parcels
-        a.order, cine, citite or 1, awb=trimisa, motiv=motiv,
-        aplica=a.apply and complet and awbs is not None and not oprit, token=tok))
+        a.order, cine, citite or 1, awb=trimisa, motiv=motiv, aplica=executa, token=tok))
+    if executa:
+        _regen_dupa_raspuns(a, cheie, OH, r, fara_raspuns)
     if not pin and awb0 and OH is not None and r.stare == OH.DECIS and r.rezultat == "eticheta_anulata":
         # Shopify arată încă o etichetă pe care Order Hub a înlocuit-o (fulfillment-ul ei n-a putut fi anulat): proba
         # se reface pe comandă, ca să arate eticheta vie. Cu --awb dat, refuzul rămâne: el oprește a treia etichetă.
@@ -5115,7 +5210,31 @@ def cmd_awb_regen(a):
             if a.apply:   # cerere incompletă: s-a făcut doar proba
                 print("  ⛔ --apply cere --parcels și --awb (eticheta de refăcut, din probă): altfel o cerere repetată"
                       " ar face a treia etichetă. Nu s-a executat nimic.")
-            if vii and not oprit and awbs is not None:   # un număr de colete necitit nu se ghicește: rămâne de completat
+            # O refacere de curând (de aici, sau văzută în Shopify) face ca eticheta vie să fie, foarte probabil, chiar
+            # cea nouă: rândul de execuție ar reface-o și ar ieși a treia. Atunci nu se tipărește (doar cu --awb dat).
+            recenta = ""
+            if fara_raspuns:
+                print("  ⚠ Pe mașina asta, refacerea cerută acum %d min pe --awb %s n-a primit răspuns: POATE să fi fost"
+                      " executată, iar eticheta vie de mai sus poate fi chiar cea nouă. Nu o reface; repetă întâi cererea"
+                      " aceea, identic (Order Hub o refuză dacă s-a făcut):" % (
+                          (time.time() - float(fara_raspuns.get("la") or 0)) // 60, fara_raspuns.get("awb")))
+                print("    → repetă: %s" % fara_raspuns.get("repeta"))
+                recenta = "fara_raspuns"
+            elif jurnal:
+                recenta = "refăcută acum %d min, de pe mașina asta (%s → %s)" % (
+                    (time.time() - float(jurnal.get("la") or 0)) // 60, jurnal.get("awb") or "?",
+                    jurnal.get("awb_nou") or (vii[0].split()[0] if vii else "?"))
+            elif getattr(a, "inlocuite_recent", None):
+                awb_v, minute = a.inlocuite_recent[0]
+                recenta = "eticheta %s a fost anulată în Shopify acum %d min, iar cea vie e %s" % (
+                    awb_v, minute, vii[0].split()[0] if vii else "?")
+            if recenta and recenta != "fara_raspuns":
+                print("  ℹ Refacere de curând: %s. Dacă e refacerea ta (sau a unei cereri al cărei răspuns nu l-ai văzut),"
+                      " e gata — nu o repeta." % recenta)
+                if not pin:
+                    print("    Rândul de execuție nu se tipărește. Altă refacere a etichetei vii, cu bună știință: proba cu"
+                          " --awb <eticheta vie> arată execuția.")
+            if vii and not oprit and awbs is not None and (not recenta or (pin and recenta != "fara_raspuns")):
                 alte = "".join(' --%s "%s"' % (k, str(getattr(a, k)).replace('"', "'"))
                                for k in ("shop", "agent", "motiv") if getattr(a, k, None))
                 print("  → execuție: xconnector.py awb-regen --order %s --parcels %s --awb %s%s --apply" % (

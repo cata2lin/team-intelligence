@@ -110,6 +110,11 @@ AWB-uri de 1 colet când trebuiau 2-3 (sursă frecventă de eșec/etichetă gre�
     invers: se repetă EXACT aceeași comandă, cu același `--awb` (o tipărește mesajul, „→ repetă: …”) — Order Hub o
     refuză (`eticheta_anulata`) dacă refacerea s-a făcut și o face o singură dată dacă nu. `--awb` NU se ia dintr-o probă
     nouă după un răspuns pierdut sau un timeout: proba arată deja eticheta nouă, iar refacerea ei ar face a treia.
+    Garda e și mecanică: execuția se notează în `~/.xconnector/awb_regen_jurnal.json` ÎNAINTE să plece (rămâne și când
+    procesul e oprit de timeout). Cât n-a venit un răspuns hotărât, pe mașina asta o execuție cu alt `--awb` iese cu
+    cod 2, iar proba nu tipărește rândul „→ execuție”, ci „→ repetă”. După o refacere de curând (30 min: din jurnal
+    sau, de pe altă mașină, un fulfillment anulat de curând în Shopify) proba spune „e gata” și nu tipărește execuția;
+    altă refacere, cu bună știință: proba cu `--awb <eticheta vie>`.
   - **`awb-regen`** = `/refa`: același curier, doar numărul de colete (`--connector` / `--type` se refuză). Cu `--apply`
     cere `--parcels` și `--awb` (eticheta din probă): refacerea nu e idempotentă, iar eticheta numită face ca o cerere
     repetată să fie refuzată (`eticheta_anulata`) în loc să iasă a treia etichetă. Proba tipărește rândul de execuție; un

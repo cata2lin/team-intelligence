@@ -38,7 +38,11 @@ Shopify și au lăsat eticheta vie la curier (cinci comenzi). Testul verifică, 
       Hub întrebat de „TST-77” și xConnector care găsește TST77 (cod 2, nicio scriere prin xConnector); un --shop
       myshopify care nu e al nostru; timeoutul MCP la o probă awb-regen; aceleași cifre cu alt prefix;
   17. doar cifre fără --shop (două magazine au comanda 41730): cod 2 pe probă și pe --apply, la toate comenzile,
-      inclusiv addr-set; cu --shop, cifrele merg.
+      inclusiv addr-set; cu --shop, cifrele merg;
+  18. awb-regen după o refacere de curând (testul cerut de review: răspuns pierdut → probă → rândul tipărit nu face a
+      treia etichetă): jurnalul local, scris înaintea execuției, oprește execuția pe altă etichetă și rândul de
+      execuție al probei — și când procesul e oprit fără răspuns (timeoutul MCP); o refacere de pe altă mașină se vede
+      în Shopify (fulfillment anulat de curând).
 Dublura de Order Hub răspunde cu formele reale ale rutelor /api/depozit (măsurate cu probe pe 2-oct-2026).
 Comenzile, AWB-urile, magazinul și cheile sunt inventate.
 
@@ -155,6 +159,12 @@ COLETE = [2]                 # metafield-ul de colete al comenzii; None = Shopif
 ORAS_SHOPIFY = ["Vechi"]     # orașul comenzii în Shopify; xConnector are „Cluj"
 EVENIMENTE, MUTATII, ANULARI, KB, SUBPROC = [], [], [], {}, []
 NUME_LARG = {}               # ce tastează omul → comanda pe care o întoarce căutarea `name:` din Shopify (prima)
+DEMULT = "2026-10-01T08:00:00Z"   # updatedAt al fulfillment-urilor din date: de demult, nu „o refacere de curând”
+
+
+def ACUM_ISO(minute_in_urma=0):
+    import datetime as _dt
+    return (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(minutes=minute_in_urma)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def oh_raspuns(cale, c):
@@ -207,6 +217,7 @@ def oh_raspuns(cale, c):
         o["vii"] = [nou]
         if cod in SHOPIFY:   # eticheta nouă apare în Shopify ca tracking; fulfillment-ul celei vechi rămâne, anulat
             SHOPIFY[cod]["anulate"] = SHOPIFY[cod].get("anulate", []) + SHOPIFY[cod]["tracking"]
+            SHOPIFY[cod].setdefault("anulate_la", {}).update({t: ACUM_ISO() for t in SHOPIFY[cod]["tracking"]})
             SHOPIFY[cod]["tracking"] = [nou]
         return rez(True, "refacut", "AWB vechi: %s · anulat · AWB nou: %s · colete: %d" % (vechi, nou, colete),
                    pasi=[{"pas": "refa", "ok": True, "text": "AWB nou: %s" % nou}], awb_vechi=[vechi], awb_nou=nou)
@@ -301,9 +312,10 @@ def fake_gql(shop, token, query, variables=None):
         anulata = s.get("anulata") or ("anulata_dupa" in s and CITIRI_STARE[0] > s["anulata_dupa"])
         return {"data": {"orders": {"edges": [{"node": {
             "id": "gid://shopify/Order/1", "name": nume, "cancelledAt": "2026-10-02T10:00:00Z" if anulata else None,
-            "fulfillments": [{"status": "CANCELLED", "trackingInfo": [{"number": t}]} for t in s.get("anulate", [])]
-            + [{"status": "ERROR", "trackingInfo": [{"number": t}]} for t in s.get("erori", [])]
-            + [{"status": "SUCCESS", "trackingInfo": [{"number": t}]} for t in s["tracking"]]}}]}}}
+            "fulfillments": [{"status": "CANCELLED", "updatedAt": s.get("anulate_la", {}).get(t, DEMULT),
+                              "trackingInfo": [{"number": t}]} for t in s.get("anulate", [])]
+            + [{"status": "ERROR", "updatedAt": DEMULT, "trackingInfo": [{"number": t}]} for t in s.get("erori", [])]
+            + [{"status": "SUCCESS", "updatedAt": DEMULT, "trackingInfo": [{"number": t}]} for t in s["tracking"]]}}]}}}
     raise AssertionError("query Shopify neașteptat: %s" % query[:90])
 
 
@@ -356,6 +368,8 @@ X.route_connector = lambda sh, st, order, cons, con: con
 X._kb_secret = lambda key: (KB[key], True) if key in KB else ("", False)
 X.subprocess.run = fara_retea
 X.time.sleep = lambda s: None
+_DIR_JURNAL = tempfile.TemporaryDirectory(prefix="xc-regen-")   # șters la ieșire
+X.REGEN_JURNAL = os.path.join(_DIR_JURNAL.name, "awb_regen_jurnal.json")   # nu ~/.xconnector
 
 
 def ruleaza(*args, raspuns=None, cheie=CHEIE, agent="Raluca", handle=None, confirma=True, pastreaza=False,
@@ -368,6 +382,8 @@ def ruleaza(*args, raspuns=None, cheie=CHEIE, agent="Raluca", handle=None, confi
     if not pastreaza:
         OH_COMENZI.clear(); OH_COMENZI.update(copy.deepcopy(OH_COMENZI_0))
         SHOPIFY.clear(); SHOPIFY.update(copy.deepcopy(SHOPIFY_0))
+        if os.path.exists(X.REGEN_JURNAL):   # jurnalul local al refacerilor ține de „lume”, ca Order Hub și Shopify
+            os.remove(X.REGEN_JURNAL)
     OH_RASPUNS[0], SHOPIFY_CONFIRMA[0] = raspuns, confirma
     PICA.clear(); PICA.update(pica or {})
     CITIRI_STARE[:] = [0, stare_pica_dupa, stare_pica_primele]
@@ -1355,6 +1371,104 @@ OH_COMENZI_0.pop("TST41730", None)
 check("nume_comanda_potrivit: cifrele goale se potrivesc doar cu magazinul fixat",
       X.nume_comanda_potrivit("41730", "ALT41730") and not X.nume_comanda_potrivit("41730", "ALT41730", False)
       and X.nume_comanda_potrivit("#77001", "77001", False) and X.nume_comanda_potrivit("TST-41730", "TST41730", False))
+
+print("18. awb-regen după o refacere de curând: proba nu mai duce la a treia etichetă")
+
+
+def executii():
+    return [c for c in oh() if c[1]["dry_run"] is False]
+
+
+def rand_executie(out):
+    m = re.search(r"→ execuție: (.+)", out)
+    return shlex.split(m.group(1)) if m else []
+
+
+def jurnal_regen():
+    try:
+        with open(X.REGEN_JURNAL, encoding="utf-8") as f:
+            return json.load(f)
+    except OSError:
+        return {}
+
+
+# testul cerut de review: răspuns pierdut → probă → rândul tipărit nu trebuie să facă a treia etichetă
+cod, out = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000001", "--apply",
+                   raspuns=pierde_executia(True))
+check("răspuns pierdut: jurnalul local ține refacerea „fara_raspuns”, pe --awb 70000000001", cod == 2
+      and jurnal_regen().get("TST1", {}).get("stare") == "fara_raspuns"
+      and jurnal_regen()["TST1"].get("awb") == "70000000001", (cod, jurnal_regen()))
+cod, out = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", pastreaza=True)
+check("…proba de după: niciun rând „→ execuție”, ci avertismentul și comanda de repetat (același --awb)", cod == 0
+      and not rand_executie(out) and "n-a primit răspuns" in out and rand_repeta(out)[:9] == [
+          "xconnector.py", "awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000001", "--apply"], out)
+cod, out = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000099", "--apply", pastreaza=True)
+check("…execuția pe eticheta vie din Order Hub (70000000099 = cea nouă): cod 2, nimic trimis, nu iese a treia",
+      cod == 2 and not executii() and OH_COMENZI["TST1"]["vii"] == ["70000000099"]
+      and OH_COMENZI["TST1"]["arhiva"] == ["70000000001"] and "→ repetă:" in out, (cod, executii(), OH_COMENZI["TST1"]))
+cod, out = ruleaza(*rand_repeta(out)[1:], pastreaza=True)
+check("…repetarea identică: eticheta_anulata, tot fără a treia; jurnalul trece pe „refacut”", cod == 3
+      and OH_COMENZI["TST1"]["vii"] == ["70000000099"] and jurnal_regen().get("TST1", {}).get("stare") == "refacut",
+      (cod, OH_COMENZI["TST1"], jurnal_regen()))
+cod, out = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", pastreaza=True)
+check("…proba de după: „refacere de curând … e gata”, fără rând de execuție", cod == 0 and not rand_executie(out)
+      and "Refacere de curând" in out and "e gata" in out, out)
+cod, out = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000099", pastreaza=True)
+check("…o altă refacere, cerută cu bună știință (proba cu --awb 70000000099): rândul de execuție apare",
+      cod == 0 and "--awb 70000000099 --apply" in " ".join(rand_executie(out)), out)
+
+
+def ucis_dupa_executie(cale, c):
+    """Timeoutul uneltei MCP omoară procesul după ce Order Hub a primit execuția: nimic din xconnector.py nu mai rulează."""
+    if cale.endswith("/refa") and c.get("dry_run") is False:
+        oh_raspuns(cale, c)
+        raise SystemExit(137)
+    return None
+
+
+cod, out = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000001", "--apply",
+                   raspuns=ucis_dupa_executie)
+check("proces oprit înainte de răspuns (timeoutul MCP): jurnalul fusese scris ÎNAINTE de cerere", cod == 137
+      and jurnal_regen().get("TST1", {}).get("stare") == "fara_raspuns", (cod, jurnal_regen()))
+cod, out = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", pastreaza=True)
+cod2, out2 = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000099", "--apply", pastreaza=True)
+check("…proba nu tipărește execuția, iar execuția pe eticheta nouă e refuzată (cod 2), fără a treia", cod == 0
+      and not rand_executie(out) and "→ repetă:" in out and cod2 == 2 and not executii()
+      and OH_COMENZI["TST1"]["arhiva"] == ["70000000001"], (out, cod2, OH_COMENZI["TST1"]))
+cod, out = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000001", "--apply")
+cod, out = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", pastreaza=True)
+check("clientul MCP renunță la 60 s, scriptul primește „refacut”: proba de după spune că e gata, fără execuție",
+      cod == 0 and not rand_executie(out) and "refăcută acum 0 min, de pe mașina asta (70000000001 → 70000000099)" in out,
+      out)
+# de pe altă mașină (alt coleg, altă sesiune): urma e în Shopify — fulfillment-ul etichetei vechi, anulat de curând
+OH_COMENZI_0["TST20"] = {"vii": ["70000000020"], "cont": "dpd-ro-arona", "arhiva": ["70000000019"]}
+picate = []
+for minute, pin, cu_rand in ((5, [], False), (45, [], True), (5, ["--awb", "70000000020"], True)):
+    SHOPIFY_0["TST20"] = {"tracking": ["70000000020"], "anulate": ["70000000019"],
+                          "anulate_la": {"70000000019": ACUM_ISO(minute)}}
+    cod, out = ruleaza("awb-regen", "--order", "TST20", "--parcels", "2", *pin)
+    if cod != 0 or bool(rand_executie(out)) != cu_rand or ((minute <= 30) != ("Refacere de curând" in out)):
+        picate.append("acum %d min%s: cod %s, rând de execuție %s" % (minute, " " + " ".join(pin), cod, rand_executie(out)))
+check("refacere de pe altă mașină, văzută în Shopify: acum 5 min → fără rând de execuție; acum 45 min → cu rând;"
+      " cu --awb dat → cu rând", not picate, "; ".join(picate))
+del OH_COMENZI_0["TST20"], SHOPIFY_0["TST20"]
+jurnal_bun = X.REGEN_JURNAL
+X.REGEN_JURNAL = os.path.join(os.devnull, "nu-se-poate", "awb_regen_jurnal.json")
+cod, out = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000001", "--apply")
+X.REGEN_JURNAL = jurnal_bun
+check("jurnalul nu se poate scrie: cod 2, execuția nu pleacă", cod == 2 and not executii()
+      and OH_COMENZI["TST1"]["vii"] == ["70000000001"] and "nu s-a putut scrie" in out, (cod, executii(), out))
+cod, out = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000001", "--apply",
+                   raspuns=(401, {"detail": "Cheie de serviciu: revocată"}))
+check("execuție respinsă de Order Hub înainte de orice (401): nu rămâne nimic în jurnal", cod == 2
+      and "TST1" not in jurnal_regen(), jurnal_regen())
+cod, out = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000001", "--apply",
+                   raspuns=lambda cale, c: (200, {"ok": False, "rezultat": "in_curs", "mesaj": "AWB: refacere în curs",
+                                                  "plan": [], "pasi": [], "comanda": c["cod"], "order_id": 1,
+                                                  "magazin": "Magazin Test", "anulata": False})
+                   if c.get("dry_run") is False else None)
+check("„in_curs” (Order Hub încă lucrează la o cerere): rămâne „fara_raspuns” în jurnal",
+      jurnal_regen().get("TST1", {}).get("stare") == "fara_raspuns", (cod, jurnal_regen()))
 
 check("niciun subprocess și nicio ieșire în rețea pe lângă dubluri", not SUBPROC, SUBPROC)
 

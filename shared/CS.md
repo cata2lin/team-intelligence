@@ -75,7 +75,9 @@
 >   Order Hub. La anulare și oprire: rulează proba înainte de a repeta. La **`awb-regen`** invers: repetă EXACT aceeași
 >   comandă, cu același `--awb` (mesajul o tipărește: „→ repetă: …”) — dacă refacerea s-a făcut, Order Hub o refuză
 >   (`eticheta_anulata`); dacă nu, o face o singură dată. NU lua `--awb` dintr-o probă nouă după un răspuns pierdut:
->   proba arată deja eticheta nouă, iar refacerea ei ar anula-o și ar face a treia.
+>   proba arată deja eticheta nouă, iar refacerea ei ar anula-o și ar face a treia. Dacă proba de după o refacere nu mai
+>   tipărește „→ execuție” („Refacere de curând … e gata” sau „→ repetă”), nu construi execuția de mână: refacerea e
+>   gata, sau mai întâi se repetă cererea fără răspuns.
 > - **`shopify_refuz`:** eticheta e anulată la curier, comanda rămâne deschisă în Shopify, Order Hub deschide tichet CS
 >   (azi: Belasil, până se redeschide aplicația Order Hub în admin).
 > - **Ramburs plătit apoi cu cardul:** eticheta fără ramburs o reface Order Hub. Emailul „[COD dublu]” doar raportează
