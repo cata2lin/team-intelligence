@@ -26,6 +26,7 @@ import logging
 import math
 import re
 import sqlite3
+import xml.etree.ElementTree as ET
 import threading
 import time
 from collections import defaultdict
@@ -39,6 +40,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core.config import BASE_DIR, DATA_DIR, COURIER_CONFIG
+from core.greu import greu
 from core.stores import list_stores, get_store
 
 try:
@@ -104,6 +106,22 @@ class MarketingOverrideItem(BaseModel):
 
 class MarketingOverrideBulk(BaseModel):
     items: List[MarketingOverrideItem]
+
+class CommissionOverrideItem(BaseModel):
+    month: str
+    prefix: str
+    amount: Optional[float] = None   # None = șterge override-ul, revino la calcul
+
+class CommissionOverrideBulk(BaseModel):
+    items: List[CommissionOverrideItem]
+
+class CommissionRateItem(BaseModel):
+    prefix: str
+    from_month: str
+    rate: Optional[float] = None   # None = șterge regula
+
+class CommissionRateBulk(BaseModel):
+    items: List[CommissionRateItem]
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -172,6 +190,17 @@ def _ensure_db():
                 value TEXT
             )
         """)
+        # Denumirea REALĂ a magazinului, citită din Shopify la fiecare rulare. Înainte era o hartă
+        # scrisă de mână în UI, care rămăsese în urmă: BON și GRAN erau inversate (BON e
+        # CasaOfertelor.ro, nu Bonhaus), iar LAB/ORC/SK/HU/MD/DUPBG lipseau cu totul.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS profit_store_names (
+                prefix TEXT PRIMARY KEY,
+                name TEXT DEFAULT '',
+                domain TEXT DEFAULT '',
+                updated_at TEXT DEFAULT ''
+            )
+        """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS profit_status_mapping (
                 courier_status TEXT PRIMARY KEY,
@@ -192,6 +221,29 @@ def _ensure_db():
                 prefix TEXT NOT NULL,
                 amount REAL DEFAULT 0,
                 PRIMARY KEY (month, prefix)
+            )
+        """)
+        # Comisionul de agenție. Calculul implicit e `rată × (încasări − transport)`, dar rata NU e
+        # aceeași peste tot (Grandia e 1.25%, restul 2.5%) și uneori se facturează o sumă negociată.
+        # Deci suma manuală, când există, SUPRASCRIE calculul — vezi `_commission_for`.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS profit_commission_override (
+                month TEXT NOT NULL,
+                prefix TEXT NOT NULL,
+                amount REAL NOT NULL,
+                PRIMARY KEY (month, prefix)
+            )
+        """)
+        # Rata de comision NU e aceeaşi peste tot şi se schimbă în timp (Grandia: 1.25% → 0% din
+        # iulie 2026). O ținem ca REGULĂ cu lună de start, nu ca sume pe fiecare lună — altfel o lună
+        # viitoare fără rând ar recădea tăcut pe rata globală. Se aplică regula cu cel mai mare
+        # `from_month <= luna cerută`.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS profit_commission_rate (
+                prefix TEXT NOT NULL,
+                from_month TEXT NOT NULL,
+                rate REAL NOT NULL,
+                PRIMARY KEY (prefix, from_month)
             )
         """)
         conn.execute("""
@@ -250,11 +302,20 @@ DEFAULT_COUNTRY_MAP = {
     "MAG": "RO", "NOC": "RO", "NUB": "RO", "OFER": "RO", "PAT": "RO",
     "RED": "RO", "ROSSI": "RO", "CZ": "CZ", "PL": "PL", "BG": "BG",
     "BONBG": "BG",
+    "ORC": "RO",   # Orice Redus (oriceredus.ro) — RON, TVA 21%
+    "SK": "SK",    # Bonhaus.sk  — EUR, TVA 23%
+    "HU": "HU",    # Bonhaus.hu  — HUF, TVA 27%
+    "MD": "MD",    # Duppo Moldova — MDL, TVA 20%
+    "DUPBG": "BG", # Duppo BG — țara BG, dar magazinul vinde în EUR
 }
 
-DEFAULT_VAT_RATES = {"RO": 0.21, "CZ": 0.21, "PL": 0.23, "BG": 0.20}  # RO trecut la 21% (aug 2025)
+DEFAULT_VAT_RATES = {"RO": 0.21, "CZ": 0.21, "PL": 0.23, "BG": 0.20, "SK": 0.23,
+                     "HU": 0.27, "MD": 0.20}  # RO trecut la 21% (aug 2025)
 
-CURRENCY_BY_COUNTRY = {"RO": "RON", "CZ": "CZK", "PL": "PLN", "BG": "BGN"}
+CURRENCY_BY_COUNTRY = {"RO": "RON", "CZ": "CZK", "PL": "PLN", "BG": "BGN", "SK": "EUR",
+                       "HU": "HUF", "MD": "MDL"}
+# ⚠️ E doar un DEFAULT per țară — conversia reală folosește `profit_orders.currency` (moneda din
+# Shopify, per comandă). Ex: Duppo BG (prefix DUPBG, țara BG) vinde în EUR, nu BGN.
 
 
 def _get_settings() -> dict:
@@ -323,10 +384,32 @@ def _save_status_mapping(mapping: Dict[str, str]):
         )
 
 
+# Pseudo-statusuri scrise de tracker: a le re-interoga n-are rost (AWB inexistent / date șterse
+# de curier), deci închid comanda la fel ca un verdict real.
+_NO_RETRY_STATUSES = {"awb invalid", "sameday expirat"}
+
+
+def _confirmed_courier_statuses(mapping: Dict[str, str]) -> Set[str]:
+    """Statusurile (lowercase) care reprezintă un VERDICT DE CURIER terminal.
+
+    Doar astea scot un AWB din coada de verificat. „Închis" dedus din Shopify NU se califică:
+    DPD închide și un retur cu un eveniment de livrare („Delivered Back to Sender"), pe care
+    Shopify îl raportează tot ca `DELIVERED` — vezi _map_status.
+    """
+    return {k.strip().lower() for k, v in mapping.items()
+            if v in ("Livrata", "Refuzata", "Anulata")} | _NO_RETRY_STATUSES
+
+
+def _has_tag(tags: str, tag: str) -> bool:
+    """Tag EXACT, nu subșir (`refuzata` nu trebuie să prindă `swap_request_bi` sau `nerefuzata`)."""
+    return tag in {t.strip().lower() for t in (tags or "").split(",")}
+
+
 def _map_status(courier_status: str, fulfillment_status: str, payment_status: str,
                 awb: str, mapping: Dict[str, str],
                 shopify_delivery_status: str = "",
-                unmapped_collector: Optional[Dict[str, int]] = None) -> str:
+                unmapped_collector: Optional[Dict[str, int]] = None,
+                tags: str = "") -> str:
     """
     Map raw courier status to category.
     Logic mirrors user's Excel formula exactly:
@@ -370,9 +453,17 @@ def _map_status(courier_status: str, fulfillment_status: str, payment_status: st
         if k.lower().strip() == cs_lower:
             return v
 
-    # 2b) Shopify fulfillment marked as delivered (e.g. "Other" tracking)
+    # 2b) Shopify zice că fulfillment-ul e livrat.
+    #     ⚠️ NU e dovadă de livrare: DPD închide și un RETUR cu un eveniment de livrare
+    #     („Delivered Back to Sender"), iar Shopify îl raportează tot `DELIVERED`. Un COD chiar
+    #     livrat ajunge PAID; dacă plata a rămas PENDING sau OrderHub a pus tag-ul `refuzata`,
+    #     coletul s-a întors. Verificat la DPD pe 1.599 AWB (aug-2026): regula are 100% precizie
+    #     pe iulie și 96% pe august, fără să retrogradeze nicio livrare reală.
+    #     E doar o plasă de siguranță până vine verdictul curierului — care are prioritate (pasul 2).
     sds = (shopify_delivery_status or "").upper().strip()
     if sds == "DELIVERED":
+        if ps == "PENDING" or _has_tag(tags, "refuzata"):
+            return "Refuzata"
         return "Livrata"
 
     # 3) No courier status at all
@@ -412,88 +503,150 @@ def _map_status(courier_status: str, fulfillment_status: str, payment_status: st
 
 
 # ═══════════════════════════════════════════════════════════════
-# Exchange Rates (frankfurter.app — free ECB historical rates)
+# Curs valutar — sursa canonică: BNR (warehouse metrics.fx_rates + XML oficial curs.bnr.ro)
 # ═══════════════════════════════════════════════════════════════
 
+def _bnr_month_rates(month: str) -> Dict[str, float]:
+    """Media LUNARĂ <VAL>→RON din `metrics.fx_rates` (feed BNR, 37 monede, sincronizat zilnic de
+    fx_rates_sync.py). Sursa CANONICĂ de curs: frankfurter.app — folosit înainte — întoarce 403
+    din aug-2026, iar fallback-ul hardcodat (EUR 4.97 vs 5.27 real) subevalua venitul intl ~6%."""
+    try:
+        import os as _os, re as _re
+        import psycopg2 as _pg
+
+        def _cl(d):
+            d = _re.sub(r"([?&])(schema|channel_binding|pgbouncer|connection_limit)=[^&]*", r"\1", d)
+            return _re.sub(r"[?&]+(&|$)", r"\1", d).rstrip("?&")
+
+        conn = _pg.connect(_cl(_os.environ["DATABASE_URL_METRICS"]))
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """SELECT "fromCurrency", AVG(rate) FROM fx_rates
+                   WHERE "toCurrency" = 'RON' AND to_char("rateDate", 'YYYY-MM') = %s
+                   GROUP BY 1""", (month,))
+            out = {c: float(r) for c, r in cur.fetchall() if r and float(r) > 0}
+        finally:
+            conn.close()
+        if out:
+            log.info("FX %s: %d monede din BNR (metrics.fx_rates)", month, len(out))
+        return out
+    except Exception as e:
+        log.warning("FX BNR lookup failed for %s: %s", month, e)
+        return {}
+
+
+# Rata IREVOCABILĂ de conversie BGN→EUR (Bulgaria a intrat în euro pe 1-ian-2026). BNR nu mai
+# publică BGN după decembrie 2025, dar mai avem comenzi în BGN (33, toate din 1-ian-2026), deci
+# cursul lor se derivă din EUR cu pegul — NU dintr-o valoare hardcodată.
+BGN_PER_EUR = 1.95583
+
+_BNR_XML_CACHE: Dict[int, Dict[str, Dict[str, float]]] = {}
+
+
+async def _bnr_xml_year(year: int) -> Dict[str, Dict[str, float]]:
+    """Medii lunare <VAL>→RON dintr-un an, din XML-ul OFICIAL BNR (curs.bnr.ro).
+
+    Sursa canonică de curs: acoperă tot istoricul (warehouse-ul `metrics.fx_rates` începe abia în
+    2026-04) și BGN până la adoptarea euro. ⚠️ `www.bnr.ro/files/xml/...` dă 302 → **curs.bnr.ro**.
+    """
+    if year in _BNR_XML_CACHE:
+        return _BNR_XML_CACHE[year]
+    acc: Dict[str, Dict[str, list]] = defaultdict(lambda: defaultdict(list))
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            r = await client.get(f"https://curs.bnr.ro/files/xml/years/nbrfxrates{year}.xml")
+            r.raise_for_status()
+        for cube in ET.fromstring(r.content).iter():
+            if not cube.tag.endswith("Cube"):
+                continue
+            day = cube.get("date")
+            if not day:
+                continue
+            for node in cube:
+                cur = node.get("currency")
+                if not cur:
+                    continue
+                try:
+                    acc[day[:7]][cur].append(float(node.text) / float(node.get("multiplier") or 1))
+                except (TypeError, ValueError):
+                    continue
+    except Exception as e:
+        log.warning("BNR XML %s indisponibil: %s", year, e)
+        return {}
+    out = {m: {c: sum(v) / len(v) for c, v in d.items() if v} for m, d in acc.items()}
+    if out:
+        _BNR_XML_CACHE[year] = out
+    return out
+
+
+def _is_open_month(month: str) -> bool:
+    """Luna curentă (încă în desfășurare) — cursul ei se REÎMPROSPĂTEAZĂ, nu se îngheață."""
+    try:
+        now = datetime.now(ZoneInfo("Europe/Bucharest")) if ZoneInfo else datetime.now()
+        return month >= now.strftime("%Y-%m")
+    except Exception:
+        return False
+
+
+async def _canonical_rates(month: str) -> Dict[str, float]:
+    """Cursul ADEVĂRAT al lunii: warehouse BNR, completat din XML-ul BNR, plus BGN din peg."""
+    out = {c: v for c, v in _bnr_month_rates(month).items() if c != "RON" and v > 0}
+    xml = (await _bnr_xml_year(int(month[:4]))).get(month, {})
+    for c, v in xml.items():
+        if v > 0:
+            out.setdefault(c, v)
+    # BGN: BNR nu-l mai publică după adoptarea euro → rata irevocabilă față de EUR
+    if "BGN" not in out and out.get("EUR"):
+        out["BGN"] = out["EUR"] / BGN_PER_EUR
+    return out
+
+
 async def _fetch_exchange_rates(month: str) -> Dict[str, float]:
-    """Fetch average exchange rate for a month. Returns {currency: rate_to_RON}."""
-    # Check cache first
+    """Curs {monedă: rată_în_RON} pentru o lună.
+
+    Ordinea: **BNR** (warehouse `metrics.fx_rates` → XML oficial curs.bnr.ro → peg BGN), apoi cache.
+    Reguli, învăţate dintr-un bug care a costat bani:
+    - **Luna DESCHISĂ se reîmprospătează**: BNR suprascrie cache-ul. Înainte, cursul scris în prima
+      zi a lunii (când BNR n-avea încă zile şi se cădea pe fallback) rămânea lipit toată luna —
+      august 2026 stătea pe EUR 4,97 în loc de 5,2469, adică ~17.500 lei venit intl neraportat.
+    - **Luna ÎNCHISĂ rămâne îngheţată**: cache-ul e adevărul cu care s-a raportat deja P&L-ul; BNR
+      completează doar monedele care lipsesc (ex. o monedă apărută cu un magazin nou).
+    - **Fallback-ul hardcodat NU se mai scrie niciodată în cache** — o valoare aproximativă lipită
+      acolo nu mai putea fi corectată de nicio sursă. Se foloseşte doar în memorie, cu warning.
+    """
     with _db() as conn:
         rows = conn.execute(
             "SELECT currency, rate_to_ron FROM profit_exchange_rates WHERE month=?", (month,)
         ).fetchall()
-    if rows:
-        rates = {r["currency"]: r["rate_to_ron"] for r in rows}
-        if len(rates) >= 3:  # have enough currencies cached
-            rates["RON"] = 1.0
-            return rates
+    cached = {r["currency"]: r["rate_to_ron"] for r in rows if r["rate_to_ron"] and r["rate_to_ron"] > 0}
 
-    # Fetch from frankfurter.app
-    y, m = month.split("-")
-    year, mo = int(y), int(m)
+    canonical = await _canonical_rates(month)
+    is_open = _is_open_month(month)
+    fresh = {c: v for c, v in canonical.items()
+             if is_open or c not in cached}
+    fresh = {c: v for c, v in fresh.items() if abs(v - cached.get(c, 0)) > 1e-9}
 
-    # Get first and last day of month
-    start = f"{year}-{mo:02d}-01"
-    if mo == 12:
-        end = f"{year + 1}-01-01"
-    else:
-        end = f"{year}-{mo + 1:02d}-01"
+    if fresh:
+        with _db() as conn:
+            for c, v in fresh.items():
+                conn.execute("INSERT OR REPLACE INTO profit_exchange_rates (month,currency,rate_to_ron) "
+                             "VALUES (?,?,?)", (month, c, v))
+        log.info("FX %s: %d cursuri actualizate din BNR (%s)", month, len(fresh),
+                 "lună deschisă" if is_open else "goluri completate")
+        cached.update(fresh)
 
-    # Get end date as last day of month
-    from datetime import date
-    end_dt = date(int(end[:4]), int(end[5:7]), 1) - timedelta(days=1)
-    end_str = end_dt.isoformat()
+    # Ultimă plasă: valori aproximative, DOAR în memorie, ca raportul să nu iasă cu zero pe o monedă.
+    FALLBACK = {"EUR": 4.97, "CZK": 0.21, "PLN": 1.16, "BGN": 2.54}
+    missing = [c for c, v in FALLBACK.items() if c not in cached]
+    if missing:
+        log.warning("FX %s: fără curs BNR pentru %s — folosesc valori APROXIMATIVE, nesalvate",
+                    month, ",".join(missing))
+        for c in missing:
+            cached[c] = FALLBACK[c]
 
-    rates = {"RON": 1.0}
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            # Get average rate for the month (start..end)
-            url = f"https://api.frankfurter.app/{start}..{end_str}"
-            params = {"from": "RON", "to": "EUR,CZK,PLN,BGN"}
-            r = await client.get(url, params=params)
-
-            if r.status_code == 200:
-                data = r.json()
-                # Average all daily rates
-                daily_rates = data.get("rates", {})
-                if daily_rates:
-                    avg = defaultdict(list)
-                    for day_str, day_rates in daily_rates.items():
-                        for curr, rate in day_rates.items():
-                            avg[curr].append(rate)
-
-                    for curr, values in avg.items():
-                        if values:
-                            # frankfurter gives RON→X, we need X→RON = 1/rate
-                            avg_rate = sum(values) / len(values)
-                            if avg_rate > 0:
-                                rates[curr] = round(1.0 / avg_rate, 6)
-
-        # Also add EUR directly if we have it
-        if "EUR" in rates and rates["EUR"] > 0:
-            # EUR rate is already X→RON
-            pass
-
-    except Exception as e:
-        log.warning("Exchange rate fetch failed: %s — using defaults", e)
-
-    # Fallback defaults
-    defaults = {"EUR": 4.97, "CZK": 0.21, "PLN": 1.16, "BGN": 2.54}
-    for curr, default_rate in defaults.items():
-        if curr not in rates or rates[curr] <= 0:
-            rates[curr] = default_rate
-
-    # Save to cache
-    with _db() as conn:
-        for curr, rate in rates.items():
-            if curr != "RON":
-                conn.execute(
-                    "INSERT OR REPLACE INTO profit_exchange_rates (month, currency, rate_to_ron) VALUES (?,?,?)",
-                    (month, curr, rate)
-                )
-
-    return rates
+    cached["RON"] = 1.0
+    return cached
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -508,6 +661,8 @@ query($q: String!, $cursor: String) {
       node {
         id name createdAt currencyCode tags
         totalPriceSet { shopMoney { amount currencyCode } }
+        currentTotalPriceSet { shopMoney { amount } }
+        totalRefundedSet { shopMoney { amount } }
         displayFinancialStatus displayFulfillmentStatus
         metafield(namespace: "custom", key: "awb") { value }
         fulfillments(first: 10) {
@@ -534,6 +689,57 @@ query($ids: [ID!]!) {
   }
 }
 """
+
+
+SHOP_NAME_GQL = "{ shop { name myshopifyDomain primaryDomain { host } } }"
+
+
+def _get_store_names() -> Dict[str, dict]:
+    """{prefix: {"name": "Maison d'Esteban", "domain": "esteban.ro"}} — gol dacă n-a rulat încă."""
+    try:
+        with _db() as conn:
+            return {r["prefix"]: {"name": r["name"] or "", "domain": r["domain"] or ""}
+                    for r in conn.execute("SELECT prefix, name, domain FROM profit_store_names")}
+    except Exception:
+        return {}
+
+
+async def _refresh_store_names(stores: List[dict]) -> None:
+    """Ia denumirea reală a fiecărui magazin DIN SHOPIFY și o salvează.
+
+    Rulează la fiecare `run` ca lista să nu mai rămână niciodată în urmă când se adaugă un magazin
+    nou. Nu are voie să strice rularea: orice eroare se înghite (raportul cade înapoi pe prefix).
+    """
+    async def _one(client, st):
+        try:
+            r = await client.post(
+                f"https://{st['shop']}/admin/api/{DEFAULT_API_VERSION}/graphql.json",
+                headers={"X-Shopify-Access-Token": st["token"], "Content-Type": "application/json"},
+                json={"query": SHOP_NAME_GQL}, timeout=20.0)
+            shop = ((r.json().get("data") or {}).get("shop") or {})
+            name = str(shop.get("name") or "").strip()
+            domain = str(((shop.get("primaryDomain") or {}).get("host")) or "").strip()
+            if name:
+                return st["prefix"], name, domain
+        except Exception as e:
+            log.warning("nume magazin %s: %s", st.get("prefix"), e)
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            res = await asyncio.gather(*[_one(client, st) for st in stores], return_exceptions=True)
+        rows = [r for r in res if isinstance(r, tuple)]
+        if rows:
+            now = datetime.now(timezone.utc).isoformat()
+            with _db() as conn:
+                conn.executemany(
+                    "INSERT INTO profit_store_names (prefix, name, domain, updated_at) VALUES (?,?,?,?) "
+                    "ON CONFLICT(prefix) DO UPDATE SET name=excluded.name, domain=excluded.domain, updated_at=excluded.updated_at",
+                    [(p, nm, dom, now) for p, nm, dom in rows])
+                conn.commit()
+        log.info("denumiri magazine actualizate: %d/%d", len(rows), len(stores))
+    except Exception as e:
+        log.warning("refresh denumiri magazine esuat: %s", e)
 
 
 def _parse_month_range(month: str, tz_name: str = "Europe/Bucharest"):
@@ -683,8 +889,17 @@ async def _fetch_orders_for_store(
             tags = ",".join(tags_raw) if isinstance(tags_raw, list) else str(tags_raw)
 
             total_set = (node.get("totalPriceSet") or {}).get("shopMoney") or {}
-            revenue = float(total_set.get("amount") or 0)
             currency = str(total_set.get("currencyCode") or node.get("currencyCode") or "").strip()
+            # 8-sep-2026 (decizia ownerului): venitul e NET. `currentTotalPriceSet` e singurul camp
+            # care acopera corect ambele cazuri, verificat pe tranzactiile reale din Shopify:
+            #   * REFUNDED  -> SALE + CAPTURE + REFUND, current = 0  (banii s-au dat inapoi)
+            #   * VOIDED    -> SALE PENDING + VOID,     current = 0  (COD-ul nu s-a incasat niciodata)
+            #   * COD livrat dar inca necapturat in Shopify -> current = total (venitul se pastreaza,
+            #     spre deosebire de netPaymentSet care ar fi 0 si ar sterge venit real)
+            # Cade inapoi pe totalPriceSet daca magazinul nu intoarce campul.
+            _cur_set = (node.get("currentTotalPriceSet") or {}).get("shopMoney") or {}
+            _cur_amt = _cur_set.get("amount")
+            revenue = float(_cur_amt) if _cur_amt is not None else float(total_set.get("amount") or 0)
 
             # AWB from metafield + fulfillments
             mf = node.get("metafield") or {}
@@ -1361,13 +1576,14 @@ def _update_tracking_in_db(month: str, awb_status_map: Dict[str, str], status_ma
                         continue
 
                 row = conn.execute(
-                    "SELECT payment_status, fulfillment_status, shopify_delivery_status FROM profit_orders WHERE month=? AND awb=? LIMIT 1",
+                    "SELECT payment_status, fulfillment_status, shopify_delivery_status, tags FROM profit_orders WHERE month=? AND awb=? LIMIT 1",
                     (month, awb)
                 ).fetchone()
                 if not row:
                     continue
                 category = _map_status(status, row["fulfillment_status"], row["payment_status"], awb, status_mapping,
-                                       shopify_delivery_status=row["shopify_delivery_status"] or "")
+                                       shopify_delivery_status=row["shopify_delivery_status"] or "",
+                                       tags=row["tags"] or "")
                 conn.execute(
                     "UPDATE profit_orders SET courier_status=?, status_category=? WHERE month=? AND awb=?",
                     (status, category, month, awb)
@@ -1398,7 +1614,7 @@ async def run_profitability(req: RunRequest):
         stores = list_stores()
 
         try:
-            await sync_marketing_from_daily_perf(month)
+            await sync_marketing_from_daily_perf(month, None, None, 1)
             log.info(f"Marketing sync complete for {month}")
         except Exception as e:
             log.error(f"Eroare preluare marketing din daily_perf.db: {e}")
@@ -1408,6 +1624,9 @@ async def run_profitability(req: RunRequest):
             return
 
         total_stores = len(stores)
+
+        # Denumirile reale, direct din Shopify (magazin nou adăugat => apare cu numele lui, singur).
+        await _refresh_store_names(stores)
 
         # Check if orders already cached in DB
         with _db() as conn:
@@ -1525,10 +1744,30 @@ async def run_profitability(req: RunRequest):
             # SAVE to DB immediately (before tracking!)
             yield f"data: {json.dumps({'type': 'progress', 'phase': 2, 'progress': total_stores, 'total': total_stores, 'message': f'Salvare {len(all_orders)} comenzi in DB...'})}\n\n"
 
+            # Statusul de la curier e singura DOVADĂ de livrare pe care o avem; rescrierea lunii
+            # din Shopify nu are voie să-l piardă. (Până la fix-ul din 2026-08-21 se scria "" la
+            # fiecare rulare → 120 de retururi confirmate de DPD au fost re-etichetate „Livrata"
+            # într-o singură noapte.) Îl păstrăm doar dacă AWB-ul a rămas același — la un AWB refăcut
+            # statusul vechi nu mai descrie coletul care a plecat.
             with _db() as conn:
-                conn.execute("DELETE FROM profit_orders WHERE month=?", (month,))
+                prev_courier = {
+                    (r["prefix"], r["order_name"]): (r["awb"] or "", r["courier_status"] or "")
+                    for r in conn.execute(
+                        "SELECT prefix, order_name, awb, courier_status FROM profit_orders "
+                        "WHERE month=? AND COALESCE(courier_status,'')!=''", (month,))
+                }
+                # Ștergem DOAR prefixele pe care chiar le sincronizăm acum. Un magazin închis și
+                # scos din sincronizare (marcat `active=0` în stores.csv, ex. BG/nocturna.bg în
+                # aug-2026) și-ar pierde altfel TOT istoricul la prima re-sincronizare a unei luni
+                # vechi — ștergerea era pe toată luna, iar re-inserarea aducea doar magazinele active.
+                _synced = sorted({st["prefix"] for st in stores})
+                _pp = ",".join("?" * len(_synced))
+                conn.execute(f"DELETE FROM profit_orders WHERE month=? AND prefix IN ({_pp})",
+                             [month] + _synced)
                 for o in all_orders:
                     awb = (o.get("awb") or "").strip()
+                    _prev = prev_courier.get((o["prefix"], o["order_name"]))
+                    prev_cs = _prev[1] if (_prev and _prev[0] == awb and awb) else ""
                     conn.execute("""
                         INSERT OR REPLACE INTO profit_orders
                         (month, prefix, shop, order_name, created_at, revenue, currency,
@@ -1541,9 +1780,10 @@ async def run_profitability(req: RunRequest):
                         o.get("created_at", ""), o.get("revenue", 0), o.get("currency", "RON"),
                         o.get("cogs", 0), o.get("cogs_missing", 0), o.get("cogs_missing_skus", ""),
                         o.get("payment_status", ""), o.get("fulfillment_status", ""),
-                        awb, o.get("courier_key", ""), "",
-                        _map_status("", o.get("fulfillment_status", ""), o.get("payment_status", ""),
-                                    awb, status_mapping, shopify_delivery_status=o.get("shopify_delivery_status", "")),
+                        awb, o.get("courier_key", ""), prev_cs,
+                        _map_status(prev_cs, o.get("fulfillment_status", ""), o.get("payment_status", ""),
+                                    awb, status_mapping, shopify_delivery_status=o.get("shopify_delivery_status", ""),
+                                    tags=o.get("tags", "")),
                         o.get("tags", ""), o.get("skus", ""), o.get("shopify_delivery_status", ""),
                     ))
 
@@ -1551,19 +1791,22 @@ async def run_profitability(req: RunRequest):
 
         # Phase 3: Tracking (reads AWBs from DB)
         # If orders already existed (re-sync), only track non-closed orders
-        CLOSED_CATS = {'Livrata', 'Refuzata', 'Anulata'}
+        # „Închis" = are VERDICT DE CURIER terminal. O comandă pe care doar Shopify o dă livrată
+        # rămâne în coadă până confirmă DPD — altfel un retur raportat de Shopify ca `DELIVERED`
+        # nu mai e verificat niciodată (cauza celor 1.225 retururi numărate ca livrări în iulie).
+        confirmed = sorted(_confirmed_courier_statuses(status_mapping))
+        _ph = ",".join("?" * len(confirmed))
         with _db() as conn:
             if existing_cnt > 0:
-                # Re-sync: skip closed orders
                 rows = conn.execute(
-                    "SELECT DISTINCT awb, courier_key FROM profit_orders "
-                    "WHERE month=? AND awb!='' AND status_category NOT IN ('Livrata','Refuzata','Anulata')",
-                    (month,)
+                    f"SELECT DISTINCT awb, courier_key FROM profit_orders "
+                    f"WHERE month=? AND awb!='' AND LOWER(TRIM(COALESCE(courier_status,''))) NOT IN ({_ph})",
+                    [month] + confirmed
                 ).fetchall()
                 closed_cnt = conn.execute(
-                    "SELECT COUNT(DISTINCT awb) FROM profit_orders "
-                    "WHERE month=? AND awb!='' AND status_category IN ('Livrata','Refuzata','Anulata')",
-                    (month,)
+                    f"SELECT COUNT(DISTINCT awb) FROM profit_orders "
+                    f"WHERE month=? AND awb!='' AND LOWER(TRIM(COALESCE(courier_status,''))) IN ({_ph})",
+                    [month] + confirmed
                 ).fetchone()[0]
             else:
                 # First run: track all
@@ -1753,12 +1996,13 @@ async def run_profitability(req: RunRequest):
         unmapped = {}
         with _db() as conn:
             no_awb_rows = conn.execute(
-                "SELECT id, payment_status, fulfillment_status, awb, courier_status, shopify_delivery_status FROM profit_orders WHERE month=? AND (awb='' OR awb IS NULL)",
+                "SELECT id, payment_status, fulfillment_status, awb, courier_status, shopify_delivery_status, tags FROM profit_orders WHERE month=? AND (awb='' OR awb IS NULL)",
                 (month,)
             ).fetchall()
             for row in no_awb_rows:
                 category = _map_status("", row["fulfillment_status"], row["payment_status"], "", status_mapping,
-                                       shopify_delivery_status=row["shopify_delivery_status"] or "", unmapped_collector=unmapped)
+                                       shopify_delivery_status=row["shopify_delivery_status"] or "",
+                                       unmapped_collector=unmapped, tags=row["tags"] or "")
                 conn.execute("UPDATE profit_orders SET status_category=? WHERE id=?", (category, row["id"]))
 
         with _db() as conn:
@@ -1806,7 +2050,8 @@ def _window_day_fraction(month_list, win_from, win_to):
 
 
 @router.get("/api/profitability/report")
-async def get_report(
+@greu
+def get_report(
     month: str = Query(...),
     from_date: Optional[str] = Query(None),
     to_date: Optional[str] = Query(None),
@@ -1859,7 +2104,9 @@ async def get_report(
         orders = [o for o in orders if not _is_excluded(o)]
 
     # Exchange rates (use first month for rates)
-    rates = await _fetch_exchange_rates(month_list[0])
+    # corpul ruleaza in threadpool (@greu): cursul se ia pe o bucla PROPRIE a firului. `anyio.from_thread.run`
+    # l-ar fi rulat pe bucla principala (conectarea la metrics + SQLite = 1,35 s de scanari blocate, recenzia V90)
+    rates = asyncio.run(_fetch_exchange_rates(month_list[0]))
 
     # Transport costs (merge across selected months, latest month wins per prefix)
     with _db() as conn:
@@ -1985,17 +2232,27 @@ async def get_report(
             _names = [o["order_name"] for o in _ords if o.get("status_category") in _PLECAT]
             if not _names:
                 continue
+            # 8-sep-2026: SUMA tuturor liniilor de AWB ale comenzii (outbound + RETUR + colete
+            # suplimentare), nu o singură valoare. `orders.transport_cost` ține UN cost/comandă și
+            # pierde piciorul de retur internațional și coletele în plus. Însumarea e sigură de când
+            # importul de CSV curier se face din Scripturi (api/courier_import.py): 0 perechi
+            # (order_id, tracking_number) duplicate pe iun-aug 2026. Lipsa față de vechea regulă,
+            # măsurată: iunie 8.261 / iulie 17.119 / august 9.799 RON ex-TVA (CZ/PL/BONBG/HU/SK = retur).
+            # Fallback păstrat pe orders.transport_cost dacă nu există nicio linie costată.
             _acur.execute(
                 "SELECT o.order_number, "
-                "CASE WHEN o.transport_cost > 0 THEN o.transport_cost / 1.21 "
-                "ELSE MAX(a.transport_cost_fara_tva) END AS ft_exvat "
+                "COALESCE(SUM(COALESCE(a.transport_cost_fara_tva, a.transport_cost / 1.21)), 0) AS awb_sum_exvat, "
+                "MAX(o.transport_cost) AS otc_gross "
                 "FROM orders o JOIN order_awbs a ON a.order_id = o.id "
                 "WHERE o.store_uid = %s AND o.order_number = ANY(%s) "
-                "GROUP BY o.order_number, o.transport_cost",
+                "GROUP BY o.order_number",
                 (_uid, _names))
-            for _on, _t in _acur.fetchall():
-                if _t and _t > 0:
-                    real_transport_eng[(_pfx, _on)] = float(_t)   # ex-TVA, un cost per comandă
+            for _on, _sum, _otc in _acur.fetchall():
+                _t = float(_sum or 0)
+                if _t <= 0 and _otc and _otc > 0:
+                    _t = float(_otc) / 1.21
+                if _t > 0:
+                    real_transport_eng[(_pfx, _on)] = _t   # ex-TVA, toate AWB-urile comenzii
         _ac.close()
         log.info("transport REAL AWBprint: %d comenzi mapate", len(real_transport_eng))
     except Exception as e:
@@ -2023,6 +2280,7 @@ async def get_report(
                 all_unmapped[cs] += 1
 
     # Build deliverability report
+    store_names = _get_store_names()
     deliverability = []
     for prefix in sorted(by_prefix.keys()):
         prefix_orders = by_prefix[prefix]
@@ -2035,6 +2293,8 @@ async def get_report(
 
         deliverability.append({
             "prefix": prefix,
+            "name": (store_names.get(prefix) or {}).get("name") or prefix,
+            "domain": (store_names.get(prefix) or {}).get("domain") or "",
             "livrata": cats.get("Livrata", 0),
             "in_curs": cats.get("In curs de livrare", 0),
             "refuzata": cats.get("Refuzata", 0),
@@ -2136,11 +2396,15 @@ async def get_report(
 
         # Marketing: override takes priority, else daily_perf
         with _db() as conn:
+            # 8-sep-2026: caută pe month_list, nu pe șirul BRUT `month`. Pe o selecție de două luni
+            # cheia devenea "2026-07,2026-08", nu se potrivea nimic și TOATE magazinele cădeau tacit
+            # pe warehouse (ex. BONBG rămânea cu marketing 0).
+            _mk_marks = ",".join("?" for _ in month_list)
             mkt_row = conn.execute(
-                "SELECT amount FROM profit_marketing_override WHERE month=? AND prefix=?",
-                (month, prefix)
+                f"SELECT SUM(amount) AS amount FROM profit_marketing_override WHERE month IN ({_mk_marks}) AND prefix=?",
+                (*month_list, prefix)
             ).fetchone()
-        if mkt_row is not None:
+        if mkt_row is not None and mkt_row["amount"] is not None:
             marketing_total = mkt_row["amount"]
             # Override-ul e o cifră LUNARĂ → pe fereastră parțială se pro-ratează cu ponderea spend-ului
             # din fereastră (cel mai bun semnal), altfel cu fracția de zile.
@@ -2162,6 +2426,8 @@ async def get_report(
 
         profitability.append({
             "prefix": prefix,
+            "name": (store_names.get(prefix) or {}).get("name") or prefix,
+            "domain": (store_names.get(prefix) or {}).get("domain") or "",
             "country": country,
             "vat_rate": vat_rate,
             "incasari_ron": round(incasari_ron, 2),
@@ -2340,8 +2606,21 @@ async def sync_sku_titles():
 # Product Stats (per-SKU delivery rates)
 # ═══════════════════════════════════════════════════════════════
 
+def _norm_sku(sku: str) -> str:
+    """Cheia de potrivire a unui SKU: trim + colapsare spatii + lower.
+
+    Identica cu `_norm_sku` din api/product_analytics.py — DELIBERAT: raportul per-produs
+    si ratele de livrare trebuie sa se potriveasca pe ACEEASI cheie. Pe string brut,
+    `profit_orders` (majuscule, din engine) nu se potrivea cu `analytics_sales` (minuscule,
+    din cronul de livrari): 617 SKU-uri / 20.168 comenzi (11,6% din iulie 2026) ramaneau
+    fara rata de livrare, iar UI-ul le afisa 100% — un scor perfect fabricat.
+    """
+    return " ".join((sku or "").strip().lower().split())
+
+
 @router.get("/api/profitability/product-stats")
-async def get_product_stats(
+@greu
+def get_product_stats(
     month: str = Query(...),
     from_date: Optional[str] = Query(None),
     to_date: Optional[str] = Query(None),
@@ -2353,7 +2632,7 @@ async def get_product_stats(
 
     with _db() as conn:
         placeholders = ",".join("?" for _ in month_list)
-        query = f"SELECT prefix, skus, status_category, created_at FROM profit_orders WHERE month IN ({placeholders})"
+        query = f"SELECT month, prefix, order_name, skus, status_category, created_at FROM profit_orders WHERE month IN ({placeholders})"
         params = list(month_list)
 
         if from_date:
@@ -2365,22 +2644,38 @@ async def get_product_stats(
 
         rows = conn.execute(query, params).fetchall()
 
+        # `profit_orders.skus` se construieste din varianta Shopify si e GRESIT pentru pachetele
+        # unicat: toata familia `surpriza` primea acelasi SKU inventat (`surpriza-EST 143`), care
+        # NU exista in Shopify. In iulie 2026: 3.066 comenzi gresite din 3.083. Consecinta — toate
+        # produsele surpriza ramaneau fara rata de livrare, iar unul singur le inghitea pe toate.
+        #
+        # `profit_order_lines` are SKU-urile reale: verificate la unitate fata de analytics_sales
+        # (sursa Shopify) pe toata luna iulie — 1.344 vs 1.342, 379 vs 379, 311 vs 311. Acoperire
+        # 99,9% din comenzi; unde lipsesc linii se cade pe vechiul camp, ca sa nu dispara nimic.
+        linii: Dict[tuple, list] = {}
+        for lr in conn.execute(
+                f"SELECT month, prefix, order_name, sku FROM profit_order_lines WHERE month IN ({placeholders})",
+                list(month_list)):
+            if lr["sku"]:
+                linii.setdefault((lr["month"], lr["prefix"], lr["order_name"]), []).append(lr["sku"])
+
     # Aggregate by SKU (global + per-store)
     sku_stats: Dict[str, dict] = {}
     for row in rows:
-        skus_str = row["skus"] or ""
         cat = row["status_category"] or "Necunoscut"
         prefix = row["prefix"] or ""
 
-        sku_list = [s.strip() for s in skus_str.split(";") if s.strip()]
+        sku_list = linii.get((row["month"], prefix, row["order_name"]))
+        if not sku_list:
+            sku_list = [s.strip() for s in (row["skus"] or "").split(";") if s.strip()]
         if not sku_list:
             sku_list = ["(fără SKU)"]
 
         for sku in sku_list:
-            key = sku
+            key = _norm_sku(sku)
             if key not in sku_stats:
                 sku_stats[key] = {
-                    "sku": sku, "stores": set(),
+                    "sku": sku, "key": key, "stores": set(),
                     "total": 0, "livrata": 0, "refuzata": 0,
                     "in_curs": 0, "anulata": 0, "netrimisa": 0, "lipsa_awb": 0,
                     "per_store": {},
@@ -2448,11 +2743,11 @@ async def get_product_stats(
                 f"SELECT sku, title, image_url FROM profit_sku_titles WHERE sku IN ({placeholders})",
                 all_skus
             ).fetchall()
-            title_map = {r["sku"]: r["title"] for r in rows}
-            image_map = {r["sku"]: r["image_url"] for r in rows}
+            title_map = {_norm_sku(r["sku"]): r["title"] for r in rows}
+            image_map = {_norm_sku(r["sku"]): r["image_url"] for r in rows}
     for p in products:
-        p["title"] = title_map.get(p["sku"], "")
-        p["image_url"] = image_map.get(p["sku"], "")
+        p["title"] = title_map.get(p["key"], "")
+        p["image_url"] = image_map.get(p["key"], "")
 
     # Sort by total descending
     products.sort(key=lambda x: -x["total"])
@@ -2464,8 +2759,18 @@ async def get_product_stats(
 # CRUD Endpoints
 # ═══════════════════════════════════════════════════════════════
 
+@router.post("/api/profitability/refresh-store-names")
+async def refresh_store_names_endpoint():
+    """Reîmprospătează denumirile reale ale magazinelor din Shopify (rulează și singur la fiecare run)."""
+    stores = list_stores()
+    await _refresh_store_names(stores)
+    names = _get_store_names()
+    return {"ok": True, "stores": len(stores), "cu_nume": len(names), "names": names}
+
+
 @router.get("/api/profitability/months")
-async def get_months():
+@greu
+def get_months():
     with _db() as conn:
         rows = conn.execute(
             "SELECT DISTINCT month FROM profit_orders ORDER BY month DESC"
@@ -2541,9 +2846,111 @@ async def save_marketing_overrides(data: MarketingOverrideBulk):
             """, (item.month, item.prefix, item.amount))
     return {"ok": True, "count": len(data.items)}
 
+@router.get("/api/profitability/commission-overrides")
+@greu
+def get_commission_overrides(month: str = Query(...)):
+    """Sumele de comision scrise MANUAL, pentru lunile cerute (una sau mai multe, separate prin virgulă).
+
+    Întoarce {prefix: sumă}. Pe interval de mai multe luni sumele se ADUNĂ per magazin, ca raportul
+    să rămână coerent cu restul coloanelor (care sunt tot cumulate pe fereastra selectată)."""
+    months = [m.strip() for m in month.split(",") if m.strip()]
+    if not months:
+        return {}
+    with _db() as conn:
+        ph = ",".join("?" for _ in months)
+        rows = conn.execute(
+            f"SELECT prefix, SUM(amount) AS amount FROM profit_commission_override "
+            f"WHERE month IN ({ph}) GROUP BY prefix", months
+        ).fetchall()
+    return {r["prefix"]: r["amount"] for r in rows}
+
+
+@router.post("/api/profitability/commission-overrides")
+async def save_commission_overrides(data: CommissionOverrideBulk):
+    """Salvează/șterge sume manuale de comision. `amount: null` ȘTERGE override-ul (revine la calcul)."""
+    saved = deleted = 0
+    with _db() as conn:
+        for item in data.items:
+            if item.amount is None:
+                cur = conn.execute(
+                    "DELETE FROM profit_commission_override WHERE month=? AND prefix=?",
+                    (item.month, item.prefix))
+                deleted += cur.rowcount
+            else:
+                conn.execute(
+                    "INSERT OR REPLACE INTO profit_commission_override (month, prefix, amount) "
+                    "VALUES (?, ?, ?)", (item.month, item.prefix, item.amount))
+                saved += 1
+    return {"ok": True, "saved": saved, "deleted": deleted}
+
+
+@router.get("/api/profitability/commission-rates")
+@greu
+def get_commission_rates(month: str = Query(...)):
+    """Ratele de comision per magazin.
+
+    `effective` = rata în vigoare pentru ULTIMA lună din selecţie (regula cu cel mai mare
+    `from_month <= lună`). `rules` = toate regulile, pentru administrare. Magazinele care nu apar
+    merg pe rata globală din UI."""
+    months = sorted(m.strip() for m in month.split(",") if m.strip())
+    ref = months[-1] if months else ""
+    with _db() as conn:
+        rules = [dict(r) for r in conn.execute(
+            "SELECT prefix, from_month, rate FROM profit_commission_rate "
+            "ORDER BY prefix, from_month").fetchall()]
+    effective = {}
+    for r in rules:
+        if ref and r["from_month"] <= ref:
+            effective[r["prefix"]] = r["rate"]   # ordonat crescător → ultima potrivire câştigă
+    return {"effective": effective, "rules": rules}
+
+
+@router.post("/api/profitability/commission-rates")
+async def save_commission_rates(data: CommissionRateBulk):
+    """Setează/şterge reguli de rată. `rate: null` ȘTERGE regula pentru (prefix, from_month)."""
+    saved = deleted = 0
+    with _db() as conn:
+        for it in data.items:
+            if it.rate is None:
+                cur = conn.execute(
+                    "DELETE FROM profit_commission_rate WHERE prefix=? AND from_month=?",
+                    (it.prefix, it.from_month))
+                deleted += cur.rowcount
+            else:
+                conn.execute(
+                    "INSERT OR REPLACE INTO profit_commission_rate (prefix, from_month, rate) "
+                    "VALUES (?, ?, ?)", (it.prefix, it.from_month, it.rate))
+                saved += 1
+    return {"ok": True, "saved": saved, "deleted": deleted}
+
+
 @router.get("/api/profitability/marketing-sync")
-async def sync_marketing_from_daily_perf(month: str = Query(...)):
-    """Read marketing spend from daily_perf.db for the given month, grouped by brand with platform breakdown."""
+async def sync_marketing_from_daily_perf(
+    month: str = Query(...),
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    persist: int = Query(0),
+):
+    """Marketing din daily_perf.db pentru luna/lunile/fereastra cerută, grupat pe brand.
+
+    8-sep-2026, trei corecții:
+      * acceptă mai multe luni și o fereastră de zile -> UI-ul nu mai suprascrie marketingul
+        pro-ratat de get_report cu cel pe LUNA ÎNTREAGĂ (măsurat: Gento 1-15 iun apărea -838 RON
+        în loc de +7.766);
+      * SCRIE în profit_marketing_override doar cu persist=1 (butonul manual, o singură lună
+        întreagă). Înainte, un simplu GET la randarea paginii rescria override-urile lunii cu
+        valorile din sheet, peste cele din warehouse;
+      * brandurile care nu sunt în BRAND_TO_PREFIX se SAR (înainte se scria numele ca prefix).
+    """
+    # Chemata si direct din Python (run_profitability), unde parametrii Query() sosesc ca OBIECTE,
+    # nu ca None -> normalizeaza inainte de orice folosire (altfel: "type 'Query' is not supported").
+    if not isinstance(from_date, str):
+        from_date = None
+    if not isinstance(to_date, str):
+        to_date = None
+    if not isinstance(persist, int):
+        persist = 0
+    _win = bool(from_date or to_date)
     marketing = {}
     breakdown = {}
     try:
@@ -2551,9 +2958,11 @@ async def sync_marketing_from_daily_perf(month: str = Query(...)):
         if not dp_db.exists():
             return {"error": "daily_perf.db not found", "marketing": {}, "breakdown": {}}
 
-        y, m = month.split("-")
-        from_date = f"{y}-{m}-01"
-        to_date = f"{y}-{m}-31"
+        _months = [x.strip() for x in month.split(",") if x.strip()] or [month]
+        y, m = _months[0].split("-")
+        y2, m2 = _months[-1].split("-")
+        from_date = from_date or f"{y}-{m}-01"
+        to_date = to_date or f"{y2}-{m2}-31"
 
         conn2 = sqlite3.connect(str(dp_db))
         conn2.row_factory = sqlite3.Row
@@ -2569,7 +2978,10 @@ async def sync_marketing_from_daily_perf(month: str = Query(...)):
                 GROUP BY brand
             """, (from_date, to_date)).fetchall()
             for r in mk_rows:
-                prefix = BRAND_TO_PREFIX.get(r["brand"], r["brand"])
+                prefix = BRAND_TO_PREFIX.get(r["brand"])
+                if not prefix:
+                    log.warning("marketing-sync: brand nemapat in BRAND_TO_PREFIX, il sar: %r", r["brand"])
+                    continue
                 marketing[prefix] = round(r["total_marketing"], 2)
                 breakdown[prefix] = {
                     "fb": round(r["fb"] or 0, 2),
@@ -2580,12 +2992,12 @@ async def sync_marketing_from_daily_perf(month: str = Query(...)):
         finally:
             conn2.close()
 
-        if marketing:
+        if marketing and persist and len(_months) == 1 and not _win:
             with _db() as conn:
                 for pfx, val in marketing.items():
                     conn.execute(
                         "INSERT OR REPLACE INTO profit_marketing_override (month, prefix, amount) VALUES (?, ?, ?)",
-                        (month, pfx, val)
+                        (_months[0], pfx, val)
                     )
 
     except Exception as e:
@@ -2725,24 +3137,29 @@ async def save_status_mapping_endpoint(data: StatusMappingBulk):
     return {"ok": True, "count": len(data.items)}
 
 
-@router.get("/api/profitability/orders")
-async def list_orders(
-    month: str = Query(...),
-    prefix: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
-    q: Optional[str] = Query(None),
-    courier_status: Optional[str] = Query(None),
-    from_date: Optional[str] = Query(None),
-    to_date: Optional[str] = Query(None),
-    limit: int = Query(500),
-    offset: int = Query(0),
-):
-    """List orders for one or more months (comma-separated) with optional filters."""
-    month_list = [m.strip() for m in month.split(",") if m.strip()]
+_ORDER_COLUMNS = (
+    "order_name, prefix, shop, created_at, revenue, currency, cogs, "
+    "payment_status, fulfillment_status, awb, courier_key, courier_status, "
+    "status_category, tags"
+)
+
+
+def _orders_where(
+    month: str,
+    prefix: Optional[str] = None,
+    status: Optional[str] = None,
+    q: Optional[str] = None,
+    courier_status: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+) -> Tuple[str, list]:
+    """WHERE shared by the orders list and the orders CSV export, so the export returns
+    exactly the rows shown in the tab (multiple months + the same filters)."""
+    month_list = [m.strip() for m in (month or "").split(",") if m.strip()]
     if not month_list:
-        return {"orders": [], "total": 0}
-    placeholders = ",".join("?" for _ in month_list)
-    sql = f"SELECT id, order_name, prefix, shop, created_at, revenue, currency, cogs, payment_status, fulfillment_status, awb, courier_key, courier_status, status_category, tags FROM profit_orders WHERE month IN ({placeholders})"
+        return "", []
+
+    sql = " WHERE month IN ({})".format(",".join("?" for _ in month_list))
     params: list = list(month_list)
 
     if prefix:
@@ -2765,18 +3182,32 @@ async def list_orders(
         sql += " AND courier_status LIKE ?"
         params.append(f"%{courier_status}%")
 
-    # Count total matching
-    count_sql = sql.replace(
-        "SELECT id, order_name, prefix, shop, created_at, revenue, currency, cogs, payment_status, fulfillment_status, awb, courier_key, courier_status, status_category, tags",
-        "SELECT COUNT(*)"
-    )
+    return sql, params
 
-    sql += " ORDER BY prefix, order_name LIMIT ? OFFSET ?"
-    params.extend([limit, offset])
+
+@router.get("/api/profitability/orders")
+async def list_orders(
+    month: str = Query(...),
+    prefix: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
+    courier_status: Optional[str] = Query(None),
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    limit: int = Query(500),
+    offset: int = Query(0),
+):
+    """List orders for one or more months (comma-separated) with optional filters."""
+    where, params = _orders_where(month, prefix, status, q, courier_status, from_date, to_date)
+    if not where:
+        return {"orders": [], "total": 0}
 
     with _db() as conn:
-        total = conn.execute(count_sql, params[:-2]).fetchone()[0]
-        rows = conn.execute(sql, params).fetchall()
+        total = conn.execute(f"SELECT COUNT(*) FROM profit_orders{where}", params).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT id, {_ORDER_COLUMNS} FROM profit_orders{where} ORDER BY prefix, order_name LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
 
     return {
         "total": total,
@@ -2813,21 +3244,30 @@ async def update_order_status(data: OrderStatusUpdate):
 
 
 @router.get("/api/profitability/export")
-async def export_orders_csv(month: str = Query(...)):
-    """Export all orders for a month as a CSV file."""
+async def export_orders_csv(
+    month: str = Query(...),
+    prefix: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
+    courier_status: Optional[str] = Query(None),
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+):
+    """Export orders as CSV — same months (comma-separated) and filters as the Comenzi tab."""
     import io
+
+    where, params = _orders_where(month, prefix, status, q, courier_status, from_date, to_date)
+    if not where:
+        raise HTTPException(status_code=400, detail="Nicio luna selectata")
 
     with _db() as conn:
         rows = conn.execute(
-            "SELECT order_name, prefix, shop, created_at, revenue, currency, "
-            "cogs, payment_status, fulfillment_status, awb, courier_key, "
-            "courier_status, status_category, tags "
-            "FROM profit_orders WHERE month=? ORDER BY prefix, order_name",
-            (month,)
+            f"SELECT {_ORDER_COLUMNS} FROM profit_orders{where} ORDER BY prefix, order_name",
+            params,
         ).fetchall()
 
     if not rows:
-        raise HTTPException(status_code=404, detail=f"No orders for {month}")
+        raise HTTPException(status_code=404, detail=f"Nicio comanda pentru {month} cu filtrele curente")
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -2837,15 +3277,15 @@ async def export_orders_csv(month: str = Query(...)):
         "COURIER_STATUS", "STATUS_CATEGORY", "TAGS"
     ])
     for r in rows:
-        writer.writerow(r)
+        writer.writerow(list(r))
 
-    csv_content = output.getvalue()
-    filename = f"comenzi_{month}.csv"
+    filename = f"comenzi_{month.replace(',', '_')}.csv"
 
     from starlette.responses import Response
     return Response(
-        content=csv_content,
-        media_type="text/csv",
+        # BOM: fara el Excel strica diacriticele din adrese/statusuri
+        content=("\ufeff" + output.getvalue()).encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
 
@@ -2861,7 +3301,7 @@ async def remap_statuses(month: str = Query(...)):
 
     with _db() as conn:
         rows = conn.execute(
-            "SELECT id, courier_status, fulfillment_status, payment_status, awb, shopify_delivery_status "
+            "SELECT id, courier_status, fulfillment_status, payment_status, awb, shopify_delivery_status, tags "
             "FROM profit_orders WHERE month=?", (month,)
         ).fetchall()
 
@@ -2870,7 +3310,7 @@ async def remap_statuses(month: str = Query(...)):
                 r["courier_status"], r["fulfillment_status"],
                 r["payment_status"], r["awb"], mapping,
                 shopify_delivery_status=r["shopify_delivery_status"] or "",
-                unmapped_collector=unmapped
+                unmapped_collector=unmapped, tags=r["tags"] or ""
             )
             conn.execute(
                 "UPDATE profit_orders SET status_category=? WHERE id=?",
@@ -3040,12 +3480,13 @@ async def refresh_open_orders(month: str = Query(...)):
 
         with _db() as conn:
             no_awb = conn.execute(
-                "SELECT id, payment_status, fulfillment_status, shopify_delivery_status FROM profit_orders WHERE month=? AND (awb='' OR awb IS NULL)",
+                "SELECT id, payment_status, fulfillment_status, shopify_delivery_status, tags FROM profit_orders WHERE month=? AND (awb='' OR awb IS NULL)",
                 (month,)
             ).fetchall()
             for r in no_awb:
                 cat = _map_status("", r["fulfillment_status"], r["payment_status"], "", mapping,
-                                  shopify_delivery_status=r["shopify_delivery_status"] or "", unmapped_collector=unmapped)
+                                  shopify_delivery_status=r["shopify_delivery_status"] or "",
+                                  unmapped_collector=unmapped, tags=r["tags"] or "")
                 conn.execute("UPDATE profit_orders SET status_category=? WHERE id=?", (cat, r["id"]))
                 updated += 1
 
