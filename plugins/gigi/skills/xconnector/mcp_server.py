@@ -30,9 +30,16 @@ def _run(script, args, timeout=180):
         out = e.stdout or ""
         if isinstance(out, bytes):
             out = out.decode("utf-8", "replace")
-        return ((out.strip() + "\n") if out.strip() else "") + (
-            "⚠ Comanda a depășit %d s. Dacă era o acțiune cu apply=true, POATE să fi fost executată: verifică starea "
-            "comenzii (apply=false) înainte de a repeta." % timeout)
+        if args[:1] == ["awb-regen"] and "--apply" in args:   # o probă nouă ar arăta deja eticheta nouă → a treia
+            awb = args[args.index("--awb") + 1] if "--awb" in args[:-1] else ""
+            sfat = ("⚠ Comanda a depășit %d s: refacerea POATE să fi fost executată. Repetă EXACT același apel "
+                    "(aceleași order și parcels, awb=%s, apply=true): dacă s-a făcut, Order Hub îl refuză "
+                    "(eticheta_anulata) și nu iese a treia etichetă; dacă nu, îl face o singură dată. NU lua awb dintr-o "
+                    "probă nouă după un timeout: proba ar arăta eticheta nouă, iar refacerea ei ar face a treia." % (timeout, awb))
+        else:
+            sfat = ("⚠ Comanda a depășit %d s. Dacă era o acțiune cu apply=true, POATE să fi fost executată: verifică "
+                    "starea comenzii (apply=false) înainte de a repeta." % timeout)
+        return ((out.strip() + "\n") if out.strip() else "") + sfat
     return ((r.stdout or "").strip() or "(fără output)")+(("\n[cod de ieșire %d] %s" % (r.returncode,(r.stderr or "")[:400])) if r.returncode!=0 else "")
 
 # ─────────── CUSTOMER SERVICE (cs-360) ───────────
@@ -97,7 +104,7 @@ def xc_awb_void(order: str, apply: bool = False, agent: str = "", motiv: str = "
     return _run(XC,["awb-void","--order",order]+(["--apply"] if apply else [])+_cine(agent,motiv),timeout=300)
 @mcp.tool()
 def xc_awb_regen(order: str, parcels: int = 0, awb: str = "", apply: bool = False, agent: str = "", motiv: str = "") -> str:
-    """Reface AWB-ul unei comenzi (anulează + face altul, pe același curier), prin Order Hub. Întâi probă (apply=false): arată eticheta de refăcut și numărul de colete. Execuția (apply=true) cere parcels și awb = eticheta din probă; o cerere repetată pe aceeași etichetă e refuzată, deci nu iese a treia. Se folosește și după o schimbare de adresă pe o comandă care are deja AWB — la 1–2 minute după schimbare, ca adresa nouă să fi ajuns peste tot. Pe o comandă pe care Order Hub n-o cunoaște: anulează + reface prin xConnector."""
+    """Reface AWB-ul unei comenzi (anulează + face altul, pe același curier), prin Order Hub. Întâi probă (apply=false): arată eticheta de refăcut și numărul de colete. Execuția (apply=true) cere parcels și awb = eticheta din proba făcută ÎNAINTEA execuției; o cerere repetată pe aceeași etichetă e refuzată, deci nu iese a treia. Dacă execuția nu întoarce răspuns (timeout, eroare, „POATE să fi fost executată”): repetă EXACT același apel, cu același awb — Order Hub îl refuză (eticheta_anulata) dacă refacerea s-a făcut, altfel o face o singură dată. NU lua awb dintr-o probă nouă după un răspuns pierdut: proba arată deja eticheta nouă, iar refacerea ei face a treia. Se folosește și după o schimbare de adresă pe o comandă care are deja AWB — la 1–2 minute după schimbare, ca adresa nouă să fi ajuns peste tot. Pe o comandă pe care Order Hub n-o cunoaște: anulează + reface prin xConnector."""
     return _run(XC,["awb-regen","--order",order]+(["--parcels",str(parcels)] if parcels else [])+(["--awb",awb] if awb else [])+(["--apply"] if apply else [])+_cine(agent,motiv),timeout=300)
 @mcp.tool()
 def xc_inv_make(order: str, apply: bool = False) -> str:

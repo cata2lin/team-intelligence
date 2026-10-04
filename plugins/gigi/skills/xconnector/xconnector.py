@@ -4815,13 +4815,33 @@ def _oh_adresa_in_urma(a, st, OH, r):
     return ""
 
 
+def _regen_de_repetat(a):
+    """Execuția awb-regen tocmai trimisă, cu aceleași valori (--awb numit inclus), gata de repetat: fiecare argument
+    trece prin shlex.quote."""
+    import shlex
+    arg = ["xconnector.py", "awb-regen", "--order", a.order, "--parcels", str(getattr(a, "parcels", "") or ""),
+           "--awb", (getattr(a, "awb", None) or "").strip()]
+    for k in ("shop", "agent", "motiv"):
+        if getattr(a, k, None):
+            arg += ["--" + k, str(getattr(a, k))]
+    return " ".join(shlex.quote(x) for x in arg + ["--apply"])
+
+
 def _oh_fara_raspuns(a, cmd, OH, r):
     """Order Hub n-a dat un răspuns valid. Probă: avertisment, apelantul arată planul xConnector (orientativ).
     --apply: cod 2 și nicio scriere prin xConnector — iar dacă cererea a plecat, starea e necunoscută."""
     de_ce = r.mesaj if OH else "oh_client.py lipsește de lângă xconnector.py"
     if OH and r.incert:
         print("  ⚠ Cererea a plecat spre Order Hub, dar răspunsul n-a venit (%s): POATE să fi fost executată." % de_ce)
-        print("    Nu reîncerca orbește: rulează proba (fără --apply) și vezi starea comenzii în Order Hub (%s)." % OH_UI_COMENZI)
+        if cmd == "awb-regen":   # o probă nouă ar arăta deja eticheta NOUĂ, iar „→ execuție" din ea ar face a treia
+            print("    Repetă EXACT aceeași comandă, cu același --awb %s: dacă refacerea s-a făcut, Order Hub o refuză"
+                  " (eticheta_anulata) și nu iese a treia etichetă; dacă nu s-a făcut, o face o singură dată."
+                  % (a.awb or "").strip())
+            print("    NU lua --awb dintr-o probă nouă după un răspuns pierdut sau după un timeout: proba ar arăta eticheta"
+                  " nouă, iar refacerea ei ar anula-o și ar face a treia.")
+            print("    → repetă: %s" % _regen_de_repetat(a))
+        else:
+            print("    Nu reîncerca orbește: rulează proba (fără --apply) și vezi starea comenzii în Order Hub (%s)." % OH_UI_COMENZI)
         sys.exit(OH_FARA_RASPUNS)
     print("  ⚠ Fără un răspuns valid de la Order Hub (%s) → nu se știe ce etichetă sau ce hold are comanda %s." % (de_ce, a.order))
     if not a.apply:
@@ -5027,7 +5047,10 @@ def cmd_awb_regen(a):
         return
     else:
         _oh_arata(a, "awb-regen", OH, r, neaplicate=[("--notify", "Order Hub nu trimite clientului emailul cu AWB-ul nou")]
-                  if getattr(a, "notify", False) else ())
+                  if getattr(a, "notify", False) else (),
+                  indicii={"eticheta_anulata": "Eticheta asta s-a refăcut deja (AWB-ul curent e în mesajul de mai sus):"
+                           " dacă refacerea ai cerut-o tu, e gata. Nu o reîncerca cu --awb dintr-o probă nouă: ar anula"
+                           " eticheta nouă și ar face a treia."} if pin else None)
         if awbs is None:
             _oh_necitita(a, "awb-regen")   # --apply: cod 2
         _oh_oprit(a, "awb-regen", oprit, cod_oprit)

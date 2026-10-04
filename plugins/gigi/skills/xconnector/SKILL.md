@@ -73,7 +73,8 @@ Toate rezolvă comanda după `--order GT###` (caută în `--shop` dacă dat, alt
   pe care Order Hub n-o cunoaște: `cancel-shipping-label` (după orderId + connectorId).
 - **`awb-regen`** — **anulează + refă**. Pe o comandă a Order Hub (aproape toate): prin Order Hub, pe același curier,
   doar cu alt număr de colete — întâi proba `awb-regen --order X --parcels 3`, apoi rândul „→ execuție” pe care îl
-  afișează (`… --parcels 3 --awb <eticheta> --apply`); vezi „Order Hub ÎNTÂI” mai jos. Doar pe o comandă pe care Order
+  afișează (`… --parcels 3 --awb <eticheta> --apply`). Răspuns pierdut / timeout la execuție: se repetă EXACT aceeași
+  comandă (același `--awb`), nu o probă nouă; vezi „Order Hub ÎNTÂI” mai jos. Doar pe o comandă pe care Order
   Hub n-o cunoaște: void + create prin xConnector, cu alte condiții (`--parcels`, `--type`, `--connector`).
 
 ### Nr. de colete (parcelCount) — AUTO din metafield (NU mai punem 1 greșit)
@@ -101,7 +102,10 @@ AWB-uri de 1 colet când trebuiau 2-3 (sursă frecventă de eșec/etichetă gre�
     (cheie lipsă, 401, 5xx, rețea), cerere incompletă sau comandă necitită din Shopify; 3 = refuz, al Order Hub sau al
     gărzilor de aici (hold pus de el, etichetă pe care n-o are nimeni). `--force` nu ocolește niciunul. Atenție: și un
     răspuns pierdut după o cerere de execuție iese cu 2 („POATE să fi fost executată”) — atunci acțiunea poate să fi
-    fost făcută în Order Hub: se rulează proba, nu se repetă orbește.
+    fost făcută în Order Hub: la `order-cancel` / `awb-void` se rulează proba, nu se repetă orbește. La `awb-regen`
+    invers: se repetă EXACT aceeași comandă, cu același `--awb` (o tipărește mesajul, „→ repetă: …”) — Order Hub o
+    refuză (`eticheta_anulata`) dacă refacerea s-a făcut și o face o singură dată dacă nu. `--awb` NU se ia dintr-o probă
+    nouă după un răspuns pierdut sau un timeout: proba arată deja eticheta nouă, iar refacerea ei ar face a treia.
   - **`awb-regen`** = `/refa`: același curier, doar numărul de colete (`--connector` / `--type` se refuză). Cu `--apply`
     cere `--parcels` și `--awb` (eticheta din probă): refacerea nu e idempotentă, iar eticheta numită face ca o cerere
     repetată să fie refuzată (`eticheta_anulata`) în loc să iasă a treia etichetă. Proba tipărește rândul de execuție; un

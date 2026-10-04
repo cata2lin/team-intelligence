@@ -48,7 +48,7 @@
 | **modific adresa** (la o valoare dată) | `addr-set` | `xconnector.py addr-set --order EST123 --city "Cluj" --zip 400001 --address1 "…" --apply`. Dacă comanda are deja AWB, eticheta rămâne cu adresa veche → după 1–2 minute, `awb-regen` |
 | **schimb conținutul** (COD/Releaseit, line items blocate) | cancel + replace | `order-cancel … --apply` apoi `gigi:cs-actions place` (comandă nouă COD) → AWB-ul îl face Order Hub |
 | **fac AWB** | Order Hub | AWB-ul îl face Order Hub (singur, sau „Ship now” din Order Hub). `xconnector.py awb-make` doar când Order Hub cere eticheta făcută manual în xConnector: se refuză pe o comandă care are deja AWB și nu eliberează hold-urile puse de Order Hub |
-| **refac AWB** (alt nr. de colete, adresă schimbată) | `awb-regen` | probă: `xconnector.py awb-regen --order GRAND123 --parcels 3`; execuție: rândul „→ execuție” afișat de probă (`… --parcels 3 --awb <eticheta> --apply`) |
+| **refac AWB** (alt nr. de colete, adresă schimbată) | `awb-regen` | probă: `xconnector.py awb-regen --order GRAND123 --parcels 3`; execuție: rândul „→ execuție” afișat de probă (`… --parcels 3 --awb <eticheta> --apply`). Fără răspuns la execuție (timeout, „POATE să fi fost executată”): repetă EXACT aceeași comandă, cu același `--awb` — NU o probă nouă |
 | **opresc** o comandă (anulez AWB, rămâne pe hold) | `awb-void` | `xconnector.py awb-void --order GT123 --apply`. NU e pasul întâi din „anulez și fac alt AWB” (acela e `awb-regen`); hold-ul se eliberează din Order Hub |
 | **factură** (creez/anulez/storno/regen) | `inv-make / inv-cancel / inv-storno / inv-regen` | `xconnector.py inv-make --order GT123 --apply` |
 | comandă nouă COD / swap / resend gratis | `gigi:cs-actions` | rezolvă clientul + plasează/înlocuiește |
@@ -71,8 +71,11 @@
 >   lipsă, eroare, timeout) sau comanda nu s-a putut citi din Shopify — fă acțiunea din https://orderhub.arona.ro/app/orders.
 >   Excepție: la `awb-regen`, un 2 cu „xConnector are altă adresă decât Shopify” înseamnă că adresa nouă n-a ajuns încă
 >   în xConnector — reîncearcă peste 1–2 minute (din Order Hub doar dacă adresa din xConnector e cea bună).
-> - **„Cererea a plecat, dar răspunsul n-a venit”** (tot cod 2): poate să fi fost executată în Order Hub. Rulează proba
->   înainte de a repeta.
+> - **„Cererea a plecat, dar răspunsul n-a venit”** (tot cod 2, sau un timeout al uneltei): poate să fi fost executată în
+>   Order Hub. La anulare și oprire: rulează proba înainte de a repeta. La **`awb-regen`** invers: repetă EXACT aceeași
+>   comandă, cu același `--awb` (mesajul o tipărește: „→ repetă: …”) — dacă refacerea s-a făcut, Order Hub o refuză
+>   (`eticheta_anulata`); dacă nu, o face o singură dată. NU lua `--awb` dintr-o probă nouă după un răspuns pierdut:
+>   proba arată deja eticheta nouă, iar refacerea ei ar anula-o și ar face a treia.
 > - **`shopify_refuz`:** eticheta e anulată la curier, comanda rămâne deschisă în Shopify, Order Hub deschide tichet CS
 >   (azi: Belasil, până se redeschide aplicația Order Hub în admin).
 > - **Ramburs plătit apoi cu cardul:** eticheta fără ramburs o reface Order Hub. Emailul „[COD dublu]” doar raportează

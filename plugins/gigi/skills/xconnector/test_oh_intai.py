@@ -29,7 +29,9 @@ Shopify și au lăsat eticheta vie la curier (cinci comenzi). Testul verifică, 
    9. addr-set: avertizează că eticheta rămâne cu adresa veche (și sub pauză de AWB, și pe o comandă pe care Order
       Hub n-o cunoaște); --make-awb doar pe o comandă fără AWB viu, altfel cod 3 după schimbarea adresei;
   10. dup_guard.py și cod_paid_watch.py cheamă comenzile cum trebuie; 11. uneltele MCP; 12. oh_client;
-  13. un --shop care nu e magazinul nostru nu primește secretele app-urilor Shopify (nicio emitere de token).
+  13. un --shop care nu e magazinul nostru nu primește secretele app-urilor Shopify (nicio emitere de token);
+  14. awb-regen cu răspunsul execuției pierdut: se repetă aceeași comandă, cu același --awb (Order Hub refuză a doua
+      refacere), nu o probă nouă — și în textele uneltei MCP.
 Dublura de Order Hub răspunde cu formele reale ale rutelor /api/depozit (măsurate cu probe pe 2-oct-2026).
 Comenzile, AWB-urile, magazinul și cheile sunt inventate.
 
@@ -43,6 +45,7 @@ import io
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -1129,6 +1132,74 @@ check("control: un magazin cunoscut (din PREFIX_DOMAIN) e acceptat ca --shop, ia
       and all(u == "https://6f9e22-9d.myshopify.com/admin/oauth/access_token" for u in CERERI_HTTP), (CERERI_HTTP, out))
 X.http = fara_retea
 KB.clear()
+
+print("14. awb-regen cu răspunsul pierdut: se repetă aceeași comandă, nu o probă nouă")
+
+
+def pierde_executia(executa):
+    """Răspunsul cererii de execuție /refa se pierde (timeout); `executa` = Order Hub apucase s-o execute."""
+    def f(cale, c):
+        if cale.endswith("/refa") and c.get("dry_run") is False:
+            if executa:
+                oh_raspuns(cale, c)
+            return "ERR", "TimeoutError: timed out"
+        return None
+    return f
+
+
+def rand_repeta(out):
+    m = re.search(r"→ repetă: (.+)", out)
+    return shlex.split(m.group(1)) if m else []
+
+
+cod, out = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000001", "--apply",
+                   raspuns=pierde_executia(True))
+repeta = rand_repeta(out)
+check("răspuns pierdut după execuție: cod 2, „repetă EXACT aceeași comandă, cu același --awb”, fără trimitere la probă",
+      cod == 2 and OH_COMENZI["TST1"]["vii"] == ["70000000099"]
+      and "Repetă EXACT aceeași comandă, cu același --awb 70000000001" in out and "NU lua --awb dintr-o probă nouă" in out
+      and "rulează proba" not in out and "→ execuție" not in out, out)
+check("…și tipărește comanda de repetat, cu același --awb", repeta == [
+    "xconnector.py", "awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000001", "--apply"], repeta)
+cod, out = ruleaza(*repeta[1:], pastreaza=True)
+check("repetată cum scrie: Order Hub o refuză (eticheta_anulata), nu iese a treia etichetă, iar sfatul nu trimite la o"
+      " probă nouă", cod == 3 and "Order Hub: eticheta_anulata" in out and OH_COMENZI["TST1"]["vii"] == ["70000000099"]
+      and OH_COMENZI["TST1"]["arhiva"] == ["70000000001"] and "s-a refăcut deja" in out and "rulează proba" not in out,
+      (cod, OH_COMENZI["TST1"], out))
+cod, out = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000001", "--apply",
+                   raspuns=pierde_executia(False))
+repeta = rand_repeta(out)
+cod, out = ruleaza(*repeta[1:], pastreaza=True)
+check("răspuns pierdut ÎNAINTE de execuție: aceeași comandă repetată o face o singură dată", cod == 0
+      and "AWB nou: 70000000099" in out and OH_COMENZI["TST1"]["arhiva"] == ["70000000001"], (cod, out))
+cod, out = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000001", "--apply",
+                   "--agent", "O'Neil", "--motiv", "adresă; schimbată $(x)", "--shop", SHOP, raspuns=pierde_executia(True))
+check("comanda de repetat păstrează --shop, --agent și --motiv, fiecare citat cu shlex.quote", rand_repeta(out) == [
+    "xconnector.py", "awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000001", "--shop", SHOP,
+    "--agent", "O'Neil", "--motiv", "adresă; schimbată $(x)", "--apply"] and "'adresă; schimbată $(x)'" in out,
+      (rand_repeta(out), out))
+cod, out = ruleaza("order-cancel", "--order", "TST1", "--apply", raspuns=("ERR", "TimeoutError: timed out"))
+check("la order-cancel sfatul rămâne proba (o anulare repetată nu face o etichetă nouă)", cod == 2
+      and "rulează proba" in out and "→ repetă" not in out, out)
+M2 = incarca("mcp_server_regen", os.path.join(AICI, "mcp_server.py"))
+
+
+def timeout_mcp(args, **k):
+    raise subprocess.TimeoutExpired(args, k.get("timeout"), output="  ⚠ Cererea a plecat spre Order Hub\n")
+
+
+subprocess.run = timeout_mcp
+text_regen = M2._run(M2.XC, ["awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000001", "--apply"], timeout=300)
+text_void = M2._run(M2.XC, ["awb-void", "--order", "TST1", "--apply"], timeout=300)
+subprocess.run = fara_retea
+check("MCP, timeout la xc_awb_regen cu apply: repetă același apel cu același awb, nu „verifică starea (apply=false)”",
+      "Repetă EXACT același apel" in text_regen and "awb=70000000001" in text_regen
+      and "NU lua awb dintr-o probă nouă" in text_regen and "apply=false" not in text_regen, text_regen)
+check("MCP, timeout la celelalte acțiuni: sfatul de dinainte (verifică starea înainte de a repeta)",
+      "verifică starea comenzii (apply=false)" in text_void and "Repetă EXACT" not in text_void, text_void)
+doc = M2.xc_awb_regen.__doc__ or ""
+check("MCP: descrierea xc_awb_regen spune ce faci după un răspuns pierdut", "repetă EXACT același apel" in doc
+      and "NU lua awb dintr-o probă nouă" in doc, doc)
 
 check("niciun subprocess și nicio ieșire în rețea pe lângă dubluri", not SUBPROC, SUBPROC)
 
