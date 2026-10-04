@@ -31,7 +31,9 @@ Shopify și au lăsat eticheta vie la curier (cinci comenzi). Testul verifică, 
   10. dup_guard.py și cod_paid_watch.py cheamă comenzile cum trebuie; 11. uneltele MCP; 12. oh_client;
   13. un --shop care nu e magazinul nostru nu primește secretele app-urilor Shopify (nicio emitere de token);
   14. awb-regen cu răspunsul execuției pierdut: se repetă aceeași comandă, cu același --awb (Order Hub refuză a doua
-      refacere), nu o probă nouă — și în textele uneltei MCP.
+      refacere), nu o probă nouă — și în textele uneltei MCP;
+  15. la Order Hub ajunge numele canonic al comenzii găsite (Shopify caută larg: „123456” → TST123456), iar o căutare
+      care întoarce altă comandă („TST 123456” → TST100200) oprește tot, cu cod 2.
 Dublura de Order Hub răspunde cu formele reale ale rutelor /api/depozit (măsurate cu probe pe 2-oct-2026).
 Comenzile, AWB-urile, magazinul și cheile sunt inventate.
 
@@ -147,6 +149,7 @@ TOKEN = ["tok-test"]         # tokenul magazinului din lista de magazine (poate 
 COLETE = [2]                 # metafield-ul de colete al comenzii; None = Shopify nu răspunde, "partial" = răspuns parțial
 ORAS_SHOPIFY = ["Vechi"]     # orașul comenzii în Shopify; xConnector are „Cluj"
 EVENIMENTE, MUTATII, ANULARI, KB, SUBPROC = [], [], [], {}, []
+NUME_LARG = {}               # ce tastează omul → comanda pe care o întoarce căutarea `name:` din Shopify (prima)
 
 
 def oh_raspuns(cale, c):
@@ -272,7 +275,8 @@ def fake_gql(shop, token, query, variables=None):
     if "orderUpdate" in query:
         MUTATII.append("orderUpdate")
         return {"data": {"orderUpdate": {"order": {"id": "gid://shopify/Order/1"}, "userErrors": []}}}
-    nume = re.search(r"name:(\w+)", query).group(1)
+    cerut = re.search(r'name:([^"]*)"', query).group(1)
+    nume = NUME_LARG.get(cerut, cerut)   # căutarea `name:` din Shopify e largă: „123456” poate da TST123456
     s = SHOPIFY.get(nume)
     if s is None:
         return {"data": {"orders": {"edges": []}}}
@@ -291,7 +295,7 @@ def fake_gql(shop, token, query, variables=None):
             return {"_status": 502, "_raw": "Bad Gateway"}
         anulata = s.get("anulata") or ("anulata_dupa" in s and CITIRI_STARE[0] > s["anulata_dupa"])
         return {"data": {"orders": {"edges": [{"node": {
-            "id": "gid://shopify/Order/1", "cancelledAt": "2026-10-02T10:00:00Z" if anulata else None,
+            "id": "gid://shopify/Order/1", "name": nume, "cancelledAt": "2026-10-02T10:00:00Z" if anulata else None,
             "fulfillments": [{"status": "CANCELLED", "trackingInfo": [{"number": t}]} for t in s.get("anulate", [])]
             + [{"status": "ERROR", "trackingInfo": [{"number": t}]} for t in s.get("erori", [])]
             + [{"status": "SUCCESS", "trackingInfo": [{"number": t}]} for t in s["tracking"]]}}]}}}
@@ -1200,6 +1204,56 @@ check("MCP, timeout la celelalte acțiuni: sfatul de dinainte (verifică starea 
 doc = M2.xc_awb_regen.__doc__ or ""
 check("MCP: descrierea xc_awb_regen spune ce faci după un răspuns pierdut", "repetă EXACT același apel" in doc
       and "NU lua awb dintr-o probă nouă" in doc, doc)
+
+print("15. numele canonic: Order Hub primește comanda găsită, nu ce s-a tastat")
+OH_COMENZI_0["TST123456"] = {"vii": ["70000000284"], "cont": "dpd-ro-arona"}   # etichetă OH, încă nu e în Shopify
+SHOPIFY_0["TST123456"] = {"tracking": []}
+SHOPIFY_0["TST100200"] = {"tracking": ["80000000173"]}     # altă comandă, mai veche, a altui client
+NUME_LARG.update({"123456": "TST123456", "TST-123456": "TST123456", "tst123456": "TST123456",
+                  "23456": "TST123456", "TST 123456": "TST100200"})
+for intrare in (["--order", "123456", "--shop", SHOP], ["--order", "TST-123456"], ["--order", "tst123456"]):
+    cod, out = ruleaza("order-cancel", *(intrare + ["--apply"]))
+    check("order-cancel %s: la Order Hub ajunge TST123456 (în cod și în comanda), el anulează, xConnector neatins"
+          % " ".join(intrare), cod == 0 and oh() and all(c[1]["cod"] == c[1]["comanda"] == "TST123456" for c in oh())
+          and oh()[-1][1]["dry_run"] is False and OH_COMENZI["TST123456"].get("anulata") and fara_scrieri()
+          and "order-cancel · TST123456" in out and "Order Hub nu cunoaște" not in out, (cod, oh(), out))
+cod, out = ruleaza("awb-void", "--order", "123456", "--shop", SHOP, "--apply")
+check("awb-void 123456: oprirea o face Order Hub pe TST123456", cod == 0 and oh()[-1][1]["cod"] == "TST123456"
+      and oh()[-1][1]["actiune"] == "hold" and "OPRITĂ (hold)" in out and fara_scrieri(), (cod, oh(), out))
+cod, out = ruleaza("awb-regen", "--order", "123456", "--shop", SHOP)
+check("awb-regen 123456: proba pe TST123456, iar rândul de execuție poartă numele canonic", cod == 0
+      and oh()[-1][1]["cod"] == "TST123456" and "→ execuție: xconnector.py awb-regen --order TST123456 --parcels 2"
+      " --awb 70000000284" in out, (cod, oh(), out))
+cod, out = ruleaza("awb-make", "--order", "123456", "--shop", SHOP, "--apply")
+check("awb-make 123456: Order Hub vede AWB-ul viu al TST123456 și refuză al doilea", cod == 3
+      and oh()[0][1]["cod"] == "TST123456" and "are deja AWB: 70000000284" in out and fara_scrieri(), (cod, oh(), out))
+for cmd in (["order-cancel"], ["awb-void"], ["awb-regen", "--parcels", "2", "--awb", "80000000173"], ["awb-make"]):
+    picate = []
+    for intrare, alta in ((["--order", "TST 123456"], "TST100200"), (["--order", "23456", "--shop", SHOP], "TST123456")):
+        for aplica in ([], ["--apply"]):
+            cod, out = ruleaza(cmd[0], *(intrare + cmd[1:] + aplica))
+            if not (cod == 2 and not oh() and fara_scrieri() and ("găsit comanda %s, care NU e cea cerută" % alta) in out
+                    and not OH_COMENZI["TST123456"].get("anulata") and SHOPIFY["TST100200"]["tracking"] == ["80000000173"]):
+                picate.append("%s %s%s: cod %s, Order Hub %s" % (cmd[0], " ".join(intrare), " --apply" if aplica else "",
+                                                               cod, [c[1]["cod"] for c in oh()]))
+    check("%s: căutarea întoarce altă comandă (TST 123456 → TST100200; 23456 → TST123456): cod 2, nimic la Order Hub,"
+          " nimic scris" % cmd[0], not picate, "; ".join(picate))
+resolve_real = X.resolve_order
+X.resolve_order = lambda name, a, days=60: (
+    {"shopDomain": SHOP, "apiKey": "k-test"}, FakeXC("k"),
+    {"orderName": {"TST-77": "TST77", "TST-123456": "TST123456", "TST 123456": "TST100200"}.get(name, name),
+     "orderId": {"TST-77": "97"}.get(name, "284"), "documents": [eticheta("80000000077")] if name == "TST-77" else []})
+cod, out = ruleaza("order-cancel", "--order", "TST-77", "--apply", stare_pica_primele=1)
+check("Shopify necitit la început, Order Hub întrebat de „TST-77”, xConnector găsește TST77: cu --apply cod 2, nimic"
+      " scris (răspunsul lui Order Hub nu valorează pentru alt nume)", cod == 2 and fara_scrieri()
+      and "Reia cu --order TST77" in out, (cod, xc(), ANULARI, out))
+cod, out = ruleaza("addr-set", "--order", "TST-123456", "--city", "Cluj")
+check("addr-set TST-123456: Order Hub e întrebat de numele găsit de xConnector", cod == 0 and oh()
+      and all(c[1]["cod"] == "TST123456" for c in oh()) and "ADRESĂ set · TST123456" in out, (oh(), out))
+cod, out = ruleaza("addr-set", "--order", "TST 123456", "--city", "Cluj", "--apply")
+check("addr-set pe altă comandă decât cea cerută: cod 2, adresa neschimbată, nimic la Order Hub", cod == 2
+      and not MUTATII and not oh() and "TST100200" in out, (cod, MUTATII, out))
+X.resolve_order = resolve_real
 
 check("niciun subprocess și nicio ieșire în rețea pe lângă dubluri", not SUBPROC, SUBPROC)
 

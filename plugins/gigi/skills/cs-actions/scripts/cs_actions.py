@@ -379,6 +379,35 @@ def _awb_vii(o):
     return out
 
 
+def _nume_norm(s):
+    return re.sub(r"[#\s-]", "", str(s or "")).upper()
+
+
+def nume_comanda_potrivit(cerut, gasit):
+    """Comanda întoarsă de get_order e chiar cea cerută? Căutarea `name:` din Shopify e largă și get_order ia PRIMA
+    potrivire: „123456” și „EST-123456” dau EST123456, dar „EST 123456” dă întâi EST100200 (name:EST ȘI textul 123456).
+    Doar cifre (magazinul vine din --store; prefixele GRAN / GRAND diferă) → se compară doar cifrele numelui găsit;
+    altfel numele întreg, fără „#”, spații și „-”, fără diferență de majuscule. (Aceeași regulă ca în xconnector.py.)"""
+    c, g = _nume_norm(cerut), _nume_norm(gasit)
+    if not c or not g:
+        return False
+    return re.sub(r"\D", "", g) == c if c.isdigit() else c == g
+
+
+def _comanda_ceruta(a, o):
+    """De aici încolo `a.order` = numele canonic o['name']: la Order Hub (care caută DOAR numele exact — „123456” i-ar
+    ajunge drept comandă necunoscută și ar deschide orderCancel direct pe o comandă a lui), în citirile de confirmare
+    și în tot ce se tipărește. Altă comandă decât cea cerută → cod 2, nimic trimis, nimic scris (și la probă)."""
+    gasit = (o or {}).get("name") or ""
+    if not nume_comanda_potrivit(a.order, gasit):
+        print("  ⛔ %s: Shopify a întors comanda %s, care NU e cea cerută → nu s-a trimis și nu s-a scris nimic. Dă"
+              " numele întreg al comenzii (ex. EST123456)." % (a.order, gasit or "fără nume"))
+        sys.exit(OH_FARA_RASPUNS)
+    if gasit != a.order:
+        print("  ℹ comanda: %s (cerută ca „%s”)" % (gasit, a.order))
+        a.order = gasit
+
+
 def _awb_viu(o):
     """Primul AWB viu al comenzii în Shopify, sau ""."""
     return (_awb_vii(o) or [""])[0]
@@ -523,6 +552,7 @@ def op_cancel(a, agent):
     o = get_order(pref, a.order)
     if not o:
         sys.exit("Nu găsesc %s în %s." % (a.order, pref))
+    _comanda_ceruta(a, o)   # Order Hub, confirmarea și „ANULEZ …”: numele canonic
     if _oh_anulare(a, agent, pref, o):   # și pe o comandă deja anulată: Order Hub îi anulează etichetele rămase vii
         return
     if o.get("cancelledAt"):
@@ -621,6 +651,7 @@ def op_modify(a, agent):
     o = get_order(pref, a.order)
     if not o:
         sys.exit("Nu găsesc %s." % a.order)
+    _comanda_ceruta(a, o)   # altă comandă decât cea cerută → cod 2, înainte de orice scriere
     ful = o["displayFulfillmentStatus"]
     if ful not in ("UNFULFILLED", "PARTIALLY_FULFILLED", "ON_HOLD", "OPEN", "SCHEDULED"):
         print("  ⚠ %s e %s — modificarea poate să nu mai conteze (deja expediată)." % (a.order, ful))

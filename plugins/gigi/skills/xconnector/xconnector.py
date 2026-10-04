@@ -4532,6 +4532,7 @@ def cmd_awb_make(a, _resolved=None):
     sh, xc, o = _resolved or resolve_order(a.order, a, a.days)
     if not o:
         print("Comanda %s negăsită%s." % (a.order, " în %s" % a.shop if a.shop else " (căutat în toate)")); return
+    _oh_nume_canonic(a, o.get("orderName"), oh_intrebat=not _resolved)
     if has_awb(o):
         print("  ⚠ %s ARE deja AWB (%s) — folosește awb-regen ca să-l refaci (anulează + reface)." % (a.order, doc_tracking(awb_doc(o))))
         return
@@ -4667,17 +4668,55 @@ def _oh_intreaba(cere):
 
 
 def shopify_stare_comanda(st, name):
-    """{id, anulata, awb: [tracking-urile fulfillment-urilor vii]} din Shopify, sau None dacă nu se poate citi."""
-    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ id cancelledAt '
+    """{id, name, anulata, awb: [tracking-urile fulfillment-urilor vii]} din Shopify, sau None dacă nu se poate citi.
+    `name` = numele canonic al comenzii găsite (căutarea `name:` e largă: vezi nume_comanda_potrivit)."""
+    q = ('query{ orders(first:1, query:"name:%s"){ edges{ node{ id name cancelledAt '
          'fulfillments(first:10){ status trackingInfo(first:5){ number } } } } } }') % (name or "").replace('"', "")
     d = shopify_gql(st["shopDomain"], st["adminToken"], q)
     edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
     if not edges or d.get("errors"):   # și un răspuns parțial: fără fulfillment-uri citite nu se știe ce etichetă are
         return None
     n = edges[0]["node"]
+    if not n.get("name"):   # fără nume nu se știe dacă e comanda cerută
+        return None
     awb = [t.get("number") for f in (n.get("fulfillments") or []) if f.get("status") not in ("CANCELLED", "ERROR", "FAILURE")
            for t in (f.get("trackingInfo") or []) if t.get("number")]
-    return {"id": n.get("id"), "anulata": bool(n.get("cancelledAt")), "awb": awb}
+    return {"id": n.get("id"), "name": n["name"], "anulata": bool(n.get("cancelledAt")), "awb": awb}
+
+
+def _nume_norm(s):
+    return re.sub(r"[#\s-]", "", str(s or "")).upper()
+
+
+def nume_comanda_potrivit(cerut, gasit):
+    """Comanda găsită (Shopify / xConnector) e chiar cea cerută? Căutarea `name:` din Shopify e largă: „123456” și
+    „EST-123456” dau EST123456, dar „EST 123456” dă întâi EST100200 (name:EST ȘI textul 123456). Doar cifre (magazinul
+    vine din --shop / --store; prefixele GRAN / GRAND diferă) → se compară doar cifrele numelui găsit; altfel numele
+    întreg, fără „#”, spații și „-”, fără diferență de majuscule."""
+    c, g = _nume_norm(cerut), _nume_norm(gasit)
+    if not c or not g:
+        return False
+    return re.sub(r"\D", "", g) == c if c.isdigit() else c == g
+
+
+def _oh_nume_canonic(a, gasit, oh_intrebat=False):
+    """De aici încolo `a.order` = numele canonic găsit: Order Hub caută comanda DOAR după numele exact, deci „123456”
+    i-ar ajunge drept comandă necunoscută (404) și ar redeschide calea xConnector pe o comandă a lui. Altă comandă decât
+    cea cerută → cod 2, nimic trimis la Order Hub, nimic scris (și la probă). `oh_intrebat`: Order Hub a fost deja
+    întrebat de numele dat (Shopify n-a putut fi citit înainte): cu --apply, cod 2 — întrebarea nu se ia drept valabilă
+    pentru alt nume."""
+    if not gasit or gasit == a.order:
+        return
+    if not nume_comanda_potrivit(a.order, gasit):
+        print("  ⛔ %s · %s: căutarea a găsit comanda %s, care NU e cea cerută → nu s-a trimis și nu s-a scris nimic. Dă"
+              " numele întreg al comenzii (ex. EST123456)." % (getattr(a, "cmd", "") or "comanda", a.order, gasit))
+        sys.exit(OH_FARA_RASPUNS)
+    print("  ℹ comanda: %s (cerută ca „%s”)" % (gasit, a.order))
+    cerut, a.order = a.order, gasit
+    if oh_intrebat and a.apply:
+        print("  ⛔ Order Hub a fost întrebat de „%s”, nu de %s → nu s-a scris nimic. Reia cu --order %s." % (
+            cerut, gasit, gasit))
+        sys.exit(OH_FARA_RASPUNS)
 
 
 def _magazine_cunoscute(statice):
@@ -4720,6 +4759,7 @@ def _oh_shopify(a, dom=None):
 def _oh_etichete_shopify(a, dom=None):
     """(magazinul cu tokenul lui | None, AWB-urile vii ale comenzii în Shopify). AWB-uri: [] = comanda s-a citit și
     n-are niciun tracking viu; None = comanda NU s-a putut citi (magazin fără token, comandă negăsită acolo, eroare).
+    Citită: `a.order` devine numele ei canonic din Shopify; altă comandă decât cea cerută → cod 2 (_oh_nume_canonic).
     Primul merge la Order Hub ca `awb`, celelalte se verifică separat (_oh_alte_etichete): o etichetă făcută în afara
     lui (de mână, în xConnector) apare în Shopify ca tracking al unui fulfillment, iar dacă Order Hub n-o cunoaște
     refuză, în loc să anuleze comanda cu o etichetă pe care n-o vede. Nu trece prin xConnector."""
@@ -4728,6 +4768,8 @@ def _oh_etichete_shopify(a, dom=None):
         sp = shopify_stare_comanda(st, a.order) if st else None
     except Exception:
         return None, None
+    if sp:   # Order Hub primește numele canonic, nu ce s-a tastat (altă comandă → cod 2)
+        _oh_nume_canonic(a, sp["name"])
     return st, (list(dict.fromkeys(sp["awb"])) if sp else None)
 
 
@@ -4933,15 +4975,16 @@ def _oh_refuz_awb_nou(OH, r):
 def _oh_lasa_awb_nou(a, cmd):
     """awb-make / awb-create au rămas pe xConnector. True = se poate continua: Order Hub nu cunoaște comanda, sau o
     cunoaște fără AWB viu. Refuz (False; cu --apply cod 3) pe o comandă cu AWB viu, plecată, anulată sau cu AWB-urile
-    magazinului pe pauză. Întrebarea e o probă: nu scrie nimic în Order Hub."""
+    magazinului pe pauză. Întrebarea e o probă: nu scrie nimic în Order Hub. Shopify se citește întâi: Order Hub
+    primește numele canonic al comenzii."""
     cine = _oh_cine(a)[0]
+    awbs = _oh_etichete_shopify(a)[1]
     OH, r = _oh_intreaba(lambda OH, tok: OH.stie(a.order, cine, token=tok))
     if OH is None or r.stare not in (OH.DECIS, OH.NECUNOSCUTA):
         _oh_fara_raspuns(a, cmd, OH, r)
         return True
     refuz = _oh_refuz_awb_nou(OH, r) if r.stare == OH.DECIS else ""
     if not refuz:   # fără AWB viu la Order Hub (sau n-o cunoaște): o etichetă făcută de mână apare doar în Shopify
-        awbs = _oh_etichete_shopify(a)[1]
         if awbs is None:
             _oh_necitita(a, cmd)   # --apply: cod 2
         elif awbs:
@@ -4982,6 +5025,7 @@ def cmd_awb_void(a, _resolved=None):
     sh, xc, o = _resolved or resolve_order(a.order, a, a.days)
     if not o:
         print("Comanda %s negăsită." % a.order); return
+    _oh_nume_canonic(a, o.get("orderName"), oh_intrebat=True)
     doc = awb_doc(o)
     if not doc and not a.apply:
         print("  %s nu are AWB (SHIPPING_LABEL) de anulat." % a.order); return
@@ -5075,6 +5119,7 @@ def cmd_awb_regen(a):
     sh, xc, o = resolve_order(a.order, a, a.days)
     if not o:
         print("Comanda %s negăsită." % a.order); return
+    _oh_nume_canonic(a, o.get("orderName"), oh_intrebat=True)
     if awbs is None:   # Shopify n-a răspuns la început: etichetele se recitesc cu magazinul găsit de xConnector
         awbs = _oh_etichete_shopify(a, sh["shopDomain"])[1]
         if awbs is None:
@@ -5381,6 +5426,7 @@ def cmd_order_cancel(a):
     sh, xc, o = resolve_order(a.order, a, a.days)
     if not o:
         print("Comanda %s negăsită." % a.order); return
+    _oh_nume_canonic(a, o.get("orderName"), oh_intrebat=True)
     if not citita:   # Shopify n-a răspuns la început: etichetele se recitesc cu magazinul găsit de xConnector
         awbs = _oh_etichete_shopify(a, sh["shopDomain"])[1]
         if awbs is None:
@@ -8689,6 +8735,7 @@ def cmd_addr_set(a):
     sh, xc, o = resolve_order(a.order, a, a.days)
     if not o:
         print("Comanda %s negăsită." % a.order); return
+    _oh_nume_canonic(a, o.get("orderName"))   # Order Hub, Shopify și ce se tipărește: numele găsit de xConnector
     st = {t.get("shopDomain"): t for t in load_shopify_tokens()}.get(sh["shopDomain"])
     if not st:
         print("  fără token Shopify pt %s." % sh["shopDomain"]); return

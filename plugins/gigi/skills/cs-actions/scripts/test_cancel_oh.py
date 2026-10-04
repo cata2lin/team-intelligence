@@ -15,7 +15,9 @@ dublură de GraphQL care răspunde doar cu ce cere query-ul. Verifică:
   3. orderCancel direct doar la 404 `necunoscuta`, și doar pe o comandă fără etichetă; fără un răspuns valid de la
      Order Hub --apply iese cu cod 2; un răspuns pierdut după o cerere de execuție e stare necunoscută;
   4. `modify` spune că eticheta rămâne cu datele vechi când comanda are AWB — și când Order Hub nu răspunde;
-  5. kb.py se găsește și când scriptul e pornit din alt folder.
+  5. la Order Hub ajunge numele canonic o['name'] („123456 --store TST” → TST123456), iar o căutare care întoarce altă
+     comandă („TST 123456” → TST100200) oprește cancel și modify cu cod 2, fără nicio scriere;
+  6. kb.py se găsește și când scriptul e pornit din alt folder.
 Comenzile, magazinul și cheia sunt inventate.
 
   uv run test_cancel_oh.py
@@ -77,7 +79,7 @@ HOLD_FARA = dict(BAZA, ok=True, rezultat="previzualizare", mesaj="", anulata=Fal
     "AWB de anulat: niciunul viu", "Comandă: rămâne · hold (nu pleacă acum)"])
 
 RASPUNS, CERERI, MUTATII, REST, TAGURI, CITIRI = [None], [], [], [], [], [0]
-LUME_0 = {"anulata": False, "tracking": ["70000000001"], "confirma": True, "tag_pica": False, "citire_pica": None,
+LUME_0 = {"nume": "TST1", "anulata": False, "tracking": ["70000000001"], "confirma": True, "tag_pica": False, "citire_pica": None,
           "confirma_dupa": 0, "anulata_de_la": None, "nota": "", "taguri": []}
 DEJA_OK = dict(BAZA, ok=True, rezultat="deja_anulata", anulata=True,
                mesaj="Comandă: TST1 · deja anulată · AWB viu: niciunul",
@@ -112,7 +114,7 @@ def fake_sgql(prefix, query, variables=None):
                 sys.exit("GraphQL: throttled")        # ca sgql adevărat pe o eroare GraphQL
             return {}                                 # ca sgql adevărat pe un 5xx necitit → KeyError în get_order
         anulata = LUME["anulata"] or (LUME["anulata_de_la"] is not None and CITIRI[0] > LUME["anulata_de_la"])
-        nod = {"id": "gid://shopify/Order/1", "cancelledAt": "2026-10-01T10:00:00Z" if anulata else None,
+        nod = {"id": "gid://shopify/Order/1", "name": LUME["nume"], "cancelledAt": "2026-10-01T10:00:00Z" if anulata else None,
                "displayFinancialStatus": "PENDING", "displayFulfillmentStatus": "FULFILLED", "lineItems": {"edges": []}}
         if "note tags" in query:
             nod.update(note=LUME["nota"], tags=list(LUME["taguri"]))
@@ -295,7 +297,39 @@ cod, out = ruleaza("--address", "Str Noua 9", "--city", "Cluj", "--apply", op="m
 check("Order Hub n-o cunoaște și Shopify nu arată nicio etichetă: fără avertisment", cod == 0 and len(REST) == 1
       and "⚠" not in out.replace("⚠ TST1 e FULFILLED", ""), (cod, out))
 
-print("5. kb.py")
+print("5. numele canonic al comenzii (căutarea Shopify e largă, Order Hub caută doar numele exact)")
+
+
+def oh_exact(cale, c):
+    """Ca `gaseste` din Order Hub: o comandă se găsește doar după numele exact (cu sau fără „#”)."""
+    if c["cod"].lstrip("#").upper() != "TST123456":
+        return 404, {"detail": {"rezultat": "necunoscuta", "mesaj": "Cod: %s · necunoscut în Order Hub" % c["cod"]}}
+    return 200, dict(PROBA if c["dry_run"] else FACUT, comanda="TST123456")
+
+
+for intrare in (["--order", "123456"], ["--order", "TST-123456"], ["--order", "tst123456"]):
+    cod, out = ruleaza(*(intrare + ["--apply"]), raspuns=oh_exact, nume="TST123456", tracking=[])
+    check("cancel %s --store TST: la Order Hub ajunge TST123456, el anulează; fără orderCancel direct" % " ".join(intrare),
+          cod == 0 and CERERI and all(c[1]["cod"] == c[1]["comanda"] == "TST123456" for c in CERERI)
+          and CERERI[-1][1]["dry_run"] is False and MUTATII == ["tagsAdd"] and "ANULEZ TST123456" in out
+          and "✅ ANULAT TST123456" in out and "nu cunoaște" not in out, (cod, CERERI, MUTATII, out))
+cod, out = ruleaza("--order", "123456", raspuns=oh_exact, nume="TST123456", tracking=[])
+check("…și proba arată numele canonic în rândul ANULEZ", cod == 0 and "[DRY-RUN] ANULEZ TST123456" in out
+      and not MUTATII, out)
+for intrare, alta in ((["--order", "TST 123456"], "TST100200"), (["--order", "23456"], "TST123456")):
+    for op, extra in (("cancel", []), ("modify", ["--address", "Str Noua 9", "--city", "Cluj"])):
+        for aplica in ([], ["--apply"]):
+            cod, out = ruleaza(*(intrare + extra + aplica), op=op, raspuns=oh_exact, nume=alta, tracking=[])
+            check("%s %s%s: Shopify întoarce %s, nu comanda cerută → cod 2, nimic la Order Hub, nimic scris"
+                  % (op, " ".join(intrare), " --apply" if aplica else "", alta), cod == 2 and not CERERI and not MUTATII
+                  and not REST and ("comanda %s, care NU e cea cerută" % alta) in out, (cod, CERERI, MUTATII, REST, out))
+cod, out = ruleaza("--order", "123456", "--address", "Str Noua 9", "--city", "Cluj", "--apply", op="modify",
+                   raspuns=lambda cale, c: (200, HOLD_PROBA) if c["cod"] == "TST123456" else NECUNOSCUTA, nume="TST123456")
+check("modify 123456: proba la Order Hub pe TST123456, MODIFIC cu numele canonic, sfatul de refacere tot pe el", cod == 0
+      and CERERI and all(c[1]["cod"] == "TST123456" for c in CERERI) and "MODIFIC TST123456" in out
+      and "✅ MODIFICAT TST123456" in out and "awb-regen --order TST123456" in out, (cod, CERERI, out))
+
+print("6. kb.py")
 getcwd = C.os.getcwd
 C.os.getcwd = lambda: os.path.join(os.path.abspath(os.sep), "nu-exista-%d" % os.getpid())   # niciun strămoș cu repo-ul
 try:
