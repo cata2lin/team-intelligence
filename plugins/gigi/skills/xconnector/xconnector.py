@@ -325,6 +325,16 @@ class XC:
 SHOPIFY_API = "2026-04"
 
 
+_MYSHOPIFY = re.compile(r"[a-z0-9][a-z0-9-]*\.myshopify\.com")
+
+
+def _gazda_myshopify(shop):
+    """Secretele client_credentials pleacă DOAR la un domeniu `<magazin>.myshopify.com`. Altă gazdă (un --shop greșit
+    sau strecurat, ex. `6f9e22-9d.myshopify.com.evil.net`) ar primi client_secret-ul app-urilor și ar putea emite cu el
+    tokenuri admin pe toate magazinele unde-s instalate."""
+    return bool(_MYSHOPIFY.fullmatch(str(shop or "")))
+
+
 def _mint_din_marcaj(shop, marcaj):
     """Rezolva un marcaj `OAUTH:<NUME>_CLIENT_ID+SECRET` din SHOPIFY_STORES_CSV intr-un token Shopify.
 
@@ -334,6 +344,8 @@ def _mint_din_marcaj(shop, marcaj):
     401 "Invalid API key" — parea un token expirat, dar nu era nimic de reinnoit.
     None daca marcajul e malformat, secretele lipsesc sau app-ul nu e instalat. NU printeaza tokenul."""
     import time as _t
+    if not _gazda_myshopify(shop):
+        return None
     c = _ARONA_TOK.get(shop)
     if c and c[1] > _t.time() + 300:
         return c[0]
@@ -400,6 +412,8 @@ def _shopify_mint(shop):
     proces). Încearcă fiecare app din `_SHOPIFY_APPS` → prima care emite (app instalat pe magazin) câștigă. None
     dacă niciun app nu-i instalat (400 app_not_installed) sau lipsesc credentialele. NU se printează tokenul."""
     import time as _t
+    if not _gazda_myshopify(shop):
+        return None
     c = _ARONA_TOK.get(shop)
     if c and c[1] > _t.time() + 300:
         return c[0]
@@ -4666,13 +4680,31 @@ def shopify_stare_comanda(st, name):
     return {"id": n.get("id"), "anulata": bool(n.get("cancelledAt")), "awb": awb}
 
 
+def _magazine_cunoscute(statice):
+    """Domeniile myshopify ale magazinelor noastre: SHOPIFY_STORES_CSV + SHOPIFY_ADMIN_TOKENS (`statice`, din
+    _tokenuri_statice), XCONNECTOR_SHOPS și PREFIX_DOMAIN."""
+    out = set(statice or {})
+    try:
+        out |= {sh.get("shopDomain") for sh in load_shops() if sh.get("shopDomain")}
+    except Exception:
+        pass
+    return out | {sub + ".myshopify.com" for sub in PREFIX_DOMAIN.values() if sub}
+
+
 def _oh_shopify(a, dom=None):
     """{shopDomain, adminToken} al magazinului comenzii, cu tokenul verificat (și reemis, dacă e un marcaj OAUTH sau a
-    expirat), sau None. Magazinul: `dom` dat, --shop, apoi prefixul numelui — PREFIX_DOMAIN, apoi cel mai lung `prefix`
+    expirat), sau None. Magazinul: `dom` dat, --shop (doar un magazin cunoscut: altfel cod 2, nimic trimis), apoi
+    prefixul numelui — PREFIX_DOMAIN, apoi cel mai lung `prefix`
     din SHOPIFY_STORES_CSV (magazinele care lipsesc din PREFIX_DOMAIN: BUC, MD, DUPBG). Doar tokenul magazinului
     comenzii, fără emiteri pentru celelalte (ca load_shopify_tokens)."""
     statice = _tokenuri_statice()
     shop = getattr(a, "shop", None)
+    if not dom and shop and "." in shop and shop not in _magazine_cunoscute(statice):
+        # --shop devine gazda cererilor (și a emiterii de token): doar un magazin de-al nostru, altfel nimic nu pleacă
+        print("  ⛔ --shop %r nu e un magazin cunoscut (SHOPIFY_STORES_CSV, XCONNECTOR_SHOPS, PREFIX_DOMAIN) → nu s-a"
+              " trimis și nu s-a scris nimic. Dă domeniul myshopify exact al magazinului sau lasă --shop deoparte"
+              " (magazinul se ia din prefixul comenzii)." % shop)
+        sys.exit(OH_FARA_RASPUNS)
     dom = dom or (shop if (shop and "." in shop) else domain_for_order(a.order))
     if not dom:
         m = re.match(r"^([A-Za-z]+)", a.order or "")

@@ -28,7 +28,8 @@ Shopify și au lăsat eticheta vie la curier (cinci comenzi). Testul verifică, 
    8. awb-create nu eliberează un hold pus de Order Hub, nici unul pe care nu-l poate citi;
    9. addr-set: avertizează că eticheta rămâne cu adresa veche (și sub pauză de AWB, și pe o comandă pe care Order
       Hub n-o cunoaște); --make-awb doar pe o comandă fără AWB viu, altfel cod 3 după schimbarea adresei;
-  10. dup_guard.py și cod_paid_watch.py cheamă comenzile cum trebuie; 11. uneltele MCP; 12. oh_client.
+  10. dup_guard.py și cod_paid_watch.py cheamă comenzile cum trebuie; 11. uneltele MCP; 12. oh_client;
+  13. un --shop care nu e magazinul nostru nu primește secretele app-urilor Shopify (nicio emitere de token).
 Dublura de Order Hub răspunde cu formele reale ale rutelor /api/depozit (măsurate cu probe pe 2-oct-2026).
 Comenzile, AWB-urile, magazinul și cheile sunt inventate.
 
@@ -1090,6 +1091,45 @@ try:
     check("…iar pe o cerere de execuție starea e „poate executată”, nu un refuz", r.stare == OH.EROARE and r.incert, r.mesaj)
 finally:
     urllib.request.build_opener = build_opener_real
+
+print("13. --shop: secretele app-urilor Shopify nu pleacă la o gazdă străină")
+CERERI_HTTP = []
+
+
+def tine_minte_http(method, url, headers, body=None, timeout=45):
+    CERERI_HTTP.append(url)
+    return 400, json.dumps({"errors": "app_not_installed"})
+
+
+KB.update({k: "FAKE-" + k for pereche in X._SHOPIFY_APPS for k in pereche})
+X.http = tine_minte_http
+for gazda in ("attacker.example", "6f9e22-9d.myshopify.com.evil.net"):
+    picate = []
+    for cmd in (["order-cancel", "--order", "TST1"], ["awb-void", "--order", "TST1"],
+                ["awb-regen", "--order", "TST1", "--parcels", "2", "--awb", "70000000001"], ["awb-make", "--order", "TST8"]):
+        for aplica in ([], ["--apply"]):
+            del CERERI_HTTP[:]
+            cod, out = ruleaza(*(cmd + ["--shop", gazda] + aplica))
+            if CERERI_HTTP or cod != 2 or not fara_scrieri() or not doar_probe() or "nu e un magazin cunoscut" not in out:
+                picate.append("%s%s: cod %s, cereri %s" % (cmd[0], " --apply" if aplica else "", cod, CERERI_HTTP))
+            elif cmd[0] != "awb-make" and oh():
+                picate.append("%s: a plecat o cerere la Order Hub" % cmd[0])
+    check("--shop %s: order-cancel / awb-void / awb-regen / awb-make (și probă, și --apply) — nicio emitere de token, cod"
+          " 2, nimic scris" % gazda, not picate, "; ".join(picate))
+del CERERI_HTTP[:]
+emise = [X._shopify_mint("attacker.example"), X._shopify_mint("6f9e22-9d.myshopify.com.evil.net"),
+         X._shopify_mint("6f9e22-9d.myshopify.com\n"), X._mint_din_marcaj("attacker.example", "OAUTH:SHOPIFY_ARONA_CLIENT_ID+SECRET"),
+         X._token_viu_sau_emis("6f9e22-9d.myshopify.com.evil.net", None)[0]]
+check("a doua gardă: _shopify_mint / _mint_din_marcaj refuză orice gazdă care nu e <magazin>.myshopify.com, înainte de"
+      " orice cerere", emise == [None] * 5 and not CERERI_HTTP, (emise, CERERI_HTTP))
+del CERERI_HTTP[:]
+cod, out = ruleaza("order-cancel", "--order", "TST1", "--shop", "6f9e22-9d.myshopify.com")
+check("control: un magazin cunoscut (din PREFIX_DOMAIN) e acceptat ca --shop, iar emiterea merge doar la el",
+      "nu e un magazin cunoscut" not in out and len(CERERI_HTTP) == len(X._SHOPIFY_APPS)
+      and all(u == "https://6f9e22-9d.myshopify.com/admin/oauth/access_token" for u in CERERI_HTTP), (CERERI_HTTP, out))
+X.http = fara_retea
+KB.clear()
+
 check("niciun subprocess și nicio ieșire în rețea pe lângă dubluri", not SUBPROC, SUBPROC)
 
 print()
