@@ -33,7 +33,10 @@ Shopify și au lăsat eticheta vie la curier (cinci comenzi). Testul verifică, 
   14. awb-regen cu răspunsul execuției pierdut: se repetă aceeași comandă, cu același --awb (Order Hub refuză a doua
       refacere), nu o probă nouă — și în textele uneltei MCP;
   15. la Order Hub ajunge numele canonic al comenzii găsite (Shopify caută larg: „123456” → TST123456), iar o căutare
-      care întoarce altă comandă („TST 123456” → TST100200) oprește tot, cu cod 2.
+      care întoarce altă comandă („TST 123456” → TST100200) oprește tot, cu cod 2;
+  16. piesele pe care altfel nu le fixează niciun test: awb-void și awb-regen cu Shopify necitit la început, Order
+      Hub întrebat de „TST-77” și xConnector care găsește TST77 (cod 2, nicio scriere prin xConnector); un --shop
+      myshopify care nu e al nostru; timeoutul MCP la o probă awb-regen; aceleași cifre cu alt prefix.
 Dublura de Order Hub răspunde cu formele reale ale rutelor /api/depozit (măsurate cu probe pe 2-oct-2026).
 Comenzile, AWB-urile, magazinul și cheile sunt inventate.
 
@@ -1254,6 +1257,41 @@ cod, out = ruleaza("addr-set", "--order", "TST 123456", "--city", "Cluj", "--app
 check("addr-set pe altă comandă decât cea cerută: cod 2, adresa neschimbată, nimic la Order Hub", cod == 2
       and not MUTATII and not oh() and "TST100200" in out, (cod, MUTATII, out))
 X.resolve_order = resolve_real
+
+
+print("16. piese ale corecturilor pe care altfel niciun test nu le fixează")
+resolve_real = X.resolve_order
+X.resolve_order = lambda name, a, days=60: (
+    {"shopDomain": SHOP, "apiKey": "k-test"}, FakeXC("k"),
+    {"orderName": {"TST-77": "TST77"}.get(name, name), "orderId": "97", "documents": [eticheta("80000000077")]})
+NUME_LARG["TST-77"] = "TST77"      # ca Shopify real: „name:TST-77” găsește TST77
+cod, out = ruleaza("awb-void", "--order", "TST-77", "--apply", stare_pica_primele=1)
+check("R1 awb-void: Shopify necitit la început, Order Hub întrebat de „TST-77”, xConnector găsește TST77 → cod 2,"
+      " fără void prin xConnector", cod == 2 and fara_scrieri() and "Reia cu --order TST77" in out, (cod, xc(), out[-400:]))
+cod, out = ruleaza("awb-regen", "--order", "TST-77", "--parcels", "2", "--awb", "80000000077", "--apply",
+                   stare_pica_primele=1)
+check("R2 awb-regen: același caz → cod 2, fără void/create prin xConnector", cod == 2 and fara_scrieri()
+      and "Reia cu --order TST77" in out, (cod, xc(), out[-400:]))
+X.resolve_order = resolve_real
+del NUME_LARG["TST-77"]
+CERERI_R = []
+X.http = lambda method, url, headers, body=None, timeout=45: CERERI_R.append(url) or (400, '{"errors":"app_not_installed"}')
+KB.update({k: "FAKE-" + k for pereche in X._SHOPIFY_APPS for k in pereche})
+cod, out = ruleaza("order-cancel", "--order", "TST1", "--shop", "alt-magazin.myshopify.com")
+check("R3 --shop pe un domeniu myshopify care nu e al nostru → cod 2, nicio emitere (lista de magazine, nu doar forma)",
+      cod == 2 and not CERERI_R and "nu e un magazin cunoscut" in out, (cod, CERERI_R))
+X.http = fara_retea
+KB.clear()
+subprocess.run = timeout_mcp
+text_proba = M2._run(M2.XC, ["awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "70000000001"], timeout=300)
+subprocess.run = fara_retea
+check("R4 MCP: timeout la o PROBĂ awb-regen (apply=false) nu spune „repetă cu apply=true”",
+      "Repetă EXACT" not in text_proba and "verifică starea comenzii (apply=false)" in text_proba, text_proba)
+NUME_LARG["TSX123456"] = "TST123456"
+cod, out = ruleaza("order-cancel", "--order", "TSX123456", "--shop", SHOP)
+check("R5 aceleași cifre, alt prefix (TSX123456 → TST123456): cod 2, nimic la Order Hub", cod == 2 and not oh()
+      and "NU e cea cerută" in out, (cod, oh(), out[-300:]))
+del NUME_LARG["TSX123456"]
 
 check("niciun subprocess și nicio ieșire în rețea pe lângă dubluri", not SUBPROC, SUBPROC)
 

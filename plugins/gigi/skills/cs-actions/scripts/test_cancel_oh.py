@@ -329,6 +329,12 @@ check("modify 123456: proba la Order Hub pe TST123456, MODIFIC cu numele canonic
       and CERERI and all(c[1]["cod"] == "TST123456" for c in CERERI) and "MODIFIC TST123456" in out
       and "✅ MODIFICAT TST123456" in out and "awb-regen --order TST123456" in out, (cod, CERERI, out))
 
+
+print("5b. aceleași cifre, alt prefix")
+cod, out = ruleaza("--order", "TSX123456", raspuns=oh_exact, nume="TST123456", tracking=[])
+check("R6 cancel: aceleași cifre, alt prefix (TSX123456 → TST123456): cod 2, nimic la Order Hub", cod == 2
+      and not CERERI and not MUTATII and "NU e cea cerută" in out, (cod, CERERI, out[-300:]))
+
 print("6. kb.py")
 getcwd = C.os.getcwd
 C.os.getcwd = lambda: os.path.join(os.path.abspath(os.sep), "nu-exista-%d" % os.getpid())   # niciun strămoș cu repo-ul
