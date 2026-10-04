@@ -36,7 +36,9 @@ Shopify și au lăsat eticheta vie la curier (cinci comenzi). Testul verifică, 
       care întoarce altă comandă („TST 123456” → TST100200) oprește tot, cu cod 2;
   16. piesele pe care altfel nu le fixează niciun test: awb-void și awb-regen cu Shopify necitit la început, Order
       Hub întrebat de „TST-77” și xConnector care găsește TST77 (cod 2, nicio scriere prin xConnector); un --shop
-      myshopify care nu e al nostru; timeoutul MCP la o probă awb-regen; aceleași cifre cu alt prefix.
+      myshopify care nu e al nostru; timeoutul MCP la o probă awb-regen; aceleași cifre cu alt prefix;
+  17. doar cifre fără --shop (două magazine au comanda 41730): cod 2 pe probă și pe --apply, la toate comenzile,
+      inclusiv addr-set; cu --shop, cifrele merg.
 Dublura de Order Hub răspunde cu formele reale ale rutelor /api/depozit (măsurate cu probe pe 2-oct-2026).
 Comenzile, AWB-urile, magazinul și cheile sunt inventate.
 
@@ -1292,6 +1294,67 @@ cod, out = ruleaza("order-cancel", "--order", "TSX123456", "--shop", SHOP)
 check("R5 aceleași cifre, alt prefix (TSX123456 → TST123456): cod 2, nimic la Order Hub", cod == 2 and not oh()
       and "NU e cea cerută" in out, (cod, oh(), out[-300:]))
 del NUME_LARG["TSX123456"]
+
+
+print("17. doar cifre, fără --shop: aceleași cifre pot fi comanda altui magazin")
+SHOP_B = "alt-magazin.myshopify.com"   # și el are o comandă 41730 (ALT41730); omul se gândea la TST41730
+reale = (X.load_shops, X.load_shopify_tokens, X.shopify_order_id, X.XC, X.shopify_order_address)
+X.load_shops = lambda: [{"shopDomain": SHOP_B, "apiKey": "k-b"}, {"shopDomain": SHOP, "apiKey": "k-test"}]
+X.load_shopify_tokens = lambda: [{"shopDomain": SHOP_B, "adminToken": "tok-test", "prefix": "ALT"},
+                                 {"shopDomain": SHOP, "adminToken": "tok-test", "prefix": "TST"}]
+X.shopify_order_id = lambda name, st: {(SHOP_B, "41730"): "541730", (SHOP, "41730"): "641730",
+                                       (SHOP, "TST41730"): "641730"}.get(((st or {}).get("shopDomain"), name))
+
+
+class FakeXCDouaMagazine(FakeXC):
+    def orders(self, dfrom, dto, filters=None):   # amândouă în afara ferestrei: resolve_order trece la Shopify
+        EVENIMENTE.append(("xc-scan",))
+        return []
+
+    def by_id(self, oid):
+        EVENIMENTE.append(("xc-adresa",))
+        return {"541730": {"orderName": "ALT41730", "orderId": "541730"},
+                "641730": {"orderName": "TST41730", "orderId": "641730"}}.get(oid, {})
+
+
+X.XC = FakeXCDouaMagazine
+ADRESE_CITITE = []
+X.shopify_order_address = lambda shop, token, name: ADRESE_CITITE.append((shop, name)) or (
+    "gid://shopify/Order/1", {"address1": "Str Veche 1", "city": "Vechi", "zip": "100001", "province": "Prahova",
+                              "countryCodeV2": "RO"})
+SHOPIFY_0["TST41730"] = {"tracking": []}
+SHOPIFY_0["ALT41730"] = {"tracking": []}
+OH_COMENZI_0["TST41730"] = {"vii": []}
+NUME_LARG["41730"] = "TST41730"        # în magazinul de test, „name:41730” găsește TST41730
+cod, out = ruleaza("addr-set", "--order", "41730", "--city", "Cluj", "--apply")
+check("addr-set 41730 --apply fără --shop: cod 2, nicio adresă schimbată (nici pe ALT41730), nimic la Order Hub",
+      cod == 2 and not MUTATII and not ADRESE_CITITE and not oh() and "doar cifre, fără --shop" in out
+      and "ALT41730" in out, (cod, MUTATII, ADRESE_CITITE, out[-400:]))
+picate = []
+for cmd in (["order-cancel"], ["awb-void"], ["awb-make"], ["awb-regen"], ["addr-set", "--city", "Cluj"]):
+    for aplica in ([], ["--apply"]):
+        del ADRESE_CITITE[:]
+        cod, out = ruleaza(cmd[0], "--order", "41730", *(cmd[1:] + aplica))
+        # awb-make --apply se oprește mai devreme, tot cu cod 2: Shopify necitit (fără magazin, cifrele nu se citesc)
+        motiv = "doar cifre, fără --shop" in out or (cmd[0] == "awb-make" and aplica and "nu s-a putut citi" in out)
+        if not (cod == 2 and fara_scrieri() and not ADRESE_CITITE and doar_probe() and motiv):
+            picate.append("%s%s: cod %s, xConnector %s, Order Hub %s" % (
+                cmd[0], " --apply" if aplica else "", cod, xc(), [(c[1]["cod"], c[1]["dry_run"]) for c in oh()]))
+check("probă și --apply cu 41730 fără --shop (order-cancel, awb-void, awb-make, awb-regen, addr-set): cod 2, nimic"
+      " scris, nicio execuție la Order Hub — proba nu arată faptele comenzii altui magazin", not picate, "; ".join(picate))
+del ADRESE_CITITE[:]
+cod, out = ruleaza("addr-set", "--order", "41730", "--shop", SHOP, "--city", "Cluj", "--apply")
+check("control: addr-set 41730 --shop <magazinul de test> schimbă adresa lui TST41730, în magazinul lui", cod == 0
+      and MUTATII == ["orderUpdate"] and ADRESE_CITITE == [(SHOP, "TST41730")] and "ADRESĂ set · TST41730" in out,
+      (cod, MUTATII, ADRESE_CITITE, out[-400:]))
+X.load_shops, X.load_shopify_tokens, X.shopify_order_id, X.XC, X.shopify_order_address = reale
+del NUME_LARG["41730"]
+for k in ("TST41730", "ALT41730"):
+    SHOPIFY_0.pop(k, None)
+OH_COMENZI_0.pop("TST41730", None)
+check("nume_comanda_potrivit: cifrele goale se potrivesc doar cu magazinul fixat",
+      X.nume_comanda_potrivit("41730", "ALT41730") and not X.nume_comanda_potrivit("41730", "ALT41730", False)
+      and X.nume_comanda_potrivit("#77001", "77001", False) and X.nume_comanda_potrivit("TST-41730", "TST41730", False))
 
 check("niciun subprocess și nicio ieșire în rețea pe lângă dubluri", not SUBPROC, SUBPROC)
 

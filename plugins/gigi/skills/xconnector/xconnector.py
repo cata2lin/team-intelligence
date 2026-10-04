@@ -4688,15 +4688,16 @@ def _nume_norm(s):
     return re.sub(r"[#\s-]", "", str(s or "")).upper()
 
 
-def nume_comanda_potrivit(cerut, gasit):
+def nume_comanda_potrivit(cerut, gasit, magazin_fixat=True):
     """Comanda găsită (Shopify / xConnector) e chiar cea cerută? Căutarea `name:` din Shopify e largă: „123456” și
-    „EST-123456” dau EST123456, dar „EST 123456” dă întâi EST100200 (name:EST ȘI textul 123456). Doar cifre (magazinul
-    vine din --shop / --store; prefixele GRAN / GRAND diferă) → se compară doar cifrele numelui găsit; altfel numele
-    întreg, fără „#”, spații și „-”, fără diferență de majuscule."""
+    „EST-123456” dau EST123456, dar „EST 123456” dă întâi EST100200 (name:EST ȘI textul 123456). Doar cifre, cu
+    magazinul fixat (--shop / --store; prefixele GRAN / GRAND diferă) → se compară doar cifrele numelui găsit; altfel
+    numele întreg, fără „#”, spații și „-”, fără diferență de majuscule. Fără magazin fixat, cifrele goale nu ajung:
+    resolve_order le caută în toate magazinele și ia primul care are o comandă cu ele."""
     c, g = _nume_norm(cerut), _nume_norm(gasit)
     if not c or not g:
         return False
-    return re.sub(r"\D", "", g) == c if c.isdigit() else c == g
+    return re.sub(r"\D", "", g) == c if (c.isdigit() and magazin_fixat) else c == g
 
 
 def _oh_nume_canonic(a, gasit, oh_intrebat=False):
@@ -4707,7 +4708,13 @@ def _oh_nume_canonic(a, gasit, oh_intrebat=False):
     pentru alt nume."""
     if not gasit or gasit == a.order:
         return
-    if not nume_comanda_potrivit(a.order, gasit):
+    fixat = bool(getattr(a, "shop", None))
+    if not nume_comanda_potrivit(a.order, gasit, fixat):
+        if not fixat and nume_comanda_potrivit(a.order, gasit):   # doar cifre, fără --shop
+            print("  ⛔ %s · %s: doar cifre, fără --shop — căutarea a găsit %s, dar aceleași cifre pot fi comanda altui"
+                  " magazin → nu s-a trimis și nu s-a scris nimic. Dă numele întreg al comenzii (ex. EST123456) sau"
+                  " --shop <domeniul myshopify al magazinului>." % (getattr(a, "cmd", "") or "comanda", a.order, gasit))
+            sys.exit(OH_FARA_RASPUNS)
         print("  ⛔ %s · %s: căutarea a găsit comanda %s, care NU e cea cerută → nu s-a trimis și nu s-a scris nimic. Dă"
               " numele întreg al comenzii (ex. EST123456)." % (getattr(a, "cmd", "") or "comanda", a.order, gasit))
         sys.exit(OH_FARA_RASPUNS)

@@ -100,7 +100,8 @@ AWB-uri de 1 colet când trebuiau 2-3 (sursă frecventă de eșec/etichetă gre�
     nici pe calea veche, unde o etichetă vie din Shopify pe care xConnector n-o are (după număr) oprește tot.
     La Order Hub merge numele canonic al comenzii găsite (Shopify / xConnector), nu ce s-a tastat: Order Hub caută doar
     numele exact (`123456 --shop <magazin>` → EST123456). Dacă căutarea întoarce altă comandă (`EST 123456` → EST100200):
-    cod 2, nimic trimis, nimic scris. `--shop` = doar domeniul unui magazin de-al nostru, altfel cod 2.
+    cod 2, nimic trimis, nimic scris. Doar cifre se acceptă numai cu `--shop` (fără el, aceleași cifre pot fi comanda
+    altui magazin: cod 2). `--shop` = doar domeniul unui magazin de-al nostru, altfel cod 2.
   - **Coduri de ieșire cu `--apply`:** 2 = nu s-a scris nimic prin xConnector: fără un răspuns valid de la Order Hub
     (cheie lipsă, 401, 5xx, rețea), cerere incompletă sau comandă necitită din Shopify; 3 = refuz, al Order Hub sau al
     gărzilor de aici (hold pus de el, etichetă pe care n-o are nimeni). `--force` nu ocolește niciunul. Atenție: și un
