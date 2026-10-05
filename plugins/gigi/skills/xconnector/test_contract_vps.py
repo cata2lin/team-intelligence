@@ -12,17 +12,25 @@ AttributeError la prima rulare, de obicei duminică noaptea, la facturare). Test
      4-oct-2026 — `import xconnector as X` + `X.<atribut>`, plus cele cerute de runbook-ul de cutover);
   2. funcțiile aduse din v3.1 se comportă ca pe VPS (fără rețea: doar date în memorie și un fișier temporar);
   3. repo-ul e PUBLIC: lista facturilor OH manuale rămâne goală în git;
-  4. prin main(), pe dublurile din test_garda_oh: plasele v3.1 din inv-bulk (registru, listă externă, 410,
-     răspuns neconfirmat, registru care nu se scrie) DUPĂ garda OH și refuzul de pe stație; capture fără AWBprint;
+  4. prin main(), pe dublurile din test_garda_oh: plasele v3.1 din inv-bulk (registru, listă externă, 410, 410 cu
+     mesajul după caracterul 300 al corpului — prin XC.post real, răspuns neconfirmat, registru care nu se scrie,
+     termenul XC_INV_TERMEN_EPOCH, liste Shopify plafonate = tracking_trunchiat) DUPĂ garda OH și refuzul de pe
+     stație; capture fără AWBprint (inclusiv lista de AWB-uri plafonată); antetele căutate de runbook
+     („Registru:", „Fără AWBprint"); awb-hold pe GRAND<n> cu tokenul GRAN;
   5. tokenurile: load_shopify_tokens emite marcajele OAUTH (VPS), garda pe o comandă (și _oh_shopify din #611,
      dacă există) emite doar pt magazinul ei, iar o emitere eșuată / KB inaccesibil nu se reia la fiecare apel;
-     după merge-ul cu #611: secretele din KB, altfel din env (și cu KB inaccesibil), garda gazdei înaintea lor.
-Fiecare plasă din 4-5 a fost scoasă pe rând (mutație) și testul a picat de fiecare dată.
+     după merge-ul cu #611: secretele din KB, altfel din env (și cu KB inaccesibil), KB bate env pt client_id ȘI
+     client_secret în ambele emiteri, garda gazdei înaintea lor; un token emis se verifică înainte de folosire;
+  6. colete și DPD: order_parcel_count = ceil(qty × _default_box) ca parcel_count_watch.py (și pe magazinele cu
+     stoc pe stații); dpd_last_ops: timeout 30 s, circuitul de loturi moarte; dpd_track_sync după parcelId.
+Fiecare plasă din 4-6 a fost scoasă pe rând (23 de mutații) și testul a picat de fiecare dată; lista facturilor OH
+manuale din env (XC_OH_FACTURATE) o fixează test_garda_oh.
 Importul se face fără env și fără rețea (exact ca `python3 -c 'import xconnector'` din cronuri).
 
   uv run test_contract_vps.py
 """
 import datetime
+import json
 import os
 import sys
 import tempfile
@@ -32,6 +40,7 @@ sys.path.insert(0, AICI)
 
 import xconnector as X  # noqa: E402
 
+XC_REAL = X.XC   # clasa reală (test_garda_oh o înlocuiește cu FakeXC): §10 trece create-invoice prin XC.post real
 FAILS = []
 
 
@@ -94,6 +103,25 @@ def t_colete():
     parfum = sorted(X.SHOPS_FARA_COLETE_MULTIPLE)[0]
     check("magazin de parfumuri → 0", X._default_box(parfum) == 0.0, parfum)
     check("alt magazin → 1/5", abs(X._default_box("alt-magazin-xx") - 0.2) < 1e-9)
+    # order_parcel_count (awb-make) folosește aceeași densitate ca parcel_count_watch.py (X._default_box): un produs
+    # fără nr_cutii/nr_produse și fără hartă centrală → ceil(qty × _default_box(slug)), 0 → 1 colet la parfumuri.
+    salvate = (X.shopify_gql, X._sku_box_map_get)
+
+    def gql(shop, token, query, variables=None):
+        return {"data": {"orders": {"edges": [{"node": {"pc": None, "lineItems": {"edges": [
+            {"node": {"quantity": 6, "sku": "TSTSKU-1", "product": {"k1": None, "k2": None}}}]}}}]}}}
+    X.shopify_gql, X._sku_box_map_get = gql, (lambda sku: None)
+    try:
+        import math
+        split = sorted(X._AR.SPLIT_STORE_SLUGS - X.SHOPS_FARA_COLETE_MULTIPLE)[0]   # stoc pe două stații
+        for slug, fel, asteptat in (("alt-test", "un magazin obișnuit", 2), (parfum, "un magazin de parfumuri", 1),
+                                    (split, "un magazin cu stoc pe stații", 2)):
+            n = X.order_parcel_count(slug + ".myshopify.com", "tok", "TST1")
+            check("order_parcel_count: 6 buc fără densitate pe %s → %d colet(e) = paritate cu _default_box" % (
+                fel, asteptat),
+                  n == asteptat == max(1, math.ceil(6 * X._default_box(slug))), "colete=%s" % n)
+    finally:
+        X.shopify_gql, X._sku_box_map_get = salvate
 
 
 def t_prefix():
@@ -206,7 +234,7 @@ def t_tokenuri():
     alt = "alt-test.myshopify.com"
     marcaj_alt = "OAUTH:SHOPIFY_ALT_CLIENT_ID+SECRET"
     app_alt = {"SHOPIFY_ALT_CLIENT_ID": "cid-alt", "SHOPIFY_ALT_CLIENT_SECRET": "csec-alt"}
-    kb_citiri, oauth = [], []
+    kb_citiri, oauth, corpuri = [], [], []
 
     def kb_numarat(key):
         kb_citiri.append(key)
@@ -216,6 +244,7 @@ def t_tokenuri():
         if url.endswith("/admin/oauth/access_token"):
             host = url.split("/")[2]
             oauth.append((host, (body or {}).get("client_id")))
+            corpuri.append((host, (body or {}).get("client_id"), (body or {}).get("client_secret")))
             if host != T.SHOP:
                 if ((body or {}).get("client_id"), (body or {}).get("client_secret")) == ("cid-alt", "csec-alt"):
                     T.VALIDE.add("tok-alt")
@@ -228,7 +257,7 @@ def t_tokenuri():
         os.environ["SHOPIFY_ADMIN_TOKENS"] = "[]"
 
     def zero():
-        del kb_citiri[:], oauth[:]
+        del kb_citiri[:], oauth[:], corpuri[:]
 
     X._kb_secret, X.http = kb_numarat, http_numarat
     try:
@@ -339,14 +368,66 @@ def t_tokenuri():
                      X._mint_din_marcaj("attacker.example", marcaj_alt), X._mint_din_marcaj(alt + ".evil.net", marcaj_alt)]
             check("gazdă care nu e <magazin>.myshopify.com: nicio citire de secret (KB) și nicio cerere, la ambele emiteri",
                   emise == [None] * 4 and not kb_citiri and not oauth, "kb=%s oauth=%s" % (kb_citiri, oauth))
+
+            # KB bate un env vechi pt AMBELE chei (client_id ȘI client_secret), în AMBELE emiteri: după o rotire de
+            # secret în KB, un env rămas în urmă (stație, Second Brain) nu trebuie să ajungă la OAuth — nici întreg,
+            # nici amestecat (id din KB + secret din env).
+            app_1 = X._SHOPIFY_APPS[0]
+            T.lume(kb=dict(app_alt, **{app_1[0]: "cid-alt", app_1[1]: "csec-alt"}))
+            os.environ.update({"SHOPIFY_ALT_CLIENT_ID": "env-id-vechi", "SHOPIFY_ALT_CLIENT_SECRET": "env-sec-vechi",
+                               app_1[0]: "env-id-vechi", app_1[1]: "env-sec-vechi"})
+            zero()
+            t1 = X._mint_din_marcaj(alt, marcaj_alt)
+            t2 = X._shopify_mint("lab-test.myshopify.com")
+            check("KB și env cu valori diferite: _mint_din_marcaj și _shopify_mint trimit client_id ȘI client_secret din KB",
+                  t1 == t2 == "tok-alt" and corpuri == [(alt, "cid-alt", "csec-alt"),
+                                                        ("lab-test.myshopify.com", "cid-alt", "csec-alt")],
+                  "corpuri=%s" % [(h, c, "secret-kb" if x == "csec-alt" else "ALT secret") for h, c, x in corpuri])
         finally:
             for k, v in env_vechi.items():
                 if v is None:
                     os.environ.pop(k, None)
                 else:
                     os.environ[k] = v
+        # un token proaspăt emis se verifică la Shopify înainte de folosire: emis, dar respins → (None, „respins")
+        mint_salvat = (X._mint_din_marcaj, X._shopify_mint)
+        try:
+            T.lume(kb=T.APP_TST)
+            X._mint_din_marcaj = lambda shop, marcaj: "tok-emis-dar-respins"
+            X._shopify_mint = lambda shop: "tok-emis-dar-respins"
+            r_marcaj = X._token_viu_sau_emis(T.SHOP, T.MARCAJ)
+            r_mort = X._token_viu_sau_emis(T.SHOP, "tok-mort")
+        finally:
+            X._mint_din_marcaj, X._shopify_mint = mint_salvat
+        check("_token_viu_sau_emis: tokenul emis pe care Shopify îl respinge nu se folosește (None, respins)",
+              r_marcaj == (None, "respins") and r_mort == (None, "respins"), "marcaj=%s mort=%s" % (r_marcaj, r_mort))
     finally:
         X._kb_secret, X.http = T.fake_kb_secret, T.fake_http
+        T.lume()
+
+
+def t_awb_prefix():
+    """cmd_awb (awb-hold / awb-create, folosit de dup_guard): comanda GRAND<n> găsește tokenul înregistrat sub GRAN
+    (_prefix_potrivit, v3.1) — prin main(), cu tokenurile din SHOPIFY_STORES_CSV."""
+    T = _lume_garda()
+    print("12. awb-hold --order GRAND<n>: tokenul prefixului GRAN (cel mai lung prefix care începe comanda)")
+    cautate = []
+
+    def find_order(shop, token, name):
+        cautate.append((shop, token, name))
+        return {"displayFulfillmentStatus": "UNFULFILLED",
+                "fulfillmentOrders": {"edges": [{"node": {"id": "gid://shopify/FulfillmentOrder/1", "status": "OPEN"}}]}}
+    salvat = X.find_order
+    X.find_order = find_order
+    try:
+        T.lume()
+        os.environ["SHOPIFY_STORES_CSV"] = "prefix,shop,token\nGRAN,gran-test.myshopify.com,%s\n" % T.TOK_BUN
+        cod, out = T.ruleaza("awb-hold", "--order", "GRAND000001")
+        check("GRAND000001 → magazinul GRAN, dry-run (nimic pus în hold)",
+              cautate == [("gran-test.myshopify.com", T.TOK_BUN, "GRAND000001")] and "DRY-RUN" in out
+              and "Niciun token" not in out, "cautate=%s out=%s" % ([c[0] for c in cautate], out[-160:]))
+    finally:
+        X.find_order = salvat
         T.lume()
 
 
@@ -384,6 +465,7 @@ def t_facturare_v31():
             check("garda OH rămâne prima: TST1001 = tag_factura_oh (nu motivul din registru)",
                   motiv.get("TST1001") == "tag_factura_oh", str(motiv.get("TST1001")))
             check("TST1002 sărită ca deja_emisa_cron", motiv.get("TST1002") == "deja_emisa_cron", str(motiv.get("TST1002")))
+            check("antetul „Registru:” (căutat de runbook, pasul 3) apare cu registrul setat", "\nRegistru: %s (" % reg in out)
             text = open(reg, encoding="utf-8").read()
             check("factura emisă se scrie în registru", "\tTST1008\t" in text and "\temisa\t" in text.split("TST1008", 1)[1][:40])
 
@@ -440,6 +522,92 @@ def t_facturare_v31():
         ok = {"tags": [], "fulfillments_ok": True, "tracking": {"80000000002"}, "tracking_trunchiat": True}
         check("tracking Shopify trunchiat → garda sare (tracking_trunchiat)",
               X.oh_guard_motiv(ok, True, X._trk_set("80000000002"), "TST1", set()) == "tracking_trunchiat")
+
+        # Shopify întoarce listele de fulfillment-uri / tracking plafonate (_FF_MAX / _TRK_MAX): o listă plină poate fi
+        # trunchiată, deci comanda nu se facturează — citit prin shopify_status_by_ids, nu pe un dicționar făcut de mână.
+        noi = {"TST1031": ("9100000031", "80000000031"), "TST1032": ("9100000032", "80000000032")}
+        for nm, (oid, awb) in noi.items():
+            T.DPD[awb] = (-14, "Delivered", T.ACUM_3Z)
+            T.XC_ORDERS.append({"orderName": nm, "orderId": oid, "documents": [T.eticheta(awb)], "dispatched": True})
+            T.OID[nm] = oid
+        alte = ["8100000%04d" % i for i in range(X._TRK_MAX - 1)]
+        T.SHOPIFY["9100000031"] = T.nod("9100000031", "TST1031", [], ["80000000031"] + alte)   # _TRK_MAX numere
+        n32 = T.nod("9100000032", "TST1032", [], ["80000000032"])
+        n32["fulfillments"] = [dict(n32["fulfillments"][0]) for _ in range(X._FF_MAX)]           # _FF_MAX fulfillment-uri
+        T.SHOPIFY["9100000032"] = n32
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                tsv = os.path.join(d, "garda.tsv")
+                _env_facturare()
+                T.lume()
+                cod, out = T.ruleaza("inv-bulk", "--apply", "--force", "--garda-tsv", tsv, pe_vps=True)
+                motiv = {r.split("\t")[1]: r.split("\t")[3] for r in open(tsv, encoding="utf-8").read().splitlines()[1:]}
+            check("inv-bulk --apply: %d numere de tracking / %d fulfillment-uri (liste plafonate) → tracking_trunchiat, "
+                  "nicio factură" % (X._TRK_MAX, X._FF_MAX),
+                  motiv.get("TST1031") == motiv.get("TST1032") == "tracking_trunchiat"
+                  and not {"9100000031", "9100000032"} & set(T.facturate()) and T.facturate(),
+                  "motive=%s facturate=%s" % ((motiv.get("TST1031"), motiv.get("TST1032")), T.facturate()))
+        finally:
+            for nm, (oid, awb) in noi.items():
+                T.DPD.pop(awb, None)
+                T.SHOPIFY.pop(oid, None)
+                T.OID.pop(nm, None)
+            T.XC_ORDERS[:] = [o for o in T.XC_ORDERS if o["orderName"] not in noi]
+
+        # SmartBill fără credite cu mesajul DUPĂ caracterul 300 al corpului: create-invoice cere corpul întreg
+        # (err_max=20000), altfel http() îl taie și oprirea (ieșire 4) nu se mai declanșează. Trece prin XC.post real.
+        lung = json.dumps({"accepted": False, "invoices": [{"success": False, "errorMessage":
+                           "Eroare SmartBill: " + "detaliu tehnic; " * 30 + "Va rugam reincarcati soldul de credite"}]})
+        err_max_vazut = []
+        xc_real = XC_REAL("k-test")
+
+        def http_xc(method, url, headers, body=None, timeout=45, err_max=300):
+            if url.endswith("/api/actions/create-invoice"):
+                err_max_vazut.append(err_max)
+                if str((body or {}).get("orderId")) == T.OID["TST1002"]:
+                    return 422, lung[:err_max]
+                return 200, json.dumps({"accepted": True, "invoices": [{"success": True, "invoiceSerie": "TEST",
+                                                                        "invoiceNumber": "1"}]})
+            return T.fake_http(method, url, headers, body, timeout=timeout, err_max=err_max)
+
+        def post_real(self, path, body, err_max=300):
+            T.POSTS.append((path, dict(body)))
+            return XC_REAL.post(xc_real, path, body, err_max=err_max)
+        _env_facturare()
+        T.lume()
+        X.http, T.FakeXC.post = http_xc, post_real
+        try:
+            cod, out = T.ruleaza("inv-bulk", "--apply", "--force", pe_vps=True)
+        finally:
+            X.http, T.FakeXC.post = T.fake_http, post_orig
+        check("422 cu „fără credite” după caracterul 300 → oprire, ieșire 4, o singură creare (corpul erorii întreg)",
+              cod == 4 and len(creari()) == 1 and len(lung) > 300 and err_max_vazut and min(err_max_vazut) >= len(lung),
+              "cod=%s creari=%d err_max=%s" % (cod, len(creari()), err_max_vazut))
+
+        # termenul rulării (XC_INV_TERMEN_EPOCH): (a) trecut la pornire → niciun magazin început; (b) trece după
+        # listare, înaintea primei facturi → nicio factură.
+        _env_facturare(XC_INV_TERMEN_EPOCH="1")
+        T.lume()
+        cod, out = T.ruleaza("inv-bulk", "--apply", "--force", pe_vps=True)
+        check("termen trecut la pornire → niciun magazin început, zero create-invoice",
+              not creari() and not T.INST and "nu mai încep" in out, "cod=%s creari=%d" % (cod, len(creari())))
+        timp_real, orders_orig = X.time.time, T.FakeXC.orders
+        termen = timp_real() + 3600
+        listat = [False]
+
+        def orders(self, *a, **k):
+            listat[0] = True
+            return orders_orig(self, *a, **k)
+        _env_facturare(XC_INV_TERMEN_EPOCH=str(termen))
+        T.lume()
+        T.FakeXC.orders = orders
+        X.time.time = lambda: termen + (100 if listat[0] else -100)
+        try:
+            cod, out = T.ruleaza("inv-bulk", "--apply", "--force", pe_vps=True)
+        finally:
+            X.time.time, T.FakeXC.orders = timp_real, orders_orig
+        check("termen trecut după listare → zero create-invoice, oprire înainte de prima factură",
+              listat[0] and not creari() and "opresc emiterea" in out, "cod=%s creari=%d" % (cod, len(creari())))
     finally:
         T.FakeXC.post = post_orig
         _env_facturare()
@@ -462,10 +630,20 @@ def t_capture_v31():
             "fulfillments": [{"status": "SUCCESS", "trackingInfo": [{"number": awb, "company": "DPD Romania"}]}]}}
     pend = [nod("1", "TSTC1", "80000000101"), nod("2", "TSTC2", "80000000102"), nod("3", "TSTC3", "80000000103"),
             nod("4", "TSTC4", "80000000104", tags=["refuzata"]), nod("5", "TSTC5", "80000000105", gw="shopify_payments")]
+    # liste plafonate (_FF_MAX fulfillment-uri / _TRK_MAX AWB-uri), toate livrate: pot fi trunchiate → lăsate
+    n6 = nod("6", "TSTC6", "80000000106")
+    n6["node"]["fulfillments"] = [{"status": "SUCCESS", "trackingInfo": [{"number": "8000001%04d" % i, "company": "DPD Romania"}]}
+                                  for i in range(X._FF_MAX)]
+    n7 = nod("7", "TSTC7", "80000000107")
+    n7["node"]["fulfillments"][0]["trackingInfo"] = [{"number": "8000002%04d" % i, "company": "DPD Romania"}
+                                                     for i in range(X._TRK_MAX)]
+    pend += [n6, n7]
     dpd_salvat = dict(T.DPD)
     T.DPD.update({"80000000101": (-14, "Delivered", v4), "80000000102": (124, "Delivered Back to Sender", n2),
                   "80000000103": (111, "Return to Sender", n2), "80000000104": (-14, "Delivered", v4),
                   "80000000105": (-14, "Delivered", v4)})
+    T.DPD.update({"8000001%04d" % i: (-14, "Delivered", v4) for i in range(X._FF_MAX)})
+    T.DPD.update({"8000002%04d" % i: (-14, "Delivered", v4) for i in range(X._TRK_MAX)})
     scrise = []
     salvate = (X.shopify_gql, X.shopify_mark_paid, X.shopify_add_tags, X.shopify_remove_tags)
 
@@ -497,7 +675,10 @@ def t_capture_v31():
         check("124 Delivered Back to Sender → tag refuzata (TSTC2)", ("tag+", "2") in f, str(sorted(f)))
         check("111 de 2 ore → lăsată (DPD poate relivra) (TSTC3)", not any(o == "3" for _a, o in f), str(sorted(f)))
         check("plată cu cardul → lăsată (TSTC5)", not any(o == "5" for _a, o in f), str(sorted(f)))
+        check("listă de AWB-uri plafonată (%d fulfillment-uri / %d AWB-uri), toate livrate → lăsată, nimic scris (TSTC6/7)"
+              % (X._FF_MAX, X._TRK_MAX), not any(o in ("6", "7") for _a, o in f), str(sorted(f)))
         check("capture: ieșire 0, fără Traceback", cod == 0 and "Traceback" not in out, "cod=%s" % cod)
+        check("antetul „Fără AWBprint” (căutat de runbook, pașii 3 și 5) apare", "Fără AWBprint." in out)
         T.lume(tok=T.MARCAJ, kb=T.APP_TST)
         cod, out = ruleaza()
         tok = {t for a, _o, t in scrise if a == "paid"}
@@ -516,9 +697,63 @@ def t_capture_v31():
         T.lume()
 
 
+def t_dpd_live():
+    """dpd_last_ops (garda de stare, capture): timeout 30 s pe /v1/track și circuitul care nu mai întreabă DPD după
+    DPD_LOTURI_MOARTE_MAX loturi moarte; dpd_track_sync (cod_reconcile.py): potrivire după parcelId, nu după poziție."""
+    T = _lume_garda()
+    print("13. DPD live: timeout, circuitul de loturi moarte, potrivire după parcelId")
+    apeluri = []
+    raspuns = [None]
+
+    def http_dpd(method, url, headers, body=None, timeout=45, err_max=300):
+        assert url == "https://api.dpd.ro/v1/track", url
+        apeluri.append((len(body["parcels"]), timeout))
+        return raspuns[0](body)
+
+    salvat = dict(X._DPD_CIRCUIT)
+    X.http = http_dpd
+    try:
+        X._DPD_CIRCUIT.update(moarte=0, deschis=False)
+        raspuns[0] = lambda body: (502, "<html>Bad Gateway</html>")
+        awbs = ["8100000%04d" % i for i in range(5 * 10)]
+        rez = X.dpd_last_ops(awbs)
+        pe_lot = 2 + 10   # lotul de două ori, apoi AWB cu AWB
+        n1 = len(apeluri)
+        del apeluri[:]
+        rez2 = X.dpd_last_ops(["80000009999"])
+        check("DPD mort: după %d loturi moarte circuitul se deschide (%d cereri, nu 5 loturi + a doua trecere)"
+              % (X.DPD_LOTURI_MOARTE_MAX, X.DPD_LOTURI_MOARTE_MAX * pe_lot),
+              not rez and n1 == X.DPD_LOTURI_MOARTE_MAX * pe_lot and X._DPD_CIRCUIT["deschis"], "cereri=%d" % n1)
+        check("circuit deschis: un apel nou nu mai întreabă DPD (necitit)", not rez2 and not apeluri, str(apeluri))
+
+        X._DPD_CIRCUIT.update(moarte=0, deschis=False)
+        del apeluri[:]
+        raspuns[0] = lambda body: (200, json.dumps({"parcels": [{"parcelId": p["id"], "operations": [
+            {"operationCode": -14, "description": "Delivered", "dateTime": "2026-10-01T10:00:00+0300"}]}
+            for p in body["parcels"]]}))
+        rez = X.dpd_last_ops(["80000000301", "80000000302"])
+        check("dpd_last_ops: timeout=30 pe fiecare cerere /v1/track (DPD care atârnă nu ține cronul pe lacăt)",
+              apeluri and all(t == 30 for _n, t in apeluri) and set(rez) == {"80000000301", "80000000302"},
+              str(apeluri))
+
+        def raspuns_amestecat(body):   # un id invalid LIPSEȘTE din răspuns, iar ordinea nu e cea cerută
+            ids = [p["id"] for p in body["parcels"]]
+            return 200, json.dumps({"parcels": [
+                {"parcelId": ids[2], "operations": [{"description": "Delivered", "dateTime": "2026-10-01T10:00:00+0300"}]},
+                {"parcelId": ids[0], "operations": [{"description": "Return to Sender", "dateTime": "2026-10-01T11:00:00+0300"}]}]})
+        raspuns[0] = raspuns_amestecat
+        r = X.dpd_track_sync(["80000000401", "80000000499", "80000000403"])
+        check("dpd_track_sync: starea fiecărui AWB după parcelId (lipsă + ordine schimbată), nu după poziție",
+              r == {"80000000401": "Return to Sender", "80000000403": "Delivered"}, str(r))
+    finally:
+        X.http = T.fake_http
+        X._DPD_CIRCUIT.clear()
+        X._DPD_CIRCUIT.update(salvat)
+
+
 def main():
     for t in (t_atribute, t_colete, t_prefix, t_dpd, t_capture, t_registru, t_smartbill, t_igiena,
-              t_tokenuri, t_facturare_v31, t_capture_v31):
+              t_tokenuri, t_facturare_v31, t_capture_v31, t_awb_prefix, t_dpd_live):
         t()
     print()
     if FAILS:
