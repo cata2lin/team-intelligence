@@ -335,6 +335,14 @@ def _gazda_myshopify(shop):
     return bool(_MYSHOPIFY.fullmatch(str(shop or "")))
 
 
+def _secret_kb_sau_env(key):
+    """Secretul unui app Shopify (client_credentials): din KB, altfel din env. Second Brain injectează secretele
+    declarate în manifest ca env și nu are kb.py lângă skill, deci acolo vin din env; unde există KB, el rămâne sursa
+    (un env vechi nu-l bate). NU se printează."""
+    v, _ = _kb_secret(key)
+    return v or (os.environ.get(key) or "").strip()
+
+
 def _mint_din_marcaj(shop, marcaj):
     """Rezolva un marcaj `OAUTH:<NUME>_CLIENT_ID+SECRET` din SHOPIFY_STORES_CSV intr-un token Shopify.
 
@@ -352,8 +360,8 @@ def _mint_din_marcaj(shop, marcaj):
     m = re.match(r"^OAUTH:([A-Z0-9_]+)_CLIENT_ID\+SECRET$", (marcaj or "").strip())
     if not m:
         return None
-    cid, _ = _kb_secret(m.group(1) + "_CLIENT_ID")
-    csec, _ = _kb_secret(m.group(1) + "_CLIENT_SECRET")
+    cid = _secret_kb_sau_env(m.group(1) + "_CLIENT_ID")
+    csec = _secret_kb_sau_env(m.group(1) + "_CLIENT_SECRET")
     if not (cid and csec):
         return None
     try:
@@ -418,8 +426,8 @@ def _shopify_mint(shop):
     if c and c[1] > _t.time() + 300:
         return c[0]
     for cid_key, csec_key in _SHOPIFY_APPS:
-        cid, _ = _kb_secret(cid_key)
-        csec, _ = _kb_secret(csec_key)
+        cid = _secret_kb_sau_env(cid_key)
+        csec = _secret_kb_sau_env(csec_key)
         if not (cid and csec):
             continue
         try:

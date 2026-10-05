@@ -43,6 +43,8 @@ Shopify și au lăsat eticheta vie la curier (cinci comenzi). Testul verifică, 
       treia etichetă): jurnalul local, scris înaintea execuției, oprește execuția pe altă etichetă și rândul de
       execuție al probei — și când procesul e oprit fără răspuns (timeoutul MCP); o refacere de pe altă mașină se vede
       în Shopify (fulfillment anulat de curând).
+  19. secretele app-urilor Shopify vin din KB, iar unde KB nu le are (Second Brain: le injectează manifestul ca env) din
+      env — tot doar către <magazin>.myshopify.com; KB-ul bate un env vechi.
 Dublura de Order Hub răspunde cu formele reale ale rutelor /api/depozit (măsurate cu probe pe 2-oct-2026).
 Comenzile, AWB-urile, magazinul și cheile sunt inventate.
 
@@ -1469,6 +1471,65 @@ cod, out = ruleaza("awb-regen", "--order", "TST1", "--parcels", "3", "--awb", "7
                    if c.get("dry_run") is False else None)
 check("„in_curs” (Order Hub încă lucrează la o cerere): rămâne „fara_raspuns” în jurnal",
       jurnal_regen().get("TST1", {}).get("stare") == "fara_raspuns", (cod, jurnal_regen()))
+
+print("19. secretele app-urilor Shopify: din KB, altfel din env (Second Brain)")
+CERERI_MINT = []
+
+
+def mint_http(method, url, headers, body=None, timeout=45):
+    CERERI_MINT.append((url, dict(body or {})))
+    if url == "https://%s/admin/oauth/access_token" % SHOP or url.endswith(".myshopify.com/admin/oauth/access_token"):
+        return 200, json.dumps({"access_token": "tok-emis", "expires_in": 86400})
+    return fara_retea(url)
+
+
+CHEI_ENV = [k for pereche in X._SHOPIFY_APPS for k in pereche] + ["TST_CLIENT_ID", "TST_CLIENT_SECRET",
+                                                                 "SHOPIFY_ORICEREDUS_CLIENT_ID", "SHOPIFY_ORICEREDUS_CLIENT_SECRET"]
+ENV_VECHI = {k: os.environ.get(k) for k in CHEI_ENV}
+try:
+    KB.clear()
+    X._ARONA_TOK.clear()
+    X.http = mint_http
+    os.environ.update({"SHOPIFY_ARONA_CLIENT_ID": "env-id", "SHOPIFY_ARONA_CLIENT_SECRET": "env-secret"})
+    tok = X._shopify_mint("lab-test.myshopify.com")
+    check("KB fără secrete, env cu ele: _shopify_mint emite cu secretele din env", tok == "tok-emis"
+          and CERERI_MINT and CERERI_MINT[0][1].get("client_id") == "env-id"
+          and CERERI_MINT[0][1].get("client_secret") == "env-secret", CERERI_MINT)
+    del CERERI_MINT[:]
+    X._ARONA_TOK.clear()
+    os.environ.update({"SHOPIFY_ORICEREDUS_CLIENT_ID": "env-orc-id", "SHOPIFY_ORICEREDUS_CLIENT_SECRET": "env-orc-sec"})
+    tok = X._mint_din_marcaj("orc-test.myshopify.com", "OAUTH:SHOPIFY_ORICEREDUS_CLIENT_ID+SECRET")
+    check("marcaj OAUTH, KB fără secrete, env cu ele: se emite din env", tok == "tok-emis" and CERERI_MINT
+          and CERERI_MINT[0][1].get("client_id") == "env-orc-id", CERERI_MINT)
+    del CERERI_MINT[:]
+    X._ARONA_TOK.clear()
+    KB.update({"SHOPIFY_ARONA_CLIENT_ID": "kb-id", "SHOPIFY_ARONA_CLIENT_SECRET": "kb-secret"})
+    tok = X._shopify_mint("lab-test.myshopify.com")
+    check("KB are secretele: ele bat env-ul (un env vechi nu înlocuiește KB-ul)", tok == "tok-emis" and CERERI_MINT
+          and CERERI_MINT[0][1].get("client_id") == "kb-id", CERERI_MINT)
+    KB.clear()
+    del CERERI_MINT[:]
+    X._ARONA_TOK.clear()
+    emise = [X._shopify_mint("attacker.example"), X._shopify_mint("6f9e22-9d.myshopify.com.evil.net"),
+             X._mint_din_marcaj("attacker.example", "OAUTH:SHOPIFY_ORICEREDUS_CLIENT_ID+SECRET")]
+    check("secretele din env nu pleacă la o gazdă care nu e <magazin>.myshopify.com", emise == [None] * 3
+          and not CERERI_MINT, (emise, CERERI_MINT))
+    del CERERI_MINT[:]
+    X._ARONA_TOK.clear()
+    os.environ.update({"TST_CLIENT_ID": "env-tst-id", "TST_CLIENT_SECRET": "env-tst-sec"})
+    cod, out = ruleaza("order-cancel", "--order", "TST6", "--apply", token="OAUTH:TST_CLIENT_ID+SECRET")
+    check("cap-coadă, KB fără secrete și env cu ele (ca pe Second Brain): marcajul OAUTH se rezolvă și eticheta se"
+          " trimite ca la KB", cod == 3 and oh() and oh()[0][1]["awb"] == "80000000066" and "tok-emis" not in out
+          and any(c[1].get("client_id") == "env-tst-id" for c in CERERI_MINT), (cod, CERERI_MINT, out))
+finally:
+    for k, v in ENV_VECHI.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+    X.http = fara_retea
+    X._ARONA_TOK.clear()
+    KB.clear()
 
 check("niciun subprocess și nicio ieșire în rețea pe lângă dubluri", not SUBPROC, SUBPROC)
 
