@@ -333,7 +333,9 @@ def _mint_din_marcaj(shop, marcaj):
     `client_credentials`, tokenul tine ~24h si se EMITE la cerere din cele doua secrete KB pe care
     marcajul le numeste. Inainte, marcajul era trimis direct ca token si fiecare apel dadea
     401 "Invalid API key" — parea un token expirat, dar nu era nimic de reinnoit.
-    None daca marcajul e malformat, secretele lipsesc sau app-ul nu e instalat. NU printeaza tokenul."""
+    None daca marcajul e malformat, secretele lipsesc sau app-ul nu e instalat. NU printeaza tokenul.
+    Un esec se tine minte _MINT_ESUAT_TTL secunde (pe proces), iar cu KB inaccesibil nu se mai cheama KB deloc:
+    altfel fiecare load_shopify_tokens() relua toate emiterile (2 citiri KB de pana la 30 s + un POST pe magazin)."""
     import time as _t
     c = _ARONA_TOK.get(shop)
     if c and c[1] > _t.time() + 300:
@@ -341,9 +343,11 @@ def _mint_din_marcaj(shop, marcaj):
     m = re.match(r"^OAUTH:([A-Z0-9_]+)_CLIENT_ID\+SECRET$", (marcaj or "").strip())
     if not m:
         return None
-    cid, _ = _kb_secret(m.group(1) + "_CLIENT_ID")
-    csec, _ = _kb_secret(m.group(1) + "_CLIENT_SECRET")
+    if _mint_esuat_recent(("marcaj", shop, marcaj)):
+        return None
+    cid, csec = _kb_pereche(m.group(1) + "_CLIENT_ID", m.group(1) + "_CLIENT_SECRET")
     if not (cid and csec):
+        _mint_esuat(("marcaj", shop, marcaj))
         return None
     try:
         st, b = http("POST", "https://%s/admin/oauth/access_token" % shop, {"Content-Type": "application/json"},
@@ -354,7 +358,33 @@ def _mint_din_marcaj(shop, marcaj):
             return d["access_token"]
     except Exception:
         pass
+    _mint_esuat(("marcaj", shop, marcaj))
     return None
+
+
+_MINT_ESUAT_TTL = 300   # s: cât se ține minte, pe proces, o emitere de token eșuată (app neinstalat, secrete lipsă)
+
+
+def _mint_esuat(cheie):
+    import time as _t
+    _ARONA_TOK[("esuat",) + tuple(cheie)] = _t.time() + _MINT_ESUAT_TTL
+
+
+def _mint_esuat_recent(cheie):
+    import time as _t
+    return (_ARONA_TOK.get(("esuat",) + tuple(cheie)) or 0) > _t.time()
+
+
+def _kb_pereche(k_id, k_secret):
+    """(client_id, client_secret) din KB, sau ("", "") — fără niciun apel KB dacă KB e deja inaccesibil în procesul
+    ăsta (KB_UNREACHABLE), iar după primul eșec de conexiune nu se mai citește nici a doua cheie."""
+    if KB_UNREACHABLE:
+        return "", ""
+    cid, _ = _kb_secret(k_id)
+    if not cid or KB_UNREACHABLE:
+        return "", ""
+    csec, _ = _kb_secret(k_secret)
+    return (cid, csec) if csec else ("", "")
 
 
 def _stores_csv_tokens(emite=True):
@@ -406,15 +436,19 @@ _ARONA_TOK = {}
 def _shopify_mint(shop):
     """Token Shopify admin ON-DEMAND pt magazinele fără token static în CSV (client_credentials, ~24h, cache pe
     proces). Încearcă fiecare app din `_SHOPIFY_APPS` → prima care emite (app instalat pe magazin) câștigă. None
-    dacă niciun app nu-i instalat (400 app_not_installed) sau lipsesc credentialele. NU se printează tokenul."""
+    dacă niciun app nu-i instalat (400 app_not_installed) sau lipsesc credentialele. NU se printează tokenul.
+    Eșecul se ține minte _MINT_ESUAT_TTL secunde, iar cu KB inaccesibil nu se mai cheamă KB (vezi _mint_din_marcaj)."""
     import time as _t
     c = _ARONA_TOK.get(shop)
     if c and c[1] > _t.time() + 300:
         return c[0]
+    if _mint_esuat_recent(("app", shop)):
+        return None
     for cid_key, csec_key in _SHOPIFY_APPS:
-        cid, _ = _kb_secret(cid_key)
-        csec, _ = _kb_secret(csec_key)
+        cid, csec = _kb_pereche(cid_key, csec_key)
         if not (cid and csec):
+            if KB_UNREACHABLE:
+                return None   # nu se ține minte: fără KB nu s-a încercat nimic, iar KB_UNREACHABLE oprește oricum
             continue
         try:
             s, b = http("POST", "https://%s/admin/oauth/access_token" % shop, {"Content-Type": "application/json"},
@@ -425,6 +459,7 @@ def _shopify_mint(shop):
                 return d["access_token"]
         except Exception:
             continue
+    _mint_esuat(("app", shop))
     return None
 
 
@@ -436,10 +471,12 @@ def _prefix_for_domain(dom):
     return ""
 
 
-def _tokenuri_statice(emite=True):
+def _tokenuri_statice(emite=False):
     """{shopDomain: {prefix, shopDomain, adminToken}} din SHOPIFY_STORES_CSV (canonic), suprascris de
-    SHOPIFY_ADMIN_TOKENS (env/KB). Marcajele `OAUTH:<NUME>_CLIENT_ID+SECRET` din CSV (SK/HU/ORC…): cu emite=True se
-    emit aici (_stores_csv_tokens); cu emite=False rămân marcaje și le rezolvă _token_viu_sau_emis. NU se printează."""
+    SHOPIFY_ADMIN_TOKENS (env/KB). Marcajele `OAUTH:<NUME>_CLIENT_ID+SECRET` din CSV (SK/HU/ORC…): implicit
+    (emite=False, ca în main) rămân marcaje și le rezolvă apelantul doar pt magazinul de care are nevoie
+    (_token_viu_sau_emis) — fără nicio citire KB / emitere pt celelalte magazine. emite=True le emite pe TOATE aici
+    (_stores_csv_tokens); asta cere doar load_shopify_tokens (comportamentul VPS v3.1). NU se printează."""
     by_dom = {t["shopDomain"]: t for t in _stores_csv_tokens(emite)}
     raw = os.environ.get("SHOPIFY_ADMIN_TOKENS")
     if not raw:
@@ -460,8 +497,11 @@ def _tokenuri_statice(emite=True):
 def load_shopify_tokens():
     """[{prefix, shopDomain, adminToken}] pt TOATE magazinele: bază din SHOPIFY_STORES_CSV (canonic),
     suprascris de SHOPIFY_ADMIN_TOKENS (env/KB) pt override-uri/tokenuri proaspete. Pt magazinele ARONA-only
-    din XCONNECTOR_SHOPS fără token static → EMITE token via ARONA Assistant (client_credentials). NU se printează."""
-    by_dom = _tokenuri_statice()
+    din XCONNECTOR_SHOPS fără token static → EMITE token via ARONA Assistant (client_credentials). Marcajele OAUTH
+    din CSV se emit aici, pt TOATE magazinele (VPS v3.1: cod_paid_watch & co. primesc tokenuri, nu marcaje); un rând
+    al cărui marcaj nu se poate emite lipsește. Cine are nevoie de UN magazin folosește _tokenuri_statice() +
+    _token_viu_sau_emis (garda OH pe o comandă), ca să nu emită pt toate. NU se printează."""
+    by_dom = _tokenuri_statice(emite=True)
     # ARONA-only (Lab Noir etc.): magazin în XCONNECTOR_SHOPS fără token static → mint on-demand.
     try:
         for sh in load_shops():
@@ -7280,7 +7320,8 @@ def _scan_all_orders(xc, dfrom, dto, depth=0):
 # (storno-dubla-xconnector). Acolo factura bună e acum cea xConnector, deci numele lor NU intră în listă: inv-regen
 # le-ar refuza. Pe a patra o prinde regula 5 (tracking-ul ei viu e AWB-ul OH). Lista e deci GOALĂ. Dacă va trebui din
 # nou: env XC_OH_FACTURATE="NUME1,NUME2"; fără env, secretul KB cu același nume, care ajunge doar pe stații. Cronul VPS
-# n-are KB_DATABASE_URL, deci acolo lista se exportă din xc_invoice.sh (KB inaccesibil = avertisment, listă goală).
+# n-are KB_DATABASE_URL: acolo lista poate veni DOAR din env (de exportat în xc_invoice.sh, dintr-un fișier root-only,
+# nu din git). Azi nu e exportată → avertisment la fiecare rulare, listă goală.
 # Numele comenzilor NU stau în repo-ul public. Rest de risc: o factură manuală NOUĂ din OH pe o etichetă xConnector —
 # OH o stornează singur pe a lui când apare dublura (storno-dubla-xconnector).
 # SĂRITE FĂRĂ STĂPÂN: 3 și 5 prind și etichetele făcute în afara ambelor sisteme (DragonStar/DPD din portalul
@@ -7343,7 +7384,8 @@ def _oh_facturate_fara_tag():
             val, ok = _kb_secret("XC_OH_FACTURATE")
             if not ok and KB_UNREACHABLE:
                 print("⚠ XC_OH_FACTURATE (facturile OH manuale, fără tag) necitit: KB inaccesibil și env nesetat → garda"
-                      " merge fără lista asta (doar pe tag + etichetă). Pe VPS lista se exportă din xc_invoice.sh.")
+                      " merge fără lista asta (doar pe tag + etichetă). Pe VPS lista vine doar din env, exportat în xc_invoice.sh"
+                      " (dacă e nevoie; implicit nu e).")
             KB_UNREACHABLE = KB_UNREACHABLE or inainte
             _OH_FACTURATE_KB = val or ""
         raw = _OH_FACTURATE_KB
@@ -7816,8 +7858,9 @@ def _token_viu_sau_emis(dom, tok):
 def garda_oh_comanda(sh, o, name):
     """Garda OH pe O comandă (inv-make / inv-regen) → (motiv|None, s_). Aceleași reguli ca în inv-bulk
     (oh_guard_motiv): tagurile și fulfillment-urile vin din Shopify (un apel, după orderId), eticheta din documentele
-    xConnector ale comenzii. Tokenul e doar al magazinului comenzii (fără emiteri pt celelalte, ca load_shopify_tokens),
-    verificat și reemis când Shopify îl respinge sau e un marcaj OAUTH (_token_viu_sau_emis). Fail-closed: fără token
+    xConnector ale comenzii. Tokenul e doar al magazinului comenzii (_tokenuri_statice fără emiteri pt celelalte,
+    spre deosebire de load_shopify_tokens, care emite marcajele tuturor magazinelor), verificat și reemis când
+    Shopify îl respinge sau e un marcaj OAUTH (_token_viu_sau_emis). Fail-closed: fără token
     acceptat → „token_respins" / „token_lipsa"; Shopify n-a răspuns → „taguri_necitite"; comandă rezolvată prin
     address-detail (fără `documents`) → „fara_eticheta_xc"."""
     oid = str((o or {}).get("orderId") or "").rsplit("/", 1)[-1]
