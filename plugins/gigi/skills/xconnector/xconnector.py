@@ -171,14 +171,14 @@ def shopify_append_note(shop, token, name, text):
     return not ((((r.get("data") or {}).get("orderUpdate") or {}).get("userErrors")) or [])
 
 
-def http(method, url, headers, body=None, timeout=45):
+def http(method, url, headers, body=None, timeout=45, err_max=300):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
-        return e.code, e.read().decode("utf-8", "replace")[:300]
+        return e.code, e.read().decode("utf-8", "replace")[:err_max]
     except Exception as e:
         return "ERR", str(e)[:160]
 
@@ -277,9 +277,10 @@ class XC:
         body = {k: v for k, v in (body or {}).items() if k != "orderId"}
         return http("POST", XBASE + "/api/orders/%s/address-correction" % sid, self.h, body)
 
-    def post(self, path, body):
-        """POST /api/actions/* sau alt endpoint de scriere. Întoarce (status, json|text)."""
-        s, b = http("POST", XBASE + path, self.h, body)
+    def post(self, path, body, err_max=300):
+        """POST /api/actions/* sau alt endpoint de scriere. Întoarce (status, json|text).
+        err_max = cât din corpul unei erori HTTP se păstrează (create-invoice îl vrea întreg: vezi _smartbill_fara_credite)."""
+        s, b = http("POST", XBASE + path, self.h, body, err_max=err_max)
         try:
             return s, json.loads(b)
         except Exception:
@@ -338,8 +339,11 @@ def _gazda_myshopify(shop):
 def _secret_kb_sau_env(key):
     """Secretul unui app Shopify (client_credentials): din KB, altfel din env. Second Brain injectează secretele
     declarate în manifest ca env și nu are kb.py lângă skill, deci acolo vin din env; unde există KB, el rămâne sursa
-    (un env vechi nu-l bate). NU se printează."""
-    v, _ = _kb_secret(key)
+    (un env vechi nu-l bate). Cu KB deja inaccesibil în procesul ăsta (KB_UNREACHABLE) nu se mai cheamă KB (un apel =
+    `uv run kb.py` de până la 30 s), dar env-ul se citește în continuare. NU se printează."""
+    v = ""
+    if not KB_UNREACHABLE:
+        v, _ = _kb_secret(key)
     return v or (os.environ.get(key) or "").strip()
 
 
@@ -350,7 +354,11 @@ def _mint_din_marcaj(shop, marcaj):
     `client_credentials`, tokenul tine ~24h si se EMITE la cerere din cele doua secrete KB pe care
     marcajul le numeste. Inainte, marcajul era trimis direct ca token si fiecare apel dadea
     401 "Invalid API key" — parea un token expirat, dar nu era nimic de reinnoit.
-    None daca marcajul e malformat, secretele lipsesc sau app-ul nu e instalat. NU printeaza tokenul."""
+    None daca marcajul e malformat, secretele lipsesc sau app-ul nu e instalat. NU printeaza tokenul.
+    Secretele: din KB, altfel din env (_pereche_app / _secret_kb_sau_env; pe Second Brain vin din env), si pleaca doar
+    la o gazda <magazin>.myshopify.com (_gazda_myshopify, verificata inaintea oricarei citiri de secret).
+    Un esec se tine minte _MINT_ESUAT_TTL secunde (pe proces), iar cu KB inaccesibil nu se mai cheama KB deloc (env-ul
+    da): altfel fiecare load_shopify_tokens() relua toate emiterile (2 citiri KB de pana la 30 s + un POST pe magazin)."""
     import time as _t
     if not _gazda_myshopify(shop):
         return None
@@ -360,10 +368,13 @@ def _mint_din_marcaj(shop, marcaj):
     m = re.match(r"^OAUTH:([A-Z0-9_]+)_CLIENT_ID\+SECRET$", (marcaj or "").strip())
     if not m:
         return None
-    cid = _secret_kb_sau_env(m.group(1) + "_CLIENT_ID")
-    csec = _secret_kb_sau_env(m.group(1) + "_CLIENT_SECRET")
-    if not (cid and csec):
+    if _mint_esuat_recent(("marcaj", shop, marcaj)):
         return None
+    cid, csec = _pereche_app(m.group(1) + "_CLIENT_ID", m.group(1) + "_CLIENT_SECRET")
+    if not (cid and csec):
+        _mint_esuat(("marcaj", shop, marcaj))
+        return None
+    tranzitoriu = False
     try:
         st, b = http("POST", "https://%s/admin/oauth/access_token" % shop, {"Content-Type": "application/json"},
                      {"client_id": cid, "client_secret": csec, "grant_type": "client_credentials"})
@@ -371,15 +382,52 @@ def _mint_din_marcaj(shop, marcaj):
         if st == 200 and d.get("access_token"):
             _ARONA_TOK[shop] = (d["access_token"], _t.time() + (d.get("expires_in") or 86400))
             return d["access_token"]
+        tranzitoriu = _mint_tranzitoriu(st)
     except Exception:
-        pass
+        tranzitoriu = True      # corp ilizibil / excepție: nu știm că e definitiv
+    if not tranzitoriu:
+        _mint_esuat(("marcaj", shop, marcaj))
     return None
 
 
-def _stores_csv_tokens():
+_MINT_ESUAT_TTL = 300   # s: cât se ține minte, pe proces, o emitere eșuată DEFINITIV (app neinstalat, secrete lipsă, 4xx)
+
+
+def _mint_esuat(cheie):
+    import time as _t
+    _ARONA_TOK[("esuat",) + tuple(cheie)] = _t.time() + _MINT_ESUAT_TTL
+
+
+def _mint_esuat_recent(cheie):
+    import time as _t
+    return (_ARONA_TOK.get(("esuat",) + tuple(cheie)) or 0) > _t.time()
+
+
+def _mint_tranzitoriu(st):
+    """Răspuns după care emiterea poate merge la reîncercare (rețea, 429, 5xx): NU se ține minte ca eșec. capture și
+    inv-bulk țin procesul zeci de minute, iar un blip ar scoate magazinul din toată rularea; codul de pe VPS îl
+    recupera la apelul următor."""
+    return st == "ERR" or (isinstance(st, int) and (st == 429 or st >= 500))
+
+
+def _pereche_app(k_id, k_secret):
+    """(client_id, client_secret) ale unui app Shopify, fiecare din KB, altfel din env (_secret_kb_sau_env), sau
+    ("", ""). Fără client_id nu se mai citește secretul; după primul eșec de conexiune la KB nu se mai cheamă KB în
+    procesul ăsta (env-ul da). Apelantul verifică gazda (_gazda_myshopify) ÎNAINTE de a cere secretele."""
+    cid = _secret_kb_sau_env(k_id)
+    if not cid:
+        return "", ""
+    csec = _secret_kb_sau_env(k_secret)
+    return (cid, csec) if csec else ("", "")
+
+
+def _stores_csv_tokens(emite=True):
     """[{prefix, shopDomain, adminToken}] din SHOPIFY_STORES_CSV (canonic, TOATE magazinele; col prefix/shop/token).
     Sursă: env SHOPIFY_STORES_CSV (path sau text) sau KB. NUB = OAuth-rotation (token static mort, merge pe VPS).
-    Pe VPS fără uv/KB → întoarce [] grațios (cron-ul folosește env SHOPIFY_ADMIN_TOKENS)."""
+    Pe VPS fără uv/KB → întoarce [] grațios (cron-ul folosește env SHOPIFY_ADMIN_TOKENS).
+    emite=True (implicit, ca pe VPS): un marcaj `OAUTH:<NUME>_CLIENT_ID+SECRET` se rezolvă ACUM într-un token emis
+    (_mint_din_marcaj), iar rândul se sare dacă emiterea nu merge. emite=False: marcajul rămâne ca atare, ca să-l
+    rezolve apelantul doar pt magazinul de care are nevoie (garda OH pe o comandă, prin _token_viu_sau_emis)."""
     import csv, io
     raw = os.environ.get("SHOPIFY_STORES_CSV") or ""
     if raw and "\n" not in raw and os.path.exists(raw):
@@ -399,6 +447,10 @@ def _stores_csv_tokens():
             pref = (row.get("prefix") or "").strip().lstrip("﻿").upper()
             shop = (row.get("shop") or "").strip().replace("https://", "").strip("/")
             tok = (row.get("token") or "").strip()
+            if emite and tok.startswith("OAUTH:"):
+                # marcaj, nu token: se emite la cerere (vezi _mint_din_marcaj). Daca nu se poate
+                # emite, randul se sare — mai bine lipsa decat un token fals care da 401.
+                tok = _mint_din_marcaj(shop, tok) or ""
             if pref and shop and tok:
                 out.append({"prefix": pref, "shopDomain": shop, "adminToken": tok})
     except Exception:
@@ -418,18 +470,22 @@ _ARONA_TOK = {}
 def _shopify_mint(shop):
     """Token Shopify admin ON-DEMAND pt magazinele fără token static în CSV (client_credentials, ~24h, cache pe
     proces). Încearcă fiecare app din `_SHOPIFY_APPS` → prima care emite (app instalat pe magazin) câștigă. None
-    dacă niciun app nu-i instalat (400 app_not_installed) sau lipsesc credentialele. NU se printează tokenul."""
+    dacă niciun app nu-i instalat (400 app_not_installed) sau lipsesc credentialele. NU se printează tokenul.
+    Secretele: din KB, altfel din env (_pereche_app), doar către <magazin>.myshopify.com (_gazda_myshopify, întâi).
+    Eșecul se ține minte _MINT_ESUAT_TTL secunde, iar cu KB inaccesibil nu se mai cheamă KB (vezi _mint_din_marcaj)."""
     import time as _t
     if not _gazda_myshopify(shop):
         return None
     c = _ARONA_TOK.get(shop)
     if c and c[1] > _t.time() + 300:
         return c[0]
+    if _mint_esuat_recent(("app", shop)):
+        return None
+    tranzitoriu = False
     for cid_key, csec_key in _SHOPIFY_APPS:
-        cid = _secret_kb_sau_env(cid_key)
-        csec = _secret_kb_sau_env(csec_key)
+        cid, csec = _pereche_app(cid_key, csec_key)
         if not (cid and csec):
-            continue
+            continue          # alt app poate avea secretele (din KB sau din env, ca pe Second Brain)
         try:
             s, b = http("POST", "https://%s/admin/oauth/access_token" % shop, {"Content-Type": "application/json"},
                         {"client_id": cid, "client_secret": csec, "grant_type": "client_credentials"})
@@ -437,8 +493,12 @@ def _shopify_mint(shop):
             if s == 200 and d.get("access_token"):
                 _ARONA_TOK[shop] = (d["access_token"], _t.time() + (d.get("expires_in") or 86400))
                 return d["access_token"]
+            tranzitoriu = tranzitoriu or _mint_tranzitoriu(s)
         except Exception:
+            tranzitoriu = True
             continue
+    if not tranzitoriu:       # un app a picat trecător (rețea / 429 / 5xx) → nu se ține minte, se reîncearcă
+        _mint_esuat(("app", shop))
     return None
 
 
@@ -450,11 +510,13 @@ def _prefix_for_domain(dom):
     return ""
 
 
-def _tokenuri_statice():
+def _tokenuri_statice(emite=False):
     """{shopDomain: {prefix, shopDomain, adminToken}} din SHOPIFY_STORES_CSV (canonic), suprascris de
-    SHOPIFY_ADMIN_TOKENS (env/KB). Fără emitere: un rând din CSV poate purta marcajul `OAUTH:<NUME>_CLIENT_ID+SECRET`
-    în loc de token (SK/HU/ORC…) — îl rezolvă _token_viu_sau_emis. NU se printează."""
-    by_dom = {t["shopDomain"]: t for t in _stores_csv_tokens()}
+    SHOPIFY_ADMIN_TOKENS (env/KB). Marcajele `OAUTH:<NUME>_CLIENT_ID+SECRET` din CSV (SK/HU/ORC…): implicit
+    (emite=False, ca în main) rămân marcaje și le rezolvă apelantul doar pt magazinul de care are nevoie
+    (_token_viu_sau_emis) — fără nicio citire KB / emitere pt celelalte magazine. emite=True le emite pe TOATE aici
+    (_stores_csv_tokens); asta cere doar load_shopify_tokens (comportamentul VPS v3.1). NU se printează."""
+    by_dom = {t["shopDomain"]: t for t in _stores_csv_tokens(emite)}
     raw = os.environ.get("SHOPIFY_ADMIN_TOKENS")
     if not raw:
         try:
@@ -474,8 +536,11 @@ def _tokenuri_statice():
 def load_shopify_tokens():
     """[{prefix, shopDomain, adminToken}] pt TOATE magazinele: bază din SHOPIFY_STORES_CSV (canonic),
     suprascris de SHOPIFY_ADMIN_TOKENS (env/KB) pt override-uri/tokenuri proaspete. Pt magazinele ARONA-only
-    din XCONNECTOR_SHOPS fără token static → EMITE token via ARONA Assistant (client_credentials). NU se printează."""
-    by_dom = _tokenuri_statice()
+    din XCONNECTOR_SHOPS fără token static → EMITE token via ARONA Assistant (client_credentials). Marcajele OAUTH
+    din CSV se emit aici, pt TOATE magazinele (VPS v3.1: cod_paid_watch & co. primesc tokenuri, nu marcaje); un rând
+    al cărui marcaj nu se poate emite lipsește. Cine are nevoie de UN magazin folosește _tokenuri_statice() +
+    _token_viu_sau_emis (garda OH pe o comandă), ca să nu emită pt toate. NU se printează."""
+    by_dom = _tokenuri_statice(emite=True)
     # ARONA-only (Lab Noir etc.): magazin în XCONNECTOR_SHOPS fără token static → mint on-demand.
     try:
         for sh in load_shops():
@@ -675,6 +740,20 @@ def shopify_hold(shop, token, name, notes="xc-hold"):
     return held
 
 
+def _prefix_potrivit(litere, toks):
+    """Tokenul pentru cel mai LUNG prefix inregistrat care e INCEPUTUL literelor comenzii.
+
+    Comanda Grandia se numeste `GRAND<numar>`, dar registrul o tine sub `GRAN` — potrivirea pe
+    egalitate nu gasea nimic si hold-ul/nota picau tacut pe TOATE comenzile Grandia.
+    Acelasi tipar ca `domain_for_order`. Cel mai lung castiga, ca `BONBG` sa bata `BON`.
+    """
+    best = ""
+    for p in toks:
+        if litere.startswith(p) and len(p) > len(best):
+            best = p
+    return toks.get(best) if best else None
+
+
 def cmd_awb(a):
     """create = ELIBERează hold-ul (→ Flow hold-released -> xConnector Create AWB);
     hold = pune fulfillment-ul în hold; cancel = info (fără trigger de tag)."""
@@ -682,7 +761,7 @@ def cmd_awb(a):
     toks = {t["prefix"]: t for t in load_shopify_tokens()}
     pm = re.match(r"^([A-Za-z]+)", a.order)
     pref = pm.group(1).upper() if pm else ""
-    sh = toks.get(pref)
+    sh = toks.get(pref) or _prefix_potrivit(pref, toks)
     if not sh:
         print("Niciun token Shopify pt prefixul '%s' (am: %s). Adaugă în KB SHOPIFY_ADMIN_TOKENS." % (pref, list(toks))); return
     shop, token = sh["shopDomain"], sh["adminToken"]
@@ -4231,6 +4310,19 @@ def _sku_box_map_get(sku):
         return None
 
 
+# Densitatea IMPLICITĂ pentru produsele fără `custom.nr_cutii`/`nr_produse` și fără intrare în
+# harta centrală: 5 bucăți încap într-un colet (owner, 20-aug-2026) => 1/5 de colet per bucată.
+DEFAULT_BOX = 1.0 / 5
+# Magazinele de PARFUMURI/cosmetice: produse mici, intră toate într-o cutie, indiferent câte —
+# acolo default-ul de 5/colet ar inventa colete (6 parfumuri × 1 buc ≠ 2 colete). Rămân pe 1/comandă.
+SHOPS_FARA_COLETE_MULTIPLE = {"ix5bxc-hr", "6f9e22-9d", "bmuwvv-jy", "1d2bce-2", "1eee37-2d",
+                              "de51c5-b8", "31k0py-bi"}   # +Lab Noir
+
+
+def _default_box(slug):
+    return 0.0 if slug in SHOPS_FARA_COLETE_MULTIPLE else DEFAULT_BOX
+
+
 def order_parcel_count(shop, token, name, strict=False):
     """`strict`: None când comanda nu s-a putut citi din Shopify, și la un răspuns parțial (altfel 1, ca până acum)."""
     if not shop or not token or not name:
@@ -4271,13 +4363,17 @@ def order_parcel_count(shop, token, name, strict=False):
                 box = mb
         if box is not None and box <= 0:    # '0'/negativ (zgomot metafield, ex MagDeal) = fara colete definite -> qty-driven 1/unitate
             box = None
-        if box is not None:
-            total += box * qty; found = True
+        # FĂRĂ densitate setată = **5 bucăți / colet** (regula owner 20-aug). Adică densitatea
+        # implicită e 1/5 = 0.2: 5 buc → 1 colet, 6 buc → 2 colete. Vechiul default („toată comanda
+        # într-un colet") ignora complet cantitatea. Produsele cu densitate proprie (0.333 = 3/cutie,
+        # 1 = un colet de bucată, >1 = voluminos) o păstrează — default-ul se aplică doar celor NEsetate.
+        total += (box if box is not None else _default_box(slug)) * qty
+        found = True
         if is_split:
-            # COMBINĂ (regula owner 14-aug): produs FĂRĂ densitate setată → NU inflatează coletele (contribuie 0 →
-            # stația primește 1 colet baseline via max(1,..)). Densitate setată (nr_cutii local/map) → box×qty
-            # (broscuțe 0.05, așternut 0.5, covor 1); voluminos (box>1) → +colete. Înlocuiește qty-driven-ul de pe 13-aug.
-            per_station[_AR.sku_station(sku)] = per_station.get(_AR.sku_station(sku), 0.0) + (box if box is not None else 0.0) * qty
+            # Regula owner 20-aug (înlocuiește „COMBINĂ" din 14-aug): produs FĂRĂ densitate → _default_box(slug)
+            # = 1/5 de colet pe bucată (5 buc/colet), 0 pe magazinele de parfumuri (SHOPS_FARA_COLETE_MULTIPLE);
+            # cu densitate → box×qty (broscuțe 0.05 se comasează, voluminos box>1 → +colete).
+            per_station[_AR.sku_station(sku)] = per_station.get(_AR.sku_station(sku), 0.0) + (box if box is not None else _default_box(slug)) * qty
     # metafield order (total deja calculat de sistem), dacă e setat
     pc_val = None
     pc = (node.get("pc") or {}).get("value")
@@ -4765,7 +4861,8 @@ def _oh_shopify(a, dom=None):
     expirat), sau None. Magazinul: `dom` dat, --shop (doar un magazin cunoscut: altfel cod 2, nimic trimis), apoi
     prefixul numelui — PREFIX_DOMAIN, apoi cel mai lung `prefix`
     din SHOPIFY_STORES_CSV (magazinele care lipsesc din PREFIX_DOMAIN: BUC, MD, DUPBG). Doar tokenul magazinului
-    comenzii, fără emiteri pentru celelalte (ca load_shopify_tokens)."""
+    comenzii, fără emiteri pentru celelalte (_tokenuri_statice() implicit nu emite; load_shopify_tokens le emite pe
+    toate, deci nu se folosește aici)."""
     statice = _tokenuri_statice()
     shop = getattr(a, "shop", None)
     if not dom and shop and "." in shop and shop not in _magazine_cunoscute(statice):
@@ -7787,7 +7884,7 @@ def shopify_status_by_ids(shop, token, ids, batch=50):
          'displayFinancialStatus currentTotalPriceSet{ shopMoney{ amount } } '
          'totalRefundedSet{ shopMoney{ amount } } '
          'transactions(first:20){ kind status processedAt } '
-         'fulfillments(first:10){ status trackingInfo(first:5){ number } } } } }')
+         'fulfillments(first:%d){ status trackingInfo(first:%d){ number } } } } }') % (_FF_MAX, _TRK_MAX)
     pending = list(uniq)
     for _round in range(6):
         if not pending:
@@ -7804,10 +7901,14 @@ def shopify_status_by_ids(shop, token, ids, batch=50):
                 total = float((((n.get("currentTotalPriceSet") or {}).get("shopMoney")) or {}).get("amount") or 0)
                 refunded = float((((n.get("totalRefundedSet") or {}).get("shopMoney")) or {}).get("amount") or 0)
                 trk = set()
-                for f in (n.get("fulfillments") or []):
+                ffs = n.get("fulfillments") if isinstance(n.get("fulfillments"), list) else []
+                trunchiat = len(ffs) >= _FF_MAX   # listă plină până la limită = poate fi trunchiată
+                for f in ffs:
                     if not isinstance(f, dict) or (f.get("status") or "").upper() in ("CANCELLED", "ERROR", "FAILURE"):
                         continue
-                    for ti in (f.get("trackingInfo") or []):
+                    tis = f.get("trackingInfo") or []
+                    trunchiat = trunchiat or len(tis) >= _TRK_MAX
+                    for ti in tis:
                         trk |= _trk_set((ti or {}).get("number"))
                 out[num] = {
                     "paid": (n.get("displayFinancialStatus") or "").upper() == "PAID",
@@ -7818,6 +7919,7 @@ def shopify_status_by_ids(shop, token, ids, batch=50):
                     "tags": n.get("tags") if isinstance(n.get("tags"), list) else None,
                     "fulfillments_ok": isinstance(n.get("fulfillments"), list),
                     "tracking": trk,
+                    "tracking_trunchiat": trunchiat,
                     "gateways": [str(g) for g in (n.get("paymentGatewayNames") or [])],
                     # ultima încasare reușită (SALE/CAPTURE) — garda de stare o folosește ca să nu se ia la
                     # întrecere cu facturarea automată a xConnector de la încasare/livrare (None = necitită)
@@ -7830,6 +7932,57 @@ def shopify_status_by_ids(shop, token, ids, batch=50):
     return out
 
 
+# SmartBill fără CREDITE: API-ul lui răspunde HTTP 410 („reîncarcă soldul de credite"). xConnector îl dă mai departe
+# ca status 410 sau ca 422 cu mesajul SmartBill în errorMessage (la coada corpului — de aici err_max la create-invoice).
+# Nu e rate-limit și retry-ul nu ajută: până la reîncărcarea soldului pică la fel TOATE facturile următoare.
+# (portat din xconnector.py.lista, 29-sep-2026)
+_CREDITE_RE = re.compile(
+    r"reincarc[\w-]*\s+(?:[\w-]+\s+){0,3}(?:sold|credit)"
+    r"|sold\w*\s+(?:de\s+)?credit"
+    r"|credit\w*\s+(?:insuficient|epuizat|expirat)"
+    r"|(?:fara|nu\s+mai\s+(?:ai|aveti|exista))\s+(?:[\w-]+\s+){0,2}credit"
+    r"|insufficient\s+credit|out\s+of\s+credit|no\s+(?:more\s+)?credits"
+    r"|\b(?:http|status|statuscode|httpstatus|code|cod|errorcode|eroare|error)\"?\s*[:=]?\s*\"?410\b"
+    r"|\b410\s+gone\b")
+# Răspuns NECONFIRMAT la create-invoice: nu se știe dacă factura s-a creat (29-sep, o comandă Bonhaus: „SmartBill is currently
+# unavailable. We cannot confirm whether the invoice was created"). Un 4xx cu mesaj de business e un refuz clar.
+_NESIGUR_RE = re.compile(
+    r"cannot confirm|could not confirm|unable to confirm|can ?not be confirmed|nu (?:se )?poate confirma|nu putem confirma"
+    r"|currently unavailable|temporarily unavailable|temporar indisponibil|timed out|timeout")
+NESIGURE_MAX = 2   # la al doilea răspuns neconfirmat din aceeași rulare → se oprește emiterea (SmartBill instabil)
+
+
+def _text_fara_diacritice(d):
+    import unicodedata
+    t = json.dumps(d, ensure_ascii=False) if isinstance(d, (dict, list)) else str(d or "")
+    return "".join(c for c in unicodedata.normalize("NFKD", t) if not unicodedata.combining(c)).lower()
+
+
+def _smartbill_fara_credite(s, d):
+    """True dacă răspunsul la create-invoice e refuzul SmartBill pentru lipsă de credite (HTTP 410)."""
+    if s == 410 or str(s) == "410":
+        return True
+    return bool(_CREDITE_RE.search(_text_fara_diacritice(d)))
+
+
+def _raspuns_nesigur(s, d):
+    """True = create-invoice fără confirmare (transport ERR/timeout, HTTP 5xx, „cannot confirm"): factura POATE exista."""
+    if s == "ERR" or (isinstance(s, int) and s >= 500):
+        return True
+    return bool(_NESIGUR_RE.search(_text_fara_diacritice(d)))
+
+
+def _eroare_completa(s, d, n=400):
+    """Mesajul întreg al erorii create-invoice (până la n caractere)."""
+    em = ""
+    if isinstance(d, dict):
+        invs = d.get("invoices") or []
+        em = (invs[0].get("errorMessage") if invs and isinstance(invs[0], dict) else None) or d.get("errorMessage") or ""
+    if not em:
+        em = json.dumps(d, ensure_ascii=False) if isinstance(d, (dict, list)) else str(d or "")
+    return ("HTTP %s · %s" % (s, " ".join(str(em).split())))[:n]
+
+
 def _create_invoice_rl(xc, body, max_retry=6):
     """create-invoice respectând rata SmartBill. LIMITA REALĂ MĂSURATĂ: X-RateLimit-Limit=30/fereastră
     (≈30/min); la depășire SmartBill dă 403 fără Retry-After + o penalizare „lipicioasă" (blocaj care
@@ -7838,7 +7991,9 @@ def _create_invoice_rl(xc, body, max_retry=6):
     Întoarce (ok, status, data, rate_limited) — rate_limited=True dacă am renunțat din cauza limitei."""
     s, d = None, None
     for attempt in range(max_retry):
-        s, d = xc.post("/api/actions/create-invoice", body)
+        s, d = xc.post("/api/actions/create-invoice", body, err_max=20000)
+        if s != 200 and _smartbill_fara_credite(s, d):
+            return False, s, d, False   # fără credite ≠ rate-limit: fără retry (vezi _smartbill_fara_credite)
         txt = (json.dumps(d) if isinstance(d, (dict, list)) else str(d)).lower()
         # ATENȚIE: SmartBill folosește HTTP 422 pt AMBELE — rate-limit ȘI erori de business (produs fără
         # cod, date lipsă etc.). Tratăm 422 ca rate-limit DOAR dacă MESAJUL confirmă; altfel e eroare reală
@@ -7929,7 +8084,8 @@ def _scan_all_orders(xc, dfrom, dto, depth=0):
 # (storno-dubla-xconnector). Acolo factura bună e acum cea xConnector, deci numele lor NU intră în listă: inv-regen
 # le-ar refuza. Pe a patra o prinde regula 5 (tracking-ul ei viu e AWB-ul OH). Lista e deci GOALĂ. Dacă va trebui din
 # nou: env XC_OH_FACTURATE="NUME1,NUME2"; fără env, secretul KB cu același nume, care ajunge doar pe stații. Cronul VPS
-# n-are KB_DATABASE_URL, deci acolo lista se exportă din xc_invoice.sh (KB inaccesibil = avertisment, listă goală).
+# n-are KB_DATABASE_URL: acolo lista poate veni DOAR din env (de exportat în xc_invoice.sh, dintr-un fișier root-only,
+# nu din git). Azi nu e exportată → avertisment la fiecare rulare, listă goală.
 # Numele comenzilor NU stau în repo-ul public. Rest de risc: o factură manuală NOUĂ din OH pe o etichetă xConnector —
 # OH o stornează singur pe a lui când apare dublura (storno-dubla-xconnector).
 # SĂRITE FĂRĂ STĂPÂN: 3 și 5 prind și etichetele făcute în afara ambelor sisteme (DragonStar/DPD din portalul
@@ -7948,9 +8104,11 @@ OH_GUARD_MOTIVE = {
     "eticheta_vie_nu_e_xc": "altă etichetă vie decât cea xConnector (OH sau din afară)",
     "token_respins": "token Shopify respins (401), iar altul nu s-a putut emite",
     "token_lipsa": "niciun token Shopify pt magazin, iar unul nu s-a putut emite",
+    "tracking_trunchiat": "tracking Shopify trunchiat (prea multe colete, neverificat)",
 }
 # motivele după care comanda NU e sigur a OH → lista întreagă, de verificat în OH (garda_vs_oh.py)
-OH_GUARD_DE_VERIFICAT = ("fara_eticheta_xc", "eticheta_vie_nu_e_xc", "tracking_xc_necitit", "taguri_necitite")
+OH_GUARD_DE_VERIFICAT = ("fara_eticheta_xc", "eticheta_vie_nu_e_xc", "tracking_xc_necitit", "taguri_necitite",
+                         "tracking_trunchiat")
 # fără token Shopify acceptat (doar inv-make / inv-regen; inv-bulk sare magazinul întreg): reîncercarea nu ajută
 OH_GUARD_TOKEN = ("token_respins", "token_lipsa")
 _TRK_SEP = re.compile(r"[-,;/|]+")
@@ -7990,7 +8148,8 @@ def _oh_facturate_fara_tag():
             val, ok = _kb_secret("XC_OH_FACTURATE")
             if not ok and KB_UNREACHABLE:
                 print("⚠ XC_OH_FACTURATE (facturile OH manuale, fără tag) necitit: KB inaccesibil și env nesetat → garda"
-                      " merge fără lista asta (doar pe tag + etichetă). Pe VPS lista se exportă din xc_invoice.sh.")
+                      " merge fără lista asta (doar pe tag + etichetă). Pe VPS lista vine doar din env, exportat în xc_invoice.sh"
+                      " (dacă e nevoie; implicit nu e).")
             KB_UNREACHABLE = KB_UNREACHABLE or inainte
             _OH_FACTURATE_KB = val or ""
         raw = _OH_FACTURATE_KB
@@ -8005,6 +8164,8 @@ def oh_guard_motiv(s_, xc_has_label, xc_trk, name=None, manuale=None):
     tags = s_.get("tags")
     if tags is None or not s_.get("fulfillments_ok"):
         return "taguri_necitite"
+    if s_.get("tracking_trunchiat"):
+        return "tracking_trunchiat"
     if any(str(t).strip().lower().startswith(OH_TAG) for t in tags):
         return "tag_factura_oh"
     if not xc_has_label:
@@ -8039,8 +8200,21 @@ def _garda_tsv_rand(f, *campuri):
 # Excluderi manuale fără cod: env XC_INV_EXCLUDE="NUME1,NUME2" (motiv propriu, NU „factură OH manuală").
 DPD_LIVRAT = {-14}
 DPD_INTORS = {111, 123, 124}      # Return to Sender · Refused by recipient · Delivered Back to Sender
-DPD_NESIGUR = {129}
+# v3.1 (30-sep-2026): 120 „Refusal to send" = refuz LA PRELUARE (coletul n-a plecat) → nesigur, nu refuz de client;
+# 195 „Refuse contents check/test" = pas din timpul livrării → în curs. Textul le prindea pe amândouă ca „întors".
+DPD_NESIGUR = {129, 120}
+DPD_IN_CURS = {195}
 DPD_REDIRECTIONAT = {115}
+# Tag-ul 'refuzata' (capture) se pune doar pe un retur FINAL: 124 „Delivered Back to Sender", sau 111/123 rămase ULTIMA
+# operație de cel puțin XC_CAPTURE_ORE_INTORS (implicit 48h). Verificat în DPD pe 30-sep pe trei comenzi (111 sau 123,
+# apoi -14 după 1–4 zile) — toate PLĂTITE, dar cu 'refuzata' pus prea devreme.
+DPD_INTORS_FINAL = {124}
+ORE_INTORS_FINAL_IMPLICIT = 48
+# Shopify întoarce listele fulfillments/trackingInfo TRUNCHIATE la `first`: trackingInfo(first:5) vedea 5 din cele 9
+# colete ale unor comenzi Grandia (mai multe comenzi cu 6–9 colete), deci „PAID numai dacă TOATE sunt -14"
+# se verifica pe o parte. Costul interogării nu depinde de limite (măsurat 30-sep: 29 puncte/100 comenzi la 5/5 și la
+# 50/100). O listă plină până la limită = posibil trunchiată → comanda se tratează ca NECITITĂ (fail-closed).
+_FF_MAX, _TRK_MAX = 20, 50
 ASTEPTARE_ORE_IMPLICIT = 24
 STARE_MOTIVE = {
     "exclus_manual": "exclusă manual (env XC_INV_EXCLUDE)",
@@ -8059,6 +8233,99 @@ STARE_MOTIVE = {
 # motivele cu lista ÎNTREAGĂ în log: plătite în Shopify fără livrare confirmată → le corectează / verifică un om
 STARE_DE_CORECTAT = ("colet_intors", "colet_mixt", "refuz_partial", "stare_nesigura", "platita_nelivrata",
                      "redirectionat", "curier_fara_urmarire", "dpd_necitit")
+# ── REGISTRUL CRONULUI + FACTURI DIN AFARA LISTĂRII (v3.1, 30-sep-2026) ──
+# Listarea xConnector nu vede mereu factura: o comandă Grandia avea factura emisă la livrare (în SmartBill și în importul
+# OH), dar nici listarea, nici GET /api/orders/{id} n-o arăta → cronul a emis a doua factură (încă trei cazuri, pe
+# Grandia și Esteban). Două plase, ambele independente de listare, verificate DUPĂ garda OH și ÎNAINTE de DPD:
+#  • registrul (env XC_INV_REGISTRU, TSV: ts, magazin, comanda, orderId, eveniment, detaliu): `emisa`/`istoric` = factură
+#    emisă de cron → nu se reemite automat NICIODATĂ; `nesigura` = create-invoice fără confirmare → nu se reîncearcă până
+#    când un om adaugă `verificata` (a văzut în SmartBill că factura NU există);
+#  • lista externă (env XC_INV_FACTURATE_EXTERN): nume de comenzi cu factură în SmartBill din instantaneul OH `facturi`
+#    (import raport SmartBill + facturile OH). Fișier ilizibil/gol/prea mic → NU se emite nimic (fail-closed).
+REGISTRU_MOTIVE = {
+    "deja_emisa_cron": "cronul a emis deja factură (registru) — lipsă din listare: verifică în SmartBill",
+    "emitere_nesigura": "emitere NECONFIRMATĂ anterior (registru) — verifică în SmartBill",
+    "factura_smartbill": "are factură în SmartBill (instantaneu OH facturi) — nu se reemite",
+}
+EXTERN_MIN_IMPLICIT = 1000
+
+
+def registru_citeste(cale):
+    """{NUME: 'emisa'|'nesigura'} din registru. {} dacă fișierul nu există; None dacă e ilizibil (→ fail-closed)."""
+    st = {}
+    try:
+        with open(cale, encoding="utf-8") as f:
+            for linie in f:
+                c = linie.rstrip("\n").split("\t")
+                if len(c) < 5 or c[0].startswith("#"):
+                    continue
+                nm, ev = c[2].strip().lstrip("#").upper(), c[4].strip().lower()
+                if not nm or nm == "-":
+                    continue
+                if ev in ("emisa", "istoric"):
+                    st[nm] = "emisa"
+                elif ev == "nesigura" and st.get(nm) != "emisa":
+                    st[nm] = "nesigura"
+                elif ev == "verificata" and st.get(nm) == "nesigura":
+                    del st[nm]
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        return None
+    return st
+
+
+def registru_scrie(cale, dom, nume, oid, ev, detaliu):
+    """Un rând în registru (append + fsync). False = nu s-a putut scrie → apelantul OPREȘTE emiterea."""
+    try:
+        with open(cale, "a", encoding="utf-8") as f:
+            f.write("\t".join(str(x).replace("\t", " ").replace("\n", " ") for x in (
+                datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"), dom, nume, oid, ev,
+                detaliu)) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        return True
+    except Exception as e:
+        sys.stderr.write("  ⛔ registru %s: %s\n" % (cale, e))
+        return False
+
+
+def facturate_extern(cale, minim=None):
+    """Numele (prima coloană, un nume pe rând) cu factură în SmartBill din afara listării. None = ilizibil/prea mic."""
+    if minim is None:
+        try:
+            minim = int(os.environ.get("XC_INV_FACTURATE_EXTERN_MIN") or EXTERN_MIN_IMPLICIT)
+        except ValueError:
+            minim = EXTERN_MIN_IMPLICIT
+    try:
+        with open(cale, encoding="utf-8") as f:
+            nume = {l.split("\t")[0].strip().lstrip("#").upper() for l in f if l.strip() and not l.startswith("#")}
+    except Exception:
+        return None
+    nume.discard("")
+    return nume if len(nume) >= minim else None
+
+
+def _registru_motiv(nmu, registru, extern):
+    r = (registru or {}).get(nmu)
+    if r == "emisa":
+        return "deja_emisa_cron"
+    if r == "nesigura":
+        return "emitere_nesigura"
+    if extern and nmu in extern:
+        return "factura_smartbill"
+    return None
+
+
+def _termen_inv():
+    """Termen de emitere (epoch, env XC_INV_TERMEN_EPOCH): după el nu mai pornește nicio factură nouă. None = fără."""
+    try:
+        v = float(os.environ.get("XC_INV_TERMEN_EPOCH") or 0)
+    except ValueError:
+        return None
+    return v if v > 0 else None
+
+
 TAG_REFUZ_PARTIAL = "refuz-partial"   # pus de OH (cod_capture) pe comenzile pe mai multe AWB cu o parte refuzată
 # aceleași mărci ca OH (cod_capture._COD_MARKERS) + „xconnector"/„manual" (tranzacțiile de marcare ca plătit)
 _GW_RAMBURS = ("cash on delivery", "cod", "ramburs", "numerar", "la livrare", "xconnector", "manual")
@@ -8113,6 +8380,13 @@ def _inv_excluse():
     return {x.strip().upper() for x in (os.environ.get("XC_INV_EXCLUDE") or "").split(",") if x.strip()}
 
 
+def _ore_intors_final():
+    try:
+        return max(0, int(os.environ.get("XC_CAPTURE_ORE_INTORS") or ORE_INTORS_FINAL_IMPLICIT))
+    except ValueError:
+        return ORE_INTORS_FINAL_IMPLICIT
+
+
 def _awb_principal(x):
     """Primul număr (≥6 caractere) dintr-un tracking „<AWB>-<colet>-<colet>" = AWB-ul expediției."""
     s = _trk_norm(urllib.parse.unquote(str(x or "")))
@@ -8130,25 +8404,42 @@ def xc_label_awbs(o):
     return out
 
 
-def _dpd_op_state(code, desc):
-    """delivered | refused | unknown | redirected | progress — după CODUL operației DPD; textul doar întărește.
-    Livrat = numai codul -14. Un text „delivered" pe alt cod (sau fără cod) nu se ghicește: unknown."""
+def _cod_dpd(code):
     try:
-        c = int(code)
+        return int(code)
     except (TypeError, ValueError):
-        c = None
+        return None
+
+
+def _dpd_op_state(code, desc):
+    """delivered | refused | unknown | redirected | progress — după CODUL operației DPD.
+    Livrat = numai -14; întors = numai DPD_INTORS (111/123/124). Textul decide DOAR când lipsește codul (v3.1: textul
+    „refus…/return…" prindea și 120 „Refusal to send" și 195 „Refuse contents check/test"). Un cod necunoscut cu text de
+    retur sau de livrare = unknown (nu se ghicește: nici plată, nici tag, nici factură); -14 cu text de retur = unknown."""
+    c = _cod_dpd(code)
     txt = _dpd_state(desc)
-    if c in DPD_INTORS or txt == "refused":
+    if c is None:
+        return {"refused": "refused", "delivered": "unknown"}.get(txt, "progress")
+    if c in DPD_INTORS:
         return "refused"
     if c in DPD_NESIGUR:
         return "unknown"
     if c in DPD_LIVRAT:
-        return "delivered"
+        return "unknown" if txt == "refused" else "delivered"
     if c in DPD_REDIRECTIONAT:
         return "redirected"
-    if txt == "delivered":
+    if c in DPD_IN_CURS:
+        return "progress"
+    if txt in ("refused", "delivered"):
         return "unknown"
     return "progress"
+
+
+# v3.1: dacă DPD nu răspunde DPD_LOTURI_MOARTE_MAX loturi la rând (lot ×2 + AWB cu AWB, toate fără răspuns), nu mai
+# întrebăm DPD deloc până la finalul procesului: restul rămâne NECITIT (fail-closed). Fără asta, un api.dpd.ro care
+# atârnă (nu pică repede) ținea capture-ul zile întregi pe lacătul cronului (≈466 loturi × 12 apeluri × 45 s).
+DPD_LOTURI_MOARTE_MAX = 3
+_DPD_CIRCUIT = {"moarte": 0, "deschis": False}
 
 
 def dpd_last_ops(awbs):
@@ -8156,15 +8447,17 @@ def dpd_last_ops(awbs):
     Potrivire după `parcelId`: un id invalid LIPSEȘTE din răspuns, deci poziția nu e de încredere (un zip ar da
     starea altui colet). Lot căzut → reîncercat o dată, apoi AWB cu AWB. Absent din rezultat = necitit."""
     out = {}
-    u, p = _dpd_creds()
     uniq = [str(x).strip() for x in dict.fromkeys(awbs or []) if x and str(x).strip()]
-    if not (u and p) or not uniq:
+    if not uniq or _DPD_CIRCUIT["deschis"]:
+        return out
+    u, p = _dpd_creds()
+    if not (u and p):
         return out
 
     def _cere(lot):
         body = {"userName": u, "password": p, "language": "EN", "lastOperationOnly": True,
                 "parcels": [{"id": x} for x in lot]}
-        s, b = http("POST", "https://api.dpd.ro/v1/track", {"Content-Type": "application/json"}, body)
+        s, b = http("POST", "https://api.dpd.ro/v1/track", {"Content-Type": "application/json"}, body, timeout=30)
         try:
             d = json.loads(b)
         except Exception:
@@ -8192,24 +8485,36 @@ def dpd_last_ops(awbs):
         return rez
 
     for i in range(0, len(uniq), 10):
+        if _DPD_CIRCUIT["deschis"]:
+            break
         lot = uniq[i:i + 10]
         rez = _cere(lot)
         if rez is None:
             time.sleep(1.0)
             rez = _cere(lot)
         if rez is None:
-            rez = {}
+            rez, viu = {}, False
             for x in lot:
                 r1 = _cere([x])
+                if r1 is not None:
+                    viu = True
                 if r1:
                     rez.update(r1)
                 time.sleep(0.2)
+            _DPD_CIRCUIT["moarte"] = 0 if viu else _DPD_CIRCUIT["moarte"] + 1
+            if _DPD_CIRCUIT["moarte"] >= DPD_LOTURI_MOARTE_MAX:
+                _DPD_CIRCUIT["deschis"] = True
+                sys.stderr.write("  ⛔ DPD nu răspunde (%d loturi la rând) — nu-l mai întreb în rularea asta; restul "
+                                 "comenzilor rămâne „DPD necitit” (nimic plătit, nimic facturat pe ele)\n"
+                                 % _DPD_CIRCUIT["moarte"])
+        else:
+            _DPD_CIRCUIT["moarte"] = 0
         out.update(rez)
         time.sleep(0.15)
     # a doua trecere, după o pauză, pe cele rămase fără răspuns (29-sep: 3 AWB-uri RED livrate ieșiseră necitite
     # dintr-un lot căzut de mai multe ori la rând) — tot fail-closed: ce nu răspunde nici acum rămâne necitit
     lipsa = [x for x in uniq if x not in out]
-    if lipsa:
+    if lipsa and not _DPD_CIRCUIT["deschis"]:
         time.sleep(5.0)
         for i in range(0, len(lipsa), 10):
             rez = _cere(lipsa[i:i + 10]) or {}
@@ -8293,11 +8598,11 @@ def _shop_accepta(dom, tok):
 
 
 def _token_viu_sau_emis(dom, tok):
-    """(token, 'ok'|'reemis') dacă Shopify îl acceptă — altfel unul emis acum (client_credentials, din KB).
+    """(token, 'ok'|'reemis') dacă Shopify îl acceptă — altfel unul emis acum (client_credentials, secrete din KB sau env).
     (None, de ce) dacă nu: 'respins' (tokenul dat e respins, 401, și nici reemiterea n-a mers), 'lipsa' (niciun token
     utilizabil și nici emiterea n-a mers), 'necitit' (Shopify n-a răspuns: se poate reîncerca). Tokenurile de ~24h
     (SK/HU/ORC/LAB) expiră; marcajul `OAUTH:<NUME>_CLIENT_ID+SECRET` din SHOPIFY_STORES_CSV nu e token: se emite din
-    secretele KB pe care le numește (_mint_din_marcaj). NU se printează tokenul."""
+    secretele pe care le numește, din KB sau env (_mint_din_marcaj). NU se printează tokenul."""
     tok = str(tok or "").strip()
     marcaj = tok if tok.startswith("OAUTH:") else ""
     motiv = "lipsa"
@@ -8317,15 +8622,16 @@ def _token_viu_sau_emis(dom, tok):
 def garda_oh_comanda(sh, o, name):
     """Garda OH pe O comandă (inv-make / inv-regen) → (motiv|None, s_). Aceleași reguli ca în inv-bulk
     (oh_guard_motiv): tagurile și fulfillment-urile vin din Shopify (un apel, după orderId), eticheta din documentele
-    xConnector ale comenzii. Tokenul e doar al magazinului comenzii (fără emiteri pt celelalte, ca load_shopify_tokens),
-    verificat și reemis când Shopify îl respinge sau e un marcaj OAUTH (_token_viu_sau_emis). Fail-closed: fără token
+    xConnector ale comenzii. Tokenul e doar al magazinului comenzii (_tokenuri_statice fără emiteri pt celelalte,
+    spre deosebire de load_shopify_tokens, care emite marcajele tuturor magazinelor), verificat și reemis când
+    Shopify îl respinge sau e un marcaj OAUTH (_token_viu_sau_emis). Fail-closed: fără token
     acceptat → „token_respins" / „token_lipsa"; Shopify n-a răspuns → „taguri_necitite"; comandă rezolvată prin
     address-detail (fără `documents`) → „fara_eticheta_xc"."""
     oid = str((o or {}).get("orderId") or "").rsplit("/", 1)[-1]
     dom = (sh or {}).get("shopDomain")
     s_, mot_token = None, None
     if dom:
-        tok, stare = _token_viu_sau_emis(dom, (_tokenuri_statice().get(dom) or {}).get("adminToken"))
+        tok, stare = _token_viu_sau_emis(dom, (_tokenuri_statice(emite=False).get(dom) or {}).get("adminToken"))
         if tok and oid:
             s_ = (shopify_status_by_ids(dom, tok, [oid]) or {}).get(oid)
         elif not tok and stare in ("respins", "lipsa"):
@@ -8387,6 +8693,7 @@ def _refuz_inv_bulk_apply(a):
             "   XC_INV_BULK_PERMIS=1 uv run xconnector.py inv-bulk … --apply   (întâi fără --apply).")
 
 
+
 def cmd_inv_bulk(a):
     """Facturează TOATE comenzile plătite din ultimele --days zile (≈2 luni) care NU au factură,
     nu-s anulate/refunded și au încasări > 0. Shipping = inclus automat de SmartBill; data facturii = azi.
@@ -8408,6 +8715,16 @@ def cmd_inv_bulk(a):
     toks = {t.get("shopDomain"): t.get("adminToken") for t in load_shopify_tokens()}
     asteptare_h = _asteptare_ore()
     excluse = _inv_excluse()
+    termen = _termen_inv()
+    reg_cale = (os.environ.get("XC_INV_REGISTRU") or "").strip()
+    registru = registru_citeste(reg_cale) if reg_cale else {}
+    ext_cale = (os.environ.get("XC_INV_FACTURATE_EXTERN") or "").strip()
+    extern = facturate_extern(ext_cale) if ext_cale else set()
+    blocat = None   # motivul pt care NU se emite nimic în rularea asta (fail-closed); lista se afișează oricum
+    if registru is None:
+        blocat, registru = "registrul %s e ilizibil" % reg_cale, {}
+    if extern is None:
+        blocat, extern = "lista de facturi din afara listării %s e ilizibilă/goală/prea mică" % ext_cale, set()
     dpd_u, dpd_p = _dpd_creds()
     if not (dpd_u and dpd_p):
         print("⛔ fără credențiale DPD (DPD_RO_USERNAME/PASSWORD) → livrarea nu se poate confirma → NU se emite nimic "
@@ -8427,9 +8744,19 @@ def cmd_inv_bulk(a):
     print("Criterii: payment=PAID · neanulate · fără refund · încasări>0 · fără factură. Shipping inclus, data=azi.")
     print("Garda OH (cine facturează) + garda de stare: DPD live = LIVRAT (cod -14) de peste %dh, încasată de peste %dh%s." % (
         asteptare_h, asteptare_h, (" · excluse manual: %d" % len(excluse)) if excluse else ""))
+    print("Registru: %s · facturi din afara listării: %s%s" % (
+        ("%s (%d emise de cron · %d neconfirmate)" % (reg_cale, sum(1 for v in registru.values() if v == "emisa"),
+                                                      sum(1 for v in registru.values() if v == "nesigura")))
+        if reg_cale else "FĂRĂ (XC_INV_REGISTRU nesetat — ce se emite acum nu se ține minte în afara listării)",
+        ("%s (%d comenzi)" % (ext_cale, len(extern))) if ext_cale else "fără",
+        (" · termen emitere %s" % datetime.datetime.fromtimestamp(termen).strftime("%H:%M")) if termen else ""))
+    if blocat and a.apply:
+        print("⛔ %s → NU se emite nimic (fail-closed); lista de facturat se afișează ca la probă." % blocat)
     print("═" * 64)
     G = dict(cand=0, inv=0, err=0, skip_inv=0, skip_xc=0, paid=0, pre_guard=0, garda=0, garda_motive={}, de_verificat=0,
-             stare=0, de_corectat=0)
+             stare=0, de_corectat=0, fara_token=[], registru=0, nesigure=0)
+    emite = a.apply and not blocat
+    oprit = None   # (motiv, magazin, comanda, mesaj) — oprirea emiterii în rularea asta
     acum = datetime.datetime.now(datetime.timezone.utc)
     tsv_cale = (getattr(a, "garda_tsv", None) or os.environ.get("XC_INV_GARDA_TSV") or "").strip()
     tsv = None
@@ -8444,9 +8771,16 @@ def cmd_inv_bulk(a):
                  # fluxul normal de facturare al xConnector care consumă din ACELAȘI bucket SmartBill
     for sh in targets:
         dom = sh["shopDomain"]
-        st, _st_src = _token_viu_sau_emis(dom, toks.get(dom))
+        if oprit:
+            break
+        if termen and time.time() >= termen and emite:
+            oprit = ("termen", dom, "-", "termenul rulării (XC_INV_TERMEN_EPOCH) a trecut înainte de magazin")
+            print("\n⏱ termenul rulării a trecut — nu mai încep %s și nici magazinele următoare" % dom)
+            break
+        st, st_src = _token_viu_sau_emis(dom, toks.get(dom))
         if not st:
-            print("\n══ %s ══  ⚠ %s → skip" % (dom, "Shopify n-a răspuns la verificarea tokenului" if _st_src == "necitit"
+            G["fara_token"].append(dom)
+            print("\n══ %s ══  ⚠ %s → skip" % (dom, "Shopify n-a răspuns la verificarea tokenului" if st_src == "necitit"
                                               else "token Shopify absent/respins și nu s-a putut emite altul (KB)")); continue
         xc = XC(sh["apiKey"])
         con, bills = pick_billing(xc, a)
@@ -8491,7 +8825,10 @@ def cmd_inv_bulk(a):
                 continue
             pre_guard += 1
             has_lab, xtrk = xclabel.get(nm, (False, set()))
-            mot = "exclus_manual" if str(nm).strip().upper() in excluse else oh_guard_motiv(s_, has_lab, xtrk, nm, manuale)
+            nmu = str(nm).strip().upper()
+            mot = "exclus_manual" if nmu in excluse else oh_guard_motiv(s_, has_lab, xtrk, nm, manuale)
+            if not mot:
+                mot = _registru_motiv(nmu, registru, extern)   # plasele independente de listare (v3.1)
             if mot:
                 sarite.setdefault(mot, []).append(nm)
                 if tsv is not None:
@@ -8520,22 +8857,23 @@ def cmd_inv_bulk(a):
                 sarite.setdefault(mot, []).append(nm); n_stare += 1
                 continue
             todo.append((nm, oid, s_["total"])); n_paid += 1
-        n_garda = sum(len(v) for v in sarite.values()) - n_stare
+        n_reg = sum(len(v) for k, v in sarite.items() if k in REGISTRU_MOTIVE)
+        n_garda = sum(len(v) for v in sarite.values()) - n_stare - n_reg
         G["cand"] += len(todo); G["skip_inv"] += n_inv; G["paid"] += n_paid
-        G["pre_guard"] += pre_guard; G["garda"] += n_garda; G["stare"] += n_stare
+        G["pre_guard"] += pre_guard; G["garda"] += n_garda; G["stare"] += n_stare; G["registru"] += n_reg
         for mot, lst in sarite.items():
             G["garda_motive"][mot] = G["garda_motive"].get(mot, 0) + len(lst)
             if mot in OH_GUARD_DE_VERIFICAT:
                 G["de_verificat"] += len(lst)
-            if mot in STARE_DE_CORECTAT:
+            if mot in STARE_DE_CORECTAT or mot in REGISTRU_MOTIVE:
                 G["de_corectat"] += len(lst)
-        print("\n══ %s ══  [%s %s]" % (dom, con.get("type"), con.get("id")))
-        print("  comenzi xConnector: %d · cu factură: %d · fără factură: %d · PLĂTITE fără factură: %d · garda OH sare: %d · garda de stare sare: %d · de facturat: %d" % (
-            len(xorders), n_inv, len(uninvoiced), pre_guard, n_garda, n_stare, len(todo)))
+        print("\n══ %s ══  [%s %s]%s" % (dom, con.get("type"), con.get("id"), "  (token Shopify reemis din KB)" if st_src == "reemis" else ""))
+        print("  comenzi xConnector: %d · cu factură: %d · fără factură: %d · PLĂTITE fără factură: %d · garda OH sare: %d · registru sare: %d · garda de stare sare: %d · de facturat: %d" % (
+            len(xorders), n_inv, len(uninvoiced), pre_guard, n_garda, n_reg, n_stare, len(todo)))
         for mot, lst in sorted(sarite.items(), key=lambda kv: -len(kv[1])):
-            eticheta = OH_GUARD_MOTIVE.get(mot) or STARE_MOTIVE.get(mot, mot)
-            garda = "garda stare" if mot in STARE_MOTIVE else "garda OH"
-            if mot in OH_GUARD_DE_VERIFICAT or mot in STARE_DE_CORECTAT:
+            eticheta = OH_GUARD_MOTIVE.get(mot) or STARE_MOTIVE.get(mot) or REGISTRU_MOTIVE.get(mot, mot)
+            garda = "garda stare" if mot in STARE_MOTIVE else ("registru" if mot in REGISTRU_MOTIVE else "garda OH")
+            if mot in OH_GUARD_DE_VERIFICAT or mot in STARE_DE_CORECTAT or mot in REGISTRU_MOTIVE:
                 # lista ÎNTREAGĂ: OH_GUARD_DE_VERIFICAT = nu le facturează nimeni automat dacă OH nu le are;
                 # STARE_DE_CORECTAT = PLĂTITE fără livrare confirmată (plată de corectat / de rambursat / de verificat)
                 print("    %s · %-54s %5d  %s:" % (garda, eticheta, len(lst),
@@ -8558,21 +8896,52 @@ def cmd_inv_bulk(a):
         for name, oid, total in todo:
             if a.limit and done >= a.limit:
                 print("  … oprit la --limit %d (mai sunt %d)" % (a.limit, len(todo) - done)); break
-            if not a.apply:
+            if not emite:
                 print("  • DRY factură %-12s orderId=%s total=%.2f" % (name, oid, total)); done += 1; continue
+            if termen and time.time() >= termen:
+                oprit = ("termen", dom, name, "termenul rulării (XC_INV_TERMEN_EPOCH) a trecut")
+                print("  ⏱ termenul rulării a trecut — opresc emiterea înainte de %s (restul la tura următoare)" % name)
+                break
             body = {"orderId": oid, "connectorId": con["id"]}
             if getattr(a, "lang", None):
                 body["languageCode"] = a.lang
             ok, s, d, limited = _create_invoice_rl(xc, body)
             if ok:
                 inv = next((i for i in (d.get("invoices") or []) if i.get("success")), {})
-                print("  ✅ %-12s → %s %s" % (name, inv.get("invoiceSerie") or "", inv.get("invoiceNumber") or "")); G["inv"] += 1
+                serie_nr = ("%s %s" % (inv.get("invoiceSerie") or "", inv.get("invoiceNumber") or "")).strip()
+                print("  ✅ %-12s → %s" % (name, serie_nr)); G["inv"] += 1
+                if reg_cale and not registru_scrie(reg_cale, dom, name, oid, "emisa", serie_nr or "fără număr (accepted)"):
+                    oprit = ("registru", dom, name, "registrul %s nu se poate scrie" % reg_cale)
+                    print("  ⛔ registrul nu se poate scrie → opresc emiterea (altfel o factură s-ar putea reemite)")
+                    break
             else:
                 em = ""
                 if isinstance(d, dict):
                     invs = d.get("invoices") or []
                     em = (invs[0].get("errorMessage") if invs and isinstance(invs[0], dict) else None) or d.get("errorMessage") or ""
                 em = (em or _err_text(s, d)).strip()[:90]
+                if not limited and _smartbill_fara_credite(s, d):
+                    errmsgs[em] = errmsgs.get(em, 0) + 1
+                    G["err"] += 1
+                    oprit = ("410", dom, name, _eroare_completa(s, d))
+                    print("  ⛔ OPRIT la %s: SmartBill refuză facturile pentru CREDITE — %s" % (name, oprit[3]), flush=True)
+                    break
+                if not limited and _raspuns_nesigur(s, d):
+                    # NU se știe dacă factura s-a creat → în registru, fără retry automat (o reîncercare = posibilă dublă)
+                    G["nesigure"] += 1
+                    print("  ⚠️  %-12s → NECONFIRMAT (%s) — trecută în registru, NU se reîncearcă automat" % (name, em), flush=True)
+                    if not reg_cale or not registru_scrie(reg_cale, dom, name, oid, "nesigura", _eroare_completa(s, d, 200)):
+                        oprit = ("nesigur", dom, name, "răspuns neconfirmat și fără registru în care să-l țin minte: " + em)
+                        print("  ⛔ fără registru pentru răspunsul neconfirmat → opresc emiterea")
+                        break
+                    if G["nesigure"] >= NESIGURE_MAX:
+                        oprit = ("nesigur", dom, name, "%d răspunsuri neconfirmate — SmartBill/xConnector instabil" % G["nesigure"])
+                        print("  ⛔ %d răspunsuri neconfirmate în rularea asta → opresc emiterea (restul la tura următoare)" % G["nesigure"])
+                        break
+                    print("  ⏸  pauză 10 min după un răspuns neconfirmat", flush=True)
+                    time.sleep(600)
+                    done += 1
+                    continue
                 errmsgs[em] = errmsgs.get(em, 0) + 1
                 print("  ❌ %-12s → %s" % (name, em)); G["err"] += 1
             if limited:
@@ -8584,18 +8953,21 @@ def cmd_inv_bulk(a):
             done += 1
             time.sleep(pace)   # pacing adaptiv ≈28/min, SUB limita reală SmartBill de 30/fereastră
     print("\n" + "═" * 64)
-    print("TOTAL: plătite-fără-factură=%d · garda OH a sărit=%d · garda de stare a sărit=%d · candidați de facturat=%d · %s · deja facturate(xConnector)=%d · erori=%d" % (
-        G["pre_guard"], G["garda"], G["stare"], G["cand"], ("FACTURATE=%d" % G["inv"]) if a.apply else "DRY-RUN (0 emise)",
-        G["skip_inv"], G["err"]))
+    print("TOTAL: plătite-fără-factură=%d · garda OH a sărit=%d · registru a sărit=%d · garda de stare a sărit=%d · candidați de facturat=%d · %s · deja facturate(xConnector)=%d · erori=%d · neconfirmate=%d" % (
+        G["pre_guard"], G["garda"], G["registru"], G["stare"], G["cand"],
+        ("FACTURATE=%d" % G["inv"]) if emite else ("BLOCAT (0 emise): " + blocat if (a.apply and blocat) else "DRY-RUN (0 emise)"),
+        G["skip_inv"], G["err"], G["nesigure"]))
     for mot, n in sorted(G["garda_motive"].items(), key=lambda kv: -kv[1]):
-        print("  %s · %-54s %6d" % ("garda stare" if mot in STARE_MOTIVE else "garda OH",
-                                   OH_GUARD_MOTIVE.get(mot) or STARE_MOTIVE.get(mot, mot), n))
+        print("  %s · %-54s %6d" % ("garda stare" if mot in STARE_MOTIVE else ("registru" if mot in REGISTRU_MOTIVE else "garda OH"),
+                                   OH_GUARD_MOTIVE.get(mot) or STARE_MOTIVE.get(mot) or REGISTRU_MOTIVE.get(mot, mot), n))
     if G["de_verificat"]:
         print("  ⚠ %d comenzi sărite NU sunt sigur ale OH (listate mai sus, „DE VERIFICAT ÎN OH”): cele pe care OH le"
               " socotește ale xConnector nu le mai facturează nimeni automat → garda_vs_oh.py le separă." % G["de_verificat"])
     if G["de_corectat"]:
         print("  ⚠ %d comenzi PLĂTITE în Shopify fără livrare confirmată de DPD (listate mai sus, „DE CORECTAT/VERIFICAT”):"
               " ramburs marcat plătit greșit / card de rambursat / curier fără urmărire — NU se facturează." % G["de_corectat"])
+    if G["fara_token"]:
+        print("  ⛔ %d magazin(e) SĂRITE — token Shopify mort și neemis: %s" % (len(G["fara_token"]), ", ".join(G["fara_token"])))
     if tsv is not None:
         tsv.close()
         print("  lista (TSV: sărite + de facturat, cu starea DPD): %s" % tsv_cale)
@@ -8603,11 +8975,23 @@ def cmd_inv_bulk(a):
         print("ERORI DE BUSINESS (NU rate-limit — necesită fix config SmartBill/produs, NU se rezolvă prin retry):")
         for msg, n in sorted(errmsgs.items(), key=lambda kv: -kv[1]):
             print("  %4d×  %s" % (n, msg))
+    if oprit:
+        mot_o, dom_o, nm_o, msg_o = oprit
+        print("⛔ EMITERE OPRITĂ (%s) la %s (%s) — %s · facturate înainte de oprire: %d" % (mot_o, nm_o, dom_o, msg_o, G["inv"]))
+        if mot_o == "nesigur" or G["nesigure"]:
+            print("   Comenzile NECONFIRMATE sunt în registru ca `nesigura`: verifică în SmartBill; dacă NU există factură, adaugă"
+                  " în registru un rând TSV (ts, magazin, COMANDA, -, verificata, cine) ca s-o reia tura următoare.")
+        if mot_o == "410":
+            print("   Reîncarcă soldul SmartBill; tura următoare reia (ce s-a facturat are factură în listare + registru).")
+        sys.exit({"410": 4, "nesigur": 5, "registru": 6}.get(mot_o, 0))
+    if G["nesigure"]:
+        print("⚠ %d răspunsuri NECONFIRMATE (în registru ca `nesigura`, fără retry automat) — verifică-le în SmartBill." % G["nesigure"])
     if not a.apply and G["cand"]:
         print("→ Rulează din nou cu --apply ca să emiți cele %d facturi." % G["cand"])
 
 
-# ── CAPTURE COD: PENDING + LIVRAT → mark paid · REFUZAT → tag · ÎN CURS → verifică DPD ──
+# ── CAPTURE COD: PENDING + DPD live LIVRAT → mark paid · ÎNTORS → tag (v3: fără AWBprint, vezi cmd_capture) ──
+# Seturile AWBprint de mai jos nu mai decid capture-ul; rămân pt scripturile care importă modulul (awbprint_batch).
 DELIVERED_ST = {"delivered"}   # COLECTAT + plătit COD. „customer_pickup" = pregătit la locker, NU încă ridicat → în curs.
 REFUSED_ST = {"back_to_sender", "returning_to_sender", "refused", "lost", "lost_in_transit"}
 PROGRESS_ST = {"in_transit", "waiting_for_courier", "deferred_delivery", "redirected", "on_hold", "customer_pickup",
@@ -8679,8 +9063,17 @@ def dpd_track_sync(awbs):
             d = json.loads(b)
             if not isinstance(d, dict) or d.get("error"):
                 continue
-            for awb, parcel in zip(batch, d.get("parcels") or []):
-                if not isinstance(parcel, dict) or parcel.get("error"):
+            parcels = [x for x in (d.get("parcels") or []) if isinstance(x, dict)]
+            # după parcelId: un id invalid LIPSEȘTE din răspuns, iar zip-ul pozițional dădea starea altui colet
+            cheie = {str(a).strip(): a for a in batch}
+            if all(x.get("parcelId") for x in parcels):
+                perechi = [(cheie[str(x["parcelId"]).strip()], x) for x in parcels if str(x["parcelId"]).strip() in cheie]
+            elif len(parcels) == len(batch):
+                perechi = list(zip(batch, parcels))
+            else:
+                perechi = []
+            for awb, parcel in perechi:
+                if parcel.get("error"):
                     continue
                 ops = parcel.get("operations") or []
                 if not ops:
@@ -8761,11 +9154,111 @@ def shopify_remove_tags(shop, token, gid, tags):
     return (not ue and not d.get("errors")), (ue or d.get("errors"))
 
 
+def shopify_pending_detaliat(shop, token, since_date, max_pages=120):
+    """Comenzile PENDING, neanulate, total>0, din fereastră, cu tagurile, gateway-urile și AWB-urile
+    fulfillment-urilor vii: [{name, gid, total, tags, gateways, awbs:[(companie, awb_principal)]}]. None la auth fail.
+    `max_pages` × 100: Esteban are ~4.000 de comenzi PENDING în 30 de zile (plafonul vechi de 40 de pagini le tăia)."""
+    out, cursor = [], None
+    for _ in range(max_pages):
+        after = ', after:"%s"' % cursor if cursor else ""
+        q = ('query{ orders(first:100%s, sortKey:CREATED_AT, reverse:true, query:"financial_status:pending AND created_at:>=%s"){ '
+             'edges{ cursor node{ id name cancelledAt test displayFinancialStatus tags paymentGatewayNames '
+             'currentTotalPriceSet{ shopMoney{ amount } } '
+             'fulfillments(first:%d){ status trackingInfo(first:%d){ number company } } } } pageInfo{ hasNextPage } } }') % (
+                 after, since_date, _FF_MAX, _TRK_MAX)
+        d = shopify_gql(shop, token, q)
+        edges = (((d.get("data") or {}).get("orders") or {}).get("edges")) or []
+        if not edges and not out and d.get("errors"):
+            return None
+        for e in edges:
+            n = e["node"]
+            if n.get("cancelledAt") or n.get("test"):
+                continue
+            if (n.get("displayFinancialStatus") or "").upper() != "PENDING":
+                continue
+            total = float((((n.get("currentTotalPriceSet") or {}).get("shopMoney")) or {}).get("amount") or 0)
+            if total <= 0:
+                continue
+            awbs = []
+            ffs = n.get("fulfillments") or []
+            trunchiat = len(ffs) >= _FF_MAX   # listă plină până la limită = poate fi trunchiată → necitit
+            for f in ffs:
+                if not isinstance(f, dict) or (f.get("status") or "").upper() in ("CANCELLED", "ERROR", "FAILURE"):
+                    continue
+                tis = f.get("trackingInfo") or []
+                trunchiat = trunchiat or len(tis) >= _TRK_MAX
+                for ti in tis:
+                    main = _awb_principal((ti or {}).get("number"))
+                    if main:
+                        awbs.append((((ti or {}).get("company") or "").strip(), main))
+            out.append({"name": n.get("name"), "gid": n.get("id"), "total": total,
+                        "tags": [str(t).strip().lower() for t in (n.get("tags") or [])],
+                        "tags_orig": [str(t) for t in (n.get("tags") or [])],
+                        "gateways": [str(g) for g in (n.get("paymentGatewayNames") or [])],
+                        "awbs": list(dict.fromkeys(awbs)), "trunchiat": trunchiat})
+        pi = (((d.get("data") or {}).get("orders") or {}).get("pageInfo")) or {}
+        if not pi.get("hasNextPage"):
+            break
+        cursor = edges[-1]["cursor"]
+    else:
+        sys.stderr.write("  ⚠️ %s: paginare PENDING oprită la plafon (%d pag) — restrânge --days\n" % (shop, max_pages))
+    return out
+
+
+def decizie_capture(o, info, acum=None):
+    """(actiune, motiv) pt o comandă PENDING: actiune ∈ paid | refuzata | leave. Numai DPD LIVE (după codul
+    operației), pe TOATE AWB-urile vii din Shopify. AWBprint nu mai e sursă (29-sep-2026: rămânea pe
+    `waiting_for_courier`/„delivered" greșit, iar ownerul a cerut statusul din sursa reală, nu din AWBprint).
+    v3.1: listă de AWB-uri trunchiată → leave; 'refuzata' doar pe retur FINAL (124, sau 111/123 ultima operație de
+    ≥ XC_CAPTURE_ORE_INTORS ore) — DPD relivrează după 111/123 (văzut pe 30-sep pe trei comenzi, după 1–4 zile)."""
+    if not _e_ramburs(o.get("gateways")):
+        return "leave", "plata nu e ramburs"
+    if any(t.startswith(TAG_REFUZ_PARTIAL) for t in (o.get("tags") or [])):
+        return "leave", "tag refuz-partial (decide un om)"
+    if o.get("trunchiat"):
+        return "leave", "AWB-uri trunchiate în Shopify (necitit)"
+    awbs = o.get("awbs") or []
+    if not awbs:
+        return "leave", "fără AWB în Shopify"
+    if any("dpd" not in (c or "").lower() for c, _ in awbs):
+        return "leave", "curier fără urmărire (non-DPD)"
+    if acum is None:
+        acum = datetime.datetime.now(datetime.timezone.utc)
+    ore_final = _ore_intors_final()
+    prag = acum - datetime.timedelta(hours=ore_final)
+    stari, nefinal = [], False
+    for _c, awb in awbs:
+        i = info.get(awb)
+        if not i or i.get("eroare"):
+            stari.append(("necitit", None))
+            continue
+        st = _dpd_op_state(i.get("code"), i.get("desc"))
+        stari.append((st, i.get("at")))
+        if st == "refused" and _cod_dpd(i.get("code")) not in DPD_INTORS_FINAL:
+            at = i.get("at")
+            if at is None or at > prag:
+                nefinal = True
+    stare, _ = stare_din_etichete(stari)
+    if stare == "livrat":
+        return "paid", "DPD livrat"
+    if stare == "intors":
+        if nefinal:
+            return "leave", "întors nefinal (111/123 de sub %dh, DPD poate relivra)" % ore_final
+        if "refuzata" in (o.get("tags") or []):
+            return "leave", "întors, are deja tag refuzata"
+        return "refuzata", "DPD întors/refuzat"
+    return "leave", {"mixt": "stări amestecate", "nesigur": "DPD nesigur (închidere administrativă)",
+                     "redirectionat": "DPD redirecționat", "necitit": "DPD necitit",
+                     "in_curs": "în curs"}.get(stare, stare)
+
+
 def cmd_capture(a):
-    """Pt comenzile COD PENDING din ultimele --days zile:
-      LIVRATE → mark paid (orderMarkAsPaid) · REFUZATE/întoarse → tag 'refuzata' · ÎN CURS → verific live DPD → resolv.
-    Apoi `inv-bulk` facturează cele plătite. Sursa status = AWBprint (aggregated_status), cross-check DPD pe cele în curs.
-    Dry-run by default; scrie în Shopify DOAR cu --apply."""
+    """Pt comenzile COD PENDING din ultimele --days zile, după DPD LIVE (codul ultimei operații, pe fiecare AWB viu
+    din Shopify): LIVRAT (-14) → mark paid (orderMarkAsPaid) · ÎNTORS (111/124) → tag 'refuzata' (dacă nu-l are) ·
+    orice altceva (în curs, oficiu, închidere administrativă, redirecționat, curier non-DPD, fără AWB) → NIMIC.
+    v3 (29-sep-2026): fără AWBprint și cu returul citit înaintea livrării — vechiul capture a marcat PLĂTITE
+    colete întoarse („Delivered Back to Sender") pe care cronul le-a și facturat. Apoi `inv-bulk` facturează
+    cele plătite (cu garda lui de stare). Dry-run by default; scrie în Shopify DOAR cu --apply."""
     import datetime
     dfrom = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
     shops = load_shops()
@@ -8775,75 +9268,87 @@ def cmd_capture(a):
         print("Niciun magazin potrivit pt --shop=%r." % a.shop); return
     print("═" * 64)
     print("CAPTURE COD · de la %s · %s" % (dfrom, "APPLY (scrie în Shopify)" if a.apply else "DRY-RUN"))
-    print("PENDING → livrat=mark paid · refuzat/întors=tag 'refuzata' · în curs=verific DPD live → resolv.")
+    print("PENDING ramburs → DPD live: livrat(-14)=mark paid (+ scot 'refuzata' rămas) · întors FINAL (124, sau 111/123 "
+          "de peste %dh)=tag 'refuzata' · altceva=nimic. Fără AWBprint." % _ore_intors_final())
     print("═" * 64)
-    G = dict(pend=0, paid=0, ref=0, prog=0, err=0, skip=0)
+    u, p = _dpd_creds()
+    if not (u and p):
+        print("⛔ fără credențiale DPD (DPD_RO_USERNAME/PASSWORD) → nu pot confirma nimic → capture nu scrie nimic.")
+        return
+    G = dict(pend=0, paid=0, ref=0, err=0, tag_scos=0, motive={}, fara_token=[])
     for sh in targets:
-        dom = sh["shopDomain"]; st = toks.get(dom)
+        dom = sh["shopDomain"]
+        st, st_src = _token_viu_sau_emis(dom, toks.get(dom))
         if not st:
-            print("\n══ %s ══  ⚠ fără token Shopify → skip" % dom); continue
-        pend = shopify_pending_orders(dom, st, dfrom)
+            G["fara_token"].append(dom)
+            print("\n══ %s ══  ⚠ token Shopify absent/respins și nu s-a putut emite altul (KB) → skip" % dom); continue
+        pend = shopify_pending_detaliat(dom, st, dfrom)
         if pend is None:
             print("\n══ %s ══  ⚠ Shopify auth fail → skip" % dom); continue
         G["pend"] += len(pend)
-        awb = awbprint_batch([p[0] for p in pend])
-        # 1) clasific din AWBprint; strâng cele „în curs" pe DPD (doar curier DPD + are tracking)
-        actions = {}   # name -> ('paid'|'refuzata'|'leave')
-        dpd_check = {}  # name -> tracking
-        for name, gid, total in pend:
-            stt, trk, cur = awb.get(name, (None, None, None))
-            if stt in DELIVERED_ST:
-                actions[name] = "paid"
-            elif stt in REFUSED_ST:
-                actions[name] = "refuzata"
-            elif stt in ("incorrect_address", "errors_incorrect_shipping_address", "cancelled"):
-                actions[name] = "leave"
-            else:  # în curs / fără status
-                if trk and cur and "dpd" in (cur or "").lower():
-                    dpd_check[name] = trk
-                else:
-                    actions[name] = "leave"
-        # 2) DPD live pe cele în curs
-        if dpd_check:
-            res = dpd_track_sync(list(dpd_check.values()))
-            inv = {v: k for k, v in dpd_check.items()}
-            for trk, desc in res.items():
-                nm = inv.get(trk)
-                if not nm:
-                    continue
-                stt = _dpd_state(desc)
-                actions[nm] = "paid" if stt == "delivered" else ("refuzata" if stt == "refused" else "leave")
-            for nm in dpd_check:
-                actions.setdefault(nm, "leave")
+        de_verificat = [awb for o in pend if _e_ramburs(o["gateways"]) and o["awbs"]
+                        and all("dpd" in (c or "").lower() for c, _ in o["awbs"]) for _c, awb in o["awbs"]]
+        info = dpd_last_ops(de_verificat)
+        actions, motive = {}, {}
+        for o in pend:
+            act, mot = decizie_capture(o, info)
+            actions[o["name"]] = act
+            if act == "leave":
+                motive[mot] = motive.get(mot, 0) + 1
+                G["motive"][mot] = G["motive"].get(mot, 0) + 1
         n_paid = sum(1 for v in actions.values() if v == "paid")
         n_ref = sum(1 for v in actions.values() if v == "refuzata")
-        n_leave = sum(1 for v in actions.values() if v == "leave")
-        print("\n══ %s ══  PENDING: %d → de marcat PAID(livrate): %d · de tag-uit 'refuzata': %d · lăsate(în curs/CS): %d  [DPD verificate: %d]" % (
-            dom, len(pend), n_paid, n_ref, n_leave, len(dpd_check)))
+        print("\n══ %s ══  PENDING: %d → de marcat PAID(DPD livrat): %d · de tag-uit 'refuzata'(DPD întors): %d · lăsate: %d  [AWB DPD verificate: %d]%s" % (
+            dom, len(pend), n_paid, n_ref, len(pend) - n_paid - n_ref, len(set(de_verificat)),
+            "  (token Shopify reemis din KB)" if st_src == "reemis" else ""))
+        if motive:
+            print("  lăsate: " + " · ".join("%s=%d" % kv for kv in sorted(motive.items(), key=lambda kv: -kv[1])))
+        coduri = {}
+        for i in info.values():
+            if not i.get("eroare") and _dpd_op_state(i.get("code"), i.get("desc")) not in ("delivered", "refused"):
+                k = "%s %s" % (i.get("code"), (i.get("desc") or "")[:30])
+                coduri[k] = coduri.get(k, 0) + 1
+        if coduri:
+            print("  DPD pe AWB-urile nici livrate, nici întoarse: " + " · ".join(
+                "%s=%d" % kv for kv in sorted(coduri.items(), key=lambda kv: -kv[1])[:10]))
         done = 0
-        for name, gid, total in pend:
+        for o in pend:
+            name, gid, total = o["name"], o["gid"], o["total"]
             act = actions.get(name, "leave")
             if act == "leave":
                 continue
             if a.limit and done >= a.limit:
                 print("  … oprit la --limit %d" % a.limit); break
+            refuz_vechi = [t for t in (o.get("tags_orig") or []) if t.strip().lower() == "refuzata"] if act == "paid" else []
             if not a.apply:
-                print("  • DRY %-9s %-12s total=%.2f" % (act.upper(), name, total)); done += 1; continue
+                print("  • DRY %-9s %-12s total=%.2f%s" % (act.upper(), name, total,
+                                                          "  (+ scot tag 'refuzata' rămas)" if refuz_vechi else ""))
+                done += 1; continue
             if act == "paid":
-                ok, info = shopify_mark_paid(dom, st, gid)
-                print("  %s %-12s → PAID" % ("✅" if ok else "❌", name) if ok else "  ❌ %-12s mark-paid: %s" % (name, info))
+                ok, info_ = shopify_mark_paid(dom, st, gid)
+                print("  %s %-12s → PAID" % ("✅" if ok else "❌", name) if ok else "  ❌ %-12s mark-paid: %s" % (name, info_))
                 G["paid" if ok else "err"] += 1
+                if ok and refuz_vechi:
+                    # livrat -14 pe TOATE AWB-urile: 'refuzata' e un rest (111/123 relivrat, sau pus de OH pe o stare
+                    # tranzitorie) — altfel P&L (_map_status 2b) și statisticile de refuz o numără ca REFUZATĂ
+                    ok2, info2 = shopify_remove_tags(dom, st, gid, refuz_vechi)
+                    print("  %s %-12s → tag 'refuzata' scos (DPD -14)" % ("🏷️" if ok2 else "❌", name) if ok2
+                          else "  ❌ %-12s scot tag 'refuzata': %s" % (name, info2))
+                    G["tag_scos" if ok2 else "err"] += 1
             else:  # refuzata
-                ok, info = shopify_add_tags(dom, st, gid, ["refuzata"])
-                print("  %s %-12s → tag 'refuzata'" % ("🏷️" if ok else "❌", name) if ok else "  ❌ %-12s tag: %s" % (name, info))
+                ok, info_ = shopify_add_tags(dom, st, gid, ["refuzata"])
+                print("  %s %-12s → tag 'refuzata'" % ("🏷️" if ok else "❌", name) if ok else "  ❌ %-12s tag: %s" % (name, info_))
                 G["ref" if ok else "err"] += 1
             done += 1
             time.sleep(0.15)
     print("\n" + "═" * 64)
-    print("TOTAL: pending=%d · %s · %s · erori=%d" % (
-        G["pend"],
-        ("PAID=%d · tag refuzata=%d" % (G["paid"], G["ref"])) if a.apply else "DRY (0 scrise)",
-        "—", G["err"]))
+    print("TOTAL: pending=%d · %s · erori=%d" % (
+        G["pend"], ("PAID=%d · tag refuzata=%d · tag refuzata scos=%d" % (G["paid"], G["ref"], G["tag_scos"]))
+        if a.apply else "DRY (0 scrise)", G["err"]))
+    if G["motive"]:
+        print("  lăsate: " + " · ".join("%s=%d" % kv for kv in sorted(G["motive"].items(), key=lambda kv: -kv[1])))
+    if G["fara_token"]:
+        print("  ⛔ %d magazin(e) SĂRITE — token Shopify mort și neemis: %s" % (len(G["fara_token"]), ", ".join(G["fara_token"])))
     if not a.apply:
         print("→ --apply ca să scrii în Shopify, apoi `inv-bulk --apply` ca să facturezi cele plătite.")
 
@@ -9603,7 +10108,7 @@ def main():
     ap.add_argument("--held-sweep-hours", type=int, default=HELD_SWEEP_DEFAULT_H, dest="held_sweep_hours", help="fulfill: la câte ore/magazin trece peste comenzile pe HOLD (bad-address/awb-esec) puse de cron → le eliberează pe cele devenite livrabile, ca regulile noi să le deblocheze. Default 6.")
     ap.add_argument("--no-held-sweep", action="store_true", dest="no_held_sweep", help="fulfill: dezactivează sweep-ul peste comenzile pe hold.")
     ap.add_argument("--lang", help="inv-make/regen: languageCode pt factură (ex ro/en).")
-    ap.add_argument("--garda-tsv", dest="garda_tsv", help="inv-bulk: scrie comenzile sărite de gărzi (OH + stare DPD) și cele de facturat într-un TSV (implicit env XC_INV_GARDA_TSV; fără = doar în log). Env: XC_INV_EXCLUDE=NUME,… (excluderi manuale), XC_INV_ASTEPTARE_ORE (implicit 24), XC_OH_FACTURATE=NUME,… (facturi OH manuale, fără tag).")
+    ap.add_argument("--garda-tsv", dest="garda_tsv", help="inv-bulk: scrie comenzile sărite de gărzi (OH + stare DPD) și cele de facturat într-un TSV (implicit env XC_INV_GARDA_TSV; fără = doar în log). Env: XC_INV_EXCLUDE=NUME,… (excluderi manuale), XC_INV_ASTEPTARE_ORE (implicit 24), XC_OH_FACTURATE=NUME,… (facturi OH manuale, fără tag), XC_INV_REGISTRU=cale.tsv (registrul cronului: emise / neconfirmate), XC_INV_FACTURATE_EXTERN=cale (comenzi cu factură SmartBill din afara listării), XC_INV_TERMEN_EPOCH (termen de emitere). capture: XC_CAPTURE_ORE_INTORS (implicit 48).")
     ap.add_argument("--refund-id", dest="refund_id", help="inv-storno: Shopify refund ID (storno parțial pe un refund).")
     ap.add_argument("--address1"); ap.add_argument("--address2"); ap.add_argument("--city")
     ap.add_argument("--zip"); ap.add_argument("--province"); ap.add_argument("--phone"); ap.add_argument("--country")

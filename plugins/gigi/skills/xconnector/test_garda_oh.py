@@ -151,7 +151,7 @@ class FakeXC:
     def by_id(self, oid):
         return {}
 
-    def post(self, path, body):
+    def post(self, path, body, err_max=300):   # err_max: create-invoice cere corpul întreg al erorii (v3.1)
         POSTS.append((path, dict(body)))
         if path.endswith("/create-invoice"):
             return 200, {"accepted": True, "invoices": [{"success": True, "invoiceSerie": "TEST",
@@ -172,7 +172,7 @@ def fake_gql(shop, token, query, variables=None):
     return {"data": {"nodes": [SHOPIFY.get(str(g).rsplit("/", 1)[-1]) for g in (variables or {}).get("ids", [])]}}
 
 
-def fake_http(method, url, headers, body=None, timeout=45):
+def fake_http(method, url, headers, body=None, timeout=45, err_max=300):
     if url == "https://%s/admin/oauth/access_token" % SHOP:
         OAUTH.append(body.get("client_id"))
         if body.get("grant_type") == "client_credentials" and (body.get("client_id"), body.get("client_secret")) in INSTALATE:
