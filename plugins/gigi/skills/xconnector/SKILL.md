@@ -1,6 +1,6 @@
 ---
 name: xconnector
-description: Punte spre xConnector (curierat) pt magazinele ARONA, pe TOATE cele 19 magazine. CITEȘTE comenzile fără AWB cu adresă WRONG/UNKNOWN + adresa curentă + sugestia validatorului, le CORECTEAZĂ automat conservator (address-correction) pe cele sigure (cron `correct`), ȘI operează AWB direct prin API: `awb-make` (creează AWB cu parcelCount/curier), `awb-void` (anulează), `awb-regen` (anulează+refă cu alt nr de colete/curier), `awb-label` (link etichetă), `connectors` (listă curieri/facturare). Use pt „corectează adresele proaste", „xconnector address issues", „fă AWB / anulează AWB / regenerează AWB cu 2 colete prin xconnector", „comenzi fără awb cu adresă greșită". Scrierile AWB sunt dry-run by default (POST real doar cu --apply).
+description: Punte spre xConnector (curierat) pt magazinele ARONA, pe TOATE cele 19 magazine. CITEȘTE comenzile fără AWB cu adresă WRONG/UNKNOWN + adresa curentă + sugestia validatorului, le CORECTEAZĂ automat conservator (address-correction) pe cele sigure (cron `correct`), ȘI operează AWB direct prin API: `order-cancel`, `awb-void` (pe o comandă a Order Hub: OPRIRE = anulează AWB-ul + hold) și `awb-regen` (refacere prin Order Hub: același curier, alt nr de colete) întreabă întâi Order Hub; `awb-make` (creează AWB prin xConnector, doar unde nu există niciun AWB viu), `awb-label` (link etichetă), `connectors` (listă curieri/facturare). Use pt „corectează adresele proaste", „xconnector address issues", „fă AWB / anulează AWB / regenerează AWB cu 2 colete prin xconnector", „comenzi fără awb cu adresă greșită". Scrierile AWB sunt dry-run by default (POST real doar cu --apply).
 ---
 
 # /xconnector
@@ -21,10 +21,10 @@ uv run xconnector.py orders [--shop d] [--sku A] [--total-items 1] [--line-items
 uv run xconnector.py links  --order GT123 | --awb <tracking> [--open]    # CS: ce comandă + status + linkuri Shopify/xConnector/tracking
 uv run xconnector.py print-batch [--shop a,b] [--sku HA-0002] [--total-items 1] [--from .. --to ..] [--sort sku|totalItemsCount] [--limit 250] [--printed] [--test] [--apply]  # PRINT depozit
 uv run xconnector.py awb-make  --order GT123 [--shop d] [--connector ID] [--parcels N] [--type PARCEL] [--notify] [--apply]
-uv run xconnector.py awb-void  --order GT123 [--shop d] [--connector ID] [--apply]      # anulează AWB
-uv run xconnector.py awb-regen --order GT123 --parcels N [--connector ID] [--apply]     # anulează + refă cu alte condiții
+uv run xconnector.py awb-void  --order GT123 [--agent N] [--motiv "…"] [--apply]        # prin Order Hub: OPREȘTE comanda (anulează AWB + hold)
+uv run xconnector.py awb-regen --order GT123 --parcels N [--awb <eticheta din probă>] [--apply]   # prin Order Hub: refacere pe același curier
 uv run xconnector.py awb-label --order GT123 [--shop d]                                  # link etichetă PDF
-uv run xconnector.py order-cancel --order GT123 [--shop d] [--force] [--apply]           # anulează AWB (dacă neplecat) + comanda
+uv run xconnector.py order-cancel --order GT123 [--agent N] [--motiv "…"] [--no-restock] [--apply]   # prin Order Hub: eticheta, apoi comanda
 uv run xconnector.py inv-make  --order GT123 [--connector ID] [--lang ro] [--apply]      # creează factură (SMART_BILL default) · garda OH
 uv run xconnector.py capture   [--shop GT|all] [--days 60] [--limit N] [--apply]   # COD: livrat→mark paid · refuzat→tag 'refuzata' · în curs→verifică DPD
 uv run xconnector.py inv-bulk  [--shop GT|all] [--days 60] [--connector ID] [--lang ro] [--limit N] [--garda-tsv F] [--apply]  # FACTUREAZĂ ÎN MASĂ · --apply DOAR pe VPS
@@ -36,9 +36,9 @@ uv run xconnector.py addr-set  --order GT123 --city "…" --zip "…" [--address
 ### Modificare conținut comandă COD / Releaseit (cancel + replace)
 Comenzile din app-ul **COD Form (Releaseit)** au **line items BLOCATE** (nu se pot edita). Doar **adresa** se modifică
 (via `addr-set`). Dacă clientul cere schimbat CONȚINUTUL → procedura e **cancel + replace** (orchestrare, nu cod nou):
-1. **`order-cancel --order X --apply`** — anulează AWB-ul (dacă neplecat) + comanda veche.
+1. **`order-cancel --order X --apply`** — prin Order Hub: anulează AWB-ul (dacă neplecat) + comanda veche.
 2. **`gigi:cs-actions` `replace --from-order X`** — re-plasează COD cu produsele corecte (copiază adresa din comanda veche, tag `replasata-cs` — **NU `swap`**; swap-ul e DOAR pt schimbarea produsului/mărimii). Replasează la **aceeași valoare** (vezi promo COD [[releaseit-cod-promo-model]]).
-3. AWB-ul comenzii noi → automat din **cron-ul `fulfill`** (sau `awb-make`). Noua e tag-uită CS → `fulfill` o lasă fără dedup, dar îi face AWB.
+3. AWB-ul comenzii noi → îl face **Order Hub** (auto-AWB). `awb-make` doar când Order Hub cere eticheta făcută manual în xConnector.
 (NU se face order-edit pe Releaseit — line items blocate. Identifici Releaseit după `sourceName`/app.)
 
 ### Setare adresă (COD: adresa SE poate modifica; line items NU → ăla e cancel+replace)
@@ -68,9 +68,14 @@ Toate rezolvă comanda după `--order GT###` (caută în `--shop` dacă dat, alt
 - **`awb-make`** — creează AWB: `create-shipping-label` cu `parcelCount` **AUTO din metafield** (vezi mai jos), `parcelType`
   (`--type`, default PARCEL), curier (`--connector ID`; obligatoriu dacă-s mai mulți curieri activi). Sare dacă
   are deja AWB (zice să folosești `awb-regen`). La succes întoarce tracking + URL etichetă + preț.
-- **`awb-void`** — anulează AWB-ul (`cancel-shipping-label`, după orderId + connectorId).
-- **`awb-regen`** — **anulează + refă** cu alte condiții (alt `--parcels`, `--type`, `--connector`) — ex „de la 1 la 2 colete".
-  CS folosește asta când AWB-ul s-a făcut cu nr greșit de colete: **`awb-regen --order X --parcels 3 --apply`** = anulează AWB-ul de 1 colet și-l reface cu 3.
+- **`awb-void`** — pe o comandă a Order Hub = **oprire**: anulează toate etichetele vii și ține comanda pe hold
+  (se eliberează din Order Hub). NU e pasul întâi din „anulez și fac altul” — acela e `awb-regen`. Doar pe o comandă
+  pe care Order Hub n-o cunoaște: `cancel-shipping-label` (după orderId + connectorId).
+- **`awb-regen`** — **anulează + refă**. Pe o comandă a Order Hub (aproape toate): prin Order Hub, pe același curier,
+  doar cu alt număr de colete — întâi proba `awb-regen --order X --parcels 3`, apoi rândul „→ execuție” pe care îl
+  afișează (`… --parcels 3 --awb <eticheta> --apply`). Răspuns pierdut / timeout la execuție: se repetă EXACT aceeași
+  comandă (același `--awb`), nu o probă nouă; vezi „Order Hub ÎNTÂI” mai jos. Doar pe o comandă pe care Order
+  Hub n-o cunoaște: void + create prin xConnector, cu alte condiții (`--parcels`, `--type`, `--connector`).
 
 ### Nr. de colete (parcelCount) — AUTO din metafield (NU mai punem 1 greșit)
 `awb-make`/`awb-regen`/`fulfill` calculează `parcelCount` din Shopify (`order_parcel_count`), ca să nu mai facem
@@ -80,12 +85,60 @@ AWB-uri de 1 colet când trebuiau 2-3 (sursă frecventă de eșec/etichetă gre�
 3. altfel **1**. **Parfumurile (GT/Esteban) rămân mereu 1** — `custom.nrproduse` e nr de PRODUSE, nu de cutii, e ignorat.
 `--parcels N` **forțează** manual (ocolește metafield-ul). Verificat: GT/Esteban toate 1; Grandia 1/2/3/4; Belasil 1/2/3; Carpetto 2.
 - **`awb-label`** — link-ul de descărcare al etichetei (PDF) + tracking-ul, fără să recreeze nimic.
-- **`order-cancel`** — anulează o comandă SIGUR: verifică în **AWBprint** (`orders.aggregated_status`) dacă a **PLECAT**
-  (preluată de curier: `in_transit`/`delivered`/`back_to_sender`/…) → dacă da, **REFUZ** (cu `--force` încearcă oricum);
-  dacă e **neplecată** și are AWB → anulează AWB-ul (xConnector) și **DOAR dacă reușește** → anulează comanda
-  (Shopify `orderCancel`); fără AWB → doar comanda. **`refund` OFF by default** (`--refund` doar pt comenzi plătite,
-  decizie explicită; `--no-restock` ca să nu repună stocul). Dacă anularea AWB eșuează (colet plecat) → NU anulează
-  comanda + mesaj clar „anunță CS, a plecat". Tokenul Shopify e verificat ÎNAINTE de orice scriere (nu rămâne comandă activă cu AWB anulat).
+- 🔴 **Order Hub ÎNTÂI (2-oct-2026)** — `order-cancel`, `awb-void`, `awb-regen`, `awb-make`, `awb-create` și
+  `addr-set --make-awb` întreabă întâi Order Hub (`oh_client.py` → `POST /api/depozit/anulare` / `/refa`, aceleași rute ca
+  aplicația de scanare; cheia de serviciu `OH_CS_TOKEN`, din env sau KB). Order Hub face etichetele pe toate magazinele
+  (direct la curier, unde xConnector nu le vede, sau prin xConnector) și ține hold-urile; o anulare de aici lăsa eticheta
+  vie la curier și comanda anulată în Shopify (cinci comenzi, 29-sep).
+  - **Regula:** anularea, oprirea și refacerea prin xConnector rulează DOAR când Order Hub răspunde 404 `necunoscuta`.
+    Un AWB nou (`awb-make`, `awb-create`, `addr-set --make-awb`) se face prin xConnector și pe o comandă pe care Order Hub
+    o cunoaște fără AWB viu (`fara_awb`), dar fără să-i elibereze hold-urile. Order Hub e întrebat înaintea oricărei
+    scrieri — la `order-cancel`, `awb-void`, `awb-regen` și `awb-make`, chiar înaintea oricărei căutări în xConnector.
+    Etichetele vii ale comenzii se iau din Shopify: prima pleacă în cerere ca `awb`, celelalte se verifică cu câte o
+    probă; una pe care Order Hub n-o cunoaște oprește tot (`eticheta_necunoscuta`). Dacă comanda nu se poate citi din
+    Shopify (magazin fără token, eroare), cererea pleacă doar ca probă, iar `order-cancel` și `awb-regen` nu scriu nimic
+    nici pe calea veche, unde o etichetă vie din Shopify pe care xConnector n-o are (după număr) oprește tot.
+    La Order Hub merge numele canonic al comenzii găsite (Shopify / xConnector), nu ce s-a tastat: Order Hub caută doar
+    numele exact (`123456 --shop <magazin>` → EST123456). Dacă căutarea întoarce altă comandă (`EST 123456` → EST100200):
+    cod 2, nimic trimis, nimic scris. Doar cifre se acceptă numai cu `--shop` (fără el, aceleași cifre pot fi comanda
+    altui magazin: cod 2). `--shop` = doar domeniul unui magazin de-al nostru, altfel cod 2.
+  - **Coduri de ieșire cu `--apply`:** 2 = nu s-a scris nimic prin xConnector: fără un răspuns valid de la Order Hub
+    (cheie lipsă, 401, 5xx, rețea), cerere incompletă sau comandă necitită din Shopify; 3 = refuz, al Order Hub sau al
+    gărzilor de aici (hold pus de el, etichetă pe care n-o are nimeni). `--force` nu ocolește niciunul. Atenție: și un
+    răspuns pierdut după o cerere de execuție iese cu 2 („POATE să fi fost executată”) — atunci acțiunea poate să fi
+    fost făcută în Order Hub: la `order-cancel` / `awb-void` se rulează proba, nu se repetă orbește. La `awb-regen`
+    invers: se repetă EXACT aceeași comandă, cu același `--awb` (o tipărește mesajul, „→ repetă: …”) — Order Hub o
+    refuză (`eticheta_anulata`) dacă refacerea s-a făcut și o face o singură dată dacă nu. `--awb` NU se ia dintr-o probă
+    nouă după un răspuns pierdut sau un timeout: proba arată deja eticheta nouă, iar refacerea ei ar face a treia.
+    Garda e și mecanică: execuția se notează în `~/.xconnector/awb_regen_jurnal.json` ÎNAINTE să plece (rămâne și când
+    procesul e oprit de timeout). Cât n-a venit un răspuns hotărât, pe mașina asta o execuție cu alt `--awb` iese cu
+    cod 2, iar proba nu tipărește rândul „→ execuție”, ci „→ repetă”. După o refacere de curând (30 min: din jurnal
+    sau, de pe altă mașină, un fulfillment anulat de curând în Shopify) proba spune „e gata” și nu tipărește execuția;
+    altă refacere, cu bună știință: proba cu `--awb <eticheta vie>`.
+  - **`awb-regen`** = `/refa`: același curier, doar numărul de colete (`--connector` / `--type` se refuză). Cu `--apply`
+    cere `--parcels` și `--awb` (eticheta din probă): refacerea nu e idempotentă, iar eticheta numită face ca o cerere
+    repetată să fie refuzată (`eticheta_anulata`) în loc să iasă a treia etichetă. Proba tipărește rândul de execuție; un
+    număr de colete pe care nu l-a putut citi din Shopify nu-l ghicește (`--parcels <nr. colete>`). La o etichetă făcută
+    prin xConnector (cont `xconnector-…`) execuția se refuză (cod 2) cât el are alt cod poștal sau alt oraș decât
+    Shopify — după o schimbare de adresă, 1–2 minute.
+  - **`awb-make` / `awb-create`**: refuzate pe o comandă cu AWB viu (în Order Hub sau doar în Shopify, făcut de mână),
+    plecată, anulată sau cu AWB-urile magazinului pe pauză. Pe o comandă fără AWB merg (cazul în care Order Hub cere eticheta făcută manual în xConnector), dar un hold pus
+    de Order Hub (`heldByApp` = Order Hub: dublură, blocklist, „de confirmat”, oprire) nu se mai eliberează de aici —
+    nici unul despre care nu se poate citi cine l-a pus. La fel `awb-auto`.
+  - **`addr-set`**: avertizează când comanda are deja AWB — eticheta rămâne cu adresa veche; `awb-regen` abia după 1–2
+    minute. Etichetele le ia din Order Hub (și sub pauză de AWB), din Shopify și din xConnector; dacă Order Hub nu
+    răspunde, spune că nu se știe. `--make-awb` doar pe o comandă fără AWB viu: altfel adresa se schimbă, AWB-ul nu se
+    face și iese cu cod 3.
+  - **Bani și stoc la `order-cancel`:** plătită cu cardul = rambursare + storno automat (regula butonului din Order Hub);
+    `--refund` și `--notify` nu se aplică; stocul se repune, `--no-restock` ca să nu. După „anulata” se cere dovada din
+    Shopify (`cancelledAt`); dacă lipsește, se spune (codul de ieșire rămâne 0).
+  - `--agent` ajunge în istoricul comenzii din Order Hub; fără `--agent` / `CS_AGENT` / `EMPLOYEE_HANDLE` se scrie contul
+    și mașina. `--motiv` ajunge în nota comenzii la anulare și la oprire (la refacere Order Hub nu-l păstrează).
+    `fulfill` (cu `cancel_duplicate`) și `inv-*` NU trec prin Order Hub. Test: `test_oh_intai.py`.
+- **`order-cancel`** — prin Order Hub (vezi mai sus). Doar pe o comandă pe care Order Hub n-o cunoaște rămâne calea
+  veche: verifică în **AWBprint** (`orders.aggregated_status`) dacă a **PLECAT** → **REFUZ** (cu `--force` încearcă
+  oricum); neplecată și cu AWB → anulează AWB-ul (xConnector) și **DOAR dacă reușește** → anulează comanda (Shopify
+  `orderCancel`); fără AWB → doar comanda. Acolo `refund` e OFF by default (`--refund` doar pt comenzi plătite).
 
 ### Curier default + Grandia/Dragon Star (auto-rutat)
 `awb-make`/`awb-regen`/`fulfill` aleg implicit **DPD Romania** dacă nu dai `--connector`. **Grandia auto-rutează după

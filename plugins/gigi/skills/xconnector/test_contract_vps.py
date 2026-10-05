@@ -15,7 +15,8 @@ AttributeError la prima rulare, de obicei duminică noaptea, la facturare). Test
   4. prin main(), pe dublurile din test_garda_oh: plasele v3.1 din inv-bulk (registru, listă externă, 410,
      răspuns neconfirmat, registru care nu se scrie) DUPĂ garda OH și refuzul de pe stație; capture fără AWBprint;
   5. tokenurile: load_shopify_tokens emite marcajele OAUTH (VPS), garda pe o comandă (și _oh_shopify din #611,
-     dacă există) emite doar pt magazinul ei, iar o emitere eșuată / KB inaccesibil nu se reia la fiecare apel.
+     dacă există) emite doar pt magazinul ei, iar o emitere eșuată / KB inaccesibil nu se reia la fiecare apel;
+     după merge-ul cu #611: secretele din KB, altfel din env (și cu KB inaccesibil), garda gazdei înaintea lor.
 Fiecare plasă din 4-5 a fost scoasă pe rând (mutație) și testul a picat de fiecare dată.
 Importul se face fără env și fără rețea (exact ca `python3 -c 'import xconnector'` din cronuri).
 
@@ -303,6 +304,47 @@ def t_tokenuri():
         check("fără token static, app-uri neinstalate: emiterea eșuată se ține minte (_shopify_mint)",
               o1 == [(T.SHOP, "cid-x")] and k1 > 0 and not oauth and not kb_citiri,
               "apel1 oauth=%s kb=%d; apel2 oauth=%s kb=%d" % (o1, k1, oauth, len(kb_citiri)))
+
+        # După merge-ul cu main (#611, 0469c1a): secretele vin din KB, altfel din env (Second Brain n-are KB). Cu KB
+        # inaccesibil nu se mai cheamă KB după primul eșec, dar env-ul se citește; iar garda gazdei rulează înaintea
+        # oricărei citiri de secret.
+        chei_env = ["SHOPIFY_ALT_CLIENT_ID", "SHOPIFY_ALT_CLIENT_SECRET"] + [k for p in X._SHOPIFY_APPS for k in p]
+        env_vechi = {k: os.environ.get(k) for k in chei_env}
+        try:
+            T.lume(kb_jos=True)
+            csv(T.TOK_BUN)
+            os.environ.update(app_alt)
+            zero()
+            lt = {t["shopDomain"]: t["adminToken"] for t in X.load_shopify_tokens()}
+            k1 = len(kb_citiri)
+            zero()
+            X.load_shopify_tokens()
+            check("KB inaccesibil, secretele marcajului în env: se emite din env, cu o singură citire KB pe proces",
+                  lt.get(alt) == "tok-alt" and k1 == 1 and not kb_citiri and not oauth,
+                  "token=%s kb1=%d kb2=%d oauth2=%s" % (bool(lt.get(alt)), k1, len(kb_citiri), oauth))
+
+            T.lume(kb_jos=True)
+            for k in app_alt:
+                os.environ.pop(k, None)
+            os.environ.update({X._SHOPIFY_APPS[-1][0]: "cid-alt", X._SHOPIFY_APPS[-1][1]: "csec-alt"})
+            zero()
+            tk = X._shopify_mint("lab-test.myshopify.com")
+            check("KB inaccesibil, doar ultimul app are secretele în env: _shopify_mint trece la el și emite",
+                  tk == "tok-alt" and oauth == [("lab-test.myshopify.com", "cid-alt")] and len(kb_citiri) <= 1,
+                  "token=%s oauth=%s kb=%s" % (bool(tk), oauth, kb_citiri))
+
+            T.lume(kb=dict(app_alt, SHOPIFY_ARONA_CLIENT_ID="cid-x", SHOPIFY_ARONA_CLIENT_SECRET="csec-x"))
+            zero()
+            emise = [X._shopify_mint("attacker.example"), X._shopify_mint(alt + ".evil.net"),
+                     X._mint_din_marcaj("attacker.example", marcaj_alt), X._mint_din_marcaj(alt + ".evil.net", marcaj_alt)]
+            check("gazdă care nu e <magazin>.myshopify.com: nicio citire de secret (KB) și nicio cerere, la ambele emiteri",
+                  emise == [None] * 4 and not kb_citiri and not oauth, "kb=%s oauth=%s" % (kb_citiri, oauth))
+        finally:
+            for k, v in env_vechi.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
     finally:
         X._kb_secret, X.http = T.fake_kb_secret, T.fake_http
         T.lume()

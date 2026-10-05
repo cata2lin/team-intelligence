@@ -13,7 +13,7 @@ ARBORELE DE DECIZIE (doar pe duplicate EXACTE — line-items identice):
        ambele plătite (card) → NU anulez, raport CS (posibil dublă încasare).
   2. AWB (dacă ambele cash):
        cea veche are AWB → anulez cea NOUĂ (cea veche pleacă).
-         excepție: adresă DIFERITĂ + AWB încă anulabil → anulez AWB vechi (xConnector) + comanda veche; cea nouă pe HOLD.
+         excepție: adresă DIFERITĂ + AWB încă anulabil → anulez AWB vechi + comanda veche (order-cancel, prin Order Hub); cea nouă pe HOLD.
          dacă AWB deja plecat (scanat) → nu se poate anula → anulez cea nouă (flag CS dacă adresă greșită).
   3. Niciun AWB:
        adresă DIFERITĂ → anulez cea VECHE, cea NOUĂ pe HOLD (CS verifică adresa).
@@ -105,9 +105,12 @@ def tag_order(name, gid):   return _tags_mutate(name, gid, add=True)
 def untag_order(name, gid): return _tags_mutate(name, gid, add=False)
 
 def xc(cmd, name, apply):
-    """cheamă xconnector.py <cmd> --order NAME [--apply]. order-cancel voidează AWB + are garda 'plecată'.
+    """cheamă xconnector.py <cmd> --order NAME [--apply]. order-cancel întreabă întâi Order Hub (el anulează eticheta,
+    apoi comanda); un refuz al lui sau lipsa răspunsului ies cu cod ≠ 0, deci ✗ și perechea se reîncearcă.
     O eroare/timeout la o comandă NU trebuie să crape rularea — se loghează și se trece mai departe."""
     args = [os.environ.get("UV_BIN", "uv"), "run", "--no-project", XC, cmd, "--order", name]
+    if cmd == "order-cancel":   # trece prin Order Hub: agentul ajunge în istoricul comenzii, motivul în nota ei
+        args += ["--agent", "dup-guard", "--motiv", "comandă dublă"]
     if apply: args.append("--apply")
     try:
         r = subprocess.run(args, capture_output=True, text=True, timeout=180)

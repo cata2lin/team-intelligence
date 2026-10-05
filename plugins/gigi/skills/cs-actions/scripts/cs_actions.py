@@ -33,7 +33,7 @@ def _kb_path():
             return c
         d = os.path.dirname(d)
     here = os.path.dirname(os.path.abspath(__file__))
-    c = os.path.normpath(os.path.join(here, "..", "..", "..", "core", "scripts", "kb.py"))
+    c = os.path.normpath(os.path.join(here, "..", "..", "..", "..", "core", "scripts", "kb.py"))
     return c if os.path.exists(c) else None
 
 
@@ -206,7 +206,8 @@ def resolve_address(order_name):
 # ───────────────────────── lookups Shopify ─────────────────────────
 def get_order(prefix, name):
     q = ('query($q:String!){ orders(first:1, query:$q){ edges{ node{ id name displayFinancialStatus '
-         'displayFulfillmentStatus cancelledAt lineItems(first:50){ edges{ node{ id title sku quantity } } } } } } }')
+         'displayFulfillmentStatus cancelledAt note tags fulfillments(first:10){ status trackingInfo(first:5){ number } } '
+         'lineItems(first:50){ edges{ node{ id title sku quantity } } } } } } }')
     e = sgql(prefix, q, {"q": "name:%s" % name})["orders"]["edges"]
     return e[0]["node"] if e else None
 
@@ -350,13 +351,218 @@ def shipping_line(prefix, items, discount):
 
 
 # ───────────────────────── operațiuni ─────────────────────────
+OH_FARA_RASPUNS, OH_REFUZ = 2, 3   # coduri de ieșire cu --apply, ca în xconnector.py
+
+
+def _oh_client():
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, os.path.normpath(os.path.join(here, "..", "..", "xconnector")))
+    try:
+        import oh_client
+        return oh_client
+    except ImportError:
+        return None
+
+
+def _oh_token(OH):
+    return (os.environ.get(OH.TOKEN_ENV) or _kb_secret(OH.TOKEN_ENV) or "").strip()
+
+
+def _awb_vii(o):
+    """AWB-urile vii ale comenzii în Shopify (tracking-ul fulfillment-urilor neanulate), fără dubluri."""
+    out = []
+    for f in o.get("fulfillments") or []:
+        if f.get("status") not in ("CANCELLED", "ERROR", "FAILURE"):
+            for t in f.get("trackingInfo") or []:
+                if t.get("number") and t["number"] not in out:
+                    out.append(t["number"])
+    return out
+
+
+def _nume_norm(s):
+    return re.sub(r"[#\s-]", "", str(s or "")).upper()
+
+
+def nume_comanda_potrivit(cerut, gasit):
+    """Comanda întoarsă de get_order e chiar cea cerută? Căutarea `name:` din Shopify e largă și get_order ia PRIMA
+    potrivire: „123456” și „EST-123456” dau EST123456, dar „EST 123456” dă întâi EST100200 (name:EST ȘI textul 123456).
+    Doar cifre (magazinul vine din --store; prefixele GRAN / GRAND diferă) → se compară doar cifrele numelui găsit;
+    altfel numele întreg, fără „#”, spații și „-”, fără diferență de majuscule. (Aceeași regulă ca în xconnector.py.)"""
+    c, g = _nume_norm(cerut), _nume_norm(gasit)
+    if not c or not g:
+        return False
+    return re.sub(r"\D", "", g) == c if c.isdigit() else c == g
+
+
+def _comanda_ceruta(a, o):
+    """De aici încolo `a.order` = numele canonic o['name']: la Order Hub (care caută DOAR numele exact — „123456” i-ar
+    ajunge drept comandă necunoscută și ar deschide orderCancel direct pe o comandă a lui), în citirile de confirmare
+    și în tot ce se tipărește. Altă comandă decât cea cerută → cod 2, nimic trimis, nimic scris (și la probă)."""
+    gasit = (o or {}).get("name") or ""
+    if not nume_comanda_potrivit(a.order, gasit):
+        print("  ⛔ %s: Shopify a întors comanda %s, care NU e cea cerută → nu s-a trimis și nu s-a scris nimic. Dă"
+              " numele întreg al comenzii (ex. EST123456)." % (a.order, gasit or "fără nume"))
+        sys.exit(OH_FARA_RASPUNS)
+    if gasit != a.order:
+        print("  ℹ comanda: %s (cerută ca „%s”)" % (gasit, a.order))
+        a.order = gasit
+
+
+def _awb_viu(o):
+    """Primul AWB viu al comenzii în Shopify, sau ""."""
+    return (_awb_vii(o) or [""])[0]
+
+
+def _oh_confirma(a, agent, pref, o, r):
+    """După „anulata": Order Hub știe doar că Shopify a PRIMIT anularea (iar pe un magazin fără token a anulat-o doar
+    la el). Tagurile CS se pun numai după ce Shopify arată comanda anulată. O citire picată nu e „neanulată" și nu are
+    voie să ascundă că Order Hub a executat deja (sgql iese cu sys.exit pe erorile GraphQL)."""
+    citita = False
+    for i in range(3):
+        try:
+            n = get_order(pref, a.order)
+            citita = True
+        except (Exception, SystemExit):
+            n = None
+        if (n or {}).get("cancelledAt"):
+            break
+        if i < 2:
+            time.sleep(2)
+    else:
+        print("  ⚠ Order Hub zice „anulată”, dar Shopify %s: verifică în Shopify și în Order Hub. Tagurile nu s-au pus."
+              % ("o arată încă NEANULATĂ" if citita else "n-a putut fi citit"))
+        return
+    print("  ✅ ANULAT %s" % a.order)   # întâi rezultatul: un eșec la taguri nu e un eșec al anulării
+    if any(not p.get("ok") for p in r.pasi):
+        print("  ⚠ Anulată, dar cu pași neconfirmați (❌ mai sus): verifică în Order Hub.")
+    sgql(pref, "mutation($id:ID!,$t:[String!]!){ tagsAdd(id:$id, tags:$t){ userErrors{ message } } }",
+         {"id": o["id"], "t": [agent, "anulat-cs"]})
+    print("  tag %s, anulat-cs" % agent)
+
+
+def _oh_anulare(a, agent, pref, o):
+    """Order Hub ÎNTÂI (vezi xconnector/oh_client.py): el anulează eticheta la cine a emis-o, apoi comanda.
+    True = anularea se termină aici. False = Order Hub nu cunoaște comanda (sau e o probă fără răspunsul lui) →
+    orderCancel direct în Shopify, ca până acum. Cu --apply: fără un răspuns valid cod 2, refuz cod 3 — și în niciun
+    caz nu se anulează din Shopify."""
+    OH = _oh_client()
+    print("─" * 64)   # înaintea cererii: o eroare de afișare nu trebuie să ascundă o anulare deja făcută
+    r, oprit = None, ""
+    if OH is not None:
+        # cererea poartă prima etichetă din Shopify; celelalte se verifică înainte, cu câte o probă
+        awbs = _awb_vii(o)
+        necunoscute, neverificate = OH.alte_etichete(a.order, agent, awbs, token=_oh_token(OH))
+        if necunoscute:
+            oprit, cod_oprit = "are în Shopify și eticheta %s, pe care Order Hub n-o cunoaște" % ", ".join(necunoscute), OH_REFUZ
+        elif neverificate:
+            oprit, cod_oprit = "eticheta %s din Shopify n-a putut fi verificată la Order Hub" % ", ".join(neverificate), OH_FARA_RASPUNS
+        r = OH.anulare(a.order, agent, "CS: %s" % a.reason, awb=(awbs or [""])[0], nota=a.note or "",
+                       restock=not a.no_restock, aplica=a.apply and not oprit, token=_oh_token(OH))
+        if r.stare == OH.NECUNOSCUTA:
+            print("  ℹ Order Hub nu cunoaște %s → anulare directă în Shopify." % a.order)
+            return False
+    if OH is None or r.stare != OH.DECIS:
+        de_ce = r.mesaj if OH else "oh_client.py lipsește din ../../xconnector"
+        if OH and r.incert:
+            print("  ⚠ Cererea a plecat spre Order Hub, dar răspunsul n-a venit (%s): POATE să fi fost executată." % de_ce)
+            print("    Nu reîncerca orbește: rulează proba (fără --apply) și vezi starea comenzii în Order Hub.")
+            sys.exit(OH_FARA_RASPUNS)
+        print("  ⚠ Fără un răspuns valid de la Order Hub (%s) → nu se știe dacă %s are o etichetă vie." % (de_ce, a.order))
+        if not a.apply:
+            return False
+        print("  ⛔ cancel refuzat, nu s-a scris nimic: fără răspunsul Order Hub, anularea din Shopify poate lăsa"
+              " eticheta vie la curier. Anulează din Order Hub (https://orderhub.arona.ro/app/orders).")
+        sys.exit(OH_FARA_RASPUNS)
+    print("  %s ANULEZ %s%s prin ORDER HUB" % ("" if a.apply else "[DRY-RUN]", a.order,
+                                             (" (%s)" % r.magazin) if r.magazin else ""))
+    for l in OH.linii(r):
+        print("  " + l)
+    if a.refund:
+        print("  ℹ --refund nu se aplică aici: banii îi hotărăște Order Hub (vezi rândul „Bani” din plan).")
+    if OH.URMEAZA.get(r.rezultat):
+        print("  ℹ " + OH.URMEAZA[r.rezultat])
+    if oprit:
+        print("  ⛔ %s %s → nu s-a anulat nimic%s. Verifică eticheta și anulează din Order Hub"
+              " (https://orderhub.arona.ro/app/orders)." % (a.order, oprit, "" if a.apply else " (asta e doar proba)"))
+        if a.apply:
+            sys.exit(cod_oprit)
+    elif r.proba:
+        print("  → --apply ca să anulezi.")
+    elif r.rezultat in ("deja_anulata", "etichete_anulate"):   # era anulată: cel mult i s-au anulat etichetele rămase vii
+        print("  ℹ %s era deja anulată în Order Hub, de o cerere de dinainte." % a.order)
+        if a.apply and r.ok:   # poate reîncercarea unei anulări neconfirmate: o arată acum Shopify?
+            n = o
+            if not o.get("cancelledAt"):
+                try:
+                    n = get_order(pref, a.order)
+                except (Exception, SystemExit):
+                    n = None
+            if not (n or {}).get("cancelledAt"):
+                print("  ⚠ Order Hub o are anulată, dar Shopify %s: verifică în Shopify și în Order Hub."
+                      % ("o arată încă NEANULATĂ" if n is not None else "n-a putut fi citit"))
+            elif ("[ANULAT depozit · %s] CS:" % agent) in (n.get("note") or "") and \
+                    "anulat-cs" not in [str(t).lower() for t in (n.get("tags") or [])]:
+                # nota pusă de Order Hub arată că anularea de dinainte e a acestui agent, prin cs_actions: tagurile ei
+                sgql(pref, "mutation($id:ID!,$t:[String!]!){ tagsAdd(id:$id, tags:$t){ userErrors{ message } } }",
+                     {"id": o["id"], "t": [agent, "anulat-cs"]})
+                print("  tag %s, anulat-cs (anularea de dinainte, acum confirmată în Shopify)" % agent)
+    elif r.ok and r.rezultat == "anulata" and a.apply:   # tagurile se scriu doar la o execuție cerută de aici
+        _oh_confirma(a, agent, pref, o, r)
+    elif not r.ok:   # starea comenzii se afirmă doar unde e cunoscută
+        if r.rezultat == "eroare":
+            cum = "stare NECUNOSCUTĂ: comanda poate fi anulată sau nu, verifică în Order Hub"
+        elif r.corp.get("anulata"):
+            cum = "comanda ERA deja anulată; nu i s-au anulat toate etichetele (vezi mai sus)"
+        else:
+            cum = "comanda NU s-a anulat"
+        print("  ⛔ Order Hub: %s — %s." % (r.rezultat or "refuzat", cum))
+        if a.apply:
+            sys.exit(OH_REFUZ)
+    return True
+
+
+def _oh_eticheta_veche(a, agent, o):
+    """modify: o etichetă deja făcută rămâne cu adresa / produsele vechi (Order Hub o reface doar la cerere).
+    Doar citire: proba unei opriri, care arată etichetele și când AWB-urile magazinului sunt pe pauză, plus ce arată
+    Shopify (o etichetă făcută de mână). Dacă Order Hub nu răspunde și Shopify nu arată nimic, se spune că nu se știe:
+    o etichetă făcută direct la curier apare în Shopify abia la prima scanare."""
+    OH = _oh_client()
+    r = OH.eticheta(a.order, agent, token=_oh_token(OH)) if OH is not None else None
+    stiuta = r is not None and r.stare == OH.DECIS
+    necunoscuta = r is not None and r.stare == OH.NECUNOSCUTA
+    if stiuta and r.rezultat == "refuzat":   # eticheta depozitului (Frisbo): depozitul o reface după modificare
+        print("  ℹ Order Hub: %s" % r.mesaj)
+        return
+    vii = list(OH.awb_vii(r)) if stiuta else []
+    for x in _awb_vii(o):
+        if not any(x in v for v in vii):
+            vii.append(x)
+    if stiuta and vii and r.rezultat == "plecat":
+        print("  ⚠ Coletul a plecat (%s): modificarea nu mai ajunge pe el." % ", ".join(vii))
+    elif vii:
+        print("  ⚠ Comanda are deja AWB (%s): eticheta rămâne cu datele VECHI. Refă eticheta cu xconnector.py awb-regen"
+              " --order %s abia după ce modificarea a ajuns peste tot (1–2 minute)." % (", ".join(vii), a.order))
+    elif not stiuta and not necunoscuta:
+        print("  ⚠ Order Hub n-a răspuns (%s): nu se știe dacă %s are etichetă — dacă are, rămâne cu datele VECHI; vezi"
+              " comanda în Order Hub." % (r.mesaj if r is not None else "oh_client.py lipsește", a.order))
+
+
 def op_cancel(a, agent):
     pref = (a.store or prefix_of_order(a.order)).upper()
     o = get_order(pref, a.order)
     if not o:
         sys.exit("Nu găsesc %s în %s." % (a.order, pref))
+    _comanda_ceruta(a, o)   # Order Hub, confirmarea și „ANULEZ …”: numele canonic
+    if _oh_anulare(a, agent, pref, o):   # și pe o comandă deja anulată: Order Hub îi anulează etichetele rămase vii
+        return
     if o.get("cancelledAt"):
         print("  %s e deja anulată." % a.order); return
+    if _awb_viu(o):   # Order Hub n-o cunoaște, dar are etichetă: orderCancel de aici ar lăsa-o vie la curier
+        print("  ⛔ %s are AWB (%s), iar anularea de aici nu atinge eticheta. Folosește `xconnector.py order-cancel"
+              " --order %s`, care o anulează întâi." % (a.order, _awb_viu(o), a.order))
+        if a.apply:
+            sys.exit(OH_REFUZ)
+        return
     print("─" * 64)
     print("  %s ANULEZ %s (%s, %s)" % ("" if a.apply else "[DRY-RUN]", a.order, o["displayFinancialStatus"], o["displayFulfillmentStatus"]))
     print("  motiv=%s refund=%s restock=%s" % (a.reason, bool(a.refund), not a.no_restock))
@@ -445,6 +651,7 @@ def op_modify(a, agent):
     o = get_order(pref, a.order)
     if not o:
         sys.exit("Nu găsesc %s." % a.order)
+    _comanda_ceruta(a, o)   # altă comandă decât cea cerută → cod 2, înainte de orice scriere
     ful = o["displayFulfillmentStatus"]
     if ful not in ("UNFULFILLED", "PARTIALLY_FULFILLED", "ON_HOLD", "OPEN", "SCHEDULED"):
         print("  ⚠ %s e %s — modificarea poate să nu mai conteze (deja expediată)." % (a.order, ful))
@@ -469,6 +676,7 @@ def op_modify(a, agent):
         plan_set.append((term, q)); print("    %s %s" % ("− scot" if q == 0 else "→ qty=%d" % q, e[1][:40]))
     if new_addr:
         print("    adresă → %s" % json.dumps(new_addr, ensure_ascii=False))
+    _oh_eticheta_veche(a, agent, o)
     if not a.apply:
         print("  → --apply ca să modifici."); return
     if new_addr:
@@ -560,6 +768,11 @@ def main():
     ap.add_argument("--note"); ap.add_argument("--apply", action="store_true")
     ap.add_argument("--promo", action="store_true", help="place/swap: aplică promoția magazinului (parfum 2+1 / transport sub prag). La `replace` fără --items, valoarea vine automat din comanda veche.")
     a = ap.parse_args()
+    for _s in (sys.stdout, sys.stderr):   # ca xconnector.py: pe o consolă cp1252, „─ ✅ ⛔" nu trebuie să oprească scriptul
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
     agent = CS_AGENTS.get((a.agent or os.getenv("CS_AGENT", "")).strip().lower())
     if not agent:
