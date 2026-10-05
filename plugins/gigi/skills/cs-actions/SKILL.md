@@ -56,6 +56,8 @@ cs_actions.py modify  --order EST188351 --store EST [--address "Str Noua 9" --ci
 cs_actions.py invoice --order GT44004                                     # factură fiscală SmartBill
 ```
 - **Fără `--apply` = DRY-RUN** (arată exact ce ar face). Arată sumarul agentului, confirmă, apoi rulează cu `--apply`.
+- **cancel întreabă ÎNTÂI Order Hub**: el anulează eticheta la curier, apoi comanda. Plătită cu cardul = rambursare + storno automat (apare în planul probei; `--refund` nu se aplică). Stocul se repune (`--no-restock` ca să nu). Tagurile agent + `anulat-cs` se pun doar după ce Shopify arată comanda anulată (altfel: rând cu ⚠, fără taguri). `--reason` ajunge la Order Hub ca text în nota comenzii (`CS: customer`). Celelalte etichete vii din Shopify se verifică la Order Hub; una pe care n-o cunoaște oprește anularea. Cu `--apply`: cod 3 = refuz (plecat, Shopify a refuzat, etichetă pe care Order Hub n-o cunoaște…), cod 2 = fără răspuns valid (sau răspuns pierdut după execuție: „POATE să fi fost executată”) → vezi comanda în https://orderhub.arona.ro/app/orders. Shopify direct doar pe o comandă pe care Order Hub n-o cunoaște și care n-are AWB. La Order Hub (și în rândurile ANULEZ / MODIFIC) merge numele canonic din Shopify: `--order 123456 --store EST` → EST123456; dacă Shopify întoarce altă comandă decât cea cerută (`EST 123456` → EST100200), `cancel` și `modify` ies cu cod 2, fără nicio scriere. Test: `scripts/test_cancel_oh.py`.
+- **modify** pe o comandă care are deja AWB: eticheta rămâne cu datele vechi → la 1–2 minute după modificare, `xconnector.py awb-regen` (probă, apoi execuție). Etichetele le ia din Order Hub și din Shopify; dacă Order Hub nu răspunde și Shopify nu arată niciuna, spune cu ⚠ că nu se știe (o etichetă făcută direct la curier apare în Shopify abia la prima scanare).
 - **COD**: `place/swap/resend` creează comandă neplătită (`paymentPending`) → se expediază, plătește la livrare.
 - **PROMO la plasare**: discounturile AUTOMATE Shopify (2+1, quantity) **NU se aplică pe draft orders** → se aplică MANUAL. **`replace --from-order X` fără `--items` = reproduce EXACT valoarea comenzii vechi** (produse + discount + transport din Shopify — „cât era comanda"). `place`/`replace --items`/`swap` cu **`--promo`** = aplică promoția magazinului: **parfumuri (EST/GT/NUB) 2+1** (la fiecare 3, cel mai ieftin gratis) + **transport sub pragul de free shipping**. Deals (quantity per-SKU) → folosește `replace` fără `--items` (copiază valoarea). Vezi [[releaseit-cod-promo-model]].
 - **Produse**: `--items "termen:cantitate;..."` (termen = SKU exact sau titlu). Ambiguu → scriptul cere SKU-ul.
@@ -67,6 +69,7 @@ cs_actions.py invoice --order GT44004                                     # fact
 ## Auth (nimic nu se printează)
 - Shopify write per magazin: `SHOPIFY_STORES_CSV` (KB) — toate 20 au `write_orders`.
 - Adresă swap/resend: `XCONNECTOR_SHOPS` (GT) / `FRISBO_ORG_TOKENS` (restul) — KB.
+- Anulare prin Order Hub: `OH_CS_TOKEN` — KB (cheie de serviciu; clientul e `../xconnector/oh_client.py`).
 - Client→comandă: DB `metrics.orders` prin MCP `postgres-metrics` (read-only).
 
 ## Siguranță

@@ -19,7 +19,7 @@ flag-uri, iar output-ul e curat. Cazi pe CLI (`uv run …`) DOAR pt ce n-are în
 | Server (user-scope, „✔ Connected") | Fișier | Tool-uri |
 |---|---|---|
 | **arona-ads** (paid media + storefront) | `gigi/skills/google-ads-mcc/mcp_server.py` | `gads_accounts`, `gads_query`, `gads_portfolio`, `gads_profit_verdict`, `gads_ngram`, `gads_search_terms`, `gads_negative_cleaner`, `gads_change_history`, `weekly_insights`, `spend_pacing`, `merchant_feed_health`, `merchant_performance`, `gads_set_budget/set_tcpa/set_status/add_negatives/add_keywords` (gated), `shopify_stores`, `shopify_graphql`, `shopify_feed_gaps`, `meta_report/list/set_budget`, `tiktok_report/list/set_budget` |
-| **arona-fulfillment** (CS + livrare) | `gigi/skills/xconnector/mcp_server.py` | `cs_customer`, `cs_wismo`, `cs_conversation`, `xc_links`, `xc_summary`, `xc_address_issues`, `xc_not_downloaded`, `xc_order_cancel`, `xc_awb_make`, `xc_awb_void`, `xc_inv_make` (acțiunile = dry-run) |
+| **arona-fulfillment** (CS + livrare) | `gigi/skills/xconnector/mcp_server.py` | `cs_customer`, `cs_wismo`, `cs_conversation`, `xc_links`, `xc_summary`, `xc_address_issues`, `xc_not_downloaded`, `xc_order_cancel`, `xc_awb_make`, `xc_awb_void`, `xc_awb_regen`, `xc_inv_make` (acțiunile = dry-run) |
 | **arona-profit** (P&L + livrabilitate) | `gigi/skills/multi-brand-pnl/mcp_server.py` | `pnl`, `pnl_today`, `fulfillment`, `breakeven` |
 | **arona-catalog** (produse + inventar) | `gigi/skills/product-sales/mcp_server.py` | `product_sales`, `stock_alerts`, `returns_rma`, `reviews` |
 | **arona-social** (social organic) | `gigi/skills/social-post/mcp_server.py` | `social_listen`, `social_post_list`, `social_post` (gated), `competitor_ads` |
@@ -30,7 +30,7 @@ flag-uri, iar output-ul e curat. Cazi pe CLI (`uv run …`) DOAR pt ce n-are în
 > **8 servere arona · ~63 tool-uri.** Domenii rămase eventual: fiscal (SmartBill e deja în arona-fulfillment `xc_inv_make`; e-Transport = VPS), content-generation (articole = flux interactiv, nu MCP-natural).
 
 **Convenții comune:** read-only by default; **mutațiile Google Ads/Meta/TikTok = DRY-RUN dacă nu pui `apply=true`**;
-**mutațiile Shopify cer `confirm_mutation=true`** (Shopify n-are dry-run); acțiunile xConnector au garda „plecată".
+**mutațiile Shopify cer `confirm_mutation=true`** (Shopify n-are dry-run); acțiunile pe comandă și AWB (`xc_order_cancel`, `xc_awb_void`, `xc_awb_regen`, `xc_awb_make`) întreabă întâi Order Hub, care hotărăște pe orice comandă pe care o cunoaște.
 Credențiale din KB (self-provisioning la pornire, nu se printează). Toate = wrapper SUBȚIRE peste scripturile testate.
 
 ## 🔧 REGULA #2 — când apare o capabilitate nouă, ADAUG-O la MCP-ul potrivit
