@@ -323,6 +323,41 @@ def t_tokenuri():
               len(o1) == 1 and not o2 and not any(k.startswith("SHOPIFY_ALT") for k in kb_citiri),
               "apel1=%d apel2=%d kb2=%s" % (len(o1), len(o2), kb_citiri))
 
+        # Un eșec TRECĂTOR (5xx / rețea) nu se ține minte: capture și inv-bulk țin procesul zeci de minute, iar codul de
+        # pe VPS recupera magazinul la apelul următor (PAR-MINT-1). Un 400 (app neinstalat) rămâne ținut minte, mai sus.
+        raspunsuri = []
+
+        def http_tranzitoriu(method, url, headers, body=None, **kw):
+            if url.endswith("/admin/oauth/access_token") and raspunsuri:
+                oauth.append((url.split("/")[2], (body or {}).get("client_id")))
+                return raspunsuri.pop(0)
+            return http_numarat(method, url, headers, body, **kw)
+
+        X.http = http_tranzitoriu
+        try:
+            T.lume(kb=dict(T.APP_TST, **app_alt))
+            zero()
+            raspunsuri[:] = [(503, json.dumps({"errors": "Service Unavailable"})),
+                             (429, json.dumps({"errors": "Exceeded 2 calls per second"})),
+                             ("ERR", "timed out"), (500, "<html>Internal Server Error</html>")]
+            r = [X._mint_din_marcaj(alt, marcaj_alt) for _ in range(5)]
+            check("eșec trecător la marcaj (503 / 429 JSON, rețea, 500 HTML): nu se ține minte; a cincea încercare emite",
+                  r == [None, None, None, None, "tok-alt"] and len(oauth) == 5, "r=%s oauth=%s" % (r, oauth))
+            T.lume(kb=dict(T.APP_TST, **app_alt))
+            zero()
+            raspunsuri[:] = [(401, json.dumps({"errors": "invalid_client"}))]
+            r = [X._mint_din_marcaj(alt, marcaj_alt) for _ in range(2)]
+            check("eșec definitiv la marcaj (401 JSON): se ține minte, al doilea apel nu mai cere nimic",
+                  r == [None, None] and len(oauth) == 1, "r=%s oauth=%s" % (r, oauth))
+            T.lume(kb={X._SHOPIFY_APPS[0][0]: "cid-alt", X._SHOPIFY_APPS[0][1]: "csec-alt"})
+            zero()
+            raspunsuri[:] = [(502, json.dumps({"errors": "Bad Gateway"}))]
+            r = [X._shopify_mint("lab-test.myshopify.com") for _ in range(2)]
+            check("eșec trecător la app (502 JSON): _shopify_mint nu-l ține minte; al doilea apel emite",
+                  r == [None, "tok-alt"] and len(oauth) == 2, "r=%s oauth=%s" % (r, oauth))
+        finally:
+            X.http = http_numarat
+
         # magazin din XCONNECTOR_SHOPS fără rând în CSV → _shopify_mint prin app-urile client_credentials (Lab Noir & co.)
         T.lume(tok=None, kb={"SHOPIFY_ARONA_CLIENT_ID": "cid-x", "SHOPIFY_ARONA_CLIENT_SECRET": "csec-x"})
         zero()

@@ -374,6 +374,7 @@ def _mint_din_marcaj(shop, marcaj):
     if not (cid and csec):
         _mint_esuat(("marcaj", shop, marcaj))
         return None
+    tranzitoriu = False
     try:
         st, b = http("POST", "https://%s/admin/oauth/access_token" % shop, {"Content-Type": "application/json"},
                      {"client_id": cid, "client_secret": csec, "grant_type": "client_credentials"})
@@ -381,13 +382,15 @@ def _mint_din_marcaj(shop, marcaj):
         if st == 200 and d.get("access_token"):
             _ARONA_TOK[shop] = (d["access_token"], _t.time() + (d.get("expires_in") or 86400))
             return d["access_token"]
+        tranzitoriu = _mint_tranzitoriu(st)
     except Exception:
-        pass
-    _mint_esuat(("marcaj", shop, marcaj))
+        tranzitoriu = True      # corp ilizibil / excepție: nu știm că e definitiv
+    if not tranzitoriu:
+        _mint_esuat(("marcaj", shop, marcaj))
     return None
 
 
-_MINT_ESUAT_TTL = 300   # s: cât se ține minte, pe proces, o emitere de token eșuată (app neinstalat, secrete lipsă)
+_MINT_ESUAT_TTL = 300   # s: cât se ține minte, pe proces, o emitere eșuată DEFINITIV (app neinstalat, secrete lipsă, 4xx)
 
 
 def _mint_esuat(cheie):
@@ -398,6 +401,13 @@ def _mint_esuat(cheie):
 def _mint_esuat_recent(cheie):
     import time as _t
     return (_ARONA_TOK.get(("esuat",) + tuple(cheie)) or 0) > _t.time()
+
+
+def _mint_tranzitoriu(st):
+    """Răspuns după care emiterea poate merge la reîncercare (rețea, 429, 5xx): NU se ține minte ca eșec. capture și
+    inv-bulk țin procesul zeci de minute, iar un blip ar scoate magazinul din toată rularea; codul de pe VPS îl
+    recupera la apelul următor."""
+    return st == "ERR" or (isinstance(st, int) and (st == 429 or st >= 500))
 
 
 def _pereche_app(k_id, k_secret):
@@ -471,6 +481,7 @@ def _shopify_mint(shop):
         return c[0]
     if _mint_esuat_recent(("app", shop)):
         return None
+    tranzitoriu = False
     for cid_key, csec_key in _SHOPIFY_APPS:
         cid, csec = _pereche_app(cid_key, csec_key)
         if not (cid and csec):
@@ -482,9 +493,12 @@ def _shopify_mint(shop):
             if s == 200 and d.get("access_token"):
                 _ARONA_TOK[shop] = (d["access_token"], _t.time() + (d.get("expires_in") or 86400))
                 return d["access_token"]
+            tranzitoriu = tranzitoriu or _mint_tranzitoriu(s)
         except Exception:
+            tranzitoriu = True
             continue
-    _mint_esuat(("app", shop))
+    if not tranzitoriu:       # un app a picat trecător (rețea / 429 / 5xx) → nu se ține minte, se reîncearcă
+        _mint_esuat(("app", shop))
     return None
 
 
