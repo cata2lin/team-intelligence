@@ -14,7 +14,9 @@ Operațiuni:
 Comun: COD = draftOrderComplete(paymentPending). Tag AGENT mereu; --swap/resend/etc adaugă tag-ul lor.
 Adresa pt swap/resend: xConnector (GT) / Frisbo (restul) / --address (override). DRY-RUN implicit; scrie cu --apply.
 
-Token Shopify (write_orders): SHOPIFY_STORES_CSV (env/cwd/KB). xConnector: XCONNECTOR_SHOPS. Frisbo: FRISBO_ORG_TOKENS.
+Token Shopify (write_orders): SHOPIFY_STORES_CSV (env/cwd/KB); un rând cu marcajul OAUTH:<APP>_CLIENT_ID+SECRET își
+emite tokenul din app-ul magazinului (client_credentials). xConnector: XCONNECTOR_SHOPS. Frisbo: FRISBO_ORG_TOKENS.
+Secretele: din KB, altfel din env (Second Brain le injectează în env).
 Agent: --agent NAME (Raluca/Oana/Andra/Anna/OanaO), altfel env CS_AGENT. Nicio cheie nu se printează.
 """
 import argparse, csv, io, json, os, re, subprocess, sys, time, urllib.request, urllib.error, urllib.parse
@@ -38,13 +40,17 @@ def _kb_path():
 
 
 def _kb_secret(name):
+    """Secretul din KB, altfel din env. Second Brain n-are kb.py: acolo secretele manifestului vin în env.
+    KB întâi, ca în xconnector, ca un env vechi de pe o stație să nu bată KB-ul."""
     kb = _kb_path()
-    if not kb:
-        return ""
-    try:
-        return subprocess.run(["uv", "run", kb, "secret-get", name], capture_output=True, text=True, timeout=30).stdout.strip()
-    except Exception:
-        return ""
+    if kb:
+        try:
+            v = subprocess.run(["uv", "run", kb, "secret-get", name], capture_output=True, text=True, timeout=30).stdout.strip()
+            if v:
+                return v
+        except Exception:
+            pass
+    return os.getenv(name, "").strip()
 
 
 def _stores_csv():
@@ -70,16 +76,53 @@ def stores():
     return _STORES
 
 
+def _prefix_canonic(p):
+    """Prefixul din stores.csv. O comandă poate purta unul mai scurt decât rândul magazinului (DUP2426 e la DUPBG):
+    se ia rândul care îl continuă, doar dacă e unul singur."""
+    p = (p or "").upper()
+    if not p or p in stores():
+        return p
+    cand = [k for k in stores() if k.startswith(p)]
+    return cand[0] if len(cand) == 1 else p
+
+
+_EMISE = {}
+
+
+def _token_emis(shop, marcaj):
+    """Rândul unor magazine (ORC, SK, HU, MD, DUPBG, BUC, LAB) poartă marcajul `OAUTH:<NUME>_CLIENT_ID+SECRET`, nu un
+    token: tokenul (~24h) se emite din app-ul Shopify al magazinului, prin client_credentials, ca în xconnector.
+    Secretele pleacă doar spre un domeniu `<magazin>.myshopify.com`; nici ele, nici tokenul nu se printează."""
+    if shop in _EMISE:
+        return _EMISE[shop]
+    m = re.match(r"^OAUTH:([A-Z0-9_]+)_CLIENT_ID\+SECRET$", marcaj)
+    if not m or not re.match(r"^[a-z0-9][a-z0-9-]*\.myshopify\.com$", shop):
+        sys.exit("Token neemis pentru %s: marcaj sau domeniu nevalid în stores.csv." % shop)
+    cid, csec = _kb_secret(m.group(1) + "_CLIENT_ID"), _kb_secret(m.group(1) + "_CLIENT_SECRET")
+    if not (cid and csec):
+        sys.exit("Token neemis pentru %s: lipsesc %s_CLIENT_ID / _CLIENT_SECRET (KB sau env)." % (shop, m.group(1)))
+    s, d = _http("POST", "https://%s/admin/oauth/access_token" % shop, {"Content-Type": "application/json"},
+                 {"client_id": cid, "client_secret": csec, "grant_type": "client_credentials"})
+    tok = d.get("access_token") if isinstance(d, dict) else None
+    if s != 200 or not tok:
+        sys.exit("Token neemis pentru %s: Shopify a răspuns %s." % (shop, s))
+    _EMISE[shop] = tok
+    return tok
+
+
 def store_of(prefix):
-    s = stores().get(prefix.upper())
+    s = stores().get(_prefix_canonic(prefix))
     if not s:
         sys.exit("prefix %r negăsit în stores.csv (--store)" % prefix)
-    return s
+    shop, token = s
+    if token.startswith("OAUTH:"):
+        token = _token_emis(shop, token)
+    return shop, token
 
 
 def prefix_of_order(name):
     m = re.match(r"^([A-Za-z]+)", name or "")
-    return m.group(1).upper() if m else None
+    return _prefix_canonic(m.group(1)) if m else None
 
 
 # ───────────────────────── HTTP ─────────────────────────
