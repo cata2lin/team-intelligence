@@ -18,71 +18,84 @@
 | **telefon** client | `gigi:cs-360 customer` | `cs360.py customer --phone 0700000000` → toate comenzile lui, LTV, refuzuri. **Merge și `40748…` / `+40748…`** (ultimele 9 cifre). |
 | **nume** client | `gigi:cs-360 customer` | `cs360.py customer --name "Rebeca Kiss"` |
 | **email** client | `gigi:cs-360 customer` | `cs360.py customer --email ana@gmail.com` |
-| **nr comandă** (GT123) | `gigi:xconnector links` | `xconnector.py links --order GT45911` → status + linkuri Shopify/xConnector/tracking |
-| **AWB / tracking** | `gigi:xconnector links` | `xconnector.py links --awb 81313116658` |
+| **nr comandă** (GT123) | `gigi:order-hub comanda` · `gigi:xconnector links` | `order-hub comanda` (`comanda: GT000001`) → fișa din Order Hub: status, etichete, hold-uri, tichet, facturi, ce se poate face acum · `xconnector.py links --order GT000001` → linkuri Shopify/xConnector/tracking |
+| **AWB / tracking** | `gigi:xconnector links` | `xconnector.py links --awb 00000000001` |
 | „**unde e comanda**" (WISMO) | `gigi:cs-360 wismo` | după order# / telefon / AWB → order + fulfillment + tracking |
 | identitate **cross-platform** (Shopify ↔ Richpanel) | `gigi:customer-identity` | leagă email/telefon/FB/IG de comenzi și tichete |
 
 > ⚠️ xConnector API **NU** caută după telefon/nume (doar order# / AWB / SKU / dată). Telefon/nume = DOAR `cs-360`.
 
 ## 2. 🧩 PROFIL 360 („spune-mi tot despre comanda/clientul X") — ORCHESTRARE (combini, nu un singur tool)
-1. `gigi:xconnector links --order GT123` → comanda + status + linkuri
+1. `gigi:order-hub comanda` (`comanda: GT123`) → statusul din Order Hub, etichete, facturi, tichet; linkurile: `gigi:xconnector links --order GT123`
 2. `gigi:cs-360 customer --phone <al lui>` → alte comenzi + profil + refuzuri
 3. `gigi:cs-tickets` / Richpanel → tichetele clientului
 4. (opțional) `gigi:cs-360 conversation --llm` / `gigi:cs-360 conversation` → profil 360 pe o conversație Richpanel
 
-**Exemplu** — CS: „cine e clientul de la GT45911 și ce mai are?"
-→ `links --order GT45911` (afli telefonul + statusul) → `cs-customer-360 --phone <telefon>` (istoricul) → `cs-tickets` (tichete).
+**Exemplu** — CS: „cine e clientul de la GT000001 și ce mai are?"
+→ `links --order GT000001` (afli telefonul + statusul) → `cs-customer-360 --phone <telefon>` (istoricul) → `cs-tickets` (tichete).
 
 ## 3. 📦 STATUS / livrare / AWB
 | Vreau … | Tool | Exemplu |
 |---|---|---|
-| status comandă + tracking | `gigi:xconnector links` | `links --order GT123` (livrare reală din AWBprint) |
+| **status comandă** (sursa de adevăr) | `gigi:order-hub comanda` | fișa din Order Hub (statusurile DOAR de aici, nu din AWBprint) |
+| tracking + linkuri | `gigi:xconnector links` | `links --order GT123` |
 | tracking multi-curier dintr-un AWB | `gigi:awb-track` | lipești AWB-ul → status DPD/Sameday/Econt/Packeta |
 | livrabilitate / refuzuri / COD-risk | `gigi:deliverability-monitor` / `gigi:fulfillment-analytics` | rapoarte pe magazin |
 
-## 4. 🛠️ ACȚIUNI (modific / anulez / refac) — `gigi:cs-actions` sau `gigi:xconnector`
-| Vreau să … | Comandă (xConnector) | Exemplu |
-|---|---|---|
-| **anulez** o comandă | `order-cancel` | `xconnector.py order-cancel --order GT123 --agent Raluca --motiv "client s-a răzgândit"` = probă; apoi același rând cu `--apply`. Prin Order Hub: eticheta întâi, apoi comanda; refuză dacă a plecat |
-| **modific adresa** (la o valoare dată) | `addr-set` | `xconnector.py addr-set --order EST123 --city "Cluj" --zip 400001 --address1 "…" --apply`. Dacă comanda are deja AWB, eticheta rămâne cu adresa veche → după 1–2 minute, `awb-regen` |
-| **schimb conținutul** (COD/Releaseit, line items blocate) | cancel + replace | `order-cancel … --apply` apoi `gigi:cs-actions place` (comandă nouă COD) → AWB-ul îl face Order Hub |
-| **fac AWB** | Order Hub | AWB-ul îl face Order Hub (singur, sau „Ship now” din Order Hub). `xconnector.py awb-make` doar când Order Hub cere eticheta făcută manual în xConnector: se refuză pe o comandă care are deja AWB și nu eliberează hold-urile puse de Order Hub |
-| **refac AWB** (alt nr. de colete, adresă schimbată) | `awb-regen` | probă: `xconnector.py awb-regen --order GRAND123 --parcels 3`; execuție: rândul „→ execuție” afișat de probă (`… --parcels 3 --awb <eticheta> --apply`). Fără răspuns la execuție (timeout, „POATE să fi fost executată”): repetă EXACT aceeași comandă, cu același `--awb` — NU o probă nouă |
-| **opresc** o comandă (anulez AWB, rămâne pe hold) | `awb-void` | `xconnector.py awb-void --order GT123 --apply`. NU e pasul întâi din „anulez și fac alt AWB” (acela e `awb-regen`); hold-ul se eliberează din Order Hub |
-| **factură** (creez/anulez/storno/regen) | `inv-make / inv-cancel / inv-storno / inv-regen` | `xconnector.py inv-make --order GT123 --apply` |
-| comandă nouă COD / swap / resend gratis | `gigi:cs-actions` | rezolvă clientul + plasează/înlocuiește |
+## 4. 🛠️ ACȚIUNI (modific / anulez / refac / bani) — `gigi:order-hub`, pe TOATE magazinele
+> 🔴 **Din 6-oct-2026 orice modificare pe o comandă se face prin `gigi:order-hub`** (API-ul Order Hub pentru agenți,
+> `/api/cs`). Order Hub ține tokenurile tuturor magazinelor (inclusiv ORC, SK, HU, BUC, MD, DUP, LAB), gărzile, lacătele,
+> plafoanele și istoricul. Comenzile de modificare din `gigi:xconnector` (`order-cancel`, `addr-set`, `awb-make`,
+> `awb-regen`, `awb-void`, `inv-*`) și `gigi:cs-actions` NU se mai folosesc: n-au gărzile Order Hub.
 
-> 🔴 **Din 2-oct-2026 acțiunile pe comandă și AWB întreabă ÎNTÂI Order Hub** (`order-cancel`, `awb-void`, `awb-regen`,
-> `awb-make`, `addr-set --make-awb`, `gigi:cs-actions cancel`). Order Hub face etichetele pe toate magazinele — direct la
-> curier, unde xConnector nu le vede, sau prin xConnector — și ține hold-urile (dublură, blocklist, „de confirmat”). O
-> anulare prin xConnector anula comanda în Shopify și lăsa eticheta vie la curier (cinci comenzi, 29-sep). Acum hotărăște
-> Order Hub pe orice comandă pe care o cunoaște: anularea, oprirea și refacerea trec prin xConnector doar când Order Hub
-> răspunde că n-o cunoaște, iar un AWB nou (`awb-make`) doar pe o comandă fără AWB viu în Order Hub.
-> - **Întâi proba** (fără `--apply`): arată planul Order Hub — ce AWB anulează, ce se întâmplă cu stocul și cu banii.
->   `--agent <Nume>` ajunge în istoricul comenzii, `--motiv "…"` în nota ei (la anulare și la oprire).
-> - **Bani:** o comandă plătită cu cardul e rambursată și i se stornează factura automat (în plan: „Bani: …”). `--refund`,
->   `--notify` și `--force` nu se aplică. **Stoc:** se repune; `--no-restock` ca să nu.
-> - **Refacerea** (`awb-regen --apply`) cere `--parcels` și `--awb` (eticheta din probă): repetată pe aceeași etichetă,
->   Order Hub o refuză, deci nu iese a treia etichetă. Reface pe același curier; alt curier → din Order Hub. După o
->   schimbare de adresă, refă eticheta abia după 1–2 minute (adresa nouă trebuie să fi ajuns peste tot).
-> - **Coduri de ieșire cu `--apply`:** 3 = refuz (plecat, etichetă pe care Order Hub n-o cunoaște, Shopify a refuzat,
->   hold pus de Order Hub); 2 = nimic scris prin xConnector: fără un răspuns valid de la Order Hub (cheia `OH_CS_TOKEN`
->   lipsă, eroare, timeout) sau comanda nu s-a putut citi din Shopify — fă acțiunea din https://orderhub.arona.ro/app/orders.
->   Excepție: la `awb-regen`, un 2 cu „xConnector are altă adresă decât Shopify” înseamnă că adresa nouă n-a ajuns încă
->   în xConnector — reîncearcă peste 1–2 minute (din Order Hub doar dacă adresa din xConnector e cea bună).
-> - **„Cererea a plecat, dar răspunsul n-a venit”** (tot cod 2, sau un timeout al uneltei): poate să fi fost executată în
->   Order Hub. La anulare și oprire: rulează proba înainte de a repeta. La **`awb-regen`** invers: repetă EXACT aceeași
->   comandă, cu același `--awb` (mesajul o tipărește: „→ repetă: …”) — dacă refacerea s-a făcut, Order Hub o refuză
->   (`eticheta_anulata`); dacă nu, o face o singură dată. NU lua `--awb` dintr-o probă nouă după un răspuns pierdut:
->   proba arată deja eticheta nouă, iar refacerea ei ar anula-o și ar face a treia. Dacă proba de după o refacere nu mai
->   tipărește „→ execuție” („Refacere de curând … e gata” sau „→ repetă”), nu construi execuția de mână: refacerea e
->   gata, sau mai întâi se repetă cererea fără răspuns.
-> - **`shopify_refuz`:** eticheta e anulată la curier, comanda rămâne deschisă în Shopify, Order Hub deschide tichet CS
->   (azi: Belasil, până se redeschide aplicația Order Hub în admin).
-> - **Ramburs plătit apoi cu cardul:** eticheta fără ramburs o reface Order Hub. Emailul „[COD dublu]” doar raportează
->   comenzile lui; nu le mai reface de aici.
-> - Facturile (`inv-*`, cu garda OH) și cronul `fulfill` nu trec prin Order Hub.
+**Rețeta, pe fiecare acțiune:**
+1. `comanda` (`comanda: GT123`) — fișa din Order Hub: status, etichete, hold-uri, tichet, facturi, ce se poate face acum.
+2. **Proba** `<acțiune>` — nu scrie nimic. Întoarce planul, blocajele (`imposibil` / `politica`), `peste_necesar` și
+   `confirmare` (valabilă 15 minute).
+3. Arată omului planul și blocajele, pe scurt, și **cere-i acordul explicit**. Serverul nu mai întreabă: agentul e poarta.
+4. **Execuția** `<acțiune>-apply`, cu ACEIAȘI parametri plus `motiv`, `confirmare` (din probă) și `peste` = exact
+   `peste_necesar`. Un blocaj `imposibil` nu se trece (pauza de AWB a magazinului, comandă expediată / rambursată /
+   arhivată în Shopify, etichetele Frisbo de la MD).
+
+`utilizator` = numele omului de la CS, cum îl spune el: ajunge în istoricul comenzii.
+
+| Vreau să … | Acțiune `gigi:order-hub` | Parametri (exemplu) |
+|---|---|---|
+| **anulez** o comandă | `anulare` | `comanda: GT123` (`restock`, `rambursare`: da/nu; pe card rambursează și stornează ca butonul din OH) |
+| **opresc** o comandă (AWB anulat + hold + tichet) | `oprire` | `comanda: GT123` |
+| **scot din hold** | `eliberare` | `comanda: GT123` (doar hold-urile citite în probă, după id) |
+| **fac AWB** | `awb-nou` | `comanda: GT123` (`colete: 2` opțional; contul și ruta le alege Order Hub) |
+| **refac AWB** (alt nr. de colete, adresă nouă) | `refacere` | `comanda: GRAND123, colete: 3` (+ `awb` = eticheta arătată de probă) |
+| **modific adresa** (și refac AWB-ul) | `adresa` | `comanda: EST123, oras: Cluj, cod_postal: 400001, strada: …, reface_awb: da` |
+| **scot / adaug produse** | `produse` | `linii: [{"sku": "HA-0002", "cantitate": 0}]` · `adauga: [{"variant_id": "…", "cantitate_totala": 1}]` |
+| **notă pe comandă** | `nota` | `text: …` |
+| **tichetul CS din Order Hub** (coada CS, nu Richpanel) | `tichet` | `operatie: confirma / inchide / nota / deschide` |
+| **cererea de anulare a clientului** | `cerere-anulare` | `mod: executa / anuleaza / pastreaza` |
+| **comandă nouă COD** | `comanda-noua` | `magazin: …, produse: [...], adresa: {...}` sau `din_comanda: GT123` |
+| **swap** (alte produse, aceeași adresă) | `schimb` | `produse: [{"sku": "…", "cantitate": 1}]` |
+| **resend gratuit** | `retrimitere` | `comanda: GT123` |
+| **înlocuire** (anulează originalul, apoi comanda nouă) | `inlocuire` | `bani: ramburseaza / pastreaza` |
+| **factură / storno** | `factura` / `factura-storno` | storno: `serie`, `numar` (documentul exact) |
+| **rambursare** | `rambursare` | `suma: 50` (cel mult 2 zecimale, fără separator de mii) sau `linii` |
+| **ramburs încasat** (marchez comanda plătită) | `ramburs-platit` | `comanda: GT123` |
+| **retur DPD** / curier pentru retur / anulez returul | `retur` / `retur-curier` / `retur-anulare` | `comanda: GT123` |
+| **cerere la curier** (reprogramare, nouă încercare, retur la expeditor) | `cerere-curier` | `actiune: reprogramare` |
+| **punct de ridicare** (locker) | `punct-ridicare` | `actiune: seteaza, retea: easybox, punct_id: …` |
+| **taguri** / **e-mail comandă** | `taguri` / `email-comanda` | `adauga: [...]` / `email: …` |
+
+Parametrii exacți: `gigi:order-hub actiuni` (sau `skill_info`). Listele de obiecte se dau ca JSON.
+
+> **Coduri de ieșire** (ultima linie: `OH_REZULTAT rezultat=… scris=… iesire=…`):
+> - **0** făcut, sau proba fără blocaje;
+> - **2** nimic scris (cerere greșită, plan schimbat, confirmare expirată, comanda ocupată): corectezi și faci proba din nou;
+> - **3** refuz Order Hub, nimic scris (și plafonul atins): spui omului de ce, nu reîncerci singur;
+> - **4** scris PARȚIAL: NU repeta, deschide fișa și spune ce a rămas;
+> - **5** necunoscut (cererea a plecat, răspunsul nu, sau „în lucru"): **repetă IDENTIC** (aceeași confirmare) sau
+>   `operatie` (`id: N`); NU face probă nouă. O repetare identică e sigură: Order Hub o recunoaște.
+>
+> **Banii** sunt ireversibili (factura pleacă în e-Factura, rambursarea la client): verifică de două ori suma și documentul
+> numit în plan. **Nu face nimeni prin agent:** marcare „livrat", AWB pe un cont ales de mână, mesaje către client,
+> comasarea comenzilor, blocklist. `gigi:xconnector links` rămâne pentru linkuri și tracking.
 
 ## 5. 🖨️ PRINT etichete în depozit (Windows + Chrome)
 > 🔴 **Din 24–25 sep 2026 AWB-urile DPD se fac din ORDER HUB (contul `dpd-ro-arona`), nu din xConnector.** Etichetele astea
