@@ -422,21 +422,20 @@ PRODUCT_AD_SPEND_GOOGLE = """
 INSERT INTO cache.product_ad_spend (date, brand_id, sku, product_title, platform, spend_ron, source)
 SELECT s.date, s.brand_id, s.sku, s.product_title, 'google', s.spend_ron, 'google_product_insights'
 FROM (
-  -- grain = PK (date, sku); un sku poate exista sub mai multe brand-uri (skus generice deals: 'set-5-m', '31'…)
-  -- → însumează spend-ul pe sku și atribuie brandul cu cel mai mare spend (determinist), altfel PK (date,sku,platform)
-  -- ar primi 2 rânduri în acelaşi INSERT → CardinalityViolation.
-  SELECT g.date, v.sku,
-         (array_agg(v."brandId"    ORDER BY g."costRon" DESC NULLS LAST))[1] AS brand_id,
+  -- grain = PK REAL (date, brand_id, sku, platform): același sku generic ('set-5-m', '31'…) poate exista sub
+  -- mai multe branduri deals — fiecare își păstrează spend-ul propriu. Colapsarea pe "brandul dominant" muta
+  -- banii pe brandul greșit. ⚠️ ON CONFLICT trebuie să acopere PK-ul; (date,sku,platform) nu are index unic →
+  -- InvalidColumnReference, care a înghețat TOATĂ tabela din 2026-08-18 (inclusiv Google). Vezi 05-sep-2026.
+  SELECT g.date, v.sku, v."brandId" AS brand_id,
          (array_agg(g."productTitle" ORDER BY g."costRon" DESC NULLS LAST))[1] AS product_title,
          ROUND(SUM(g."costRon"), 2) AS spend_ron
   FROM google_ads_product_insights_daily g
   JOIN variants v ON v."shopifyNumericId" = (regexp_match(g."productItemId", '_(\\d+)$'))[1]::bigint
   WHERE g."productItemId" ~ '_\\d+$' AND v.sku IS NOT NULL AND v.sku<>'' AND g."costRon" IS NOT NULL
-  GROUP BY g.date, v.sku
+  GROUP BY g.date, v.sku, v."brandId"
 ) s
-ON CONFLICT (date, sku, platform) DO UPDATE SET
+ON CONFLICT (date, brand_id, sku, platform) DO UPDATE SET
   spend_ron = EXCLUDED.spend_ron,
-  brand_id = COALESCE(EXCLUDED.brand_id, cache.product_ad_spend.brand_id),
   product_title = EXCLUDED.product_title,
   source = EXCLUDED.source
 """
@@ -472,9 +471,8 @@ def run_product_ad_spend(apply):
     if fbtk:
         execute_values(mcur,
             "INSERT INTO cache.product_ad_spend (date,brand_id,sku,product_title,platform,spend_ron,source) "
-            "VALUES %s ON CONFLICT (date,sku,platform) DO UPDATE SET spend_ron=EXCLUDED.spend_ron, "
-            "brand_id=COALESCE(EXCLUDED.brand_id,cache.product_ad_spend.brand_id), source=EXCLUDED.source, "
-            "computed_at=now()",
+            "VALUES %s ON CONFLICT (date,brand_id,sku,platform) DO UPDATE SET spend_ron=EXCLUDED.spend_ron, "
+            "source=EXCLUDED.source, computed_at=now()",
             fbtk, page_size=2000)
         # IDEMPOTENT (fără a pierde last-known-good pe pull parțial): șterge cheile SKU STALE (dintr-o rulare
         # veche cu alt mapping SAU dublu-cont) DOAR în scope-urile (date,brand,platform) reîmprospătate ACUM
