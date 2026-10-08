@@ -882,7 +882,7 @@ apare doar când numești un user anume (`&user_id=`).
 
 ## 6. Defecte deschise
 
-### 6.1 Tichete captate FĂRĂ fir — **cauză găsită, fix cunoscut, NEAPLICAT**
+### 6.1 Tichete captate FĂRĂ fir — **fix APLICAT în cod 14 sep · re-tragerea pe VPS rămâne de rulat**
 
 **Simptom:** rândul de tichet se scrie, firul rămâne gol (`msg_total_at_fetch = 0`, zero rânduri în
 `rp_message`), iar la fiecare rulare se reîncearcă și eșuează la fel. Tichetul **trece de M1** și apare
@@ -932,7 +932,7 @@ mcp.call("get_conversation", {"conversation_number": 324855})
 ⚠️ **Fixul ăsta acoperă 1 din 8 erori.** Pentru celelalte 7, vezi §6.1b — sunt cauză diferită și
 reparație diferită.
 
-### 6.1b Parserul SSE se rupe la U+2028 — **7 din 8 erori · NEREPARAT**
+### 6.1b Parserul SSE se rupe la U+2028 — **7 din 8 erori · REPARAT în cod 14 sep, 15/15 fișiere · re-tragerea rămâne**
 
 **Cauza:** parserul din `rp.py` (`for line in txt.splitlines(): if line.startswith("data:")`) taie
 răspunsul în două când corpul conține **U+2028 LINE SEPARATOR** — caracter *legal neescapat* în JSON,
@@ -971,6 +971,30 @@ supraviețuire. Orice extrapolare ar fi ghicit.
 
 După ambele fixuri, rulează `rp_sync.py --from 2026-08-30 --to 2026-09-14` ca să recuperezi firele,
 apoi `parity_check.py --days 7`.
+
+> **✅ Stare 14 sep — ambele fixuri sunt în cod, nimic nu e încă pe VPS.**
+>
+> - **§6.1:** `fetch_thread` cade pe `conversation_number` când `conversation_id` e respins, iar
+>   `MirrorMCP.call` aruncă `MCPError` cu textul serverului. **Plus `call_raw`, obligatoriu:** aplicat
+>   literal, §6.1 omora `parity_check` — răspunsul-șir de la pagina ~51 urca până la `except Exception`
+>   din `main` ⇒ `sys.exit(2)` și zero raport pe TOATE zilele. `parity_check` folosește acum `call_raw`
+>   și își păstrează tratarea deliberată (zi NEDOVEDITĂ).
+> - **§6.1b:** `splitlines()` înlocuit cu `split` pe `\n` explicit, în **toate cele 15 fișiere** din cele
+>   9 skill-uri. Linia 625 din `cs_auto_draft.py` folosește tot `splitlines()`, dar parsează titluri
+>   Markdown, nu SSE — neatinsă.
+> - **Test de regresie** în `cs_mirror.py selftest` (65/65): un răspuns HTTP simulat cu U+2028 în corp,
+>   trecut prin `rp.MCP._post` **și** prin `MirrorMCP._post`. Dovedit prin mutație: cu oricare parser
+>   întors pe `splitlines()`, testul lui pică exact cu eroarea din producție
+>   (`JSONDecodeError: Unterminated string`) — 64/65.
+> - **Al 16-lea loc, în afara celor 15:** `shared/scripturi-tools/profit_orders_sync.py` are același
+>   tipar (`splitlines()` + `data:`), pe alt flux. Neatins — nu e Richpanel și nu e în lista de mai sus.
+>
+> **Re-tragerea, după merge** — fără root, prin `mirror-ctl` (§2.5b):
+> ```bash
+> sudo mirror-ctl pull                          # aduce checkout-ul la zi
+> sudo mirror-ctl sync 2026-08-30 2026-09-14    # recuperează firele
+> sudo mirror-ctl parity 7
+> ```
 
 ### 6.2 ~~Cinci fișiere untracked în git~~ — REZOLVAT 9 sep 2026
 
@@ -1127,11 +1151,11 @@ Partea cea mai utilă a dosarului. Fiecare rând a costat timp sau, într-un caz
 
 | Sarcină | Stare | Ce deblochează |
 |---|---|---|
-| **Fix `conversation_number` + `MirrorMCP.call` să arunce** (§6.1) | **cauză găsită, fix neaplicat** | 0,02% din tichete, dar tăcut. E cea mai mică sarcină cu cel mai clar câștig |
+| **Fix `conversation_number` + `MirrorMCP.call` să arunce** (§6.1) | **aplicat în cod 14 sep** (+ `call_raw`) · rămân merge + re-tragere | 0,02% din tichete, dar tăcut. E cea mai mică sarcină cu cel mai clar câștig |
 | ~~Commit în git al celor 5 fișiere untracked~~ → **merge PR #576 în `main`** + `deploy.sh --apply` (§6.2) | commis și împins, **nemergiat** | Până la merge, VPS-ul tot nu ia codul prin `git pull` |
 | ~~Scurgerea evenimentelor brute din D1 în `cs_mirror.db`~~ | **fără obiect** | D1 are 6 rânduri, toate IG DM. N-are ce scurge până nu trece App Review-ul |
 | **Citește `subject` pentru comentariile șterse** + fuzionează cele două arhive (§6.4) | **de făcut, ieftin** | Recuperează azi text pe care documentul îl declara pierdut definitiv |
-| **Repară parserul SSE la U+2028** (§6.1b), în toate cele 15 fișiere | **de făcut** | 7 din 8 erori curente; și riscul tăcut de a pierde o zi întreagă la enumerare |
+| **Repară parserul SSE la U+2028** (§6.1b), în toate cele 15 fișiere | **reparat în cod 14 sep, 15/15 — PR #593** · rămân merge + re-tragere | 7 din 8 erori curente; și riscul tăcut de a pierde o zi întreagă la enumerare |
 | **Bucla de interogare pe `/{story}/comments` pentru creativele ACTIVE** | **de scris — fezabilitatea e DOVEDITĂ (§3.5b)** | 149 $/lună. Tokenurile există, citirea merge, `can_hide=true`, cotă zero. Fără App Review |
 | Advanced Access Instagram (App Review) | **decizie de owner** | DOAR DM-urile Instagram. **Nu** deblochează ReplyZen |
 | ~~Validare ReplyZen: 3–5 zile în paralel~~ | **imposibil azi** | Webhook-ul nu primește niciun eveniment Facebook. Validarea ar pica. ReplyZen rămâne pornit |

@@ -49,7 +49,8 @@ def mcp_conv(conv_no, token):
                 body = r.read().decode()
         except Exception as e:
             return {"_error": str(e)}
-        ln = [l for l in body.splitlines() if l.startswith("data:")]
+        # NU splitlines(): taie si la U+2028, caracter legal neescapat in JSON (cs-documentatie §6.1b)
+        ln = [l for l in body.split("\n") if l.startswith("data:")]
         try:
             return json.loads(ln[-1][5:]) if ln else json.loads(body)
         except Exception as e:

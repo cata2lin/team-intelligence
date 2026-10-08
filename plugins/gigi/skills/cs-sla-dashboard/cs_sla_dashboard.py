@@ -98,7 +98,8 @@ class MCP:
         req = urllib.request.Request(MCP_URL, data=json.dumps(payload).encode(), headers=h)
         with urllib.request.urlopen(req, timeout=90) as r:
             body = r.read().decode()
-        lines = [l for l in body.splitlines() if l.startswith("data:")]
+        # NU splitlines(): taie si la U+2028, caracter legal neescapat in JSON (cs-documentatie §6.1b)
+        lines = [l for l in body.split("\n") if l.startswith("data:")]
         return json.loads(lines[-1][5:]) if lines else json.loads(body)
 
     def _init(self):

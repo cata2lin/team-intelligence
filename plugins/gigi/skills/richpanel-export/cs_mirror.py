@@ -818,6 +818,17 @@ class RateLimiter:
 
 
 # ───────────────────────────────────────────────────────── gardă READ-ONLY + MCP
+class MCPError(RuntimeError):
+    """Serverul MCP a răspuns cu TEXT, nu cu obiect (ex. „Error: id contains invalid
+    characters."). Fără asta textul se întorcea ca string obișnuit, `d.get(...)` arunca
+    AttributeError, iar mesajul real al serverului nu ajungea niciodată în jurnal."""
+
+    def __init__(self, tool, payload):
+        self.tool = tool
+        self.payload = payload
+        super().__init__(f"{tool}: raspuns non-dict de la MCP: {str(payload)[:200]}")
+
+
 READ_TOOLS = {"get_conversation", "list_conversations", "search_conversations_by_customer",
               "get_customer_by_email_or_phone", "get_user", "list_users", "list_tags",
               "list_teams", "query_analytics", "get_available_metrics",
@@ -892,14 +903,25 @@ class MirrorMCP:
                     raise
                 time.sleep(2 ** i * 1.5)
         out = None
-        for line in txt.splitlines():
+        # NU splitlines(): taie si la U+2028, caracter legal neescapat in JSON (cs-documentatie §6.1b)
+        for line in txt.split("\n"):
             if line.startswith("data:"):
                 out = _json.loads(line[5:].strip())
         return out if out is not None else (_json.loads(txt) if txt.strip() else None)
 
-    def call(self, tool, args=None):
+    def call_raw(self, tool, args=None):
+        """Raspunsul EXACT cum a venit, non-dict inclusiv. Pentru apelantii care
+        inspecteaza ei insisi raspunsul si degradeaza controlat — `parity_check`
+        marcheaza ziua NEDOVEDITA cand serverul intoarce un sir de la pagina ~51.
+        Restul folosesc `call`, care arunca."""
         assert_read_only(tool)
         return self.mcp.call(tool, args or {})
+
+    def call(self, tool, args=None):
+        out = self.call_raw(tool, args)
+        if out is not None and not isinstance(out, dict):
+            raise MCPError(tool, out)
+        return out
 
 
 # ───────────────────────────────────────────────────────────────────── selftest
@@ -1116,6 +1138,27 @@ def selftest(db_path=None):
         unknown_blocked = True
     _chk(R, "unealta necunoscuta = refuzata (allowlist)", unknown_blocked)
 
+    # Regresie 6.1: serverul respinge id-urile cu <>=+ (Message-ID de email) sau -_
+    # (base64url de Messenger) si raspunde cu TEXT. Inainte, textul se intorcea ca
+    # string, `d.get(...)` arunca AttributeError, iar mesajul real al serverului nu
+    # ajungea niciodata in jurnal.
+    mcp_stub = MirrorMCP.__new__(MirrorMCP)
+    mcp_stub.mcp = type("FakeRP", (), {
+        "call": lambda self, t, a: "Error: id contains invalid characters."})()
+    try:
+        mcp_stub.call("get_conversation", {"conversation_id": "m_jTGUpyrNk1NS-_"})
+        raised = None
+    except MCPError as e:
+        raised = e
+    _chk(R, "raspuns non-dict de la MCP => MCPError, nu string", raised is not None,
+         str(raised)[:60] if raised else "nu a aruncat")
+    _chk(R, "textul serverului ajunge in exceptie",
+         raised is not None and "invalid characters" in str(raised))
+    mcp_ok = MirrorMCP.__new__(MirrorMCP)
+    mcp_ok.mcp = type("FakeRP2", (), {"call": lambda self, t, a: {"messages": []}})()
+    _chk(R, "raspunsul dict trece nemodificat",
+         mcp_ok.call("get_conversation", {}) == {"messages": []})
+
     print("\n7) ticket / atasamente / paritate / sync_run")
     ms = int(datetime.datetime(2026, 8, 30, 9, 0, tzinfo=datetime.timezone.utc).timestamp() * 1000)
     t = {"id": "conv_1", "conversation_no": 312879, "channel": "facebook_feed_comment",
@@ -1218,6 +1261,57 @@ def selftest(db_path=None):
     g8 = db.execute("SELECT COUNT(*) n, MAX(reason) r FROM gm_gap").fetchone()
     _chk(R, "verdictul de gap se IMBUNATATESTE, nu se dubleaza",
          g8["n"] == 1 and g8["r"] == "lipsa_in_rp", f"{g8['n']} randuri, {g8['r']}")
+
+    # §6.1b — parserul SSE nu are voie sa taie la U+2028. splitlines() il trateaza ca sfarsit de
+    # linie, desi in JSON e caracter LEGAL neescapat => JSONDecodeError pe un raspuns CORECT.
+    import urllib.request as _ur
+    U, NL = chr(0x2028), chr(10)
+    _chk(R, "capcana e reala: splitlines() taie la U+2028", len(("a" + U + "b").splitlines()) == 2)
+    payload = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"content": [
+        {"type": "text", "text": "invitatie" + U + "TestFlight"}]}}, ensure_ascii=False)
+    sse = ("event: message" + NL + "data: " + payload + NL + NL).encode("utf-8")
+
+    class _Resp:
+        headers = {"Mcp-Session-Id": "s1", "x-ratelimit-remaining": "40"}
+
+        def __init__(self, data):
+            self.data = data
+
+        def read(self):
+            return self.data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    real_urlopen = _ur.urlopen
+    _ur.urlopen = lambda req, timeout=None: _Resp(sse)
+    try:
+        rpmod = _rp()
+        c = rpmod.MCP.__new__(rpmod.MCP)
+        c.tok, c.sid, c.n = "x", None, 0
+        try:
+            txt_rp = c._post({"jsonrpc": "2.0", "id": 1})["result"]["content"][0]["text"]
+        except Exception as e:
+            txt_rp = f"{type(e).__name__}: {e}"
+        _chk(R, "rp.MCP._post parseaza SSE cu U+2028 in corp (§6.1b)",
+             txt_rp == "invitatie" + U + "TestFlight", repr(txt_rp)[:80])
+
+        m = MirrorMCP.__new__(MirrorMCP)
+        m.limiter = RateLimiter(rpm=100000, sleep=lambda _s: None)
+        m.last_headers = {}
+        m.mcp = rpmod.MCP.__new__(rpmod.MCP)
+        m.mcp.tok, m.mcp.sid, m.mcp.n = "x", None, 0
+        try:
+            txt_m = m._post({"jsonrpc": "2.0", "id": 1})["result"]["content"][0]["text"]
+        except Exception as e:
+            txt_m = f"{type(e).__name__}: {e}"
+        _chk(R, "MirrorMCP._post parseaza SSE cu U+2028 in corp (§6.1b)",
+             txt_m == "invitatie" + U + "TestFlight", repr(txt_m)[:80])
+    finally:
+        _ur.urlopen = real_urlopen
 
     db.close()
     ok = sum(1 for c, _, _ in R if c)
