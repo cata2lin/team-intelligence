@@ -66,7 +66,7 @@ uv run test_awb_track.py                                   # test de regresie, p
 ## Cum funcționează
 - Curier auto-detectat din pattern-ul AWB (DPD `8...`, Packeta `Z...`, Sameday `1O...`, Econt `10...`,
   **Dragon Star `9xxxxxxx` 8 cifre**), apoi se interoghează sursa live: DPD `api.dpd.ro/v1/track`,
-  Sameday `api.sameday.ro`, Econt `ee.econt.com`, Packeta (XML), **Dragon Star `dragonstarcurier.ro/tracking-awb`**.
+  Sameday `api.sameday.ro`, Econt `ee.econt.com`, Packeta (XML), **Dragon Star prin proxy-ul `awb.arona.ro/dsc/` → API-ul REST DSC** (pagina publică `dragonstarcurier.ro/tracking-awb` are din 28-aug-2026 protecție anti-bot și nu mai întoarce statusul; API-ul cere IP whitelistat, de-aia proxy-ul).
 - **DPD se clasifică pe `operationCode`** (câmp stabil), nu pe text liber — tabel construit din 33.170 de
   operații reale. Cod nevăzut (colete internaționale / servicii noi) → potrivire pe text; text nepotrivit
   → `NECUNOSCUT`, **niciodată** `IN TRANZIT`.
@@ -94,3 +94,29 @@ uv run test_awb_track.py                                   # test de regresie, p
   real pentru DSC. AWB-urile sunt 8 cifre (`94xxxxxx`).
 - Econt/Packeta/Sameday: comportamentul pe **AWB inexistent** e verificat live; **nu** au putut fi testate
   pe colete reale în circulație (din 3.982 de expediții extrase din 14 magazine, 3.976 sunt DPD).
+
+## 🩺 Fix 2026-08-27 — trackerul era MORT pe VPS
+Pe VPS fiecare colet ieșea `EROARE — Credentiale DPD lipsa`. Două cauze suprapuse:
+
+1. **`_kb_path()` nu cunoștea layout-ul PLAT.** Scriptul stă în `/root/Scripturi/awb_track.py`, deci
+   calea de git (`../../../core/scripts/kb.py`) dădea `/core/scripts/kb.py`. Acum caută și `KB_PY` din
+   env, `team-intelligence/plugins/core/scripts/`, calea absolută de pe VPS și marketplace-ul local.
+2. **Căuta un secret `COURIER_CREDS_JSON` care NU EXISTĂ.** KB-ul le ține separat, per curier:
+   `DPD_CREDS` (`{dpd-ro,dpd-jg,dpd-px}`), `SAMEDAY_CREDS`, `ECONT_CREDS`, `PACKETA_CREDS` — exact
+   formele așteptate. `load_creds()` le compune acum singur. Plus `_kb_env()`, fiindcă `kb.py` are
+   nevoie de `KB_DATABASE_URL`, care pe VPS stă în `.env`, nu în mediul unui cron.
+
+**Status nou mapat: `export to foreign provider`** = DPD RO a predat coletul curierului străin. Pentru
+Bonhaus.hu/.sk ăsta E momentul plecării. Lipsea, și cu fail-closed-ul corect toate coletele
+internaționale ieșeau `NECUNOSCUT` — filtrul „trimite doar ce n-a plecat" nu tăia nimic pe ele.
+⚠️ Versiunea veche le arăta `in_transit` **din fallback, nu din cunoaștere**: nimerea corect din
+întâmplare, ceea ce e mai periculos decât să greșească vizibil.
+
+⚠️ **Copia de pe VPS era cu o generație în urmă** (23KB vs 47KB) — îi lipseau fix-urile din 26-aug
+(fail-closed, `canceled`, mapare pe `parcelId`). Când repari ceva ce există în două locuri, verifică
+ÎNTÂI care e mai nou; era să urc versiunea veche peste cea bună.
+
+## ⚠️ Un `except` larg transformă un bug în „nu s-au găsit date"
+Prima variantă a fix-ului folosea `io.open()`, dar `io` nu e importat aici. `NameError`-ul a fost
+înghițit de `except Exception: continue`, deci fix-ul „mergea" și raporta exact același eșec ca înainte.
+Restrâns la `except OSError` (fișier lipsă = singurul eșec așteptat).

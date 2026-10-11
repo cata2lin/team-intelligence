@@ -56,9 +56,9 @@ Read-only: doar interogări de tracking, nu scrie nicăieri.
 Curieri implementați LIVE: DPD (api.dpd.ro/v1/track), Sameday (api.sameday.ro),
 Econt (ee.econt.com), Packeta (zasilkovna XML), Dragon Star (pagina publică).
 
-Credențiale: din KB, secretul COURIER_CREDS_JSON (un singur JSON cu dpd_creds /
-sameday_creds / econt_creds / packeta_creds). Fallback pe variabile de mediu
-COURIER_CREDS_JSON, sau DPD_RO_USERNAME / DPD_RO_PASSWORD pentru DPD.
+Credențiale: din KB, câte un secret PER CURIER — DPD_CREDS / SAMEDAY_CREDS / ECONT_CREDS /
+PACKETA_CREDS. (Secretul `COURIER_CREDS_JSON` din documentația veche NU există; se acceptă
+în continuare dacă cineva îl setează în env.) Fallback: DPD_RO_USERNAME / DPD_RO_PASSWORD.
 
 Folosire:
   uv run awb_track.py --awb "81304028147,1ONBLN504748204,Z4944525695"
@@ -111,7 +111,56 @@ def _kb_path():
             cand = os.path.join(core, h, "scripts", "kb.py")
             if os.path.exists(cand):
                 return cand
+    # Layout PLAT (VPS: /root/Scripturi/awb_track.py). Fara asta, calea de mai sus dadea
+    # /core/scripts/kb.py, load_creds() nu gasea nimic si FIECARE colet iesea
+    # „EROARE — Credentiale DPD lipsa". O eroare care arata ca un raspuns. (fix 2026-08-27)
+    for cand in (os.environ.get("KB_PY", ""),
+                 os.path.join(here, "team-intelligence", "plugins", "core", "scripts", "kb.py"),
+                 "/root/Scripturi/team-intelligence/plugins/core/scripts/kb.py",
+                 os.path.expanduser("~/.claude/plugins/marketplaces/team-intelligence/"
+                                    "plugins/core/scripts/kb.py")):
+        if cand and os.path.isfile(cand):
+            return cand
     return p
+
+
+def _uv():
+    """`uv` nu e mereu pe PATH intr-un shell de cron."""
+    for c in ("/root/.local/bin/uv", os.path.expanduser("~/.local/bin/uv")):
+        if os.path.isfile(c):
+            return c
+    return "uv"
+
+
+def _kb_env():
+    """kb.py are nevoie de KB_DATABASE_URL; pe VPS sta in .env, nu in mediul unui cron."""
+    env = dict(os.environ)
+    if not env.get("KB_DATABASE_URL"):
+        for f in ("/root/Scripturi/.env", os.path.expanduser("~/.env")):
+            try:
+                with open(f, encoding="utf-8") as fh:
+                    for line in fh:
+                        if line.startswith("KB_DATABASE_URL="):
+                            env["KB_DATABASE_URL"] = line.split("=", 1)[1].strip()
+                            break
+            except OSError:
+                continue   # doar fisier lipsa; orice alta eroare vreau s-o vad, nu s-o inghit
+            if env.get("KB_DATABASE_URL"):
+                break
+    return env
+
+
+# Proxy-ul DSC de pe serverul whitelistat la Dragon Star (vezi track_dragonstar).
+_DSC_BAZA = "https://awb.arona.ro/dsc"
+
+
+def _kb_secret(nume):
+    try:
+        r = subprocess.run([_uv(), "run", _kb_path(), "secret-get", nume],
+                           capture_output=True, text=True, timeout=60, env=_kb_env())
+        return (r.stdout or "").strip()
+    except Exception:
+        return ""
 
 
 def load_creds():
@@ -119,20 +168,34 @@ def load_creds():
 
     Ordine: env COURIER_CREDS_JSON -> KB COURIER_CREDS_JSON -> compus din DPD_* env/KB.
     """
-    raw = os.environ.get("COURIER_CREDS_JSON")
-    if not raw:
-        kb = _kb_path()
-        try:
-            raw = subprocess.run(["uv", "run", kb, "secret-get", "COURIER_CREDS_JSON"],
-                                 capture_output=True, text=True, timeout=60).stdout.strip()
-        except Exception:
-            raw = ""
+    raw = os.environ.get("COURIER_CREDS_JSON") or _kb_secret("COURIER_CREDS_JSON")
     creds = {}
     if raw:
         try:
             creds = json.loads(raw)
         except Exception:
             creds = {}
+
+    # KB-ul tine credentialele SEPARAT, cate un secret per curier — `COURIER_CREDS_JSON` NU exista.
+    # Formele coincid exact cu ce asteapta trackerul: DPD_CREDS = {dpd-ro,dpd-jg,dpd-px} cu
+    # user/parola, restul {username,password}. (fix 2026-08-27)
+    for cheie, secret in (("dpd_creds", "DPD_CREDS"), ("sameday_creds", "SAMEDAY_CREDS"),
+                          ("econt_creds", "ECONT_CREDS"), ("packeta_creds", "PACKETA_CREDS")):
+        if creds.get(cheie):
+            continue
+        v = os.environ.get(secret) or _kb_secret(secret)
+        if not v:
+            continue
+        try:
+            creds[cheie] = json.loads(v)
+        except Exception:
+            pass
+
+    # Dragon Star: doar tokenul de proxy (credentialele DSC stau in nginx, pe serverul whitelistat).
+    if not creds.get("dsc_creds"):
+        _t = os.environ.get("DSC_PROXY_TOKEN") or _kb_secret("DSC_PROXY_TOKEN")
+        if _t:
+            creds["dsc_creds"] = {"proxy_token": _t.strip()}
 
     # Fallback / completare DPD din DPD_RO_USERNAME / DPD_RO_PASSWORD
     dpd = creds.get("dpd_creds") or {}
@@ -311,6 +374,12 @@ def normalize_status(raw) -> str:
 # operații DPD reale + formulările uzuale RO/EN ale celorlalți curieri.
 _TRANSIT = [
     "in transit", "in tranzit", "arrival scan", "departure scan", "out for delivery",
+    # DPD RO a predat coletul curierului STRAIN — pentru expedierile HU/SK ăsta E momentul plecării.
+    # Lipsea, iar cu fallback-ul corect pe `unknown` toate coletele Bonhaus.hu/.sk ieșeau NECUNOSCUT
+    # (10 din 11 verificate pe 27-aug-2026), deci filtrul „trimite doar ce n-a plecat" nu tăia nimic
+    # pe magazinele internaționale. ⚠️ Versiunea VECHE le arăta `in_transit` — din fallback, nu din
+    # cunoaștere: nimereau corect din întâmplare, ceea ce e mai rău decât să greșească vizibil.
+    "export to foreign provider", "export catre furnizor extern",
     "courier pick-up", "courier pickup", "received in office", "processed in office",
     "returned to office",          # INTERMEDIAR: coletul e înapoi în depozit, se REÎNCEARCĂ livrarea
     "unsuccessful delivery", "failed delivery", "redirected", "routed to another",
@@ -320,8 +389,12 @@ _TRANSIT = [
     # Dragon Star: vocabularul lui real de tranzit. Lipsea, iar cu fallback-ul nou pe `unknown`
     # colete care CIRCULĂ ieșeau NECUNOSCUT — codul vechi le clasifica corect ca tranzit.
     "spre livrare", "iesire agent", "intrare centru", "in centru destinatie",
-    "centru destinatie", "intrare agent", "in livrare",
+    "centru destinatie", "intrare agent", "in livrare", "redirectionat",
 ]
+# ⚠️ „Exceptie" (Dragon Star) NU e aici DINADINS. Inseamna „s-a intamplat ceva cu coletul", fara sa
+# spuna ce — deci cade pe `unknown`, care e in `_PROBLEM` si cere ochi de om. Daca cineva o muta in
+# lista de tranzit, coletul cu problema devine „pe drum" si dispare din raport. Exact clasa de bug pe
+# care fisierul asta o repara.
 
 # Categorii care cer OCHI DE OM. `unknown` / `not_found` / `error` / `invalid` sunt AICI dinadins:
 # până la fixul din 2026-08-26 un AWB neverificabil arăta ca un colet normal în tranzit, iar rezumatul
@@ -665,23 +738,38 @@ async def track_packeta(client, awb, creds) -> dict:
 
 
 async def track_dragonstar(client, awb, creds=None) -> dict:
-    """Dragon Star Curier (DSC) — status randat server-side în pagina publică de tracking, FĂRĂ credentiale.
-    Doar Grandia (connector xConnector 24257). AWBprint NU sincronizează DSC, deci asta e singura sursă de status real."""
+    """Dragon Star Curier (DSC) — statusul din API-ul lor REST, prin proxy-ul de pe serverul whitelistat.
+
+    ÎNAINTE se citea pagina publică `dragonstarcurier.ro/tracking-awb` cu un regex. Nu mai merge:
+    pagina are acum protecție anti-bot (`wsidchk`) și întoarce provocarea JS în loc de status, deci
+    regexul nu prinde nimic și TOATE coletele DSC ieșeau „AWB negăsit" — tăcut, ca și cum n-ar exista.
+    (Verificat 28-aug-2026 pe 12 AWB-uri reale: 12 din 12 „negăsit".)
+
+    Acum folosim API-ul documentat (`API Restful DSC v2.0.12`): GET /awb/status/:awb.
+    ⚠️ DSC filtrează pe IP, iar whitelistat e serverul de BAZE DE DATE, nu oricare mașină — un apel
+    direct de pe altă mașină cade în TIMEOUT (nu 403), deci arată ca o pană de rețea. De aceea
+    mergem prin proxy-ul nginx de acolo (`awb.arona.ro/dsc/`), care cere `X-Proxy-Token` și
+    injectează EL antetul `Authorization`. Consecință bună: aici nu ne trebuie user/parola DSC,
+    doar tokenul — un secret care poate doar citi, nu genera AWB-uri.
+    """
     if not str(awb).strip():
         return _fail("not_found", "AWB gol", "dragonstar")
+    token = (creds or {}).get("proxy_token") or ""
+    baza = ((creds or {}).get("proxy_base") or _DSC_BAZA).rstrip("/")
+    if not token:
+        return _fail("error", "Dragon Star: lipseste DSC_PROXY_TOKEN", "dragonstar")
     try:
-        r = await client.get("https://dragonstarcurier.ro/tracking-awb",
-                             params={"awb": str(awb).strip()},
-                             headers={"User-Agent": "Mozilla/5.0"},
-                             follow_redirects=True, timeout=20.0)
+        r = await client.get("%s/awb/status/%s" % (baza, str(awb).strip()),
+                             headers={"X-Proxy-Token": token}, timeout=25.0)
+        if r.status_code == 404:
+            return _fail("not_found", "Dragon Star: AWB inexistent", "dragonstar")
         if r.status_code != 200:
             return _fail("error", "Eroare HTTP Dragon Star %d" % r.status_code, "dragonstar")
-        m = re.search(r'>Status</div>\s*<div[^>]*>([^<]+)</div>', r.text or "")
-        if not m:
-            # Regexul neptrivit poate însemna AWB inexistent SAU pagină schimbată — în ambele cazuri
-            # NU știm statusul. Înainte devenea „IN TRANZIT" tăcut, pentru toate coletele DSC.
-            return _fail("not_found", "Dragon Star: AWB negasit / pagina schimbata", "dragonstar")
-        return _ok(html.unescape(m.group(1).strip()), None, "dragonstar")
+        d = r.json()
+        stare = (d or {}).get("status")
+        if not stare:
+            return _fail("not_found", "Dragon Star: raspuns fara status", "dragonstar")
+        return _ok(str(stare).strip(), None, "dragonstar")
     except Exception as e:
         return _fail("error", "Eroare Dragon Star (%s)" % type(e).__name__, "dragonstar")
 
@@ -692,6 +780,7 @@ async def track_all(items, creds, dpd_batch=None, dpd_rps=None):
     sd_creds = creds.get("sameday_creds") or {}
     ec_creds = creds.get("econt_creds") or {}
     pk_creds = creds.get("packeta_creds") or {}
+    ds_creds = creds.get("dsc_creds") or {}
 
     dpd_groups = defaultdict(list)
     sd, ec, pk, ds, unknown = [], [], [], [], []
@@ -739,7 +828,7 @@ async def track_all(items, creds, dpd_batch=None, dpd_rps=None):
         for a in pk:
             tasks.append(_one(a, track_packeta, pk_creds, "packeta"))
         for a in ds:
-            tasks.append(_one(a, track_dragonstar, None, "dragonstar"))   # Dragon Star: tracking public
+            tasks.append(_one(a, track_dragonstar, ds_creds, "dragonstar"))   # Dragon Star: API prin proxy
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)

@@ -24,7 +24,7 @@
    "Belasil"
   ],
   "google": "Belasil",
-  "campaign_token": "",
+  "campaign_token": "BELASIL",
   "tiktok_shared": ""
  },
  "Bonhaus": {
@@ -54,7 +54,7 @@
   "tiktok": [
    "Bonhaus CZ"
   ],
-  "google": "",
+  "google": "Bonhaus CZ",
   "campaign_token": "",
   "tiktok_shared": ""
  },
@@ -65,7 +65,7 @@
   "tiktok": [
    "Bonhaus PL"
   ],
-  "google": "",
+  "google": "Bonhaus PL",
   "campaign_token": "",
   "tiktok_shared": ""
  },
@@ -74,11 +74,12 @@
    "Bonhaus RO"
   ],
   "tiktok": [
-   "Casa ofertelor"
+   "Casa ofertelor",
+   "Nocturna Europa"
   ],
   "google": "Casa ofertelor",
-  "campaign_token": "",
-  "tiktok_shared": ""
+  "campaign_token": "CASA OFERTELOR|(^|[^A-Z0-9-])CO([^A-Z0-9-]|$)",
+  "tiktok_shared": "Nocturna Europa"
  },
  "Bonhaus SK": {
   "facebook": [
@@ -87,6 +88,15 @@
   "tiktok": [
    "Bonhaus SK"
   ],
+  "google": "",
+  "campaign_token": "",
+  "tiktok_shared": ""
+ },
+ "Bonhaus HU": {
+  "facebook": [
+   "Bonhaus HU"
+  ],
+  "tiktok": [],
   "google": "",
   "campaign_token": "",
   "tiktok_shared": ""
@@ -124,11 +134,12 @@
    "Eseban",
    "Belasil",
    "Nocturna.ro",
-   "Carpetto"
+   "Carpetto",
+   "Nocturna Europa"
   ],
   "google": "Esteban",
   "campaign_token": "ESTEBAN",
-  "tiktok_shared": "Nocturna.ro"
+  "tiktok_shared": "Nocturna.ro, Nocturna Europa, Belasil"
  },
  "Esteban Parfum": {
   "facebook": [
@@ -246,11 +257,12 @@
   ],
   "tiktok": [
    "Covoare baie",
-   "ROSSI Nails Romania"
+   "ROSSI Nails Romania",
+   "Nocturna Europa"
   ],
   "google": "",
-  "campaign_token": "REDUCERI",
-  "tiktok_shared": "ROSSI Nails Romania"
+  "campaign_token": "REDUCERI|(^|[^A-Z0-9-])RB([^A-Z0-9-]|$)",
+  "tiktok_shared": "ROSSI Nails Romania, Nocturna Europa"
  },
  "Rossi Nails": {
   "facebook": [
@@ -293,7 +305,7 @@
   "tiktok": [
    "ROSSI Nails Romania"
   ],
-  "google": "",
+  "google": "GT Parfumuri",
   "campaign_token": "GT",
   "tiktok_shared": "ROSSI Nails Romania"
  },
@@ -305,8 +317,8 @@
   "tiktok": [
    "Nocturna Europa"
   ],
-  "google": "",
-  "campaign_token": "OFERTELE",
+  "google": "Ofertele Zilei",
+  "campaign_token": "OFERTELE|(^|[^A-Z0-9-])(OZ|OF)([^A-Z0-9-]|$)",
   "tiktok_shared": ""
  },
  "Grandia": {
@@ -322,13 +334,15 @@
  },
  "Magdeal": {
   "facebook": [
-   "Reflexino"
+   "Reflexino",
+   "Magdeal 2"
   ],
   "tiktok": [
-   "ROSSI Nails Romania"
+   "ROSSI Nails Romania",
+   "Nocturna Europa"
   ],
   "google": "",
-  "campaign_token": "MAGDEAL",
+  "campaign_token": "MAGDEAL|(^|[^A-Z0-9-])MD([^A-Z0-9-]|$)",
   "tiktok_shared": ""
  },
  "Nubra": {
@@ -337,6 +351,80 @@
   ],
   "tiktok": [
    "Nubra"
+  ],
+  "google": "Nubra",
+  "campaign_token": "",
+  "tiktok_shared": ""
+ },
+ "Lab Noir": {
+  "facebook": [
+   "Labnoir"
+  ],
+  "tiktok": [],
+  "google": "Lab Noir",
+  "campaign_token": "",
+  "tiktok_shared": ""
+ },
+ "Orice Redus": {
+  "facebook": [
+   "Orice Redus"
+  ],
+  "tiktok": [],
+  "google": "Orice Redus",
+  "campaign_token": "",
+  "tiktok_shared": ""
+ },
+ "Duppo BG": {
+  "facebook": [
+   "DUPPO BG"
+  ],
+  "tiktok": [],
+  "google": "",
+  "campaign_token": "",
+  "tiktok_shared": ""
+ },
+ "Duppo MD": {
+  "facebook": [
+   "DUPPO MD"
+  ],
+  "tiktok": [],
+  "google": "",
+  "campaign_token": "",
+  "tiktok_shared": ""
+ },
+ "Duppo CZ": {
+  "facebook": [
+   "DUPPO CZ"
+  ],
+  "tiktok": [],
+  "google": "",
+  "campaign_token": "",
+  "tiktok_shared": ""
+ },
+ "Duppo HU": {
+  "facebook": [
+   "DUPPO HU"
+  ],
+  "tiktok": [],
+  "google": "",
+  "campaign_token": "",
+  "tiktok_shared": ""
+ },
+ "Artevita": {
+  "facebook": [
+   "Artevita"
+  ],
+  "tiktok": [],
+  "google": "Artevita",
+  "campaign_token": "",
+  "tiktok_shared": ""
+ },
+ "De la Bucsa": {
+  "facebook": [
+   "De la Bucsa"
+  ],
+  "tiktok": [
+   "De la Bucsa"
   ],
   "google": "",
   "campaign_token": "",
