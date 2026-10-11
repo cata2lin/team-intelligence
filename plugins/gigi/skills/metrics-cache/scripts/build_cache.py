@@ -232,6 +232,8 @@ GROUP BY identity;
 # Grandia is not in these sheets (its spend comes from the Grandia pipeline).
 SHEET_ID = "1IVg0fI-_Rm7IptmOl3BmGrqtyyzn3auf0ZPuftr9vQo"
 AZI_TAB  = "Facebook Azi"   # consolidated current-day per-brand table (FB+TikTok+Google), all brands
+ISTORIC_GID = "1025107216"  # tab "Raport Zilnic 2" (zile inchise) — sursa releului AWBprint;
+                            # citit direct DOAR pentru brandurile pe care releul nu le duce inca
 STORE_OVERRIDES = {"casaofertelor.ro": "bonhaus"}  # Casa Ofertelor = the RO Bonhaus storefront
 
 DAILY_AD_SPEND_DDL = """
@@ -314,6 +316,67 @@ def _warehouse_tiktok_rows(mcur, bname, bslug, brand_store, norm, since, until):
         print(f"[daily_ad_spend_ron] ⚠ TikTok warehouse orphan (fără token/owner): {orphan:.0f} RON")
     return rows
 
+def _rz2_brandurile_lipsa(bname, norm, acoperite, awb_max, bslug_rev):
+    """Zilele inchise ale brandurilor pe care releul AWBprint nu le duce, din tabul istoric.
+
+    Intoarce randuri in acelasi format ca restul: (data, store, brand_id, platforma, ron, sursa).
+    Daca foaia nu raspunde, intoarce lista goala si spune — nu opreste constructia cache-ului
+    pentru restul brandurilor.
+    """
+    import urllib.request, csv, io, datetime
+    u = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={ISTORIC_GID}"
+    try:
+        with urllib.request.urlopen(
+                urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"}), timeout=90) as r:
+            rd = list(csv.reader(io.StringIO(r.read().decode("utf-8", "ignore"))))
+    except Exception as e:
+        print(f"[daily_ad_spend_ron] WARN: tabul istoric inaccesibil ({e}); doar AWBprint")
+        return []
+    if not rd:
+        return []
+    idx = {h.strip(): i for i, h in enumerate(rd[0])}
+    for cerut in ("Data", "Brand"):
+        if cerut not in idx:
+            print(f"[daily_ad_spend_ron] WARN: tabul istoric n-are coloana '{cerut}'")
+            return []
+
+    out, marci = [], {}
+    for r in rd[1:]:
+        if len(r) <= idx["Brand"]:
+            continue
+        brut = (r[idx["Data"]] or "").strip()
+        d = None
+        for forma in ("%Y-%m-%d", "%d.%m.%Y"):
+            try:
+                d = datetime.datetime.strptime(brut[:10], forma).date()
+                break
+            except ValueError:
+                continue
+        if d is None:
+            continue
+        bn = norm(r[idx["Brand"]])
+        bid = bname.get(bn) or (bname.get(bn[:-2]) if bn.endswith("ro") else None)
+        # fara brand in metrics, sau deja adus de releu, sau zi pe care o acopera stratul de azi
+        if bid is None or bid in acoperite:
+            continue
+        if awb_max and d > awb_max:
+            continue
+        store = bslug_rev.get(bid) or (bn + ".rz2")
+        for plat, col in (("meta", "Facebook"), ("tiktok", "Tiktok"), ("google", "Google")):
+            if col not in idx or len(r) <= idx[col]:
+                continue
+            if plat == "tiktok" and str(d) >= TIKTOK_WAREHOUSE_SINCE:
+                continue          # de acolo incolo TikTok vine din warehouse, atribuit pe token
+            val = _ro_num(r[idx[col]])
+            out.append((d, store, bid, plat, val, "sheet_istoric"))
+            marci[bid] = marci.get(bid, 0) + val
+    if out:
+        nume = ", ".join(sorted(bslug_rev.get(b, b) for b in marci))
+        print(f"[daily_ad_spend_ron] din foaie, branduri pe care AWBprint nu le duce: "
+              f"{len(out)} randuri · {round(sum(marci.values()))} RON · {nume}")
+    return out
+
+
 def run_daily_ad_spend(apply):
     import re, csv, io, datetime
     from psycopg2.extras import execute_values
@@ -348,6 +411,16 @@ def run_daily_ad_spend(apply):
                     continue
                 rows.append((d, store, bid, plat, float(val), "awbprint"))
     aconn.close()
+
+    # Brandurile pe care releul AWBprint nu le duce inca (masurat: Artevita, De la Bucsa) —
+    # aceleasi zile, citite direct din foaia care alimenteaza releul. Vezi `_rz2_brandurile_lipsa`.
+    bslug_rev = {}
+    mcur.execute("SELECT id, slug FROM brands")
+    for _bid, _slug in mcur.fetchall():
+        if _slug:
+            bslug_rev[_bid] = _slug
+    rows += _rz2_brandurile_lipsa(bname, norm, set(brand_store), awb_max, bslug_rev)
+
     # TikTok >= 2026-05 din warehouse-ul complet, atribuit corect pe token (înlocuiește RZ2-phantom).
     # Fallback SIGUR: dacă atribuirea eșuează, reîncarcă TikTok din marketing_daily_costs (comportament vechi).
     wh_until = (awb_max or datetime.date.today()).isoformat() if hasattr(awb_max, "isoformat") else str(awb_max or datetime.date.today())
@@ -422,21 +495,20 @@ PRODUCT_AD_SPEND_GOOGLE = """
 INSERT INTO cache.product_ad_spend (date, brand_id, sku, product_title, platform, spend_ron, source)
 SELECT s.date, s.brand_id, s.sku, s.product_title, 'google', s.spend_ron, 'google_product_insights'
 FROM (
-  -- grain = PK (date, sku); un sku poate exista sub mai multe brand-uri (skus generice deals: 'set-5-m', '31'…)
-  -- → însumează spend-ul pe sku și atribuie brandul cu cel mai mare spend (determinist), altfel PK (date,sku,platform)
-  -- ar primi 2 rânduri în acelaşi INSERT → CardinalityViolation.
-  SELECT g.date, v.sku,
-         (array_agg(v."brandId"    ORDER BY g."costRon" DESC NULLS LAST))[1] AS brand_id,
+  -- grain = PK REAL (date, brand_id, sku, platform): același sku generic ('set-5-m', '31'…) poate exista sub
+  -- mai multe branduri deals — fiecare își păstrează spend-ul propriu. Colapsarea pe "brandul dominant" muta
+  -- banii pe brandul greșit. ⚠️ ON CONFLICT trebuie să acopere PK-ul; (date,sku,platform) nu are index unic →
+  -- InvalidColumnReference, care a înghețat TOATĂ tabela din 2026-08-18 (inclusiv Google). Vezi 05-sep-2026.
+  SELECT g.date, v.sku, v."brandId" AS brand_id,
          (array_agg(g."productTitle" ORDER BY g."costRon" DESC NULLS LAST))[1] AS product_title,
          ROUND(SUM(g."costRon"), 2) AS spend_ron
   FROM google_ads_product_insights_daily g
   JOIN variants v ON v."shopifyNumericId" = (regexp_match(g."productItemId", '_(\\d+)$'))[1]::bigint
   WHERE g."productItemId" ~ '_\\d+$' AND v.sku IS NOT NULL AND v.sku<>'' AND g."costRon" IS NOT NULL
-  GROUP BY g.date, v.sku
+  GROUP BY g.date, v.sku, v."brandId"
 ) s
-ON CONFLICT (date, sku, platform) DO UPDATE SET
+ON CONFLICT (date, brand_id, sku, platform) DO UPDATE SET
   spend_ron = EXCLUDED.spend_ron,
-  brand_id = COALESCE(EXCLUDED.brand_id, cache.product_ad_spend.brand_id),
   product_title = EXCLUDED.product_title,
   source = EXCLUDED.source
 """
@@ -472,9 +544,8 @@ def run_product_ad_spend(apply):
     if fbtk:
         execute_values(mcur,
             "INSERT INTO cache.product_ad_spend (date,brand_id,sku,product_title,platform,spend_ron,source) "
-            "VALUES %s ON CONFLICT (date,sku,platform) DO UPDATE SET spend_ron=EXCLUDED.spend_ron, "
-            "brand_id=COALESCE(EXCLUDED.brand_id,cache.product_ad_spend.brand_id), source=EXCLUDED.source, "
-            "computed_at=now()",
+            "VALUES %s ON CONFLICT (date,brand_id,sku,platform) DO UPDATE SET spend_ron=EXCLUDED.spend_ron, "
+            "source=EXCLUDED.source, computed_at=now()",
             fbtk, page_size=2000)
         # IDEMPOTENT (fără a pierde last-known-good pe pull parțial): șterge cheile SKU STALE (dintr-o rulare
         # veche cu alt mapping SAU dublu-cont) DOAR în scope-urile (date,brand,platform) reîmprospătate ACUM
@@ -553,7 +624,12 @@ CREATE INDEX IF NOT EXISTS order_enriched_name_idx  ON cache.order_enriched(orde
 CREATE INDEX IF NOT EXISTS order_enriched_phone_idx ON cache.order_enriched(phone);
 """
 ORDER_ENRICHED_SELECT = """
-SELECT o.id, o."name", o."brandId",
+-- DISTINCT ON (o.id): cache.order_outcome are cheia (shop, order_name), nu order_name singur, iar
+-- numele generice Shopify (#1001…#1008) exista simultan in 3-4 magazine. Fara de-duplicare, un
+-- singur o.id se multiplica prin LEFT JOIN si violeaza PK-ul lui order_enriched. Efectul masurat:
+-- tabela inghetata din 2026-08-18, ii lipseau 58.331 comenzi (16,6%), iar exceptia omora si
+-- ticket_order_link si product_returns care rulau dupa ea. Pastram randul CU semnal.
+SELECT DISTINCT ON (o.id) o.id, o."name", o."brandId",
   NULLIF(regexp_replace(COALESCE(o."phone",o."shippingPhone",''),'[^0-9]','','g'),''),
   lower(NULLIF(o."email",'')),
   COALESCE(o."shippingName",o."name"),
@@ -563,7 +639,8 @@ SELECT o.id, o."name", o."brandId",
   oo.status_category, oo.delivery_status, oo.is_refusal, oo.awb, oo.courier_status
 FROM public.orders o
 LEFT JOIN cache.order_outcome oo ON oo.order_name = o."name"
-WHERE o."deletedAt" IS NULL;
+WHERE o."deletedAt" IS NULL
+ORDER BY o.id, oo.is_refusal DESC NULLS LAST, oo.awb DESC NULLS LAST;
 """
 
 # Market-basket "frequently bought together" per brand (last 180 days, co-count >= 3).
@@ -953,10 +1030,13 @@ def run_product_returns(apply):
 # coupling build_cache to the private app package).
 PREFIX_TO_BRAND = {
   "APR":"Apreciat","BELA":"Belasil","BONBG":"Bonhaus BG","CZ":"Bonhaus CZ","PL":"Bonhaus PL",
-  "BON":"Bonhaus RO","CARP":"Carpetto","PAT":"Ce Pat Ai","COV":"Covoria","EST":"Esteban",
+  "BON":"Casa Ofertelor","CARP":"Carpetto","PAT":"Ce Pat Ai","COV":"Covoria","EST":"Esteban",
   "GEN":"Gento","GT":"George Talent","MAG":"Magdeal","NOC":"Nocturna","BG":"Nocturna BG",
   "LUX":"Nocturna Lux","NUB":"Nubra","OFER":"Ofertele Zilei","RED":"Reduceri bune",
   "ROSSI":"Rossi Nails","GRAN":"Grandia","GRAND":"Grandia",
+  # 11-oct: lipseau => brand_id NULL in brand_pnl_monthly, iar reconcile le vedea cu marketing 0.
+  # BON = casaofertelor.ro ('Bonhaus RO' nu exista in brands).
+  "LAB":"Lab Noir","SK":"Bonhaus SK","BUC":"De la Bucsa",
 }
 BRAND_PNL_MONTHLY_DDL = """
 CREATE SCHEMA IF NOT EXISTS cache;
@@ -1143,7 +1223,7 @@ _FAILED = []
 
 if __name__ == "__main__":
     # dependency order: order_outcome first (the others LEFT JOIN it)
-    ALL = ["order_outcome", "daily_brand_pnl", "brand_pnl_real", "daily_ad_spend_ron", "product_ad_spend", "product_refusal_rate", "product_basket_pairs", "customer_agg", "order_enriched", "ticket_order_link", "product_returns"]
+    ALL = ["order_outcome", "daily_brand_pnl", "daily_ad_spend_ron", "brand_pnl_real", "product_ad_spend", "product_refusal_rate", "product_basket_pairs", "customer_agg", "order_enriched", "ticket_order_link", "product_returns"]
     # named groups for cron cadences (see SKILL.md): cs = intraday CS-facing; ads = current-day spend
     GROUPS = {"cs": ["order_enriched", "customer_agg", "ticket_order_link"], "ads": ["daily_ad_spend_ron"], "all": ALL}
     ap = argparse.ArgumentParser()
@@ -1165,8 +1245,20 @@ if __name__ == "__main__":
     targets = ALL if a.all else (GROUPS[a.group] if a.group else ([a.table] if a.table else []))
     if not targets:
         print("specify --table <name>, --group <cs|ads|all>, --all, or --status"); sys.exit(1)
+    # Izolare per tabela: pana acum o exceptie in mijlocul cozii omora procesul, iar tabelele de dupa
+    # nu se mai construiau NICIODATA. Concret: order_enriched (a 9-a din 11) crapa cu UniqueViolation,
+    # deci ticket_order_link si product_returns n-au mai rulat 21 de zile, si nici heartbeat-ul n-a mai
+    # pins. Acum fiecare esec e izolat, numit, si exit code-ul ramane != 0 la final.
     for t in targets:
-        run(t, a.apply)
+        try:
+            run(t, a.apply)
+        except SystemExit:
+            raise
+        except Exception as e:
+            _FAILED.append(t)
+            import traceback
+            print("[build_cache] %s A ESUAT: %s: %s" % (t, type(e).__name__, str(e)[:200]), file=sys.stderr)
+            traceback.print_exc()
     if _FAILED:
         print("[build_cache] NEREIMPROSPATATE: %s" % ", ".join(_FAILED), file=sys.stderr)
         sys.exit(2)

@@ -25,7 +25,15 @@ for d in ("meta-ads", "tiktok-ads"):
     sys.path.insert(0, str(SKILLS / d))
 KB = Path.home() / ".claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py"
 if not KB.exists():  # VPS / alt layout
-    for cand in [SKILLS.parent / "core/scripts/kb.py", Path.home() / ".claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py"]:
+    # SKILLS = .../plugins/<autor>/skills, deci core/ e la SKILLS.parent.PARENT (adica .../plugins/).
+    # `SKILLS.parent` cauta in .../plugins/<autor>/core/scripts/kb.py — cale care nu exista nicaieri.
+    # Efect masurat pe VPS (5-sep-2026): kb.py negasit -> kb_secret() intoarce "" -> json.loads("")
+    # -> JSONDecodeError -> `live_rows` prinsa de un except larg in build_cache -> "doar google".
+    # cache.product_ad_spend a ramas fara meta/tiktok din 18-aug, TACUT, cu cronul iesind cu succes.
+    for cand in [SKILLS.parent.parent / "core/scripts/kb.py",
+                 SKILLS.parent / "core/scripts/kb.py",
+                 Path("/root/Scripturi/team-intelligence/plugins/core/scripts/kb.py"),
+                 Path.home() / ".claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py"]:
         if cand.exists(): KB = cand; break
 
 
@@ -192,31 +200,13 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
     #     (brandul pt care e dedicat, filter None); fără token ȘI fără owner → orfan (se raportează, nu se inventează).
     #   - cont DEDICAT (nimeni nu-l împrumută) → brandul iterat.
     # Token-ul cel mai lung câștigă (evită fals-pozitive la tokeni scurți ca 'GT'). seen-dedup → fiecare campanie 1×.
-    import brandmap
-    tt_token2brand = {}; tt_owner = {}; tt_shared = set()
-    for b in brands:
-        try: accs = brandmap.tiktok_accounts(b)
-        except Exception: continue
-        for e in accs:
-            nm = (e.get("name") or "").strip().lower(); f = (e.get("campaign_filter") or "").strip()
-            if not nm: continue
-            if f:                                   # b împrumută contul nm cu token f
-                tt_token2brand[f.lower()] = b; tt_shared.add(nm)
-            else:                                   # b deține contul nm (dedicat) → owner
-                tt_owner.setdefault(nm, b)
-    tt_tokens = sorted(tt_token2brand, key=len, reverse=True)   # cel mai specific (lung) întâi
-    # Reguli de brand SPECIFICE pe cont (au prioritate înaintea token-ului global + owner). Pe contul
-    # 'Belasil', Esteban rulează teste de creative numite 'NEW TIKTOK' fără token ESTEBAN → tot Esteban
-    # (regulă confirmată de user); restul fără token (și fără 'esteban') rămâne brandul owner = Belasil.
-    ACCT_BRAND_RULES = {"belasil": [("new tiktok", "Esteban")]}
-    # OWNER explicit pt conturile partajate de MAI MULTE branduri cu token (nu se poate exprima prin
-    # Mapping ca la Belasil, fiindcă brandurile astea AU token). Campaniile fără token de pe contul ăsta
-    # = brandul de mai jos (identificat din creative/produs de user 2026-06-19):
-    #   ROSSI Nails Romania → Rossi Nails (untokened-ul, inclusiv 'New Win Product', e al brandului contului);
-    #   Carpetto → Rossi Nails (creative KIT Polish/unghii); Nocturna.ro → Nocturna (creative NOCTURNA/Pijamale);
-    #   Nocturna Europa → Ofertele Zilei (oferte gospodărie).
-    ACCT_DEFAULT_OWNER = {"rossi nails romania": "Rossi Nails", "carpetto": "Rossi Nails",
-                          "nocturna.ro": "Nocturna", "nocturna europa": "Ofertele Zilei"}
+    # Atribuirea pe brand vine din tt_attrib — modulul CANONIC, același folosit de build_cache pentru
+    # cache.daily_ad_spend_ron. Aici era o COPIE a aceleiași logici; copia rămânea în urmă la fiecare
+    # regulă nouă (ex. codurile scurte CO/RB/OZ/MD din numele campaniei, 2026-08), deci calea per-SKU
+    # și calea per-brand dădeau branduri diferite pe aceeași campanie. O singură sursă acum.
+    import brandmap, tt_attrib
+    M_tt = tt_attrib.build_maps(brands, brandmap.tiktok_accounts)
+    tt_shared = M_tt["shared"]
     tt_lost = defaultdict(float)   # (acct,campaign) -> spend orfan (cont partajat, fără token ȘI fără owner)
 
     if "tiktok" in platforms:
@@ -238,11 +228,7 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
                     except Exception: _day = None
                     sp = tiktok.conv(tiktok._f(m, "spend"), r["_cur"], _day, idx_tt)
                     if acct_l in tt_shared:    # cont PARTAJAT → regulă-cont, token global, owner Mapping, owner explicit
-                        cl = (camp or "").lower()
-                        brand_row = (next((br for kw, br in ACCT_BRAND_RULES.get(acct_l, []) if kw in cl), None)
-                                     or next((tt_token2brand[t] for t in tt_tokens if t in cl), None)
-                                     or tt_owner.get(acct_l)
-                                     or ACCT_DEFAULT_OWNER.get(acct_l))
+                        brand_row = tt_attrib.attribute(r["_acct"], camp, M_tt)
                         if not brand_row:
                             if sp > 0: tt_lost[(r["_acct"], camp)] += sp
                             seen.add(k)   # orfan numărat O DATĂ (contul partajat e iterat de mai multe branduri)
@@ -260,21 +246,31 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
             for (ac, cp), v in sorted(tt_lost.items(), key=lambda x: -x[1])[:6]:
                 sys.stderr.write(f"    {ac} | {cp[:55]} | {round(v)} RON\n")
 
-    # dedup pe PK (date, sku, platform): un grup account-scoped (ex. "Covoare" pe 2 magazine) ar produce
-    # 2 rânduri cu același (date,key,platform) și brand_id diferit → coliziune ON CONFLICT. Sumăm + brand dominant.
-    final = {}  # (date, key, platform) -> [spend_total, brand_id_dominant, max_contrib]
+    # dedup pe PK REAL (date, brand_id, sku, platform). ⚠️ Înainte cheia era (date,key,platform) și
+    # spend-ul mai multor branduri se colapsa pe „brandul dominant" — un grup account-scoped (ex. „Covoare"
+    # pe 2 magazine) muta banii celuilalt magazin pe brandul greșit. PK-ul include brand_id, deci fiecare
+    # brand își păstrează suma proprie. Vezi auditul 05-sep-2026.
+    final = {}  # (date, brand_id, key, platform) -> spend_total
+    unmapped = {}  # chei fara brand rezolvat -> nu pot fi scrise (brand_id e in PK => NOT NULL)
     for (d, bid, key, plat), sp in agg.items():
         if not d:
             continue
-        k = (d, key, plat); cur = final.get(k)
-        if cur is None:
-            final[k] = [sp, bid, sp]
-        else:
-            cur[0] += sp
-            if sp > cur[2]:
-                cur[1], cur[2] = bid, sp
+        if bid is None:
+            unmapped[(d, key, plat)] = unmapped.get((d, key, plat), 0.0) + sp
+            continue
+        k = (d, bid, key, plat)
+        final[k] = final.get(k, 0.0) + sp
+    if unmapped:
+        # NU le lipim pe „brandul dominant" ca inainte — aia muta banii pe brandul GRESIT si o facea
+        # tacut. Le raportam explicit: spend real care exista, dar pe care nu-l putem atribui.
+        tot = sum(unmapped.values())
+        sys.stderr.write("\n\u26a0 %d chei FARA brand rezolvat = %d RON NU se scriu in cache.product_ad_spend\n"
+                         "   (brand_id face parte din PK, deci nu poate fi NULL). Top:\n"
+                         % (len(unmapped), round(tot)))
+        for (d, key, plat), v in sorted(unmapped.items(), key=lambda x: -x[1])[:10]:
+            sys.stderr.write("    %s %-6s | %-45s | %d RON\n" % (d, plat, str(key)[:45], round(v)))
     out = [(d, brand, key, title.get(key, key), plat, round(tot, 2), "meta_tiktok_campaign_map")
-           for (d, key, plat), (tot, brand, _) in final.items()]
+           for (d, brand, key, plat), tot in final.items()]
     return out
 
 
@@ -310,12 +306,12 @@ def main():
     from psycopg2.extras import execute_values
     mconn = metrics_conn(); mcur = mconn.cursor()
     # PUR UPSERT (fără DELETE): la --platform tiktok, rândurile au toate platform='tiktok' → ON CONFLICT
-    # atinge DOAR PK-urile (date,sku,'tiktok'); Facebook (platform='meta') rămâne intact. Cheile noi ⊇ cele
+    # atinge DOAR PK-urile (date,brand_id,sku,'tiktok'); Facebook (platform='meta') rămâne intact. Cheile noi ⊇ cele
     # vechi (același mapping de produs, doar atribuirea de brand + acoperirea diferă) → fără rânduri orfane.
     # Sigur la rulări parțiale (rețea flaky): nu pierde date existente, doar le actualizează/adaugă.
     execute_values(mcur,
         "INSERT INTO cache.product_ad_spend (date,brand_id,sku,product_title,platform,spend_ron,source) VALUES %s "
-        "ON CONFLICT (date,sku,platform) DO UPDATE SET spend_ron=EXCLUDED.spend_ron, brand_id=COALESCE(EXCLUDED.brand_id,cache.product_ad_spend.brand_id), source=EXCLUDED.source, computed_at=now()",
+        "ON CONFLICT (date,brand_id,sku,platform) DO UPDATE SET spend_ron=EXCLUDED.spend_ron, source=EXCLUDED.source, computed_at=now()",
         rows, page_size=2000)
     # IDEMPOTENT: șterge cheile SKU stale (mapping vechi/dublu-cont) DOAR în scope-urile (date,brand,platform)
     # reîmprospătate ACUM. Filtrul pe platform respectă --platform tiktok (nu atinge Meta). Vezi [[sku-ad-spend-mapping]].
