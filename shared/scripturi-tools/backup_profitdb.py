@@ -15,6 +15,9 @@ from datetime import datetime, timezone
 
 SRC = os.environ.get("PROFITABILITY_DB", "/root/Scripturi/data/profitability.db")
 DEST_DIR = os.environ.get("PROFIT_BACKUP_DIR", "/root/backups/profitability")
+# numele backup-ului vine din fisierul sursa => acelasi script serveste si alte baze
+# (bucsa.db). Pentru profitability.db rezultatul e identic cu cel de dinainte.
+NAME = os.path.splitext(os.path.basename(SRC))[0]
 
 
 def main():
@@ -23,7 +26,7 @@ def main():
     a = ap.parse_args()
     os.makedirs(DEST_DIR, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    raw = os.path.join(DEST_DIR, "profitability_%s.db" % stamp)
+    raw = os.path.join(DEST_DIR, "%s_%s.db" % (NAME, stamp))
     gz = raw + ".gz"
 
     # 1) snapshot consistent via backup API online (sigur cu writeri activi)
@@ -40,7 +43,7 @@ def main():
     size_mb = os.path.getsize(gz) / 1e6
 
     # 3) rotație: păstrează ultimele --keep
-    backups = sorted(glob.glob(os.path.join(DEST_DIR, "profitability_*.db.gz")))
+    backups = sorted(glob.glob(os.path.join(DEST_DIR, "%s_*.db.gz" % NAME)))
     removed = 0
     for old in backups[:-a.keep]:
         os.remove(old); removed += 1
@@ -57,7 +60,7 @@ def main():
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         hb.execute("INSERT INTO cron_heartbeat (name,last_ping,expected_interval_min,note) VALUES (?,?,?,?) "
                    "ON CONFLICT(name) DO UPDATE SET last_ping=excluded.last_ping",
-                   ("profitdb_backup", now, 1440, "backup_profitdb.py 03:30"))
+                   ("%s_backup" % NAME, now, 1440, "backup_profitdb.py 03:30"))
         hb.commit(); hb.close()
     except Exception as e:
         sys.stderr.write("[backup] heartbeat fail: %s\n" % e)
