@@ -128,6 +128,7 @@ PREFIX_BRAND = {
     "LAB": "Lab Noir",   # 3.145 comenzi; brand real in metrics (slug lab-noir)
     "BUC": "De la Bucsa",  # 11-oct-2026: ~1.000 livrate/luna, marketing 0 in P&L fara asta
     "SK": "Bonhaus SK",    # 11-oct-2026: brand existent acum in metrics
+    "ORC": "Orice Redus", "HU": "Bonhaus HU",  # 11-oct-2026: branduri create in metrics
     "DUPBG": "Duppo BG",  # 31 comenzi; NU are brand in metrics -> nu primeste judet la join
     # ⚠️ inca lipsesc (fara brand sigur in metrics, nu ghicim): ORC 160, HU 132, MD 45. (SK adaugat 11-oct.)
     # ⚠️ "Bonhaus BG" apare pe DOUA prefixe (BG si BONBG), iar tabelele nu sunt de acord ce e BG:

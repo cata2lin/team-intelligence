@@ -1038,6 +1038,7 @@ PREFIX_TO_BRAND = {
   # 11-oct: lipseau => brand_id NULL in brand_pnl_monthly, iar reconcile le vedea cu marketing 0.
   # BON = casaofertelor.ro ('Bonhaus RO' nu exista in brands).
   "LAB":"Lab Noir","SK":"Bonhaus SK","BUC":"De la Bucsa",
+  "ORC":"Orice Redus","HU":"Bonhaus HU",  # branduri create in metrics pe 11-oct-2026
 }
 BRAND_PNL_MONTHLY_DDL = """
 CREATE SCHEMA IF NOT EXISTS cache;
