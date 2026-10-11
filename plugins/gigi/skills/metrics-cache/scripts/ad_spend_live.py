@@ -143,6 +143,7 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
     platforms = subset of ('meta','tiktok') — trage/scrie doar platformele cerute (ex. doar TikTok,
     fără să atingă Facebook + fără apeluri Meta/Google Sheets)."""
     import meta, tiktok, prodmap, datetime
+    import tt_attrib   # aici, nu mai jos: și calea Meta are nevoie de canonical_brand
     end = until or datetime.date.today().isoformat()
     start = since or (datetime.date.today() - datetime.timedelta(days)).isoformat()
     mconn = metrics_conn(); mcur = mconn.cursor()
@@ -164,6 +165,7 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
         return (sku, g) if sku else (g, g)  # single-product group -> SKU; else keep group label
 
     def bid_for(brand):
+        brand = tt_attrib.canonical_brand(brand)
         return name2id.get(brand.strip().lower()) or name2id.get(brand.replace(" RO", "").strip().lower())
 
     # ---- Meta (Facebook/Instagram): pull each ad account ONCE, attribute via exact Mapping ----
@@ -179,6 +181,7 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
             brand = resolve_brand(nm, fb_entries)
             if not brand:
                 continue  # non-ARONA account (BauBax, intl Rossi, etc.)
+            brand = tt_attrib.canonical_brand(brand)   # „Bonhaus RO" -> „Casa Ofertelor"
             # metrics has no 'Bonhaus RO/SK', 'Esteban Parfum' etc → fold into parent (first word)
             bid = name2id.get(brand.strip().lower()) or name2id.get(brand.strip().lower().split()[0])
             for cs, ce in _month_chunks(start, end):   # monthly chunks (Meta rejects long daily ad-level spans)
@@ -204,7 +207,7 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
     # cache.daily_ad_spend_ron. Aici era o COPIE a aceleiași logici; copia rămânea în urmă la fiecare
     # regulă nouă (ex. codurile scurte CO/RB/OZ/MD din numele campaniei, 2026-08), deci calea per-SKU
     # și calea per-brand dădeau branduri diferite pe aceeași campanie. O singură sursă acum.
-    import brandmap, tt_attrib
+    import brandmap
     M_tt = tt_attrib.build_maps(brands, brandmap.tiktok_accounts)
     tt_shared = M_tt["shared"]
     tt_lost = defaultdict(float)   # (acct,campaign) -> spend orfan (cont partajat, fără token ȘI fără owner)

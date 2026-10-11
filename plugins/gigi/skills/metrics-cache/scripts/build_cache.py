@@ -292,6 +292,7 @@ def _warehouse_tiktok_rows(mcur, bname, bslug, brand_store, norm, since, until):
     M = tt_attrib.build_maps(brands, brandmap.tiktok_accounts)
 
     def _bid(brand):
+        brand = tt_attrib.canonical_brand(brand)   # „Bonhaus RO" (Mapping) = „Casa Ofertelor" (metrics)
         b = norm(brand)
         return bname.get(b) or bslug.get(b) or bname.get(norm(brand.split()[0])) or bslug.get(norm(brand.split()[0]))
 

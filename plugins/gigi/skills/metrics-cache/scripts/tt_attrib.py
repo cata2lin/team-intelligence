@@ -56,6 +56,19 @@ ACCT_DEFAULT_OWNER = {"rossi nails romania": "Rossi Nails", "carpetto": "Rossi N
                       "nocturna.ro": "Nocturna", "nocturna europa": "Ofertele Zilei"}
 
 
+# „Brand final" din Mapping -> numele brandului din metrics.brands, când diferă și nicio regulă de nume
+# nu le leagă. „Bonhaus RO" (Mapping) = magazinul casaofertelor.ro = brandul metrics „Casa Ofertelor"
+# (slug casa-ofertelor). Fără alias, ambele căi îl pierdeau: build_cache număra TikTok-ul ca ORFAN
+# (29.689 RON în sep-2026, exact cât arată sheet-ul „CPA și financiar" pt Casa Ofertelor), iar
+# ad_spend_live arunca Meta+TikTok per-SKU ca „FĂRĂ brand". Cheia = numele normalizat (lower, strip).
+METRICS_BRAND_ALIASES = {"bonhaus ro": "Casa Ofertelor"}
+
+
+def canonical_brand(brand):
+    """Numele din Mapping -> numele sub care brandul există în metrics.brands (identic dacă n-are alias)."""
+    return METRICS_BRAND_ALIASES.get((brand or "").strip().lower(), brand)
+
+
 def is_test(campaign: str) -> bool:
     return bool(re.search(r"\btest\b", (campaign or "").lower()))
 
