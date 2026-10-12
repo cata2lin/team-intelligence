@@ -46,3 +46,4 @@ plugins/gigi/skills/richpanel-export/connector_keys.json
 *.orig
 *.rej
 *~
+plugins/gigi/skills/metrics-cache/scripts/ad_landing_cache.json

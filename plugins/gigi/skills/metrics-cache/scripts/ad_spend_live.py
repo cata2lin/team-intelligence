@@ -160,6 +160,50 @@ def barcode_skus(cur):
     return out
 
 
+_HANDLE_RE = re.compile(r"/products/([a-z0-9][a-z0-9\-]*)")
+LANDING_CACHE = Path(__file__).resolve().parent / "ad_landing_cache.json"
+# Perfume brands stay brand-level on purpose (owner, 2026-10-12): no landing-page lookup for them.
+PERFUME_BRANDS = {"Esteban", "George Talent", "Nubra", "Lab Noir", "Labnoir", "DUPPO", "Belasil"}
+
+
+def handle_skus(cur):
+    """(brand_id, product handle) → SKU, for products whose variants all carry one SKU."""
+    cur.execute(
+        'SELECT p."brandId", p.handle, min(v.sku) FROM products p JOIN variants v ON v."productId" = p.id '
+        'WHERE p."deletedAt" IS NULL AND v."deletedAt" IS NULL AND COALESCE(v.sku, \'\') <> \'\' '
+        'GROUP BY 1, 2 HAVING count(DISTINCT lower(v.sku)) = 1'
+    )
+    return {(b, h): sku for b, h, sku in cur.fetchall() if h}
+
+
+def landing_handles(meta, ad_ids, tok):
+    """ad_id → product handles in the ad's creative links. The ad's landing page never changes, so
+    the answer is cached on disk and only new ads cost a Graph call (50 per call)."""
+    try:
+        cache = json.loads(LANDING_CACHE.read_text())
+    except (OSError, ValueError):
+        cache = {}
+    todo = [a for a in ad_ids if a not in cache]
+    for i in range(0, len(todo), 50):
+        chunk = todo[i:i + 50]
+        try:
+            r = meta.requests.get(f"https://graph.facebook.com/{meta.VER}/", timeout=60, params={
+                "ids": ",".join(chunk), "access_token": tok,
+                "fields": "creative{object_story_spec,asset_feed_spec,link_url}"})
+            data = r.json() if r.status_code == 200 else {}
+        except Exception:
+            data = {}
+        for ad_id in chunk:
+            if ad_id in data:
+                cache[ad_id] = sorted(set(_HANDLE_RE.findall(json.dumps(data[ad_id]))))
+    if todo:
+        try:
+            LANDING_CACHE.write_text(json.dumps(cache))
+        except OSError:
+            pass
+    return {a: cache.get(a) or [] for a in ad_ids}
+
+
 def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
     """[(date, brand_id, sku_or_group, product_title, platform, spend_ron, source)] aggregated.
     since='YYYY-MM-DD' overrides days; until='YYYY-MM-DD' caps the end (default today).
@@ -171,7 +215,8 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
     start = since or (datetime.date.today() - datetime.timedelta(days)).isoformat()
     mconn = metrics_conn(); mcur = mconn.cursor()
     name2id = brand_name_to_id(mcur)
-    ean2sku = barcode_skus(mcur); mconn.close()
+    ean2sku = barcode_skus(mcur)
+    handle2sku = handle_skus(mcur); mconn.close()
     g2sku = single_sku_groups()
     brands = list(json.loads((SKILLS / "meta-ads/brand_map.json").read_text()).keys())
 
@@ -215,16 +260,29 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
             brand = tt_attrib.canonical_brand(brand)   # „Bonhaus RO" -> „Casa Ofertelor"
             # metrics has no 'Bonhaus RO/SK', 'Esteban Parfum' etc → fold into parent (first word)
             bid = name2id.get(brand.strip().lower()) or name2id.get(brand.strip().lower().split()[0])
+            unresolved = []                            # (day, ad_id, spend, campaign) left on account/brand
             for cs, ce in _month_chunks(start, end):   # monthly chunks (Meta rejects long daily ad-level spans)
                 for r in meta.graph(f"https://graph.facebook.com/{meta.VER}/{aid}/insights",
-                        {"level": "ad", "fields": "campaign_name,ad_name,spend", "time_increment": "1",
+                        {"level": "ad", "fields": "campaign_name,ad_name,ad_id,spend", "time_increment": "1",
                          "time_range": json.dumps({"since": cs, "until": ce}), "limit": "500", "access_token": tok}):
                     d = r.get("date_start"); camp = r.get("campaign_name", ""); adn = r.get("ad_name", "")
                     sp = meta.conv(float(r.get("spend", 0)), cur, meta._pdate(d), idx_meta)  # per-day FX
                     if sp <= 0: continue
                     # TEST campaigns tracked SEPARATELY (bucket 'TEST'), excluded from real products (ca RZ2)
                     key, lbl = ("TEST", "(produse de test)") if prodmap.is_test(camp) else classify("facebook", nm, camp, adn)
+                    if r.get("ad_id") and (key.startswith("UNMAPPED:")
+                                           or (key in prodmap.BRAND_GROUPS and key not in PERFUME_BRANDS)):
+                        unresolved.append((d, r["ad_id"], sp, camp, key, lbl))
+                        continue
                     agg[(d, bid, key, "meta")] += sp; title[key] = lbl
+            # Ads named only "AD - 12" (Artevita "NEW TEST STRATEGY"): the product is the page the ad
+            # links to. One landing product → that SKU; otherwise the account/brand result stands.
+            handles = landing_handles(meta, sorted({u[1] for u in unresolved}), tok) if unresolved else {}
+            for d, ad_id, sp, camp, key, lbl in unresolved:
+                skus = {handle2sku.get((bid, h)) for h in handles.get(ad_id, [])} - {None}
+                if len(skus) == 1:
+                    key, lbl = skus.pop(), camp[:60]
+                agg[(d, bid, key, "meta")] += sp; title[key] = lbl
 
     # ---- TikTok ----
     # Un advertiser poate rula MAI MULTE branduri (cont PARTAJAT). Atribuirea corectă, INDEPENDENTĂ de ordinea

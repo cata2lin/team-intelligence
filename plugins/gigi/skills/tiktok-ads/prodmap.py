@@ -142,7 +142,8 @@ def product_of(platform, account, campaign, ad=""):
     return "Unmapped"
 
 def is_test(campaign):
-    return bool(re.search(r"\btest\b", _norm(campaign)))
+    # "NEW TEST STRATEGY" (Artevita) is a sales campaign structure, not a product test.
+    return bool(re.search(r"\btest\b(?!\s+strateg)", _norm(campaign)))
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "sync"
