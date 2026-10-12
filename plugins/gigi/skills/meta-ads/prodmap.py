@@ -87,8 +87,8 @@ def load():
 
 
 # Groups that are a whole brand or catalog, not one product.
-BRAND_GROUPS = {"Esteban", "George Talent", "Nubra", "Belasil", "Labnoir", "Magdeal", "Ofertele Zilei",
-                "Reduceri bune", "Casa Ofertelor", "Test", "Iluminat"}
+BRAND_GROUPS = {"Esteban", "George Talent", "Nubra", "Belasil", "Labnoir", "Lab Noir", "Magdeal",
+                "Ofertele Zilei", "Reduceri bune", "Casa Ofertelor", "DUPPO", "Artevita", "Test", "Iluminat"}
 
 _ORDERED = {}
 def _ordered(platform):
