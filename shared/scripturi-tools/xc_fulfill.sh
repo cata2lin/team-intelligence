@@ -28,7 +28,13 @@ cd /root/Scripturi/team-intelligence/plugins/gigi/skills/xconnector
 DOMAINS=$(python3 -c "import xconnector as X; print(' '.join(s['shopDomain'] for s in X.load_shops()))")
 LOGD=/root/Scripturi/logs/fulfill_par; mkdir -p "$LOGD"
 TMPD=$(mktemp -d /tmp/xc_fulfill_run.XXXXXX)
+# ⚠️ Cronul e RETRAS din 2026-09-08 (toata flota pe Order Hub); fisierul ramane de rollback.
+# CANARY Order Hub (2026-08-19): magazinele listate aici sunt expediate de OH, NU de cron. Cele doua
+# sisteme nu au voie sa faca AWB pe acelasi magazin in paralel (AWB dublu / erori reciproce).
+# Rollback = goleste variabila (cronul le reia imediat la urmatorul tick).
+OH_CANARY="16w7xv-0w.myshopify.com 1d2bce-2.myshopify.com 1eee37-2d.myshopify.com 31k0py-bi.myshopify.com 4fr12y-2s.myshopify.com 63e901-2f.myshopify.com 6f9e22-9d.myshopify.com 8e3700-d9.myshopify.com audusp-rf.myshopify.com bb4nmc-pb.myshopify.com bmuwvv-jy.myshopify.com bonhaus.myshopify.com cn54vk-uz.myshopify.com covoareauto-ro.myshopify.com de51c5-b8.myshopify.com dvk4hu-dq.myshopify.com f0yrmh-ia.myshopify.com ix5bxc-hr.myshopify.com n12w89-yy.myshopify.com nxfer1-n4.myshopify.com ofertelezilei.myshopify.com oriceredus.myshopify.com ux1x6n-n2.myshopify.com vthuzq-7j.myshopify.com"   # TOATA flota preluata de Order Hub (20-aug). Rollback: goleste variabila.
 for D in $DOMAINS; do
+  case " $OH_CANARY " in *" $D "*) echo "  [canary OH] sar $D"; continue;; esac
   K="${D%%.*}"
   (
     exec 9>"/tmp/xc_shop.$K.lock"
@@ -45,5 +51,10 @@ AWB=$(cat "$TMPD"/*.n 2>/dev/null | awk '{s+=$1} END{print s+0}')
 rm -rf "$TMPD"
 # dead-man-switch: cronul care face TOATE AWB-urile nu avea heartbeat, desi 20 de joburi mai mici aveau.
 # Ping DOAR daca rularea a ajuns pana aici (deci nu a crapat) -> data_health il raporteaza overdue daca moare.
-/root/Scripturi/.venv/bin/python /root/Scripturi/heartbeat.py xc_fulfill >/dev/null 2>&1 || true
+# Ping DOAR daca s-a rulat ceva. Cu OH_CANARY plin cu toata flota, scriptul sare toate magazinele
+# si ajunge mereu la final — deci pinguia VERDE raportand AWB=0 pe 0 magazine, iar calea de AWB
+# si-a pierdut dead-man-switch-ul fara ca nimeni sa observe. Masurat 8-sep: ping la 12:15, AWB=0.
+if [ "$RAN" -gt 0 ]; then
+  /root/Scripturi/.venv/bin/python /root/Scripturi/heartbeat.py xc_fulfill >/dev/null 2>&1 || true
+fi
 echo "=== $(date '+%F %T') PARALEL gata · AWB=$AWB · rulate=$RAN/$TOT · sarite(ocupate)=$((TOT-RAN)) ==="

@@ -19,7 +19,7 @@ dovedit ca check_token_expiry: Gmail API cu service account care impersonează W
   .venv/bin/python data_health.py                      # doar raport în consolă
   .venv/bin/python data_health.py --email X --key ...  # + email dacă e roșu
 """
-import os, re, sys, argparse, sqlite3
+import os, re, sys, json, argparse, sqlite3
 from datetime import datetime, timezone
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -78,6 +78,18 @@ def _judge(rows, key, ts, sla_h, note=""):
 
 
 # ---------------------------------------------------------------- checks
+
+# Sursele care TREBUIE să ruleze programat, cu SLA-ul în minute. Toate patru sunt cronuri
+# Inngest la 10 minute; SLA-ul e larg intenționat, ca o rulare ratată să nu dea alarmă, dar
+# o oprire reală să iasă în aceeași zi. Adaugi o sursă programată nouă → o treci și aici,
+# altfel moartea ei rămâne invizibilă (vezi comentariul din check_metrics).
+SCHEDULED_SOURCES = {
+    "SHOPIFY": 120,
+    "FACEBOOK_ADS": 120,
+    "GOOGLE_ADS": 120,
+    "TIKTOK_ADS": 120,
+}
+
 
 def check_metrics(rows, ctx):
     """Warehouse: spend per platformă (brand + per-SKU), P&L pe brand, curs valutar, sync_runs."""
@@ -139,19 +151,42 @@ def check_metrics(rows, ctx):
     rows.append((CRIT if tt else OK, "tiktok_token",
                  "%d tokenuri cer re-autorizare" % tt if tt else "ok"))
 
-    # sync_runs: o sursă care rulează dar eșuează 100% e mai rea decât una care nu rulează
+    # sync_runs: o sursă care rulează dar eșuează 100% e mai rea decât una care nu rulează.
+    # ⚠️ ȘI MAI RĂU: o sursă care TACE COMPLET. Varianta veche făcea GROUP BY source, deci
+    # raporta doar sursele care AVEAU rânduri — o sursă oprită de tot dispărea pur și simplu
+    # din raport, fără nicio linie roșie. Exact așa a stat TIKTOK_ADS nesincronizat din
+    # 2026-05 până pe 2026-09-08: funcțiile Inngest nu erau înregistrate, nu rula nimic, și
+    # fiindcă nu exista niciun rând, watchdog-ul n-avea ce să înroșească. Absența nu se
+    # măsura. Acum sursele așteptate sunt declarate explicit și lipsa lor e CRIT.
     # status e enum (SyncRunStatus) → cast la text, altfel ILIKE crapă
-    cur.execute("""SELECT source,
+    cur.execute("""SELECT source::text,
                           COUNT(*) FILTER (WHERE status::text ILIKE '%%fail%%') f,
-                          COUNT(*) FILTER (WHERE status::text NOT ILIKE '%%fail%%') s
-                   FROM sync_runs WHERE "createdAt" > NOW() - INTERVAL '24 hours'
-                   GROUP BY source ORDER BY 1""")
-    got = cur.fetchall()
+                          COUNT(*) FILTER (WHERE status::text NOT ILIKE '%%fail%%') s,
+                          MAX("startedAt") ultima
+                   FROM sync_runs
+                   WHERE "createdAt" > NOW() - INTERVAL '24 hours'
+                   GROUP BY 1 ORDER BY 1""")
+    got = {r[0]: r[1:] for r in cur.fetchall()}
     if not got:
-        rows.append((WARN, "sync_runs", "nicio rulare în 24h"))
-    for src, f, s in got:
+        rows.append((CRIT, "sync_runs", "nicio rulare în 24h, pe nicio sursă"))
+    for src in sorted(set(got) | set(SCHEDULED_SOURCES)):
+        if src not in got:
+            rows.append((CRIT, "sync_runs.%s" % src.lower(),
+                         "TĂCERE TOTALĂ 24h — cron programat lipsă (funcție neînregistrată în Inngest?)"))
+            continue
+        f, s, ultima = got[src]
         st = CRIT if (f and not s) else (WARN if f > s else OK)
-        rows.append((st, "sync_runs.%s" % src.lower(), "%d ok / %d eșuate în 24h" % (s, f)))
+        det = "%d ok / %d eșuate în 24h" % (s, f)
+        # ⚠️ "startedAt" e timestamp FĂRĂ fus, stocat în UTC, iar NOW() e timestamptz pe
+        # Europe/Bucharest: comparate direct, fereastra se mută cu 3 ore și verificarea
+        # iese fals-verde. De-aia se scade explicit din ora UTC.
+        sla_min = SCHEDULED_SOURCES.get(src)
+        if sla_min and ultima is not None:
+            age_min = (datetime.utcnow() - ultima).total_seconds() / 60.0
+            if age_min > sla_min:
+                st = CRIT
+                det += " · ultima acum %.0f min (SLA %d)" % (age_min, sla_min)
+        rows.append((st, "sync_runs.%s" % src.lower(), det))
     cx.close()
 
 
@@ -169,7 +204,12 @@ def check_awbprint(rows, ctx):
     cx.close()
 
 
-AWB_EVENT_LOG = "/root/Scripturi/logs/xc_awb_events.jsonl"
+# ⚠️ Sursa a fost /root/Scripturi/logs/xc_awb_events.jsonl, scris de xc_fulfill.sh. La cutover-ul pe
+# Order Hub (20-aug) acel script a ajuns sa sara toata flota, deci logul a ramas ORFAN: producatorul
+# a fost retras intentionat, verificatorul a ramas sa se uite la el si a raportat zilnic (44 de zile pana la
+# reparatia din flat, 11-oct) „niciun AWB — cronul e mort complet", in timp ce depozitul facea ~2.500-3.000
+# etichete pe zi. order_awbs.created_at e ora LOCALA (Europe/Bucharest) naiva.
+# Acum masuram EFECTUL la sursa lui: etichetele din AWBprint. Vezi [[awb-log-orfan-dupa-cutover-oh]].
 # Praguri pe FEREASTRA ORARĂ de până acum (vezi mai jos), calibrate pe 7 zile reale de trafic:
 # Praguri CALIBRATE prin backtest pe 9 zile reale (nu ghicite). Cu 5/2 și fără condiția de consistență
 # dădea 3 fals pozitive de weekend: Rossi și Covoria aveau 0 AWB la 09:15, dar 8 pe toată ziua — magazine
@@ -194,38 +234,48 @@ def check_awb_output(rows, ctx):
     până la ACEEAȘI oră. Măsurat pe date reale: până la 09:15 Esteban are mereu între 96 (duminica) și
     632 (marți) — un 0 la ora aia nu e „zi liniștită", e cron mort.
     """
-    if not os.path.exists(AWB_EVENT_LOG):
-        rows.append((WARN, "awb.output", "lipsește %s" % AWB_EVENT_LOG)); return
+    dsn = _dsn("DATABASE_URL_AWBPRINT")
+    if not dsn:
+        rows.append((WARN, "awb.output", "fără DATABASE_URL_AWBPRINT")); return
 
-    import json as _json
+    import psycopg2
     from collections import defaultdict
     from datetime import timedelta
 
-    now = datetime.now()                 # logul scrie timestamp LOCAL naiv → compar tot în local
-    hhmm = now.strftime("%H:%M")
-    today = now.date().isoformat()
-    hist_days = [(now.date() - timedelta(days=i)).isoformat() for i in range(1, 8)]
-    keep = set(hist_days) | {today}
-
     win = defaultdict(lambda: defaultdict(int))   # magazin -> zi -> AWB până la ora curentă
-    with open(AWB_EVENT_LOG, "rb") as f:
-        try:
-            f.seek(-12_000_000, os.SEEK_END); f.readline()   # doar coada; 8 zile încap lejer
-        except OSError:
-            f.seek(0)
-        for raw in f:
-            try:
-                d = _json.loads(raw.decode("utf-8", "replace"))
-            except Exception:
-                continue
-            if d.get("kind") != "awb" or d.get("result") != "ok":
-                continue
-            ts = d.get("ts") or ""
-            if ts[:10] in keep and ts[11:16] <= hhmm:        # ← fereastra orară
-                win[(d.get("store") or "?").split(".")[0]][ts[:10]] += 1
+    try:
+        cx = psycopg2.connect(dsn); cur = cx.cursor()
+        # Fereastra orară se taie cu ceasul BAZEI (created_at::time <= LOCALTIME), nu cu al nostru,
+        # ca sa nu depindem de fusul procesului. ⚠️ NU folosi shipment_created_at: e 100% NULL.
+        cur.execute("""
+            SELECT COALESCE(s.name, o.store_uid) AS store,
+                   a.created_at::date AS d,
+                   COUNT(DISTINCT a.tracking_number) AS n,
+                   to_char(LOCALTIME, 'HH24:MI') AS hhmm,
+                   CURRENT_DATE AS today
+            FROM order_awbs a
+            JOIN orders o ON o.id = a.order_id
+            LEFT JOIN stores s ON s.uid = o.store_uid
+            WHERE COALESCE(a.is_return_label, false) = false
+              AND COALESCE(a.is_redirect_label, false) = false
+              AND a.tracking_number IS NOT NULL
+              AND a.created_at >= CURRENT_DATE - INTERVAL '7 days'
+              AND a.created_at::time <= LOCALTIME
+            GROUP BY 1, 2""")
+        got = cur.fetchall()
+        cx.close()
+    except Exception as e:
+        rows.append((WARN, "awb.output", "interogare eșuată: %s" % str(e)[:90])); return
+
+    hhmm = got[0][3] if got else datetime.now().strftime("%H:%M")
+    today = (got[0][4] if got else datetime.now().date()).isoformat()
+    _t = datetime.strptime(today, "%Y-%m-%d").date()
+    hist_days = [(_t - timedelta(days=i)).isoformat() for i in range(1, 8)]
+    for store, d, n, _h, _td in got:
+        win[str(store or "?").split(".")[0]][d.isoformat()] += n
 
     if not win:
-        rows.append((CRIT, "awb.output", "niciun AWB în ultimele 8 zile — cronul de AWB e mort complet"))
+        rows.append((CRIT, "awb.output", "niciun AWB în AWBprint în ultimele 7 zile — producția e oprită"))
         return
 
     live = tot_today = 0
@@ -321,6 +371,65 @@ def check_heartbeats(rows, ctx):
                      (det + (" · " + note if note else "")) if age is not None else "NICIUN ping vreodată"))
 
 
+GADS_GUARD_STATE = "/root/Scripturi/data/gads_feed_guard.json"
+
+
+def check_gads_feed(rows, ctx):
+    """Feedul Google spune adevarul despre stoc? (gads_feed_guard.py)
+
+    Sursa: incidentul 18-aug-2026. Excluderea unui produs din canalul Google in Shopify NU sterge
+    oferta din Merchant Center - o lasa ORFANA, inghetata pe availability=IN_STOCK, si Google
+    liciteaza la infinit pe marfa care nu exista. GD-MOB-1938930 a ars 3.579 lei in 40 de zile cu
+    ZERO comenzi. Judecam REZULTATUL guard-ului, nu daca a rulat jobul.
+    """
+    if not os.path.exists(GADS_GUARD_STATE):
+        rows.append((CRIT, "gads_feed", "starea lipseste - guard-ul nu a rulat niciodata"))
+        return
+    try:
+        with open(GADS_GUARD_STATE, encoding="utf-8") as f:
+            st = json.load(f)
+    except Exception as e:
+        rows.append((CRIT, "gads_feed", "stare ilizibila: %s" % e))
+        return
+
+    age = _age_h(st.get("moment"))
+    if age is None or age > 26:
+        rows.append((CRIT, "gads_feed", "ultima rulare %s (%.0fh, SLA 26h)"
+                     % (str(st.get("moment"))[:16], age or 0)))
+        return
+
+    if st.get("esecuri"):
+        rows.append((CRIT, "gads_feed.surse", "%d surse indisponibile: %s"
+                     % (len(st["esecuri"]), "; ".join(st["esecuri"])[:120])))
+
+    mag = st.get("magazine", [])
+    scos = sum(m.get("de_scos", 0) for m in mag)
+    pus = sum(m.get("de_pus", 0) for m in mag)
+    err = [e for m in mag for e in m.get("erori", [])]
+    trunc = [m["magazin"] for m in mag if m.get("jurnal_trunchiat")]
+
+    if err:
+        rows.append((CRIT, "gads_feed.erori", "%d scrieri esuate: %s" % (len(err), "; ".join(err)[:120])))
+    if trunc:
+        rows.append((WARN, "gads_feed.jurnal", "jurnal trunchiat pe: %s" % ", ".join(trunc)))
+
+    # Judecam ce a RAMAS nereparat, nu ce s-a detectat: dupa un apply reusit detectarile sunt
+    # istorie, iar ramasele sunt zero. Altfel checkul e rosu exact fiindca reparatia a mers.
+    ram_s = sum(m.get("ramase_scos", m.get("de_scos", 0)) for m in mag)
+    ram_p = sum(m.get("ramase_pus", m.get("de_pus", 0)) for m in mag)
+    if st.get("aplicat") and (ram_s or ram_p):
+        rows.append((CRIT, "gads_feed",
+                     "dupa apply au ramas %d de scos / %d de pus - reparatia nu prinde" % (ram_s, ram_p)))
+    elif st.get("aplicat") and (scos or pus):
+        rows.append((OK, "gads_feed", "%s - reparat: %d scoase / %d puse pe %d magazine"
+                     % (str(st.get("moment"))[:16], scos, pus, len(mag))))
+    elif scos or pus:
+        rows.append((WARN, "gads_feed", "%d de scos / %d de pus (rulare dry-run)" % (scos, pus)))
+    else:
+        rows.append((OK, "gads_feed", "%s - feed sincron cu stocul pe %d magazine"
+                     % (str(st.get("moment"))[:16], len(mag))))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Watchdog de prospețime a datelor ARONA")
     ap.add_argument("--email", help="destinatar (email trimis DOAR dacă e ceva roșu)")
@@ -331,7 +440,8 @@ def main():
 
     rows = []
     ctx = {}  # check_metrics populează cache_fresh înainte ca check_profitdb să-l citească
-    for fn in (check_metrics, check_awbprint, check_awb_output, check_profitdb, check_heartbeats):
+    for fn in (check_metrics, check_awbprint, check_awb_output, check_profitdb,
+               check_gads_feed, check_heartbeats):
         try:
             fn(rows, ctx)
         except Exception as e:

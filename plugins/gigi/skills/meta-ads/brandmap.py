@@ -20,7 +20,13 @@ _KB = Path.home() / ".claude/plugins/marketplaces/team-intelligence/plugins/core
 # columns: 0 Brand final · 1 Conturi Facebook · 2 Conturi Tiktok · 3 Shopify · 4 Conturi Google · 5 Campanie(token) · 6 Cont multiplu(tiktok shared)
 
 def _kb(key):
-    """Fetch a secret/config value from the SharedClaude KB (never hardcode creds)."""
+    """Fetch a secret/config value from the SharedClaude KB (never hardcode creds).
+    Pe VPS nu există kb.py, dar cronurile își încarcă secretele în env (run.env / .env) — de aceea
+    env-ul are prioritate. Fără asta, `brandmap.py sync` nu putea rula pe VPS și cache-ul
+    brand_map.json rămânea înghețat la tokenii vechi, oricât modificai sheet-ul."""
+    v = os.environ.get(key)
+    if v:
+        return v.strip()
     try:
         r = subprocess.run(["uv", "run", str(_KB), "secret-get", key], capture_output=True, text=True, timeout=45)
         return (r.stdout or "").strip()
@@ -84,11 +90,27 @@ def resolve(brand):
         cand.sort(key=lambda kv: len(kv[0])); return cand[0]
     return None, None
 
+# Contul TikTok scris în Mapping ≠ advertiserul REAL din metrics.tiktok_ad_accounts. Mapping-ul zice
+# „Covoria", dar banii curg pe advertiserul „Covoria.ro" (contul „Covoria" are 0 spend). Cu numele
+# exact, „Covoria.ro" nu aparținea nimănui: per-brand (build_cache) îl număra ORFAN (2.856 RON în
+# sep-2026), iar per-SKU (ad_spend_live) nici nu-l trăgea din API. Aici: numele din Mapping (lower)
+# -> advertiserii reali care îi aparțin ACELUIAȘI brand. Doar conturi DEDICATE, unde numele contului
+# e chiar domeniul brandului — nu se pune aici un cont partajat.
+TT_ACCOUNT_ALIASES = {"covoria": ["Covoria.ro"]}
+
+def _with_aliases(accs):
+    out = list(accs)
+    for acc in accs:
+        for extra in TT_ACCOUNT_ALIASES.get(acc.strip().lower(), []):
+            if extra.strip().lower() not in {a.strip().lower() for a in out}:
+                out.append(extra)
+    return out
+
 def _tt_owners():
     """account-name(lower) -> set of brands that own it (via their TikTok list, or a brand-name match)."""
     m = load(); owners = {}
     for ob, ov in m.items():
-        for acc in ov.get("tiktok", []):
+        for acc in _with_aliases(ov.get("tiktok", [])):
             owners.setdefault(acc.strip().lower(), set()).add(ob)
         owners.setdefault(ob.strip().lower(), set()).add(ob)   # a brand name doubles as an account name
     return owners
@@ -102,7 +124,7 @@ def tiktok_accounts(brand):
     tok = e.get("campaign_token", "") or ""
     owners = _tt_owners()
     out = []
-    for acc in e.get("tiktok", []):
+    for acc in _with_aliases(e.get("tiktok", [])):
         borrowed = any(ob != bf for ob in owners.get(acc.strip().lower(), set()))
         out.append({"name": acc, "campaign_filter": (tok if borrowed and tok else None)})
     return out
