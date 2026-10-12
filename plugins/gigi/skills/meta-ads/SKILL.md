@@ -71,6 +71,12 @@ For accounts that sell **many products, one campaign each** (e.g. **Reflexino = 
 - **Product** = a `HA-<digits>` code in the campaign name, else the team's **Nomenclator** rules
   (`ACCOUNT` / `CAMPAIGN_KEYWORD` / `AD_KEYWORD`, accent-insensitive substring) — same logic as the ARONA
   product-profitability `apply_mapping`. Rules sync from the Nomenclator sheet: `uv run prodmap.py sync`.
+  Order (since 2026-10-12): `HA-` code → keyword rules for a **product** (longest pattern first) → keyword
+  rules for a brand/catalog group (`BRAND_GROUPS`) → `ACCOUNT` rules. Patterns ≤3 characters match whole
+  words only. A rule with an `"account"` field only applies on that ad account (e.g. TikTok `caserol` =
+  HA-0217 on Bonhaus CZ/PL). `PRODMAP_RULES_JSON=<file>` dry-runs a rule set before it goes to the KB.
+  `ad_spend_live.py` also reads an **EAN-13** in the campaign/ad name (e.g. "ALEX STRATEGY #4 7865789069743")
+  and maps it to that product's SKU via `variants.barcode`.
 - **TEST vs SALES**: a campaign whose name contains **"TEST"** is TEST; everything else is sales. The brand
   total in `report` includes both; `products` shows the **sales** P&L per product and the **TEST** spend
   apart. (This is why a raw `report` on Magdeal reads ~19% higher than the team's sales figure — the gap is TEST.)
