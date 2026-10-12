@@ -73,23 +73,72 @@ def _kb_rules():
         return None
 
 def load():
-    """Rules from KB first (live, team-shared), else the local prod_rules.json cache. Memoised."""
+    """Rules from KB first (live, team-shared), else the local prod_rules.json cache. Memoised.
+    PRODMAP_RULES_JSON=<file> overrides both (dry-run a rule change before writing it to the KB)."""
     global _RULES
     if _RULES is None:
-        _RULES = _kb_rules() or (json.loads(CACHE.read_text()) if CACHE.exists()
-                                 else {"facebook": [], "tiktok": []})
+        override = os.environ.get("PRODMAP_RULES_JSON")
+        if override:
+            _RULES = json.loads(Path(override).read_text())
+        else:
+            _RULES = _kb_rules() or (json.loads(CACHE.read_text()) if CACHE.exists()
+                                     else {"facebook": [], "tiktok": []})
     return _RULES
 
+
+# Groups that are a whole brand or catalog, not one product.
+BRAND_GROUPS = {"Esteban", "George Talent", "Nubra", "Belasil", "Labnoir", "Magdeal", "Ofertele Zilei",
+                "Reduceri bune", "Casa Ofertelor", "Test", "Iluminat"}
+
+_ORDERED = {}
+def _ordered(platform):
+    """Keyword rules before account rules, longest pattern first (as the WMS mapping does):
+    first-match in sheet order let an ACCOUNT rule ('Reduceri bune' → Covorase baie) swallow
+    campaigns that name another product (covor pufos, mașina de cusut)."""
+    rules = load().get(platform, [])
+    key = (platform, id(rules))
+    if key not in _ORDERED:
+        kw = [r for r in rules if r.get("map_type") != "ACCOUNT"]
+        acct = [r for r in rules if r.get("map_type") == "ACCOUNT"]
+        # A product named in the campaign beats a brand/catalog keyword in the same name
+        # ("OGLINDA ACRILICA #5 - OFERTELE ZILEI ALINA" is the mirror, not the whole catalog).
+        kw.sort(key=lambda r: (r["product_group"] in BRAND_GROUPS, -len(_norm(r.get("pattern")))))
+        _ORDERED[key] = kw + acct
+    return _ORDERED[key]
+
+
+# HA code anywhere in campaign/ad: "HA-0217", "HA- 1322"; not "{HAC}" or "SHA-256"-like.
+_HA_RE = re.compile(r"(?<![A-Za-z0-9])HA-\s?(\d{3,5})(?!\d)", re.IGNORECASE)
+
+
+def ha_code(text):
+    m = _HA_RE.search(text or "")
+    return f"HA-{m.group(1)}" if m else None
+
+def _pat_matches(pat, target):
+    """Pattern-urile SCURTE (≤3 car., ex 'LA','LM','GT') se potrivesc DOAR pe word-boundary — altfel 'la' prinde
+    'lavete', 'alex' etc. ca substring și un cont întreg cade fals pe un produs (bug 'Lavete abrazive' CZ 79k
+    fantomă). Pattern-urile lungi rămân substring (sunt destul de specifice). Vezi [[mapping-tiktok-attribution]]."""
+    if not pat:
+        return False
+    if len(pat) <= 3:
+        return re.search(r"(?<![a-z0-9])" + re.escape(pat) + r"(?![a-z0-9])", target) is not None
+    return pat in target
+
 def product_of(platform, account, campaign, ad=""):
-    """Campaign/ad → product group: AUTO HA-<digits> (in campaign OR ad), else first matching rule, else 'Unmapped'."""
-    m = re.search(r"(?<![A-Za-z0-9])(HA-\d+)", f"{campaign or ''} {ad or ''}", re.IGNORECASE)
-    if m: return m.group(1).upper()
-    for r in load().get(platform, []):
+    """Campaign/ad → product group: AUTO HA-<digits> (in campaign OR ad), else the matching rule
+    (keywords before accounts, longest first), else 'Unmapped'. A rule with an "account" field only
+    applies on that ad account (a word like 'caserolă' is a different product per store)."""
+    code = ha_code(f"{campaign or ''} {ad or ''}")
+    if code: return code
+    acct_n = _norm(account)
+    for r in _ordered(platform):
         pat = _norm(r["pattern"])
         if not pat: continue
+        if r.get("account") and _norm(r["account"]) != acct_n: continue
         target = {"ACCOUNT": account, "CAMPAIGN_KEYWORD": campaign, "AD_KEYWORD": ad,
                   "CAMPAIGN_AND_AD": f"{campaign} && {ad}"}.get(r["map_type"], "")
-        if pat in _norm(target): return r["product_group"]
+        if _pat_matches(pat, _norm(target)): return r["product_group"]
     return "Unmapped"
 
 def is_test(campaign):

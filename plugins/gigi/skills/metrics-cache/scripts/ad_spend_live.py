@@ -137,6 +137,29 @@ def single_sku_groups():
         return {}
 
 
+_EAN_RE = re.compile(r"(?<!\d)(\d{13})(?!\d)")
+
+
+def barcode_skus(cur):
+    """EAN-13 → SKU from the Shopify variants in the warehouse. A barcode on several SKUs counts only
+    when one SKU holds at least 3/4 of its variants (set-5-lavete-magice 9 × set-5-m 1); the
+    2000000000… placeholders are shared by unrelated products and never count."""
+    cur.execute(
+        "SELECT barcode, sku, count(*) FROM variants "
+        "WHERE \"deletedAt\" IS NULL AND barcode ~ '^[0-9]{13}$' AND COALESCE(sku, '') <> '' "
+        "AND barcode NOT LIKE '2000000000%' GROUP BY barcode, sku"
+    )
+    by_code = defaultdict(dict)
+    for code, sku, n in cur.fetchall():
+        by_code[code][sku] = n
+    out = {}
+    for code, skus in by_code.items():
+        sku, n = max(skus.items(), key=lambda kv: kv[1])
+        if n >= 0.75 * sum(skus.values()):
+            out[code] = sku
+    return out
+
+
 def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
     """[(date, brand_id, sku_or_group, product_title, platform, spend_ron, source)] aggregated.
     since='YYYY-MM-DD' overrides days; until='YYYY-MM-DD' caps the end (default today).
@@ -147,7 +170,8 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
     end = until or datetime.date.today().isoformat()
     start = since or (datetime.date.today() - datetime.timedelta(days)).isoformat()
     mconn = metrics_conn(); mcur = mconn.cursor()
-    name2id = brand_name_to_id(mcur); mconn.close()
+    name2id = brand_name_to_id(mcur)
+    ean2sku = barcode_skus(mcur); mconn.close()
     g2sku = single_sku_groups()
     brands = list(json.loads((SKILLS / "meta-ads/brand_map.json").read_text()).keys())
 
@@ -156,6 +180,13 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
     seen = set()                   # dedup shared accounts: (platform, acct, date, campaign, ad)
 
     def classify(platform, account, campaign, ad):
+        text = f"{campaign or ''} {ad or ''}"
+        if not prodmap.ha_code(text):
+            # Newer campaigns end with the product's EAN ("ALEX STRATEGY #4 7865789069743"):
+            # it names exactly one product, so it wins over any keyword rule.
+            sku = next((ean2sku[e] for e in _EAN_RE.findall(text) if e in ean2sku), None)
+            if sku:
+                return sku, campaign[:60]
         g = prodmap.product_of(platform, account, campaign, ad)
         if g == "Unmapped":
             return f"UNMAPPED:{account}", "(nemapat)"
