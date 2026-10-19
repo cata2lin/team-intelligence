@@ -22,6 +22,9 @@ KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
 CI = os.path.join(HERE, "..", "customer-identity", "customer_identity.py")
 TI = os.path.join(HERE, "cs_ticket_index.py")   # index similaritate tichete rezolvate
 MCP_URL = "https://mcp.richpanel.com/mcp"
+for _p in (os.path.join(HERE, "..", "..", "..", "core", "scripts"), HERE):
+    sys.path.insert(0, _p)
+import richpanel_schema as rps  # eroare Richpanel = excepție, nu „0 rezultate" (schema nouă oct-2026)
 
 PLAYBOOK = """Ești agent Customer Service la ARONA (magazine Shopify cu plată ramburs: Esteban, George Talent, Nubra, Gento — parfumuri; Grandia, Carpetto, Covoria — casă/mobilă; Bonhaus RO/CZ/PL/BG; Belasil; Reduceri bune, Ofertele Zilei, Magdeal etc.).
 Scrie răspunsul către client respectând EXACT procedurile echipei:
@@ -146,7 +149,7 @@ def similar_precedent(tok, query, n, api):
     blocks = []
     for h in hits:
         try:
-            conv = mcp("get_conversation", {"conversation_number": h["no"], "mode": "audit", "max_messages": 30}, tok)
+            conv = mcp("get_conversation", rps.conv_args(h["no"], mode="audit", max_messages=30), tok)
             rep = agent_reply(conv)
         except Exception:
             rep = ""
@@ -164,7 +167,11 @@ def main():
     a = ap.parse_args()
     tok = secret("RICHPANEL_MCP_TOKEN")
 
-    conv = mcp("get_conversation", {"conversation_number": a.conv, "mode": "audit", "max_messages": 30}, tok)
+    try:
+        conv = rps.check(mcp("get_conversation", rps.conv_args(a.conv, mode="audit", max_messages=30), tok),
+                         "get_conversation")
+    except rps.RichpanelError as e:
+        sys.exit("Nu pot citi conversația #%s: %s" % (a.conv, e))
     tk = conv.get("ticket") or {}
     conv_id = tk.get("id")
     tr = transcript(conv)

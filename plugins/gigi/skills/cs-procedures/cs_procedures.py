@@ -16,13 +16,16 @@ Folosește-l ca să documentezi procedurile + ca STANDARD față de care identif
 
 LLM: ANTHROPIC_API_KEY (Claude) dacă există, altfel OPENAI_API_KEY. Model: env PROC_MODEL. Read-only.
 """
-import os, json, sqlite3, subprocess, urllib.request, argparse, time
+import os, sys, json, sqlite3, subprocess, urllib.request, argparse, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", "..", ".."))
 DB = os.environ.get("RICHPANEL_DB") or os.path.join(REPO, "data", "richpanel_tickets.db")
 KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
 MCP_URL = "https://mcp.richpanel.com/mcp"
+for _p in (os.path.join(HERE, "..", "..", "..", "core", "scripts"), HERE):
+    sys.path.insert(0, _p)
+import richpanel_schema as rps  # eroare Richpanel = excepție, nu „0 rezultate" (schema nouă oct-2026)
 AGENTS = {"20458195-be56-4eb0-a42d-e439ec9bc864": "Cristina", "ecd1325c-8da5-409f-ad90-3405c062ff44": "Diana",
           "76459f48-c911-4c69-871e-537e0ac645ac": "Irina", "245b9936-837a-4c9b-8fad-fe2d179a4ddf": "Martina",
           "0964e420-84e7-457f-b0b5-57253b9a0dc8": "Alexandra", "6acebee5-9015-4e63-9646-ebfe32017be9": "Mariana"}
@@ -49,11 +52,14 @@ def mcp(token):
 
 
 def conv_text(post, no):
+    # eroare Richpanel (503, schemă schimbată) = EXCEPȚIE: altfel fiecare tichet ieșea „fără replică
+    # de agent" și procedura se „învăța" din 0 transcripturi, fără niciun semnal
+    r = rps.check(post({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "get_conversation", "arguments": rps.conv_args(no, mode="audit", max_messages=16)}}), "get_conversation")
     try:
-        r = post({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "get_conversation", "arguments": {"conversation_number": no, "mode": "audit", "max_messages": 16}}})
         d = json.loads(r["result"]["content"][0]["text"])
-    except Exception:
-        return None
+    except Exception as e:
+        raise rps.RichpanelError("get_conversation #%s: răspuns ne-JSON: %s" % (no, str(r)[:200]))
+    rps.check(d, "get_conversation")
     msgs = d.get("messages") or (d.get("messages_page") or {}).get("messages") or []
     lines = []
     for m in msgs:

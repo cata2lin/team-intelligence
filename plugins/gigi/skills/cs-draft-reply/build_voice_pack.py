@@ -13,12 +13,15 @@ exclude botul/operator/auto. Folosește prima replică a clientului pt categorie
   uv run build_voice_pack.py                 # scanează ~120 tichete CLOSED, 3 exemple/categorie
   uv run build_voice_pack.py --per 4 --scan 200
 """
-import os, re, json, argparse, urllib.request, subprocess
+import os, re, sys, json, argparse, urllib.request, subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
 OUT = os.path.join(HERE, ".voice_pack.json")
 MCP_URL = "https://mcp.richpanel.com/mcp"
+for _p in (os.path.join(HERE, "..", "..", "..", "core", "scripts"), HERE):
+    sys.path.insert(0, _p)
+import richpanel_schema as rps  # eroare Richpanel = excepție, nu „0 rezultate" (schema nouă oct-2026)
 
 DEACC = str.maketrans("ăâîșşțţ", "aaissttt"[0:7])
 def deacc(s): return (s or "").lower().translate(DEACC)
@@ -94,9 +97,9 @@ def main():
     pack = {c: [] for c in WANT}
     page, seen, got = 1, 0, 0
     while got < a.scan and all(len(pack[c]) >= a.per for c in WANT) is False:
-        r = mcp.call("list_conversations", {"status": "closed", "page": page, "per_page": 50,
+        r = mcp.call("list_conversations", {"status": "CLOSED", "page": page, "per_page": 50,
                                             "sortKey": "updatedAt", "order": "desc"})
-        batch = (r.get("tickets") or r.get("conversations") or []) if isinstance(r, dict) else []
+        batch = rps.tickets(r)
         if not batch:
             break
         for t in batch:
@@ -107,7 +110,8 @@ def main():
             if cat not in WANT or len(pack[cat]) >= a.per:
                 continue
             got += 1
-            cv = mcp.call("get_conversation", {"conversation_number": str(no), "mode": "audit", "max_messages": 30})
+            cv = rps.check(mcp.call("get_conversation", rps.conv_args(no, mode="audit", max_messages=30)),
+                           "get_conversation")
             msgs = (cv.get("messages_page") or {}).get("messages") or cv.get("messages") or []
             for m in msgs:
                 if m.get("is_private") or m.get("is_ai"):

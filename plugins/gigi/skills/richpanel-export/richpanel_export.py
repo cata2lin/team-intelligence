@@ -16,6 +16,9 @@ timpi) + CATEGORISIRE pe reguli + magazin + nr comandă. Resumabil (merge pe zil
 import os, sys, json, re, time, sqlite3, argparse, subprocess, urllib.request, datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+for _p in (os.path.join(HERE, "..", "..", "..", "core", "scripts"), HERE):
+    sys.path.insert(0, _p)
+import richpanel_schema as rps  # schema Richpanel veche/nouă (fără `to` din 5-oct-2026) + eroare = excepție
 # Respectă RICHPANEL_DB (setat de pipeline pe VPS) — altfel folosea o cale hardcodată de Mac și
 # pe VPS scria într-o bază orfană (bug 13-iun → baza reală înghețată). Fallback = calea de dev local.
 DB_DEFAULT = os.environ.get("RICHPANEL_DB") or "/Users/gheorghebeschea/Downloads/Scripturi/data/richpanel_tickets.db"
@@ -119,7 +122,10 @@ class MCP:
                 if res.get("error"):
                     raise RuntimeError("JSON-RPC error: %s" % res["error"])
                 txt = res.get("result", {}).get("content", [{}])[0].get("text", "")
-                return json.loads(txt) if txt.startswith("{") else {}
+                out = json.loads(txt) if txt.startswith("{") else {"_text": txt}
+                if res.get("result", {}).get("isError"):
+                    out.setdefault("_error", txt[:300] or "isError")
+                return rps.check(out, name)
             except Exception:
                 if i == retries - 1:
                     raise
@@ -151,15 +157,11 @@ def ensure_db(path):
 
 
 def derive(t):
-    to_email = (t.get("to") or {}).get("email") or ""
-    store = ""
-    for dom, s in STORE_BY_EMAIL.items():
-        if dom in to_email:
-            store = s; break
+    # magazinul: pagina (to.id sau prefixul id-ului la comentarii), cutia, comanda, domeniul citat —
+    # helperul comun, fiindcă din 5-oct-2026 sumarul nu mai are `to` (store cădea la ~12%)
+    store = rps.resolve_store(t) or ""
     m = ORDER_RE.search((t.get("subject") or "") + " " + (t.get("first_message") or ""))
     order = (m.group(1) + m.group(2)) if m else ""
-    if not store and m:
-        store = ORDER_PFX.get(m.group(1), "")
     cat = categorize(t.get("subject"), t.get("first_message"), t.get("channel"))
     return store, order, cat
 
@@ -206,6 +208,8 @@ def upsert(db, tickets):
 
 
 def pull(db, mcp, dfrom, dto, quiet=False):
+    """Întoarce numărul de zile EȘUATE (main iese ≠0 dacă sunt — cronul trebuie să vadă)."""
+    failed = 0
     day = datetime.date.fromisoformat(dfrom)
     end = datetime.date.fromisoformat(dto)
     today = datetime.date.today()
@@ -218,12 +222,12 @@ def pull(db, mcp, dfrom, dto, quiet=False):
             day += datetime.timedelta(days=1); continue
         try:
             total = 0
-            for status in ("open", "closed"):
+            for status in ("OPEN", "CLOSED"):
                 page = 1
                 while True:
                     d = mcp.call("list_conversations", {"status": status, "startDate": ds, "endDate": de,
                                                         "per_page": 50, "page": page})
-                    ts = (d.get("tickets") or []) if isinstance(d, dict) else []
+                    ts = rps.tickets(d)
                     upsert(db, ts); total += len(ts)
                     if len(ts) < 50 or page >= 200:
                         break
@@ -235,9 +239,11 @@ def pull(db, mcp, dfrom, dto, quiet=False):
                 print("  %s: %d tichete" % (ds, total), flush=True)
         except Exception as e:
             # ziua a eșuat (rețea/MCP/parsare) — NU o marca done; log + CONTINUĂ (se reia la următoarea rulare)
-            print("  %s: EROARE (%s) — sar peste, se reia ulterior" % (ds, str(e)[:70]), flush=True)
+            print("  %s: EROARE (%s) — sar peste, se reia ulterior" % (ds, str(e)[:160]), flush=True)
+            failed += 1
             time.sleep(3)
         day += datetime.timedelta(days=1)
+    return failed
 
 
 def stats(db):
@@ -279,8 +285,10 @@ def main():
     if not tok:
         print("Lipsește RICHPANEL_MCP_TOKEN în KB."); sys.exit(1)
     mcp = MCP(tok)
-    pull(db, mcp, a.dfrom, a.dto or a.dfrom, quiet=a.quiet)
+    failed = pull(db, mcp, a.dfrom, a.dto or a.dfrom, quiet=a.quiet)
     stats(db)
+    if failed:
+        sys.exit("EȘEC: %d zile netrase din Richpanel (vezi EROARE mai sus)" % failed)
 
 
 if __name__ == "__main__":

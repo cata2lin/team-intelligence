@@ -68,6 +68,9 @@ def _vps_run(remote_cmd, timeout=180):
         _sys.exit(str(e))
 HERE = os.path.dirname(os.path.abspath(__file__))
 MCP_URL = "https://mcp.richpanel.com/mcp"
+for _p in (os.path.join(HERE, "..", "..", "..", "core", "scripts"), HERE):
+    sys.path.insert(0, _p)
+import richpanel_schema as rps  # eroare Richpanel = excepție; schema nouă (customer, fără from/to)
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 PHONE_RE = re.compile(r"(?:\+?4?0)\s*7\d{2}[\s.\-]?\d{3}[\s.\-]?\d{3}")
@@ -189,12 +192,19 @@ def resolve(a):
     # --conv: extrage email/telefon din conversație
     seed_conv = None
     if a.conv and mcp:
-        conv = mcp.call("get_conversation", {"conversation_number": a.conv, "mode": "audit", "max_messages": 50})
+        conv = rps.check(mcp.call("get_conversation", rps.conv_args(a.conv, mode="audit", max_messages=50)),
+                         "get_conversation")
         seed_conv = conv
         blob = json.dumps(conv, ensure_ascii=False)
-        frm = (conv.get("ticket") or {}).get("from") or {} if isinstance(conv, dict) else {}
+        tk = conv.get("ticket") or {} if isinstance(conv, dict) else {}
+        frm = tk.get("from") or {}
         if isinstance(frm.get("id"), str) and "@" in frm["id"]:
             emails.add(frm["id"].lower())
+        cust = tk.get("customer") if isinstance(tk.get("customer"), dict) else {}  # schema nouă
+        if cust.get("email"):
+            emails.add(str(cust["email"]).lower())
+        if cust.get("phone") and norm_phone(cust["phone"]):
+            phones.add(norm_phone(cust["phone"]))
         for m in EMAIL_RE.findall(blob):
             if "richpanel" not in m and "sentry" not in m:
                 emails.add(m.lower())
@@ -207,10 +217,10 @@ def resolve(a):
     cdp = []
     if mcp:
         for e in list(emails):
-            r = mcp.call("get_customer_by_email_or_phone", {"id": e, "type": "email"})
+            r = rps.check(mcp.call("get_customer_by_email_or_phone", {"id": e}), "get_customer_by_email_or_phone")
             cdp += (r.get("customers") or []) if isinstance(r, dict) else []
         for ph in list(phones):
-            r = mcp.call("get_customer_by_email_or_phone", {"id": ph, "type": "phone"})
+            r = rps.check(mcp.call("get_customer_by_email_or_phone", {"id": ph}), "get_customer_by_email_or_phone")
             cdp += (r.get("customers") or []) if isinstance(r, dict) else []
     # dedupe profile pe id
     cdp = list({c.get("id"): c for c in cdp if isinstance(c, dict)}.values())
@@ -254,8 +264,8 @@ def resolve(a):
     convos, seen = [], set()
     if mcp:
         for ident, typ in [(e, "email") for e in emails] + [(ph, "phone") for ph in phones]:
-            r = mcp.call("search_conversations_by_customer", {"id": ident, "type": typ, "per_page": 50})
-            for cv in (r.get("tickets") or r.get("conversations") or []) if isinstance(r, dict) else []:
+            r = mcp.call("search_conversations_by_customer", {"id": ident, "per_page": 50})
+            for cv in rps.tickets(r, "search_conversations_by_customer"):
                 cid = cv.get("id") or cv.get("conversation_no")
                 if cid in seen:
                     continue

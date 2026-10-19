@@ -151,7 +151,7 @@ Parametrii exacți: `gigi:order-hub actiuni` (sau `skill_info`). Listele de obie
 Magazinul unui tichet = **PAGINA pe care a venit** = câmpul **`to.id`** (page id FB/IG) → mapează cu `PAGE_STORE` din `gigi:richpanel-auto-triage` (ex `775068272350568` = MagDeal). **NICIODATĂ** după:
 - **brandul / `last_message_sender_id` din Richpanel** — e neactualizat (ex pagina MagDeal e încă etichetată „nocturna9540" → un agent a zis greșit „Nocturna");
 - numele/handle-ul clientului.
-Fallback dacă n-ai `to.id`: prefixul comenzii din mesaj (EST/GT/MAG…) → magazin. Vezi memoria [[fb-page-store-map]].
+Fallback dacă n-ai `to.id` (din 5-oct-2026 Richpanel NU-l mai trimite): primul segment din id-ul conversației la comentariile FB (`<pagină>_<post>_…`), cutia de e-mail, apoi prefixul comenzii din mesaj (EST/GT/MAG…). Totul e în `plugins/core/scripts/richpanel_schema.py` → `resolve_store(t)`; nu re-implementa. Vezi memoria [[fb-page-store-map]].
 
 ## ⚠️ Capcane care au stricat lucruri înainte (citește)
 1. **Telefon negăsit** = format. Caută după ultimele **9 cifre** (`cs-360` o face). Nu scrie `phone = '07…'` exact.

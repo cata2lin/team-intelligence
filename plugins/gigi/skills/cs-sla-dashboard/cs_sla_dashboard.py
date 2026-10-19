@@ -33,6 +33,12 @@ REGULI DE SIGURANȚĂ:
 import os, sys, json, time, argparse, subprocess, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+for _p in (os.path.join(HERE, "..", "..", "..", "core", "scripts"), HERE):
+    sys.path.insert(0, _p)
+import richpanel_schema as rps  # verificarea răspunsului MCP + schema tichetelor (veche/nouă)
+
+# query_analytics cere din oct-2026 un fus IANA explicit (altfel: „timezone is required").
+TIMEZONE = "Europe/Bucharest"
 MCP_URL = "https://mcp.richpanel.com/mcp"
 
 # tag intern folosit la triaj (--apply). Doar pt organizare internă, nu se vede la client.
@@ -115,11 +121,11 @@ class MCP:
                 if res.get("error"):
                     raise RuntimeError("JSON-RPC error: %s" % res["error"])
                 txt = res.get("result", {}).get("content", [{}])[0].get("text", "")
-                out = json.loads(txt) if txt.strip().startswith("{") else {}
+                out = json.loads(txt) if txt.strip().startswith("{") else {"_text": txt}
                 if res.get("result", {}).get("isError") or out.get("success") is False:
                     # altfel un 503 Richpanel („AUTH_UNAVAILABLE") iese ca „0 conversații" în dashboard
                     raise RuntimeError("Richpanel MCP a răspuns cu eroare: %s" % (txt[:300] or res))
-                return out
+                return rps.check(out, name)
             except Exception as e:
                 last = e
                 if i == retries - 1:
@@ -138,10 +144,14 @@ def metric_map(metrics):
 
 
 def query(mcp, metrics, dimension=None, days=30):
-    args = {"metrics": metrics, "period_days": days}
+    args = {"metrics": metrics, "period_days": days, "timezone": TIMEZONE}
     if dimension:
         args["dimensions"] = dimension
-    d = mcp.call("query_analytics", args).get("data", {})
+    r = mcp.call("query_analytics", args)
+    d = r.get("data")
+    if not isinstance(d, dict):
+        # fără `data` = schemă schimbată → NU afișa un dashboard de zerouri
+        raise rps.RichpanelError("query_analytics: lipsește `data` (chei=%s)" % sorted(r)[:10])
     rows = []
     for b in d.get("breakdowns", []):
         dims = b.get("dimensions", [])
@@ -398,9 +408,7 @@ def triage(mcp, days, apply):
         # cele mai vechi conversații DESCHISE pe canal (oldest first)
         d = mcp.call("list_conversations", {"status": "OPEN", "channel": ch,
                                             "per_page": 25, "sortKey": "createdAt", "order": "asc"})
-        convs = d.get("tickets") or d.get("conversations") or d.get("data") or []
-        if isinstance(convs, dict):
-            convs = convs.get("tickets") or []
+        convs = rps.tickets(d)
         print("  Canal %s — %d tichete vechi deschise (afișez max 15):" % (ch, len(convs)))
         for c in convs[:15]:
             total_seen += 1

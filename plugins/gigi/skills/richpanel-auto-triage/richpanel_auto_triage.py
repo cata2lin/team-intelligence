@@ -22,21 +22,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
 MCP_URL = "https://mcp.richpanel.com/mcp"
 
-# pagină FB/IG -> magazin (din memoria fb-page-store-map)
-PAGE_STORE = {
-    "426248277236834": "Esteban", "364899953373966": "Ofertele Zilei", "775068272350568": "Magdeal",
-    "569610726226886": "Reduceri bune", "676105508924341": "George Talent", "568416516348894": "Belasil",
-    "582569158278392": "Nubra", "700342149818211": "Bonhaus PL", "629666993566339": "Grandia",
-    "434151126459295": "Bonhaus CZ", "651700798017858": "Casa Ofertelor", "582681401604162": "Ofertele Zilei",
-    "1678573069021466": "Orasul Verde", "522811567592063": "Gento", "621560724373069": "Carpetto",
-    "680369271815957": "Bonhaus BG", "421367954403103": "Apreciat", "1805415543098993": "Rossi Nails",
-    "61586834387211": "Lab Noir",
-}
-ORDER_PFX = {"EST": "Esteban", "GT": "George Talent", "NUB": "Nubra", "GEN": "Gento", "GRAN": "Grandia",
-             "GRAND": "Grandia", "BELA": "Belasil", "MAG": "Magdeal", "OFER": "Ofertele Zilei", "RED": "Reduceri bune",
-             "BON": "Bonhaus RO", "BONBG": "Bonhaus BG", "CZ": "Bonhaus CZ", "PL": "Bonhaus PL", "CARP": "Carpetto",
-             "COV": "Covoria", "APR": "Apreciat", "ROSSI": "Rossi Nails"}
-ORDER_RE = re.compile(r"\b(EST|GT|NUB|GRAND|GRAN|MAG|OFER|RED|BONBG|BON|CZ|PL|BELA|GEN|CARP|COV|APR|ROSSI)[ -]?(\d{4,7})\b", re.I)
+import sys
+for _p in (os.path.join(HERE, "..", "..", "..", "core", "scripts"), HERE):
+    sys.path.insert(0, _p)
+import richpanel_schema as rps  # schema Richpanel veche+nouă, harta pagină→magazin (o singură sursă)
+
+PAGE_STORE = rps.PAGE_STORE
+ORDER_PFX, ORDER_RE = rps.ORDER_PFX, rps.ORDER_RE
 # Setul COMPLET de reguli, copiat EXACT din richpanel-export/richpanel_export.py
 # (categorie, regex pe subiect+prim_mesaj, lowercase, diacritice scoase). Ordinea contează (primul match câștigă).
 RULES = [
@@ -129,18 +121,13 @@ def vip_set():
 
 def triage(t, vips):
     frm = t.get("from") or {}
-    to = t.get("to") or {}
-    email = (frm.get("email") or (frm.get("id") if isinstance(frm.get("id"), str) and "@" in (frm.get("id") or "") else "") or "").lower()
+    cust = t.get("customer") if isinstance(t.get("customer"), dict) else {}
+    email = (frm.get("email") or cust.get("email") or (frm.get("id") if isinstance(frm.get("id"), str) and "@" in (frm.get("id") or "") else "") or "").lower()
     blob = (t.get("subject") or "") + " " + (t.get("first_message") or "")
-    # magazin = PAGINA pe care a venit tichetul (`to.id` → PAGE_STORE). NU brandul/`last_message_sender_id`
-    # din Richpanel: ăla începe cu org-ul `nocturna954_...` pe ORICE tichet (cont, nu magazin) → ar da fals „Nocturna".
-    store = PAGE_STORE.get((to.get("id") if isinstance(to, dict) else None) or "")
-    m = ORDER_RE.search(blob)
-    if not store and m:
-        store = ORDER_PFX.get(m.group(1).upper())
-    if not store and "@" in email:
-        dom = email.split("@")[-1].split(".")[0]
-        store = next((s for p, s in ORDER_PFX.items() if dom in s.lower().replace(" ", "")), None)
+    # magazin = PAGINA pe care a venit tichetul (to.id, sau prefixul id-ului la comentariile FB
+    # în schema nouă din 5-oct-2026), apoi cutia de e-mail / prefixul comenzii. NU brand_id:
+    # e contul („nocturna9540") pe orice tichet → ar da fals „Nocturna".
+    store = rps.resolve_store(t)
     cat = categorize(t.get("subject"), t.get("first_message"), t.get("channel"))
     if ESCAL.search(blob):
         prio, why = "URGENT", "escaladare ANPC/juridic"
@@ -162,8 +149,9 @@ def main():
     vips = vip_set()
     convs, page, seen = [], 1, set()
     while len(convs) < a.limit:
-        r = mcp.call("list_conversations", {"status": "open", "page": page, "per_page": 50})
-        batch = (r.get("conversations") or r.get("tickets") or r.get("results") or []) if isinstance(r, dict) else []
+        r = mcp.call("list_conversations", {"status": "OPEN", "page": page, "per_page": 50,
+                                            "sortKey": "updatedAt", "order": "desc"})
+        batch = rps.tickets(r)  # eroare MCP = excepție (exit≠0), NU „0 conversații"
         if not batch:
             break
         for t in batch:
@@ -171,7 +159,7 @@ def main():
             if cid not in seen:
                 seen.add(cid); convs.append(t)
         page += 1
-        if page > 6:
+        if page > 6 or (isinstance(r, dict) and r.get("has_more") is False):
             break
     rows = [triage(t, vips) for t in convs[:a.limit]]
     if a.json:

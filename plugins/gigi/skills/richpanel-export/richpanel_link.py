@@ -10,6 +10,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", "..", ".."))  # .../Scripturi
 DB = os.environ.get("RICHPANEL_DB") or os.path.join(REPO, "data", "richpanel_tickets.db")
 KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
+import sys
+for _p in (os.path.join(HERE, "..", "..", "..", "core", "scripts"), HERE):
+    sys.path.insert(0, _p)
+import richpanel_schema as rps  # pagina din `to.id` SAU din id-ul conversației (schema nouă, oct-2026)
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 PHONE_RE = re.compile(r"(?:\+?4?0)\s*7\d{2}[\s.\-]?\d{3}[\s.\-]?\d{3}")
 
@@ -23,6 +27,7 @@ PAGE_OVERRIDE = {
     "680369271815957": "Bonhaus BG", "421367954403103": "Apreciat", "1805415543098993": "Rossi Nails",
     "61586834387211": "Lab Noir",
 }
+PAGE_OVERRIDE = {**rps.PAGE_STORE, **PAGE_OVERRIDE}
 
 
 # domeniu email `to` → MAGAZIN (DOAR domeniile specifice unui magazin). Pe astea, magazinul
@@ -110,7 +115,8 @@ def resolve_one(t):
         raw = {}
     frm = raw.get("from") or {}
     to = raw.get("to") or {}
-    page = to.get("id") if isinstance(to, dict) else None
+    # din 5-oct-2026 Richpanel nu mai trimite `to` → pagina din prefixul id-ului (comentarii FB)
+    page = rps.page_id(raw) or None
     to_email = to.get("email") if isinstance(to, dict) else None
     dom = to_email.split("@")[-1].lower() if to_email and "@" in to_email else None
     # magazinul TICHETULUI (din inbox): domeniu specific SAU pagină FB fixă. Inbox partajat → necunoscut.

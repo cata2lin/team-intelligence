@@ -933,9 +933,19 @@ def catalog_build(store, prefix=""):
 
 
 # ───────────────────────── CLI ─────────────────────────
+def _rp_ok(r, tool):
+    """Eroare Richpanel (503 AUTH_UNAVAILABLE, „Error: …", schemă schimbată) = excepție, nu „gol".
+    Inline (nu richpanel_schema): copia plată de pe VPS n-are plugins/core alături."""
+    if not isinstance(r, dict) or r.get("_error") or r.get("success") is False or \
+            str(r.get("_text") or "").lstrip().lower().startswith("error"):
+        raise SystemExit("%s: Richpanel a răspuns cu eroare: %s" % (tool, str(r)[:300]))
+    return r
+
+
 def _get_ticket(mcp, conv):
-    key = "id" if not str(conv).isdigit() else "conversation_number"
-    cv = mcp.call("get_conversation", {key: str(conv), "mode": "audit", "max_messages": 30, "max_message_chars": 300})
+    # schema nouă (oct-2026): `id` primește id, nr. de tichet sau URL
+    cv = _rp_ok(mcp.call("get_conversation", {"id": str(conv), "mode": "audit", "max_messages": 30}),
+                "get_conversation")
     tk = cv.get("ticket") or {}
     msgs = (cv.get("messages_page") or {}).get("messages") or cv.get("messages") or []
     return tk, msgs
@@ -993,8 +1003,12 @@ def main():
 
     if a.registry_build:
         seen, new, reused = set(), 0, 0
-        res = mcp.call("list_conversations", {"channel": a.channel, "limit": a.scan, "status": "OPEN"})
-        tickets = res.get("tickets") or res.get("conversations") or []
+        # `limit` nu există în list_conversations (era ignorat → 25); per_page max 50
+        res = _rp_ok(mcp.call("list_conversations", {"channel": a.channel, "per_page": min(int(a.scan), 50),
+                                                      "status": "OPEN"}), "list_conversations")
+        if not isinstance(res.get("tickets"), list):
+            raise SystemExit("list_conversations: schemă necunoscută, chei=%s" % sorted(res)[:10])
+        tickets = res["tickets"]
         print("🔄 Scanez %d comentarii (%s) → completez registrul…\n" % (len(tickets), a.channel))
         for t in tickets:
             _, post_id = extract_fb_post(t)

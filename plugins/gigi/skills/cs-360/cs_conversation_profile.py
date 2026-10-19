@@ -16,9 +16,12 @@ statusul livrării și produsele clientului.
 
 LLM: ANTHROPIC_API_KEY (Claude) dacă există, altfel OPENAI_API_KEY. Model: env PROFILE_MODEL. Read-only.
 """
-import os, json, subprocess, urllib.request, argparse
+import os, sys, json, subprocess, urllib.request, argparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+for _p in (os.path.join(HERE, "..", "..", "..", "core", "scripts"), HERE):
+    sys.path.insert(0, _p)
+import richpanel_schema as rps  # eroare MCP = excepție; schema veche/nouă
 KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
 CI = os.path.join(HERE, "..", "customer-identity", "customer_identity.py")
 MCP_URL = "https://mcp.richpanel.com/mcp"
@@ -55,13 +58,20 @@ def mcp_conv(conv_no, token):
         except Exception as e:
             return {"_error": str(e)}
     post({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "profile", "version": "1"}}})
-    r = post({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "get_conversation", "arguments": {"conversation_number": conv_no, "mode": "audit", "max_messages": 40}}})
-    if isinstance(r, dict) and r.get("_error"):
-        return None
+    r = post({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "get_conversation", "arguments": rps.conv_args(conv_no, mode="audit", max_messages=40)}})
+    rps.check(r, "get_conversation")
     try:
-        return json.loads(r["result"]["content"][0]["text"])
+        txt = r["result"]["content"][0]["text"]
     except Exception:
-        return None
+        raise rps.RichpanelError("get_conversation: răspuns fără conținut: %s" % str(r)[:300])
+    try:
+        out = json.loads(txt)
+    except Exception:
+        out = {"_text": txt}
+    rps.check(out, "get_conversation")
+    if not isinstance(out.get("ticket"), dict) and not out.get("messages"):
+        raise rps.RichpanelError("get_conversation: schemă necunoscută, chei=%s" % sorted(out)[:10])
+    return out
 
 
 def llm(system, user, want_json=False):
@@ -111,9 +121,10 @@ def main():
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
     tok = secret("RICHPANEL_MCP_TOKEN")
-    conv = mcp_conv(a.conv, tok)
-    if not conv:
-        print("Nu am putut citi conversația #%s (eroare Richpanel)." % a.conv); return
+    try:
+        conv = mcp_conv(a.conv, tok)
+    except rps.RichpanelError as e:
+        sys.exit("Nu am putut citi conversația #%s: %s" % (a.conv, e))
     tk = conv.get("ticket") or {}
     tr = transcript(conv)
 

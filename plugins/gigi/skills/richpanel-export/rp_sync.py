@@ -97,7 +97,11 @@ def enumerate_day(mcp, day, statuses, log):
             d = mcp.call("list_conversations", {
                 "status": status, "startDate": ds, "endDate": de,
                 "per_page": PER_PAGE, "page": page})
-            ts = (d.get("tickets") or []) if isinstance(d, dict) else []
+            if not isinstance(d, dict) or not isinstance(d.get("tickets"), list):
+                # eroare/schemă necunoscută ≠ „zi goală" (altfel ziua iese „completă" cu 0 tichete)
+                raise RuntimeError(f"list_conversations {ds}/{status} p{page}: răspuns neașteptat: "
+                                   f"{str(d)[:200]}")
+            ts = d["tickets"]
             for t in ts:
                 if t.get("id"):
                     out[str(t["id"])] = t
@@ -246,8 +250,9 @@ def sync(db, mcp, d_from, d_to, statuses, limit=None, log=_log):
             except Exception as e:
                 # O zi picată NU oprește restul: e re-tratabilă la următoarea rulare.
                 stats["errors"] += 1
+                stats["days_failed"] = stats.get("days_failed", 0) + 1
                 run.errors += 1
-                log(f"  {ds}: EROARE la enumerare ({type(e).__name__}: {str(e)[:90]})")
+                log(f"  {ds}: EROARE la enumerare ({type(e).__name__}: {str(e)[:160]})")
                 continue
             # Planificăm ÎNAINTE de a scrie sumarele: plan_day compară `updated_at` din
             # oglindă cu cel proaspăt, iar upsert-ul l-ar face identic (vezi plan_day).
@@ -394,6 +399,9 @@ def main():
         report(st)
     finally:
         db.close()
+    if st.get("days_failed"):
+        # zile neenumerate = Richpanel a răspuns cu eroare / altă schemă → cronul trebuie să vadă
+        sys.exit(f"EȘEC: {st['days_failed']} zile n-au putut fi enumerate din Richpanel")
 
 
 if __name__ == "__main__":
