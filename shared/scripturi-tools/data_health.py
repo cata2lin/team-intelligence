@@ -306,6 +306,23 @@ def check_profitdb(rows, ctx):
     cx.close()
 
 
+OH_MIRROR_DB = "/root/Scripturi/data/oh_mirror.db"
+
+
+def check_oh_mirror(rows, ctx):
+    """Oglinda Order Hub din scanner (comenzi, linii, AWB-uri): dacă puntea OH → scanner stă, depozitul vede
+    comenzi vechi și scannerul nu anunță nimic. Puntea rulează la 10 min + demon la 3 s."""
+    if not os.path.exists(OH_MIRROR_DB):
+        rows.append((CRIT, "oh_mirror", "lipsește %s" % OH_MIRROR_DB)); return
+    cx = sqlite3.connect("file:%s?mode=ro" % OH_MIRROR_DB, uri=True, timeout=10)
+    try:
+        ts = cx.execute("SELECT MAX(updated_at) FROM oh_orders").fetchone()[0]
+    finally:
+        cx.close()
+    # updated_at are fus orar (+03:00): îl citim întreg, altfel ora locală ar trece drept UTC (3h „mai proaspăt”)
+    _judge(rows, "oh_mirror", datetime.fromisoformat(ts) if ts else None, 12, "punte Order Hub → scanner")
+
+
 def check_heartbeats(rows, ctx):
     """Dead-man-switch: cronuri care pinguie pe SUCCES (heartbeat.py). Overdue = n-a rulat/a picat.
     Prinde exact golul pe care prospețimea datelor nu-l acoperă („cronul nu s-a executat deloc")."""
@@ -398,7 +415,7 @@ def main():
     rows = []
     ctx = {}  # check_metrics populează cache_fresh înainte ca check_profitdb să-l citească
     for fn in (check_metrics, check_awbprint, check_awb_output, check_profitdb,
-               check_gads_feed, check_heartbeats):
+               check_gads_feed, check_oh_mirror, check_heartbeats):
         try:
             fn(rows, ctx)
         except Exception as e:
