@@ -29,6 +29,7 @@ flag-uri, iar output-ul e curat. Cazi pe CLI (`uv run …`) DOAR pt ce n-are în
 | **arona-studio** (creative/content) | `gigi/skills/image-gen/mcp_server.py` | `image_gen` (⚠️ generează, cost), `ai_scrub`, `youtube_channel` |
 | **arona-orderhub** (Order Hub = SURSA DE ADEVĂR pt comenzi/statusuri — NU AWBprint) | `gigi/skills/order-hub/mcp_server.py` | `oh_comanda`, `oh_actiuni`, `oh_operatie`, `oh_rata_livrare`, `oh_proba` (nu scrie), `oh_executa` (gated: confirmare din probă + OK-ul omului) |
 | **arona-marketplace** (eMAG RO/BG/HU · Trendyol RO/BG/GR · Okazii · Pepita — prin Order Hub) | `gigi/skills/arona-marketplace/mcp_server.py` | `mkt_conexiuni`, `mkt_comenzi`, `mkt_listare`, `trendyol_produse`, `trendyol_awb_list`, `trendyol_split` (dry-run), `emag_tracker`, `emag_concurenta`, `okazii_feed`, `emag_pret_proba`, `mkt_pret_tinta`, `emag_oferte`/`mkt_leaga_oferte`/`emag_listeaza`/`okazii_adauga` (PROBĂ fără apply), `trendyol_pret` (preview + apply + confirm, regula profit 20%) |
+| **arona-kb** (baza de cunoștințe SharedClaude — READ ONLY, fără secrete) | `gigi/skills/arona-kb/mcp_server.py` | `kb_utilizare_skilluri`, `kb_comparatie`, `kb_goluri`, `kb_activitate`, `kb_resurse` |
 > **SEO/analytics/ClickUp/Richpanel/postgres = MCP-uri OFICIALE deja existente** (GA4, Search Console, dataforseo, clickup, richpanel, postgres-*) — nu le dublăm.
 > **10 servere arona · ~85 tool-uri.** Domenii rămase eventual: fiscal (SmartBill e deja în arona-fulfillment `xc_inv_make`; e-Transport = VPS), content-generation (articole = flux interactiv, nu MCP-natural).
 
