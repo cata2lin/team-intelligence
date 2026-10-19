@@ -28,8 +28,9 @@ flag-uri, iar output-ul e curat. Cazi pe CLI (`uv run …`) DOAR pt ce n-are în
 | **arona-tom** (WMS / aprovizionare) | `gigi/skills/tom/mcp_server.py` | `tom_pos`, `tom_po_get`, `tom_shipments`, `tom_ghost`, `tom_events`, `tom_product` |
 | **arona-studio** (creative/content) | `gigi/skills/image-gen/mcp_server.py` | `image_gen` (⚠️ generează, cost), `ai_scrub`, `youtube_channel` |
 | **arona-orderhub** (Order Hub = SURSA DE ADEVĂR pt comenzi/statusuri — NU AWBprint) | `gigi/skills/order-hub/mcp_server.py` | `oh_comanda`, `oh_actiuni`, `oh_operatie`, `oh_rata_livrare`, `oh_proba` (nu scrie), `oh_executa` (gated: confirmare din probă + OK-ul omului) |
+| **arona-marketplace** (eMAG RO/BG/HU · Trendyol RO/BG/GR · Okazii · Pepita — prin Order Hub) | `gigi/skills/arona-marketplace/mcp_server.py` | `mkt_conexiuni`, `mkt_comenzi`, `mkt_listare`, `trendyol_produse`, `trendyol_awb_list`, `trendyol_split` (dry-run), `emag_tracker`, `emag_concurenta`, `okazii_feed`, `emag_pret_proba`, `mkt_pret_tinta`, `emag_oferte`/`mkt_leaga_oferte`/`emag_listeaza`/`okazii_adauga` (PROBĂ fără apply), `trendyol_pret` (preview + apply + confirm, regula profit 20%) |
 > **SEO/analytics/ClickUp/Richpanel/postgres = MCP-uri OFICIALE deja existente** (GA4, Search Console, dataforseo, clickup, richpanel, postgres-*) — nu le dublăm.
-> **9 servere arona · ~69 tool-uri.** Domenii rămase eventual: fiscal (SmartBill e deja în arona-fulfillment `xc_inv_make`; e-Transport = VPS), content-generation (articole = flux interactiv, nu MCP-natural).
+> **10 servere arona · ~85 tool-uri.** Domenii rămase eventual: fiscal (SmartBill e deja în arona-fulfillment `xc_inv_make`; e-Transport = VPS), content-generation (articole = flux interactiv, nu MCP-natural).
 
 **Convenții comune:** read-only by default; **mutațiile Google Ads/Meta/TikTok = DRY-RUN dacă nu pui `apply=true`**;
 **mutațiile Shopify cer `confirm_mutation=true`** (Shopify n-are dry-run); acțiunile pe comandă și AWB (`xc_order_cancel`, `xc_awb_void`, `xc_awb_regen`, `xc_awb_make`) întreabă întâi Order Hub, care hotărăște pe orice comandă pe care o cunoaște.
