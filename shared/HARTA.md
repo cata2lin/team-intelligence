@@ -36,6 +36,9 @@
 > Tier 2 (multi-brand-pnl, daily-ops, agency-audit, product-matrix, grandia-product-marketing) **moștenesc** engine-ul prin `cache.brand_pnl_monthly`.
 
 ## „Vreau …" → unde mă duc
+- **Status comandă / livrate / refuzate** → **Order Hub** (MCP `arona-orderhub`: `oh_comanda`, `oh_rata_livrare`) — NU AWBprint (statusurile intl sunt înghețate acolo din 27-sep).
+- **Stoc pe produs / stație / „de ce n-apare pe site"** → MCP `arona-stock` (`stoc_produs`, `stoc_statie`, `magazin_ok`, `stoc_blocat`, `ponderi_stoc` dry-run).
+- **Instrucțiunile unui skill care nu e instalat local** → `second-brain` `read_skill` (hook-ul `skill_router` îți propune skill-urile singur).
 - **Profit/contribuție per SKU sau categorie** → `profit_by_sku.py` (NU fulfillment-analytics — ăla e breakeven/AWB analytics).
 - **P&L per brand / „% din profit"** → `gigi:multi-brand-pnl` (citește cache.brand_pnl_monthly, canonic).
 - **Spend ads per SKU/brand** → `cache.product_ad_spend` (Meta+TikTok via reguli KB + Google PMax). Live: `gigi:meta-ads`/`tiktok-ads`/`google-ads-mcc`.

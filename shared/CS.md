@@ -35,6 +35,8 @@
 → `links --order GT000001` (afli telefonul + statusul) → `cs-customer-360 --phone <telefon>` (istoricul) → `cs-tickets` (tichete).
 
 ## 3. 📦 STATUS / livrare / AWB
+> ⭐ **Statusul unei comenzi = Order Hub** (sursa de adevăr): MCP `arona-orderhub` → `oh_comanda` (fișa: status, AWB, hold-uri, facturi, ce se poate face). Acțiuni (anulare, refacere AWB, adresă…) → `oh_proba` apoi `oh_executa` după OK-ul omului. Stoc pe produs/stație → MCP `arona-stock` (`stoc_produs`, `magazin_ok`, `stoc_blocat`).
+
 | Vreau … | Tool | Exemplu |
 |---|---|---|
 | **status comandă** (sursa de adevăr) | `gigi:order-hub comanda` | fișa din Order Hub (statusurile DOAR de aici, nu din AWBprint) |
