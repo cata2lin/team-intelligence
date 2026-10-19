@@ -268,10 +268,12 @@ def _fetch_azi():
             continue
     return None
 
-# TikTok: din 2026-05 warehouse-ul `tiktok_campaign_insights_daily` e COMPLET (12+ conturi) → atribuim
+# TikTok: din 2026-05 citim warehouse-ul `tiktok_campaign_insights_daily` (12+ conturi) → atribuim
 # per-brand cu tt_attrib (token/owner) în loc de RZ2 (care are PHANTOM capture-all pe conturi partajate:
 # Reduceri lua 72k din 78k contul ROSSI în loc de 8k reali; Esteban +30k). Înainte de 2026-05 warehouse-ul
 # are doar 4 conturi (incomplet) → rămânem pe RZ2. Verificat la sursa API 2026-07. Vezi [[mapping-tiktok-attribution]].
+# ⚠ Mai 2026 NU era complet la nivel de campanie (Grandia/Nubra/Gento/Casa, ~42k RON) până la backfill-ul
+# din 19-oct-2026 cu shared/scripturi-tools/tiktok_warehouse_sync.py --start/--end.
 TIKTOK_WAREHOUSE_SINCE = "2026-05-01"
 
 def _warehouse_tiktok_rows(mcur, bname, bslug, brand_store, norm, since, until):
