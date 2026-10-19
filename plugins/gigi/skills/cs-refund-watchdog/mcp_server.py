@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["mcp>=1.2,<2","psycopg2-binary>=2.9","requests>=2.31"]
+# dependencies = ["mcp>=1.2,<2","psycopg2-binary>=2.9","requests>=2.31","paramiko>=3.4"]
 # ///
 """arona-cs-guard MCP — PREVENȚIA pierderilor în Customer Service.
 
@@ -134,6 +134,62 @@ def refused_recovery(brand: str = "", days: int = 30, min_value: float = 0,
     if min_value: a += ["--min-value", min_value]
     if draft: a.append("--draft")
     return _run(_script("cs-refused-recovery", "cs_refused_recovery.py"), a)
+
+
+COD_RISC = os.path.join(HERE, "scripts", "cod_risc_refuz.py")
+
+
+def _vps_py(local_script, args, timeout=180):
+    """Rulează un script local PE serverul de scripturi (trimis pe stdin, fără copiere) — doar citire."""
+    import sys, shlex, logging
+    core = os.path.normpath(os.path.join(HERE, "..", "..", "..", "core", "scripts"))
+    if core not in sys.path:
+        sys.path.insert(0, core)
+    import arona_ssh
+    logging.getLogger("paramiko").setLevel(logging.WARNING)
+    for k in ("PROFIT_SSH_HOST", "PROFIT_SSH_USER"):
+        if not os.environ.get(k):
+            os.environ[k] = arona_ssh._secret(k) or (arona_ssh.DEFAULT_HOST if k.endswith("HOST") else arona_ssh.DEFAULT_USER)
+    try:
+        cl = arona_ssh.connect()
+    except Exception as e:
+        return "SSH către serverul de scripturi a eșuat: %s" % str(e)[:500]
+    try:
+        cmd = "cd /root/Scripturi && .venv/bin/python - " + " ".join(shlex.quote(str(x)) for x in args)
+        i, o, e = cl.exec_command(cmd, timeout=timeout)
+        with open(local_script, "rb") as f:
+            i.write(f.read())
+        i.channel.shutdown_write()
+        out = o.read().decode("utf-8", "replace").strip()
+        err = e.read().decode("utf-8", "replace")
+        rc = o.channel.recv_exit_status()
+    except Exception as ex:
+        return "eroare la rularea pe server: %s: %s" % (type(ex).__name__, str(ex)[:300])
+    finally:
+        cl.close()
+    if rc != 0:
+        out += "\n[exit %s] %s" % (rc, err.strip()[-500:])
+    return out or "(fără output)"
+
+
+@mcp.tool()
+def cod_risc_refuz(comanda: str = "", top: int = 0, magazin: str = "") -> str:
+    """Riscul de REFUZ al comenzilor ramburs, din MODELUL antrenat (LightGBM, serverul de scripturi): reantrenat
+    lunea 04:10, scorat zilnic 06:40 în data/cod_refusal_queue.csv (~17k comenzi COD în așteptare).
+    comanda=MAG000001 → scorul (0–100%), locul în coadă și motivele (istoricul clientului pe telefon, valoarea);
+    top=N (implicit 20) → cele mai riscante comenzi din coada de azi; magazin = prefixul comenzii (ex. BUC, MAG, GT).
+    Statusul din coadă e cel de la scorare (AWBprint), nu cel de acum: înainte de apel verifică cu `oh_comanda`
+    (Order Hub). Diferit de `cod_confirm_queue` (reguli). DOAR CITIRE — nu schimbă nimic; acțiunile pe comandă
+    (confirmare/anulare/oprire) se fac prin Order Hub (probă → OK-ul omului → execuție). Conține nume și telefoane:
+    arată-le doar omului de la CS care sună."""
+    a = []
+    if comanda:
+        a += ["--comanda", comanda]
+    else:
+        a += ["--top", top or 20]
+    if magazin:
+        a += ["--magazin", magazin]
+    return _vps_py(COD_RISC, a)
 
 
 if __name__ == "__main__":
