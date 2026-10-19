@@ -10,8 +10,8 @@ version: 1.0.0
 Server: `mcp_server.py` (FastMCP, stdio, `psycopg2`). Register:
 `claude mcp add --scope user arona-kb -- uv run <abs path>/plugins/gigi/skills/arona-kb/mcp_server.py`
 
-Conexiunea: `KB_DATABASE_URL` din mediul sesiunii; dacă lipsește, serverul îl citește din profilul `zsh -lic`
-(fără să-l printeze). Fiecare query = tranzacție **READ ONLY** + `statement_timeout 60s`.
+Conexiunea: `KB_DATABASE_URL` din mediul sesiunii; dacă lipsește din mediu, serverul îl caută singur
+(fără să-l printeze) — fallback: `~/.claude/settings.json` → `env`, apoi `launchctl getenv` pe macOS. Fiecare query = tranzacție **READ ONLY** + `statement_timeout 60s`.
 **Tabelul `secrets` nu e citit de niciun tool** (nici valori, nici nume). Scrierile în KB rămân la `kb.py`
 (`core:knowledge-base`) și la hook-uri.
 
