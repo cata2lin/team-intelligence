@@ -20,6 +20,19 @@ You are **{$EMPLOYEE_HANDLE}** on this machine.
 > 🗺️ **Unde găsesc ce** (date, scripturi, profitabilitate, „Vreau X → unde mă duc") → vezi **`shared/HARTA.md`** (index hand-maintained). Pipeline-ul canonic de profitabilitate, harta bazelor de date și scripturile cheie sunt acolo.
 @HARTA.md
 
+## Skill-first (cum găsești skill-ul potrivit)
+Înainte să scrii un query/script de la zero, **caută skill-ul echipei**. Ordinea:
+1. **Hook-ul `skill_router`** îți pune automat în context, la fiecare cerere, skill-urile potrivite
+   (`[skill-router] …`), cu felul în care se folosește fiecare: *instalat* → Skill tool; *doar în
+   Second Brain* → citește SKILL.md-ul din calea dată (cache local) și, dacă are acțiuni,
+   `skill_info` + `run_skill`. Dacă unul se potrivește, **folosește-l** — nu improviza alături de el.
+2. Nimic în context? Întreabă `second-brain` → `find_skills "<cererea în cuvintele tale>"`, apoi
+   `shared/CS.md` (CS) / `shared/HARTA.md` (date, profit, scripturi).
+3. Tot nimic? **Rezolvă singur** (asta e corect, nu te bloca). Dacă soluția e reutilizabilă,
+   propune la final s-o salvezi ca skill (`second-brain-skill`) — golul e deja notat automat în KB
+   (`events`, `entity_type=skill_gap`), ca să vedem ce lipsește.
+4. Ai găsit un skill **greșit/învechit** în timp ce lucrai? Spune-o în răspuns și propune corectura.
+
 ## What you have
 - **Every teammate's skills**, namespaced by author: `core:*`, `iulian:*`,
   `catalin:*`, … . Invoke by describing the task or with `/<author>:<skill>`.
@@ -94,7 +107,7 @@ in the plugin, register it with `kb.py skill-register`, open a PR. Everyone gets
 it on their next plugin update.
 
 <!-- ════════════════════════════════════════════════════════════════ -->
-# Skills catalog (all team skills — 104)
+# Skills catalog (extras — ~500 în Second Brain; lista completă = `find_skills` / hook-ul skill_router)
 > Auto-generated index of every skill in the `team-intelligence` marketplace. Invoke by describing the task, or explicitly `/<author>:<skill>`. Full overlap & consolidation plan: `shared/skills-audit.md`. Add/extend skills via `gigi:skill-creator` + `gigi:publish-skill`.
 
 ## core (company-wide canonical)
