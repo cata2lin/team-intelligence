@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["mcp>=1.2,<2","psycopg2-binary>=2.9","requests>=2.31"]
+# dependencies = ["mcp>=1.2,<2","psycopg2-binary>=2.9","requests>=2.31","paramiko>=3.4"]
 # ///
 """arona-ads MCP — un singur server peste TOT ce ține de Google Ads + Merchant Center (+ Shopify, adăugat separat).
 
@@ -278,6 +278,82 @@ def ads_transparency(region: str = "RO", limit: int = 20, samples: int = 0) -> s
     a=["--region",region,"--limit",limit]
     if samples: a+=["--samples",samples]
     return _sib("ads-transparency","adstransparency.py",a)
+
+# ─────────────────── GRANDIA regim weekend (DOAR CITIRE) ───────────────────
+GR_CID="9069610821"; GR_SN="23794566678"; GR_HA="23566472089"; GR_FACTOR=0.72
+
+def _vps_tail(path, n=10):
+    import logging, shlex
+    core=os.path.normpath(os.path.join(HERE,"..","..","..","core","scripts"))
+    if core not in sys.path: sys.path.insert(0,core)
+    import arona_ssh
+    logging.getLogger("paramiko").setLevel(logging.WARNING)
+    for k in ("PROFIT_SSH_HOST","PROFIT_SSH_USER"):
+        if not os.environ.get(k):
+            os.environ[k]=arona_ssh._secret(k) or (arona_ssh.DEFAULT_HOST if k.endswith("HOST") else arona_ssh.DEFAULT_USER)
+    try:
+        cl=arona_ssh.connect()
+    except Exception as e:
+        return "(SSH eșuat: %s)"%str(e)[:300]
+    try:
+        _,o,e=cl.exec_command("tail -n %d %s"%(int(n),shlex.quote(path)),timeout=60)
+        return (o.read().decode("utf-8","replace").rstrip() or e.read().decode("utf-8","replace").strip() or "(gol)")
+    finally:
+        cl.close()
+
+@mcp.tool()
+def grandia_regim_weekend_stare() -> str:
+    """Starea regimului WEEKEND/WEEKDAY Grandia pe Google Ads (cont 9069610821): modul de azi, ce ar seta cronul
+    /root/Scripturi/grandia_weekend_regime.py (zilnic 06:00) față de valorile LIVE — bugetul Shopping-New
+    (23794566678; sâmbătă ×0,72, luni ÷0,72, altfel neatins) și tROAS h&a (23566472089; 4.5 weekend / 3.8 weekday) —
+    plus ultimele 10 linii din /root/Scripturi/data/grandia_weekend.log. API Google Ads v24.
+    DOAR CITIRE: NU schimbă nimic. Bugetul se schimbă doar de un OM, la ora planificată (regula ownerului 19-oct:
+    un job de buget ratat NU se reface târziu în zi). Pentru o corecție aprobată: gads_set_budget (dry-run → OK)."""
+    import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        now=datetime.datetime.now(ZoneInfo("Europe/Bucharest"))
+    except Exception:
+        now=datetime.datetime.now()
+    dow=now.weekday(); we=dow>=5
+    zile=["luni","marți","miercuri","joi","vineri","sâmbătă","duminică"]
+    out=["Grandia regim — azi %s %s: %s"%(zile[dow],now.strftime("%Y-%m-%d %H:%M"),"WEEKEND" if we else "WEEKDAY"),
+         "(DOAR CITIRE — nimic nu se modifică; bugetul îl schimbă doar un om, la ora planificată)"]
+    try:
+        c=g.get_connection(None)
+        rows=g.search(c,GR_CID,"SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros, "
+            "campaign.maximize_conversion_value.target_roas, campaign.target_roas.target_roas FROM campaign "
+            "WHERE campaign.id IN (%s, %s)"%(GR_SN,GR_HA))
+    except Exception as e:
+        rows=None; out.append("⚠️ nu pot citi starea live din Google Ads: %s"%str(e)[:300])
+    live={}
+    for r in rows or []:
+        cid=str(g._get(r,"campaign.id"))
+        tr=g._get(r,"campaign.maximizeConversionValue.targetRoas") or g._get(r,"campaign.targetRoas.targetRoas")
+        live[cid]={"name":g._get(r,"campaign.name"),"status":g._get(r,"campaign.status"),
+                   "budget":int(g._get(r,"campaignBudget.amountMicros") or 0)/1e6,"troas":tr}
+    if rows is not None:
+        sn=live.get(GR_SN,{}); ha=live.get(GR_HA,{})
+        b=sn.get("budget")
+        if dow==5: rule="regula de sâmbătă: cronul de la 06:00 înmulțește bugetul de vineri cu 0,72 (−28%) — vezi în log dacă a reușit"
+        elif dow==0: rule="regula de luni: cronul de la 06:00 împarte bugetul de duminică la 0,72 (restaurare) — vezi în log dacă a reușit"
+        else: rule="azi cronul NU atinge bugetul (rămâne cel setat manual)"
+        out.append("\nShopping-New %s (%s, %s): buget LIVE %s RON/zi — %s."%(GR_SN,sn.get("name","?"),sn.get("status","?"),
+                   ("%.0f"%b) if b is not None else "?",rule))
+        if dow in (0,5) and b:
+            nxt=round(b*GR_FACTOR) if dow==5 else round(b/GR_FACTOR)
+            out.append("  ⚠️ Pe buget cronul NU e idempotent în ziua tranziției: dacă ar rula ACUM ar mai aplica o dată "
+                       "factorul (%.0f → %d). Nu-l rula manual; verifică în log că a rulat o singură dată."%(b,nxt))
+        tgt=4.5 if we else 3.8
+        cur=ha.get("troas")
+        st="OK" if cur is not None and abs(float(cur)-tgt)<=0.01 else "DIFERĂ — cronul l-ar seta la %.1f la următoarea rulare"%tgt
+        out.append("h&a %s (%s, %s): tROAS LIVE %s, țintă azi %.1f → %s."%(GR_HA,ha.get("name","?"),ha.get("status","?"),cur,tgt,st))
+        if dow in (4,6):
+            out.append("Mâine e tranziție (%s): bugetul Shopping-New se va schimba la 06:00."%("sâmbătă ×0,72" if dow==4 else "luni ÷0,72"))
+    out.append("\nUltimele 10 linii din grandia_weekend.log:")
+    out.append(_vps_tail("/root/Scripturi/data/grandia_weekend.log",10))
+    return "\n".join(out)
+
 
 if __name__=="__main__":
     mcp.run()
