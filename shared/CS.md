@@ -147,6 +147,38 @@ Parametrii exacți: `gigi:order-hub actiuni` (sau `skill_info`). Listele de obie
 - De-AI pre-publicare (RO): `gigi:ai-scrub` (scoate watermark-uri + fraze AI).
 
 ---
+## 9. 🌍 INTERNAȚIONAL (BG · HU · CZ · SK · PL · GR · MD) — `gigi:cs-international`
+> Din oct-2026 răspund agenți UMANI și pe piețele străine. Restul hărții e scris pentru RO; pe internațional se schimbă:
+> limba, curierul, politica de retur, cutia de suport, autoritatea. Playbook-ul pe piață:
+> `plugins/gigi/skills/cs-international/references/piete.md`. Politicile sunt citite de pe site, pe 19-oct.
+
+| Vreau … | Tool | Exemplu |
+|---|---|---|
+| tichetele **neresponse pe piață** (ultimul mesaj = al clientului) | MCP `arona-cs-inbox` → `cs_intl_tichete` | `piata: BG` → nr. tichet, magazin, canal, vârstă, categorie, **escaladare** (КЗП/ČOI/SOI/UOKiK…) |
+| **unde e coletul** (FAN Moldova, DPD intl, Packeta, Econt) | `tracking_intl` | `awb: FAN30411342` → „Starea actuală" + istoric; restul prin `awb_track` |
+| **politica de retur / livrare / plată / contact** | `politica_retur` | `piata: MD` → 14 zile sigilat, clientul plătește returul, IBAN la ramburs |
+| **cum răspund** (limbă, adresare, șabloane validate, semnătură) | `gigi:cs-international` | bg/hu/cz/sk/pl: ASK_IDENT, plângere publică → privat; macro CZ/PL/BG/EN din ClickUp |
+| **statusul / acțiuni pe comandă** | `gigi:order-hub` (la fel ca pe RO) | `retur`/`cerere-curier`/`punct-ridicare` sunt făcute pt RO → întâi `oh_proba` |
+
+| Piață | Magazine (prefix comandă) | Curier · tracking | Limba · adresare | Retur · bani | Autoritate |
+|---|---|---|---|---|---|
+| **BG** | Duppo EU `DUP`/`DUPBG`, Bonhaus BG `BONBG`, Trendyol BG, eMAG BG | DPD 2212 → Speedy (adresă/oficiu/locker; **nu Econt**) | bulgară · Вие | 14 zile sigilat; 2+1 → și cadoul; bani ≤14 zile | КЗП |
+| **HU** | Duppo EU (comenzile HU), ~~Bonhaus HU~~ închis 15-oct, eMAG HU | DPD 2212 | maghiară · **Ön + pers. 3** | 14 zile sigilat | fogyasztóvédelem (neverificat) |
+| **CZ** | **Bonhaus CZ `CZ`** (cel mai mare), Duppo EU | DPD 2212, 1 colet/AWB; vechi Packeta `Z…` | cehă · Vy | Duppo 14 zile; Bonhaus CZ: site-ul nu scrie 14 zile (lacună) | ČOI |
+| **SK** | ~~Bonhaus SK~~ închis, Duppo EU | DPD 2212, **doar 1 colet/AWB** | slovacă · Vy | regula UE 14 zile | SOI |
+| **PL** | ~~Bonhaus PL `PL`~~ șters 15-oct (doar comenzi vechi) | DPD 2212; vechi Packeta/Sameday | poloneză · **Pan/Pani + pers. 3** | regula UE 14 zile, IBAN | UOKiK |
+| **GR** | doar Trendyol GR | neverificat | greacă: **nimic validat** | prin Trendyol (neverificat) | neverificat |
+| **MD** | Duppo Moldova `MD` (GOING STELLAR SRL, nu ARONA) | **FAN Courier Moldova** `FAN…` | română | 14 zile sigilat, **clientul plătește returul** | consumator.gov.md |
+
+> ⚠️ **Cutii partajate:** contact@ / bulgaria@ / hungary@ / czechia@**duppo.eu** = O SINGURĂ cutie (magazinul îl dă nr. comenzii);
+> contact@duppo.hu **nu primește mail**; contact@bonhaus.sk ajunge în cutia bonhaus.bg.
+> ⚠️ **Status DOAR din Order Hub**: AWBprint are statusurile internaționale înghețate din 27-sep. Coada CS din OH **sare** magazinele străine.
+> ⚠️ **FAN MD:** „Transportul a fost livrat" urmat de „returnat" = refuz scanat înapoi în hub, NU livrare.
+> ⚠️ **Duppo BG — incident activ, colete incomplete** (aug–sep): retrimitem flacoanele lipsă, **fără dată, fără bani înapoi, fără voucher**.
+> ⚠️ Botul CS LIVE (`gigi:cs-live-piete`) are încă HU/SK/PL pe trimitere automată. Din 6-oct nu mai trimite, fiindcă schema Richpanel s-a schimbat;
+> dacă e reparat, ar răspunde în paralel cu agenții. Scoaterea piețelor din listă e decizia ownerului.
+
+---
 ### 🏬 Ce MAGAZIN e un tichet Richpanel (NU te lua după brandul din Richpanel — e STALE)
 Magazinul unui tichet = **PAGINA pe care a venit** = câmpul **`to.id`** (page id FB/IG) → mapează cu `PAGE_STORE` din `gigi:richpanel-auto-triage` (ex `775068272350568` = MagDeal). **NICIODATĂ** după:
 - **brandul / `last_message_sender_id` din Richpanel** — e neactualizat (ex pagina MagDeal e încă etichetată „nocturna9540" → un agent a zis greșit „Nocturna");
