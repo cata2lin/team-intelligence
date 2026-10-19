@@ -19,7 +19,7 @@ dovedit ca check_token_expiry: Gmail API cu service account care impersonează W
   .venv/bin/python data_health.py                      # doar raport în consolă
   .venv/bin/python data_health.py --email X --key ...  # + email dacă e roșu
 """
-import os, re, sys, argparse, sqlite3
+import os, re, sys, json, argparse, sqlite3
 from datetime import datetime, timezone
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -166,6 +166,10 @@ def check_awbprint(rows, ctx):
     synced, created = cur.fetchone()
     _judge(rows, "awbprint.sync", synced, 8, "heartbeat sync")
     _judge(rows, "awbprint.orders", created, 24, "cea mai nouă comandă")
+    # Cursul BNR din AWB Arona (îl folosesc P&L-ul din AWB, meta-ads și tiktok-ads): a stat pe 21-iul până pe
+    # 19-oct fiindcă BNR a mutat fluxul XML, iar nimeni n-a văzut — consumatorii îl prelungesc tăcut.
+    cur.execute("SELECT MAX(rate_date) FROM exchange_rates")
+    _judge(rows, "awbprint.curs_bnr", cur.fetchone()[0], 96, "curs BNR din AWB Arona")
     cx.close()
 
 
@@ -194,38 +198,41 @@ def check_awb_output(rows, ctx):
     până la ACEEAȘI oră. Măsurat pe date reale: până la 09:15 Esteban are mereu între 96 (duminica) și
     632 (marți) — un 0 la ora aia nu e „zi liniștită", e cron mort.
     """
-    if not os.path.exists(AWB_EVENT_LOG):
-        rows.append((WARN, "awb.output", "lipsește %s" % AWB_EVENT_LOG)); return
+    # SURSA: AWBprint.order_awbs, nu logul xc_awb_events.jsonl. Logul a ramas ORFAN la cutover-ul pe
+    # Order Hub (20-21 aug): xc_fulfill.sh sare toate magazinele, deci nu mai scrie nimic, iar
+    # alarma „niciun AWB in 8 zile" a sunat fals 44 de zile la rand cu depozitul facand ~3.000 AWB/zi.
+    # order_awbs.created_at e ora LOCALA (Europe/Bucharest) naiva; shipment_created_at e 100% NULL.
+    dsn = _dsn("DATABASE_URL_AWBPRINT")
+    if not dsn:
+        rows.append((WARN, "awb.output", "lipsește DATABASE_URL_AWBPRINT")); return
 
-    import json as _json
     from collections import defaultdict
     from datetime import timedelta
-
-    now = datetime.now()                 # logul scrie timestamp LOCAL naiv → compar tot în local
-    hhmm = now.strftime("%H:%M")
-    today = now.date().isoformat()
-    hist_days = [(now.date() - timedelta(days=i)).isoformat() for i in range(1, 8)]
-    keep = set(hist_days) | {today}
+    import psycopg2
 
     win = defaultdict(lambda: defaultdict(int))   # magazin -> zi -> AWB până la ora curentă
-    with open(AWB_EVENT_LOG, "rb") as f:
-        try:
-            f.seek(-12_000_000, os.SEEK_END); f.readline()   # doar coada; 8 zile încap lejer
-        except OSError:
-            f.seek(0)
-        for raw in f:
-            try:
-                d = _json.loads(raw.decode("utf-8", "replace"))
-            except Exception:
-                continue
-            if d.get("kind") != "awb" or d.get("result") != "ok":
-                continue
-            ts = d.get("ts") or ""
-            if ts[:10] in keep and ts[11:16] <= hhmm:        # ← fereastra orară
-                win[(d.get("store") or "?").split(".")[0]][ts[:10]] += 1
+    cx = psycopg2.connect(dsn); cur = cx.cursor()
+    # ziua si ora le da BAZA (Europe/Bucharest), nu VPS-ul: ceasul VPS e pe alt fus (CET) si fereastra
+    # orara ar aluneca o ora fata de created_at
+    cur.execute("SELECT current_date, to_char(localtime, 'HH24:MI')")
+    d0, hhmm = cur.fetchone()
+    today = d0.isoformat()
+    hist_days = [(d0 - timedelta(days=i)).isoformat() for i in range(1, 8)]
+    cur.execute("""
+        SELECT COALESCE(s.name, '?'), a.created_at::date::text, COUNT(*)
+          FROM order_awbs a
+          JOIN orders o ON o.id = a.order_id
+          LEFT JOIN stores s ON s.uid = o.store_uid
+         WHERE a.created_at >= current_date - 7
+           AND a.created_at::time <= localtime
+           AND COALESCE(a.is_return_label, false) = false
+         GROUP BY 1, 2""")
+    for store, day, n in cur.fetchall():
+        win[store.split(".")[0]][day] += n
+    cx.close()
 
     if not win:
-        rows.append((CRIT, "awb.output", "niciun AWB în ultimele 8 zile — cronul de AWB e mort complet"))
+        rows.append((CRIT, "awb.output", "niciun AWB în order_awbs în ultimele 8 zile — nici depozitul, nici sync-ul AWBprint nu produc"))
         return
 
     live = tot_today = 0
@@ -321,6 +328,65 @@ def check_heartbeats(rows, ctx):
                      (det + (" · " + note if note else "")) if age is not None else "NICIUN ping vreodată"))
 
 
+GADS_GUARD_STATE = "/root/Scripturi/data/gads_feed_guard.json"
+
+
+def check_gads_feed(rows, ctx):
+    """Feedul Google spune adevarul despre stoc? (gads_feed_guard.py)
+
+    Sursa: incidentul 18-aug-2026. Excluderea unui produs din canalul Google in Shopify NU sterge
+    oferta din Merchant Center - o lasa ORFANA, inghetata pe availability=IN_STOCK, si Google
+    liciteaza la infinit pe marfa care nu exista. GD-MOB-1938930 a ars 3.579 lei in 40 de zile cu
+    ZERO comenzi. Judecam REZULTATUL guard-ului, nu daca a rulat jobul.
+    """
+    if not os.path.exists(GADS_GUARD_STATE):
+        rows.append((CRIT, "gads_feed", "starea lipseste - guard-ul nu a rulat niciodata"))
+        return
+    try:
+        with open(GADS_GUARD_STATE, encoding="utf-8") as f:
+            st = json.load(f)
+    except Exception as e:
+        rows.append((CRIT, "gads_feed", "stare ilizibila: %s" % e))
+        return
+
+    age = _age_h(st.get("moment"))
+    if age is None or age > 26:
+        rows.append((CRIT, "gads_feed", "ultima rulare %s (%.0fh, SLA 26h)"
+                     % (str(st.get("moment"))[:16], age or 0)))
+        return
+
+    if st.get("esecuri"):
+        rows.append((CRIT, "gads_feed.surse", "%d surse indisponibile: %s"
+                     % (len(st["esecuri"]), "; ".join(st["esecuri"])[:120])))
+
+    mag = st.get("magazine", [])
+    scos = sum(m.get("de_scos", 0) for m in mag)
+    pus = sum(m.get("de_pus", 0) for m in mag)
+    err = [e for m in mag for e in m.get("erori", [])]
+    trunc = [m["magazin"] for m in mag if m.get("jurnal_trunchiat")]
+
+    if err:
+        rows.append((CRIT, "gads_feed.erori", "%d scrieri esuate: %s" % (len(err), "; ".join(err)[:120])))
+    if trunc:
+        rows.append((WARN, "gads_feed.jurnal", "jurnal trunchiat pe: %s" % ", ".join(trunc)))
+
+    # Judecam ce a RAMAS nereparat, nu ce s-a detectat: dupa un apply reusit detectarile sunt
+    # istorie, iar ramasele sunt zero. Altfel checkul e rosu exact fiindca reparatia a mers.
+    ram_s = sum(m.get("ramase_scos", m.get("de_scos", 0)) for m in mag)
+    ram_p = sum(m.get("ramase_pus", m.get("de_pus", 0)) for m in mag)
+    if st.get("aplicat") and (ram_s or ram_p):
+        rows.append((CRIT, "gads_feed",
+                     "dupa apply au ramas %d de scos / %d de pus - reparatia nu prinde" % (ram_s, ram_p)))
+    elif st.get("aplicat") and (scos or pus):
+        rows.append((OK, "gads_feed", "%s - reparat: %d scoase / %d puse pe %d magazine"
+                     % (str(st.get("moment"))[:16], scos, pus, len(mag))))
+    elif scos or pus:
+        rows.append((WARN, "gads_feed", "%d de scos / %d de pus (rulare dry-run)" % (scos, pus)))
+    else:
+        rows.append((OK, "gads_feed", "%s - feed sincron cu stocul pe %d magazine"
+                     % (str(st.get("moment"))[:16], len(mag))))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Watchdog de prospețime a datelor ARONA")
     ap.add_argument("--email", help="destinatar (email trimis DOAR dacă e ceva roșu)")
@@ -331,7 +397,8 @@ def main():
 
     rows = []
     ctx = {}  # check_metrics populează cache_fresh înainte ca check_profitdb să-l citească
-    for fn in (check_metrics, check_awbprint, check_awb_output, check_profitdb, check_heartbeats):
+    for fn in (check_metrics, check_awbprint, check_awb_output, check_profitdb,
+               check_gads_feed, check_heartbeats):
         try:
             fn(rows, ctx)
         except Exception as e:
