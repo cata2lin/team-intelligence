@@ -65,7 +65,7 @@ def load_skus(cur, brand, window, max_real=100000):
     cur.execute('SELECT MAX("snapshotDate") FROM inventory_daily_snapshots WHERE "brandId"=%s', (bid,))
     latest = cur.fetchone()[0]
     if latest is None:
-        return [], None, None, 0
+        return [], None, None, 0, 0
     # ziua de referință pt fereastra: cel mai apropiat snapshot <= latest - window
     cur.execute('SELECT MAX("snapshotDate") FROM inventory_daily_snapshots '
                 'WHERE "brandId"=%s AND "snapshotDate" <= %s',

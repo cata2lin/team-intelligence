@@ -36,7 +36,7 @@ def product_sales(stores: str = "", months: int = 1, metric: str = "units", limi
     return _run(PS,a)
 @mcp.tool()
 def stock_alerts(brand: str = "", report: str = "restock", threshold: int = 0, limit: int = 40) -> str:
-    """Stoc mic / epuizat / prioritate restock pe magazinele Shopify. report=restock/low/out. brand gol = toate."""
+    """Stoc mic / epuizat / prioritate restock pe magazinele Shopify. report=restock/low/oos. brand gol = toate."""
     a=["--report",report,"--limit",str(limit)]
     if brand: a+=["--brand",brand]
     if threshold>0: a+=["--threshold",str(threshold)]

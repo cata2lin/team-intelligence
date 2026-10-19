@@ -1,0 +1,3 @@
+# postgres-mcp 0.3.x cere pglast==7.2.0, care NU există pe PyPI (există 7.20/7.21) → uv cădea pe 0.1.0, stricat pe mcp 2.x
+pglast==7.21
+mcp<2

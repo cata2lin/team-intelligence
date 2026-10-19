@@ -16,7 +16,8 @@ Usage:
   # GA4 (SA JSON written to a temp file, path in GOOGLE_APPLICATION_CREDENTIALS):
   mcp_env_launch.py FILE:GOOGLE_APPLICATION_CREDENTIALS=GA4_SA_JSON -- uvx analytics-mcp
 """
-import os, sys, tempfile
+import os
+import re, sys, tempfile
 
 def resolve(key):
     url = os.environ.get("KB_DATABASE_URL")
@@ -53,6 +54,9 @@ def main():
             os.write(fd, val.encode()); os.close(fd); os.chmod(path, 0o600)
             os.environ[env] = path
         else:
+            if val.startswith(("postgres://", "postgresql://")) and "schema=" in val:
+                # `?schema=public` e parametru Prisma; libpq/psycopg îl refuză („invalid URI query parameter")
+                val = re.sub(r"([?&])schema=[^&]*&?", r"\1", val).rstrip("?&")
             os.environ[spec] = val
     os.execvp(cmd[0], cmd)
 

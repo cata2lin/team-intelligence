@@ -115,7 +115,11 @@ class MCP:
                 if res.get("error"):
                     raise RuntimeError("JSON-RPC error: %s" % res["error"])
                 txt = res.get("result", {}).get("content", [{}])[0].get("text", "")
-                return json.loads(txt) if txt.strip().startswith("{") else {}
+                out = json.loads(txt) if txt.strip().startswith("{") else {}
+                if res.get("result", {}).get("isError") or out.get("success") is False:
+                    # altfel un 503 Richpanel („AUTH_UNAVAILABLE") iese ca „0 conversații" în dashboard
+                    raise RuntimeError("Richpanel MCP a răspuns cu eroare: %s" % (txt[:300] or res))
+                return out
             except Exception as e:
                 last = e
                 if i == retries - 1:
