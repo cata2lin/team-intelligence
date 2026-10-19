@@ -130,6 +130,9 @@ class MCP:
             return None
         if "error" in res:
             raise RuntimeError(f"{tool}: {res['error']}")
+        if (res.get("result") or {}).get("isError"):
+            txt = ((res["result"].get("content") or [{}])[0].get("text") or "")[:300]
+            raise RuntimeError(f"{tool}: Richpanel a răspuns cu eroare: {txt}")
         parts = []
         for c in res.get("result", {}).get("content", []):
             if c.get("type") == "text":
@@ -137,7 +140,12 @@ class MCP:
                     parts.append(json.loads(c["text"]))
                 except Exception:
                     parts.append(c["text"])
-        return parts[0] if len(parts) == 1 else parts
+        out = parts[0] if len(parts) == 1 else parts
+        # 503 AUTH_UNAVAILABLE vine ca {"success": false} cu isError lipsă → altfel „0 tichete"
+        if isinstance(out, dict) and out.get("success") is False:
+            raise RuntimeError(f"{tool}: Richpanel a răspuns cu eroare: "
+                               f"{out.get('code', '')} {str(out.get('error', ''))[:300]}")
+        return out
 
 
 # ------------------------------------------------------------------- AWBprint

@@ -63,7 +63,10 @@ def cs_wismo(order: str = "", phone: str = "", awb: str = "") -> str:
 @mcp.tool()
 def cs_conversation(conv: str, llm: bool = False) -> str:
     """Profil 360 al unei conversații Richpanel (client+comandă+categorie+sentiment+acțiune). llm=true pt sinteză LLM."""
-    return _run(CS,["conversation","--conv",conv]+(["--llm"] if llm else []))
+    out=_run(CS,["conversation","--conv",conv]+(["--llm"] if llm else []))
+    if "\n[cod de ieșire " in out:   # citire Richpanel picată (schemă/503) = eroare MCP, nu „profil gol"
+        raise RuntimeError(out)
+    return out
 
 # ─────────── FULFILLMENT / AWB (xconnector) — READ ───────────
 @mcp.tool()

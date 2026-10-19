@@ -49,11 +49,16 @@ def _writer():
 RUNNER = os.environ.get("CS_PIPELINE_RUNNER", "uv run").split()
 
 
+FAILED = []  # pașii picați: pipeline-ul merge mai departe, dar iese ≠0 la final (cronul vede)
+
+
 def run(label, args):
     print("\n━━━━━━ %s ━━━━━━" % label, flush=True)
     t = time.time()
     rc = subprocess.call(RUNNER + args)
     ok = "✅ OK" if rc == 0 else "⚠️ rc=%d" % rc
+    if rc != 0:
+        FAILED.append(label)
     print("  [%s] %s în %.0fs" % (label, ok, time.time() - t), flush=True)
     return rc
 
@@ -183,6 +188,10 @@ def main():
         run("9) PUSH → Richpanel (taguri + notă internă, niciun mesaj la client)", apply_args)
 
     print("\n" + "═" * 64)
+    if FAILED:
+        print("  ⚠️ PIPELINE terminat CU ERORI în %.0f min — pași picați: %s" % ((time.time() - t0) / 60, "; ".join(FAILED)))
+        print("═" * 64)
+        sys.exit(1)
     print("  ✅ PIPELINE complet în %.0f min. Baza e enrichată — toate skill-urile citesc de aici." % ((time.time() - t0) / 60))
     print("═" * 64)
 

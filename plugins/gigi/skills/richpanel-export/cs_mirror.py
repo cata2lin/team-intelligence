@@ -531,15 +531,28 @@ ORDER_RE = re.compile(r"\b(" + "|".join(sorted((re.escape(k) for k in ORDER_PFX)
                                                reverse=True)) + r")[ -]?(\d{4,7})\b", re.I)
 
 
-def resolve_store(t):
-    """Magazinul unui tichet = PAGINA pe care a venit (`to.id`), NU brandul din Richpanel
-    (ăla e STALE — vezi memoria fb-page-store-map). Fallback: domeniul de e-mail, apoi
-    prefixul comenzii din text."""
+for _p in (os.path.join(HERE, "..", "..", "..", "core", "scripts"), HERE):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+try:
+    import richpanel_schema as rps  # o singură hartă + schema nouă (fără `to`, oct-2026)
+    PAGE_STORE = {**PAGE_STORE, **rps.PAGE_STORE}
+except ImportError:  # copie izolată fără plugins/core — rămâne pe regulile vechi
+    rps = None
+
+
+def resolve_store(t, mailbox=None):
+    """Magazinul unui tichet = PAGINA pe care a venit (`to.id`, iar din 5-oct-2026 — când
+    Richpanel nu mai trimite `to` — prefixul id-ului la comentariile FB), NU brandul din
+    Richpanel (ăla e STALE — vezi memoria fb-page-store-map). Fallback: cutia de e-mail
+    (`to.email` sau `mailbox` din gm_message), apoi prefixul comenzii din text."""
+    if rps is not None:
+        return rps.resolve_store(t, mailbox=mailbox)
     to = t.get("to") if isinstance(t.get("to"), dict) else {}
     s = PAGE_STORE.get(str(to.get("id") or ""))
     if s:
         return s
-    mail = (to.get("email") or "").lower()
+    mail = (to.get("email") or mailbox or "").lower()
     for dom, name in STORE_BY_EMAIL.items():
         if dom and dom in mail:
             return name
@@ -547,6 +560,19 @@ def resolve_store(t):
     if m:
         return ORDER_PFX.get(m.group(1).upper())
     return None
+
+
+def _mailbox_of(db, t):
+    """Schema nouă n-are `to.email`: cutia în care a intrat e-mailul o știe oglinda Gmail
+    (`gm_message.message_id` = id-ul tichetului pe 99,7% din e-mailuri)."""
+    if not str(t.get("channel") or "").startswith("email"):
+        return None
+    try:
+        r = db.execute("SELECT mailbox FROM gm_message WHERE message_id=? LIMIT 1",
+                       (str(t.get("id")),)).fetchone()
+        return r[0] if r else None
+    except sqlite3.Error:
+        return None
 
 
 # ──────────────────────────────────────────────────────────────────── rp_ticket
@@ -614,6 +640,7 @@ def upsert_ticket(db, t, msg_total=None, fetched_at=None):
     frm = t.get("from") if isinstance(t.get("from"), dict) else {}
     to = t.get("to") if isinstance(t.get("to"), dict) else {}
     cust = t.get("customer") if isinstance(t.get("customer"), dict) else {}
+    mailbox = None if to.get("email") else _mailbox_of(db, t)
     tags = t.get("tags") or t.get("tag_names") or []
     names = [x.get("name") if isinstance(x, dict) else str(x) for x in tags]
     _subj = sanitize(str(t.get("subject") or ""))
@@ -628,8 +655,8 @@ def upsert_ticket(db, t, msg_total=None, fetched_at=None):
         "status": t.get("status") or "",
         "priority": t.get("priority") or "",
         "assignee_id": str(t.get("assignee_id") or t.get("assigneeId") or ""),
-        "to_id": str(to.get("id") or ""),
-        "to_email": sanitize(str(to.get("email") or "")),
+        "to_id": str(to.get("id") or (rps.page_id(t) if rps is not None else "") or ""),
+        "to_email": sanitize(str(to.get("email") or mailbox or "")),
         "from_id": str(frm.get("id") or ""),
         "from_email": sanitize(str(frm.get("email") or "")),
         "customer_id": str(cust.get("id") or ""),
@@ -645,7 +672,7 @@ def upsert_ticket(db, t, msg_total=None, fetched_at=None):
         "closed_at": iso_ts(_first(t, "closed_at", "closedAt", "resolved_at")) or "",
         "first_responded_at": iso_ts(_first(t, "first_responded_at", "firstRespondedAt",
                                             "first_response_at")) or "",
-        "store_resolved": resolve_store(t) or "",
+        "store_resolved": resolve_store(t, mailbox=mailbox) or "",
         "fetched_at": fetched_at or now_iso(),
         "msg_total_at_fetch": msg_total,
     }
@@ -1140,6 +1167,16 @@ def selftest(db_path=None):
          str(row2["msg_total_at_fetch"]))
     _chk(R, "magazin din prefixul comenzii cand nu stim pagina",
          resolve_store({"to": {"id": "999"}, "subject": "problema la EST12345"}) == "Esteban")
+    # schema noua Richpanel (5-oct-2026): fara `to`, pagina sta in prefixul id-ului
+    tn = {"id": "775068272350568_1221_1221_99", "conversation_no": 312880,
+          "channel": "facebook_feed_comment", "status": "OPEN", "brand_id": "nocturna9540",
+          "last_message_from": "customer", "subject": "Super", "first_message": "Super",
+          "customer": {"id": "c2", "name": "Ion"}, "created_at": ms}
+    upsert_ticket(db, tn, msg_total=1)
+    rn = db.execute("SELECT * FROM rp_ticket WHERE id=?", (tn["id"],)).fetchone()
+    _chk(R, "schema noua: magazin + to_id din prefixul id-ului",
+         rn["store_resolved"] == "Magdeal" and rn["to_id"] == "775068272350568",
+         f'{rn["store_resolved"]} / {rn["to_id"]}')
     n = upsert_attachments(db, "conv_1", "m_1",
                            {"attachments": [{"url": "https://s3/a.jpg"}, "https://s3/b.jpg"]})
     upsert_attachments(db, "conv_1", "m_1", {"attachments": [{"url": "https://s3/a.jpg"}]})

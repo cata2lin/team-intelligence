@@ -26,7 +26,12 @@ SENT=os.path.join(HERE,"..","cs-sentiment","cs_sentiment.py")
 SLA=os.path.join(HERE,"..","cs-sla-dashboard","cs_sla_dashboard.py")
 def _run(script, args, timeout=200):
     r=subprocess.run(["uv","run",script]+args,capture_output=True,text=True,env=_env(),timeout=timeout)
-    return ((r.stdout or "").strip() or "(fără output)")+(("\n[stderr] "+(r.stderr or "")[:400]) if r.returncode!=0 else "")
+    if r.returncode!=0:
+        # eroare = eroare MCP (isError), nu text care arată a rezultat gol: din oct-2026 Richpanel a
+        # schimbat schema și uneltele „mergeau" cu 0 tichete
+        raise RuntimeError("%s a eșuat (exit %d): %s\n%s"%(os.path.basename(script),r.returncode,
+                           (r.stderr or "")[-1200:],(r.stdout or "")[-600:]))
+    return (r.stdout or "").strip() or "(fără output)"
 
 @mcp.tool()
 def cs_draft(conv: str, create_draft: bool = False) -> str:
@@ -34,7 +39,7 @@ def cs_draft(conv: str, create_draft: bool = False) -> str:
     return _run(DRAFT,["--only",conv]+(["--create-draft"] if create_draft else []))
 @mcp.tool()
 def richpanel_triage(limit: int = 20, apply: bool = False) -> str:
-    """Auto-triaj conversații OPEN: propune magazin/categorie/prioritate/tag (din to.id = pagina FB/IG). DRY-RUN dacă apply=false (scrie tag+prioritate, niciun mesaj la client)."""
+    """Auto-triaj conversații OPEN: propune magazin/categorie/prioritate/tag (pagina FB/IG din to.id sau prefixul id-ului, apoi e-mail/comandă). DRY-RUN dacă apply=false (scrie tag+prioritate, niciun mesaj la client)."""
     return _run(TRIAGE,["--limit",str(limit)]+(["--apply"] if apply else []))
 @mcp.tool()
 def richpanel_janitor(type: str = "", apply: bool = False) -> str:

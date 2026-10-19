@@ -110,7 +110,11 @@ def fetch_rp_day(mcp, day, passes=DEFAULT_PASSES, page_cap=PAGE_CAP, log=None):
                 diag["capped"].append(f"{day}/{st}: raspuns invalid la pagina {page}: {str(d)[:80]}")
                 diag.setdefault("unproven", set()).add(day)
                 break
-            ts = d.get("tickets") or []
+            if not isinstance(d.get("tickets"), list):  # {"success": false,…} ≠ pagină goală
+                diag["capped"].append(f"{day}/{st}: eroare la pagina {page}: {str(d)[:120]}")
+                diag.setdefault("unproven", set()).add(day)
+                break
+            ts = d["tickets"]
             pol = d.get("context_policy") if isinstance(d, dict) else None
             for w in ((pol or {}).get("warnings") or []):
                 msg = f"{day}/{st}: {w}"

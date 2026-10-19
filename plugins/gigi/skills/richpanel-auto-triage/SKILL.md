@@ -16,7 +16,7 @@ uv run richpanel_auto_triage.py --apply         # scrie tag magazin+categorie + 
 ```
 
 ## Cum decide
-- **Magazin:** pagina FB/IG (`to.id` → hartă) → prefix nr comandă → domeniu email contact.
+- **Magazin:** pagina FB/IG (`to.id`, iar din 5-oct-2026 — când Richpanel nu mai trimite `to` — prefixul id-ului conversației la comentarii) → cutia de e-mail → prefix nr comandă → domeniu citat. Logica e UNA, în `plugins/core/scripts/richpanel_schema.py` (`resolve_store`, `PAGE_STORE`); `brand_id` e contul (`nocturna9540`), NU magazinul. O eroare Richpanel = exit ≠0, nu „0 conversații”.
 - **Categorie:** reguli pe subiect+mesaj (anulare/retur/problemă/modificare/WISMO/plată/presale/general).
 - **Prioritate:** ANPC/juridic → **URGENT**; client VIP (LTV ≥1000 RON din `metrics.orders`) → **HIGH**; retur/problemă/anulare → **HIGH**; restul NORMAL.
 

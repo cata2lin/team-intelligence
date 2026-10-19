@@ -36,15 +36,10 @@ NAME_RE = re.compile(r"(?:pe\s+numele|numele\s+(?:meu\s+)?(?:este|e|de)?|comanda
                      r"([A-ZĂÂÎȘȚ][a-zăâîșț]+(?:\s+[A-ZĂÂÎȘȚ][a-zăâîșț]+){1,2})")
 SOCIAL = ("facebook_message", "messenger", "instagram_message", "email_from_widget", "email")  # toate canalele de conversație (comentariile la reclame excluse — ~0 contact)
 # pagină FB/IG → magazin (din memoria fb-page-store-map) — dezambiguizează numele după magazinul paginii
-PAGE_STORE = {
-    "426248277236834": "Esteban", "364899953373966": "Ofertele Zilei", "775068272350568": "Magdeal",
-    "569610726226886": "Reduceri bune", "676105508924341": "George Talent", "568416516348894": "Belasil",
-    "582569158278392": "Nubra", "700342149818211": "Bonhaus PL", "629666993566339": "Grandia",
-    "434151126459295": "Bonhaus CZ", "651700798017858": "Casa Ofertelor", "582681401604162": "Ofertele Zilei",
-    "1678573069021466": "Orasul Verde", "522811567592063": "Gento", "621560724373069": "Carpetto",
-    "680369271815957": "Bonhaus BG", "421367954403103": "Apreciat", "1805415543098993": "Rossi Nails",
-    "61586834387211": "Lab Noir",
-}
+for _p in (os.path.join(HERE, "..", "..", "..", "core", "scripts"), HERE):
+    sys.path.insert(0, _p)
+import richpanel_schema as rps  # harta pagină→magazin + pagina din id (schema nouă fără `to`)
+PAGE_STORE = rps.PAGE_STORE
 WINDOW_DAYS = 120  # comanda relevantă tichetului: în jurul datei tichetului (±N zile)
 
 
@@ -213,8 +208,10 @@ def main():
     try:
         rows = con.execute("SELECT id,conversation_no,customer_name,created_at,resolved_store,"
                            "json_extract(raw,'$.to.id') FROM tickets WHERE " + where, params).fetchall()
+        # schema nouă (oct-2026): fără `to` → pagina din prefixul id-ului conversației
+        rows = [r if r[5] else r[:5] + (rps.page_id({"id": r[0]}) or None,) for r in rows]
     except sqlite3.OperationalError:  # json1 indisponibil → fără pagină, doar resolved_store
-        rows = [(r[0], r[1], r[2], r[3], r[4], None) for r in
+        rows = [(r[0], r[1], r[2], r[3], r[4], rps.page_id({"id": r[0]}) or None) for r in
                 con.execute("SELECT id,conversation_no,customer_name,created_at,resolved_store FROM tickets WHERE " + where, params).fetchall()]
     con.close()
 

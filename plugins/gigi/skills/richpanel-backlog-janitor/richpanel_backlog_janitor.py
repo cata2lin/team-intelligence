@@ -36,6 +36,9 @@ import os, sys, re, json, time, sqlite3, argparse, subprocess, importlib.util, u
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILLS = os.path.abspath(os.path.join(HERE, ".."))          # .../plugins/gigi/skills
+for _p in (os.path.join(HERE, "..", "..", "..", "core", "scripts"), HERE):
+    sys.path.insert(0, _p)
+import richpanel_schema as rps  # schema Richpanel veche/nouă + eroare MCP = excepție
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", "..", ".."))
 DB = os.environ.get("RICHPANEL_DB") or os.path.join(REPO, "data", "richpanel_tickets.db")
 MCP_URL = "https://mcp.richpanel.com/mcp"
@@ -162,7 +165,11 @@ class MCP:
                 if res.get("error"):
                     raise RuntimeError("JSON-RPC error: %s" % res["error"])
                 txt = res.get("result", {}).get("content", [{}])[0].get("text", "")
-                return json.loads(txt) if txt.startswith("{") else {}
+                out = json.loads(txt) if txt.startswith("{") else {"_text": txt}
+                if res.get("result", {}).get("isError"):
+                    out.setdefault("_error", txt[:300] or "isError")
+                # altfel o eroare Richpanel (503 AUTH_UNAVAILABLE, schemă schimbată) = „backlog gol"
+                return rps.check(out, name)
             except Exception:
                 if i == retries - 1:
                     raise
@@ -215,7 +222,7 @@ def fetch_open_comments(mcp, store_map, max_pages=200, verbose=False):
             d = mcp.call("list_conversations", {"status": "OPEN", "channel": ch,
                                                 "per_page": 50, "page": page,
                                                 "sortKey": "createdAt", "order": "asc"})
-            ts = d.get("tickets") or []
+            ts = rps.tickets(d)
             empty_streak = empty_streak + 1 if not ts else 0
             for t in ts:
                 cid = t.get("id")
@@ -224,7 +231,8 @@ def fetch_open_comments(mcp, store_map, max_pages=200, verbose=False):
                 seen.add(cid)
                 if t.get("channel") not in COMMENT_CHANNELS:   # exclude messenger/facebook_message (suport real)
                     continue
-                store = store_map.get(cid) or "necunoscut"
+                # oglinda locală întâi; altfel pagina din id (schema nouă n-are `to`), comanda, e-mail
+                store = store_map.get(cid) or rps.resolve_store(t) or "necunoscut"
                 txt = text_of(t)
                 out.append({
                     "id": cid, "no": t.get("conversation_no"), "store": store,
