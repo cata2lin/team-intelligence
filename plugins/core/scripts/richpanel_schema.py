@@ -33,6 +33,9 @@ PAGE_STORE = {
     "628544790345906": "Genti Promo", "704271086093669": "Ce-Pat-Ai", "506398435900401": "Produse Bisericesti",
     "132189989971450": "Stemma", "606625622532373": "Super Detergent", "104553898590313": "Unelte Potrivite",
     "115983611500696": "Manscout", "122095975544011424": "Rossi Nails",
+    # identificate 19-oct-2026 (titlul public al paginii + conținutul tichetelor din oglindă):
+    "984329328095386": "De la Bucsa", "898588036681214": "Lab Noir",
+    "336777842857489": "Nocturna", "995674783622734": "Orice Redus",
 }
 
 # cutia de e-mail / domeniul menționat → magazin
@@ -207,6 +210,7 @@ if __name__ == "__main__":  # autotest, fără rețea
     assert resolve_store({"id": "<c@d>", "first_message": "scris de contact@nubra.ro"}) == "Nubra"
     assert resolve_store({"id": "<c@d>"}, mailbox="bulgaria@duppo.eu") == "Duppo BG"
     assert page_id(post) == "" and resolve_store(post) is None
+    assert resolve_store({"id": "984329328095386_122139264543229860_1_2"}) == "De la Bucsa"
     for bad in ({"_error": "timeout"}, {"success": False, "error": "x", "code": "AUTH_UNAVAILABLE"},
                 {"_text": "Error: timezone is required"}):
         try:
