@@ -47,6 +47,9 @@ STORE_BY_EMAIL = {
     "belasil.ro": "Belasil", "gento.ro": "Gento", "carpetto.ro": "Carpetto", "covoria.ro": "Covoria",
     "rossinails.ro": "Rossi Nails", "apreciat.ro": "Apreciat", "labnoir.ro": "Lab Noir",
     "casaofertelor.ro": "Casa Ofertelor", "duppo.md": "Duppo Moldova", "delabucsa.ro": "De la Bucsa",
+    # Duppo EU (un singur Shopify multi-piață din 22-sep-2026: BG+CZ+HU+SK); cutiile duppo.eu sunt
+    # aliasuri ale aceleiași căsuțe → toate = magazinul „Duppo BG" (piața o dă limba clientului)
+    "duppo.eu": "Duppo BG", "duppo.bg": "Duppo BG", "duppo.cz": "Duppo Czechia", "duppo.hu": "Duppo HU",
 }
 # inboxuri PARTAJATE (primesc tichete pt mai multe magazine) — NU identifică un magazin
 # (aceeași regulă ca în richpanel_link.SHARED_INBOX)
@@ -58,7 +61,9 @@ ORDER_PFX = {"EST": "Esteban", "GT": "George Talent", "NUB": "Nubra", "GEN": "Ge
              "GRAND": "Grandia", "BELA": "Belasil", "MAG": "Magdeal", "OFER": "Ofertele Zilei",
              "RED": "Reduceri bune", "BON": "Bonhaus RO", "BONBG": "Bonhaus BG", "CZ": "Bonhaus CZ",
              "PL": "Bonhaus PL", "CARP": "Carpetto", "COV": "Covoria", "NOC": "Nocturna", "APR": "Apreciat",
-             "ROSSI": "Rossi Nails", "LUX": "Nocturna Lux", "DUPBG": "Duppo BG"}
+             "ROSSI": "Rossi Nails", "LUX": "Nocturna Lux", "DUPBG": "Duppo BG",
+             # piețe străine (prefixele din cs_auto_draft): DUP = Duppo EU după 22-sep-2026
+             "DUP": "Duppo BG", "MD": "Duppo Moldova", "SK": "Bonhaus SK", "HU": "Bonhaus HU"}
 ORDER_RE = re.compile(r"\b(" + "|".join(sorted(ORDER_PFX, key=len, reverse=True)) + r")[ -]?(\d{4,7})\b", re.I)
 _DOMAIN_RE = re.compile(r"\b(" + "|".join(re.escape(d) for d in sorted(STORE_BY_EMAIL, key=len, reverse=True))
                         + r")\b", re.I)
@@ -211,6 +216,9 @@ if __name__ == "__main__":  # autotest, fără rețea
     assert resolve_store({"id": "<c@d>"}, mailbox="bulgaria@duppo.eu") == "Duppo BG"
     assert page_id(post) == "" and resolve_store(post) is None
     assert resolve_store({"id": "984329328095386_122139264543229860_1_2"}) == "De la Bucsa"
+    assert resolve_store({"id": "<e@f>", "subject": "Поръчка DUP12345"}) == "Duppo BG"
+    assert resolve_store({"id": "<e@f>", "subject": "Comanda MD1145"}) == "Duppo Moldova"
+    assert resolve_store({"id": "<e@f>", "first_message": "pisu na contact@duppo.cz"}) == "Duppo Czechia"
     for bad in ({"_error": "timeout"}, {"success": False, "error": "x", "code": "AUTH_UNAVAILABLE"},
                 {"_text": "Error: timezone is required"}):
         try:

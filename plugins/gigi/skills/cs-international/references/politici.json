@@ -1,0 +1,84 @@
+{
+  "verificat": "2026-10-19",
+  "comun": "Vânzător ARONA SRL (CUI 37247302, J51/151/2017, Călărași), vânzare transfrontalieră din România; excepție MD = GOING STELLAR SRL (Chișinău). Drept de retragere UE 14 zile de la primire; parfumuri/produse de igienă DESIGILATE nu se primesc înapoi; banii înapoi în max. 14 zile, pe aceeași cale de plată (ramburs → IBAN). Produs defect/greșit: transportul de retur îl plătim noi, înlocuim sau rambursăm. Statusul comenzii DOAR din Order Hub.",
+  "piete": {
+    "BG": {
+      "magazine": ["Duppo EU / Duppo BG (bg.duppo.eu, duppo.bg) — EUR, parfumuri, 2+1", "Bonhaus BG (bonhaus.bg) — EUR, casă/deals, ramburs", "Trendyol BG, eMAG BG (marketplace: CS prin platformă, neverificat)"],
+      "limba": "bulgară (Вие/Ви/Ваш, cu majusculă)",
+      "contact": "contact@duppo.eu (Duppo; bulgaria@duppo.eu e alias al aceleiași cutii) · contact@bonhaus.bg (Bonhaus) · tel. Bonhaus BG 0885 493 926 (din botul CS, neverificat pe site)",
+      "retur": "14 zile de la primire, fără motiv, DOAR flacon sigilat (Duppo) / produs nedesfăcut (Bonhaus). 2+1: se returnează și cadoul sigilat sau i se plătește valoarea. Se cere pe e-mail cu nr. comenzii → primește instrucțiuni + adresa de retur.",
+      "rambursare": "max. 14 zile după primirea și verificarea returului, pe aceeași cale de plată (ramburs → IBAN + titular).",
+      "livrare": "Duppo: DPD (rețea Speedy), 2–3 zile lucrătoare, 3,99 € sub 45 €, gratuit peste; acasă sau oficiu/locker Speedy (NU Econt). Bonhaus: 3–5 zile lucrătoare.",
+      "plata": "card la comandă sau ramburs (наложен платеж); Bonhaus BG doar ramburs",
+      "autoritate": "КЗП — Комисия за защита на потребителите (kzp.bg)",
+      "pagini": ["https://duppo.bg/policies/refund-policy", "https://duppo.bg/policies/shipping-policy", "https://bonhaus.bg/policies/refund-policy", "https://bonhaus.bg/policies/shipping-policy"]
+    },
+    "HU": {
+      "magazine": ["Duppo EU (hu.duppo.eu / duppo.hu) — comenzile HU intră prin Duppo BG/EU din ~20-sep-2026", "Bonhaus HU — ÎNCHIS 15-oct-2026", "eMAG HU (marketplace, neverificat)"],
+      "limba": "maghiară (Ön + persoana a 3-a singular)",
+      "contact": "contact@duppo.hu (publicat pe site, dar domeniul NU primește mail → răspunde din cutia Duppo EU; hungary@duppo.eu = alias)",
+      "retur": "14 zile, doar flacon nedesfăcut; 2+1: cadoul se returnează sigilat sau se plătește; cerere pe e-mail cu nr. comenzii.",
+      "rambursare": "max. 14 zile după verificarea returului, pe aceeași cale de plată.",
+      "livrare": "DPD, 1–2 zile lucrătoare (conform site; realist mai mult, neverificat), 1490 Ft sub 10 000 Ft, gratuit peste.",
+      "plata": "card sau utánvét (ramburs)",
+      "autoritate": "Kormányhivatal fogyasztóvédelmi hatóság / Békéltető Testület (neverificat pe site)",
+      "pagini": ["https://hu.duppo.eu/policies/refund-policy", "https://hu.duppo.eu/policies/shipping-policy"]
+    },
+    "CZ": {
+      "magazine": ["Bonhaus CZ (bonhaus.cz) — CZK, cel mai mare magazin străin, DESCHIS", "Duppo EU (cz.duppo.eu / duppo.cz) — comenzile CZ prin Duppo BG/EU din 18-sep-2026"],
+      "limba": "cehă (Vy/Vám/Vás, cu majusculă)",
+      "contact": "contact@bonhaus.cz, tel. +420 724 216 967 (pagina de contact Bonhaus CZ) · contact@duppo.cz (Duppo; găzduit în afara tenantului nostru)",
+      "retur": "Duppo: 14 zile, flacon nedesfăcut, 2+1 ca la BG. Bonhaus CZ: pagina spune doar că NU primesc produse desfăcute/folosite și „analizăm fiecare caz” — NU menționează dreptul de retragere de 14 zile (lacună de politică, vezi gaps).",
+      "rambursare": "Duppo: max. 14 zile pe aceeași cale de plată. Bonhaus CZ: nescris pe site (aplică regula UE 14 zile).",
+      "livrare": "DPD (serviciul 2212), 1 colet/AWB; Duppo: 89 Kč sub 1000 Kč, gratuit peste; Bonhaus: procesare 24h, 3–5 zile lucrătoare.",
+      "plata": "card sau dobírka (ramburs)",
+      "autoritate": "ČOI — Česká obchodní inspekce (coi.cz)",
+      "pagini": ["https://bonhaus.cz/policies/refund-policy", "https://bonhaus.cz/policies/contact-information", "https://cz.duppo.eu/policies/refund-policy", "https://cz.duppo.eu/policies/shipping-policy"]
+    },
+    "SK": {
+      "magazine": ["Bonhaus SK — ÎNCHIS", "Duppo SK → comenzile prin Duppo EU"],
+      "limba": "slovacă (Vy/Vám/Vás)",
+      "contact": "contact@bonhaus.sk inactiv (ajunge în cutia bonhaus.bg); pentru Duppo: contact@duppo.eu",
+      "retur": "regula Duppo EU (14 zile, sigilat); Bonhaus SK: comenzi vechi — regula UE 14 zile",
+      "rambursare": "max. 14 zile, pe aceeași cale de plată",
+      "livrare": "DPD 2212, DOAR 1 colet pe AWB",
+      "plata": "card sau dobierka (neverificat pe site)",
+      "autoritate": "SOI — Slovenská obchodná inšpekcia (soi.sk)",
+      "pagini": []
+    },
+    "PL": {
+      "magazine": ["Bonhaus PL — ȘTERS 15-oct-2026 (site 404); rămân doar tichete despre comenzi vechi", "Nocturna PL — stare neverificată"],
+      "limba": "poloneză (Pan/Pani + persoana a 3-a singular)",
+      "contact": "nu mai există pagină de politici; NU da numărul RO 037x (scos intenționat de bot)",
+      "retur": "regula UE 14 zile pentru comenzile vechi; desigilat/igienă nu",
+      "rambursare": "max. 14 zile; ramburs → IBAN",
+      "livrare": "DPD 2212 (cod poștal fără cratimă); istoric Packeta (Z…) și Sameday (1ONB…)",
+      "plata": "ramburs (Releasit/EasySell)",
+      "autoritate": "UOKiK / Rzecznik Konsumentów",
+      "pagini": []
+    },
+    "GR": {
+      "magazine": ["Trendyol GR (marketplace) — singurul canal"],
+      "limba": "greacă — NU avem nicio formulare validată, niciun macro, nicio gardă în bot",
+      "contact": "prin mesageria Trendyol (neverificat)",
+      "retur": "regulile Trendyol GR (neverificat)",
+      "rambursare": "prin Trendyol (neverificat)",
+      "livrare": "neverificat",
+      "plata": "prin Trendyol",
+      "autoritate": "Γενική Γραμματεία Εμπορίου και Προστασίας Καταναλωτή (neverificat)",
+      "pagini": []
+    },
+    "MD": {
+      "magazine": ["Duppo Moldova (duppo.md) — MDL, comenzi MDxxxx, vânzător GOING STELLAR SRL"],
+      "limba": "română (dumneavoastră); clienți rusofoni posibil — fără formulări validate în rusă",
+      "contact": "contact@duppo.md, L–V 9:00–17:00 ora Chișinăului",
+      "retur": "14 zile calendaristice de la primire (ultimul colet), DOAR parfum SIGILAT; desigilat = nu (Codul civil RM, igienă). Notificare pe e-mail cu subiect „Retur” + nr. comenzii + IBAN la ramburs; clientul plătește transportul retur (nu colete cu plata la destinatar); trimite în max. 14 zile de la notificare.",
+      "rambursare": "max. 14 zile de la notificare (putem aștepta coletul/dovada expedierii); card → același card, ramburs → IBAN; transportul standard se rambursează doar la retur integral; 2+1 = reducerea împărțită egal pe cele 3 flacoane.",
+      "livrare": "FAN Courier Moldova (AWB FAN…), predare în 24h, livrare 1–2 zile lucrătoare; 79 lei sub 756 lei, gratuit peste.",
+      "plata": "ramburs sau card online",
+      "defect_lipsa": "spart/greșit/lipsă: în 48h cu poze → înlocuim pe cheltuiala noastră; defect de fabricație: înlocuire/bani, reclamație soluționată în max. 14 zile.",
+      "autoritate": "Agenția pentru Protecția Consumatorilor și Supravegherea Pieței (consumator.gov.md)",
+      "pagini": ["https://duppo.md/policies/refund-policy", "https://duppo.md/policies/shipping-policy", "https://duppo.md/policies/contact-information"]
+    }
+  }
+}
