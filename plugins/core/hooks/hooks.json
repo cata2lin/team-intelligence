@@ -6,7 +6,15 @@
         "hooks": [
           { "type": "command", "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/scripts/refresh_team_repo.py\"", "timeout": 30 },
           { "type": "command", "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/scripts/nas_connect.py\"", "timeout": 60 },
-          { "type": "command", "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/scripts/kb_guard_sync.py\"", "timeout": 20 }
+          { "type": "command", "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/scripts/kb_guard_sync.py\"", "timeout": 20 },
+          { "type": "command", "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/scripts/skill_router.py\" --sync-if-stale", "timeout": 5 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/scripts/skill_router.py\"", "timeout": 8 }
         ]
       }
     ],

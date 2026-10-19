@@ -44,7 +44,7 @@ DAYS=30
 if "--days" in sys.argv:
     try: DAYS=int(sys.argv[sys.argv.index("--days")+1])
     except: pass
-API="v22"
+API=os.environ.get("GADS_API_VERSION","v24")
 HERE=os.path.dirname(os.path.abspath(__file__))
 spec=importlib.util.spec_from_file_location("brandref",os.path.join(HERE,"brandref.py"))
 br=importlib.util.module_from_spec(spec); spec.loader.exec_module(br)

@@ -35,15 +35,15 @@
     },
     "postgres-pro": {
       "command": "uv",
-      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_env_launch.py", "DATABASE_URI=DATABASE_URL_METRICS", "--", "uvx", "postgres-mcp", "--access-mode", "restricted"]
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_env_launch.py", "DATABASE_URI=DATABASE_URL_METRICS", "--", "uvx", "--python", "3.12", "--overrides", "${CLAUDE_PLUGIN_ROOT}/scripts/postgres_mcp_overrides.txt", "postgres-mcp", "--access-mode", "restricted"]
     },
     "shopify-dev": {
       "command": "npx",
-      "args": ["-y", "@shopify/dev-mcp@latest"]
+      "args": ["-y", "@shopify/dev-mcp@1.17.0"]
     },
     "klaviyo": {
       "command": "uv",
-      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_env_launch.py", "PRIVATE_API_KEY=KLAVIYO_ESTEBAN_PRIVATE_KEY", "LIT:READ_ONLY=true", "--", "uvx", "klaviyo-mcp-server"]
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_env_launch.py", "PRIVATE_API_KEY=KLAVIYO_ESTEBAN_PRIVATE_KEY", "LIT:READ_ONLY=true", "--", "uvx", "--with", "klaviyo-api==24.0.0", "--with", "mcp<2", "klaviyo-mcp-server"]
     },
     "google-analytics": {
       "command": "uv",
@@ -51,7 +51,7 @@
     },
     "google-sheets": {
       "command": "uv",
-      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_env_launch.py", "FILE:SERVICE_ACCOUNT_PATH=GA4_SA_JSON", "--", "uvx", "mcp-google-sheets"]
+      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_env_launch.py", "FILE:SERVICE_ACCOUNT_PATH=GA4_SA_JSON", "--", "uvx", "--with", "mcp<2", "mcp-google-sheets"]
     },
     "search-console": {
       "command": "uv",

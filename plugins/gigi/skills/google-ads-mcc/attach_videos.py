@@ -16,7 +16,7 @@ Videourile trebuie să fie deja pe canalul brandului (vezi yt_upload.py).
 import os, sys, json, time, argparse
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
-API="v22"
+API=os.environ.get("GADS_API_VERSION","v24")
 _PG_OK={"host","port","dbname","user","password","sslmode","sslrootcert","sslcert","sslkey","connect_timeout","application_name","options","channel_binding"}
 def clean(d):
     p=urlsplit(d)

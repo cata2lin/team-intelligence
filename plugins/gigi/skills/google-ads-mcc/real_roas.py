@@ -23,6 +23,7 @@ from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
 from google.oauth2 import service_account
 import google.auth.transport.requests as gar
+API = os.environ.get("GADS_API_VERSION","v24")  # Google blochează versiunile vechi (v22 din 17-oct-2026)
 
 # brand -> cont Google Ads + indiciu nume property GA4 (auto-rezolvat din accountSummaries)
 BRANDS = {
@@ -87,7 +88,7 @@ def main():
         return None
 
     def gads(cid):
-        rr = requests.post(f"https://googleads.googleapis.com/v22/customers/{cid}/googleAds:searchStream", headers=GH,
+        rr = requests.post(f"https://googleads.googleapis.com/{API}/customers/{cid}/googleAds:searchStream", headers=GH,
                            json={"query": f"SELECT metrics.cost_micros, metrics.conversions, metrics.conversions_value FROM customer WHERE segments.date DURING {DUR}"}, timeout=60).json()
         rows = [x for ch in rr for x in ch.get("results", [])] if isinstance(rr, list) else []
         if not rows: return (0.0, 0.0, 0.0)

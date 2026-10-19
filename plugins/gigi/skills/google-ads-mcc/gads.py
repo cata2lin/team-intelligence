@@ -19,7 +19,7 @@ import argparse, json, os, sys
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
 
-API = os.environ.get("GADS_API_VERSION", "v22")
+API = os.environ.get("GADS_API_VERSION", "v24")
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 _PG_OK = {"host","hostaddr","port","dbname","user","password","sslmode","sslrootcert",
           "sslcert","sslkey","connect_timeout","application_name","options","channel_binding"}
