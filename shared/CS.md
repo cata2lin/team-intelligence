@@ -12,21 +12,23 @@
 > `sys.stdout.reconfigure(encoding="utf-8", errors="replace")`, altfel dă „eroare la caracter".
 
 ---
+> ⛔ **xConnector = OPRIT (cutoff 19-oct-2026).** Cheile API au expirat pe 21 din 23 de magazine (~13-oct), deci `gigi:xconnector` (links, not-downloaded, print-batch) și `depozit:print-queue` nu mai răspund. Tot ce era acolo e în Order Hub: fișa (`gigi:order-hub comanda`), acțiunile, printul (Order Hub → Printing), tracking-ul (`gigi:awb-track`).
+
 ## 1. 🔎 CAUT o comandă / un client
 | Am … | Tool | Exemplu |
 |---|---|---|
 | **telefon** client | `gigi:cs-360 customer` | `cs360.py customer --phone 0700000000` → toate comenzile lui, LTV, refuzuri. **Merge și `40748…` / `+40748…`** (ultimele 9 cifre). |
 | **nume** client | `gigi:cs-360 customer` | `cs360.py customer --name "Rebeca Kiss"` |
 | **email** client | `gigi:cs-360 customer` | `cs360.py customer --email ana@gmail.com` |
-| **nr comandă** (GT123) | `gigi:order-hub comanda` · `gigi:xconnector links` | `order-hub comanda` (`comanda: GT000001`) → fișa din Order Hub: status, etichete, hold-uri, tichet, facturi, ce se poate face acum · `xconnector.py links --order GT000001` → linkuri Shopify/xConnector/tracking |
-| **AWB / tracking** | `gigi:xconnector links` | `xconnector.py links --awb 00000000001` |
+| **nr comandă** (GT123) | `gigi:order-hub comanda` | `order-hub comanda` (`comanda: GT000001`) → fișa din Order Hub: status, etichete, hold-uri, tichet, facturi, ce se poate face acum |
+| **AWB / tracking** | `gigi:awb-track` | lipești AWB-ul → status live DPD/Sameday/FAN/Econt/Packeta; comanda lui → `order-hub comanda` |
 | „**unde e comanda**" (WISMO) | `gigi:cs-360 wismo` | după order# / telefon / AWB → order + fulfillment + tracking |
 | identitate **cross-platform** (Shopify ↔ Richpanel) | `gigi:customer-identity` | leagă email/telefon/FB/IG de comenzi și tichete |
 
 > ⚠️ xConnector API **NU** caută după telefon/nume (doar order# / AWB / SKU / dată). Telefon/nume = DOAR `cs-360`.
 
 ## 2. 🧩 PROFIL 360 („spune-mi tot despre comanda/clientul X") — ORCHESTRARE (combini, nu un singur tool)
-1. `gigi:order-hub comanda` (`comanda: GT123`) → statusul din Order Hub, etichete, facturi, tichet; linkurile: `gigi:xconnector links --order GT123`
+1. `gigi:order-hub comanda` (`comanda: GT123`) → statusul din Order Hub, etichete, facturi, tichet
 2. `gigi:cs-360 customer --phone <al lui>` → alte comenzi + profil + refuzuri
 3. `gigi:cs-tickets` / Richpanel → tichetele clientului
 4. (opțional) `gigi:cs-360 conversation --llm` / `gigi:cs-360 conversation` → profil 360 pe o conversație Richpanel
@@ -40,7 +42,7 @@
 | Vreau … | Tool | Exemplu |
 |---|---|---|
 | **status comandă** (sursa de adevăr) | `gigi:order-hub comanda` | fișa din Order Hub (statusurile DOAR de aici, nu din AWBprint) |
-| tracking + linkuri | `gigi:xconnector links` | `links --order GT123` |
+| tracking live pe AWB | `gigi:awb-track` | lipești AWB-ul |
 | tracking multi-curier dintr-un AWB | `gigi:awb-track` | lipești AWB-ul → status DPD/Sameday/Econt/Packeta |
 | livrabilitate / refuzuri / COD-risk | `gigi:deliverability-monitor` / `gigi:fulfillment-analytics` | rapoarte pe magazin |
 
@@ -97,7 +99,7 @@ Parametrii exacți: `gigi:order-hub actiuni` (sau `skill_info`). Listele de obie
 >
 > **Banii** sunt ireversibili (factura pleacă în e-Factura, rambursarea la client): verifică de două ori suma și documentul
 > numit în plan. **Nu face nimeni prin agent:** marcare „livrat", AWB pe un cont ales de mână, mesaje către client,
-> comasarea comenzilor, blocklist. `gigi:xconnector links` rămâne pentru linkuri și tracking.
+> comasarea comenzilor, blocklist.
 
 ## 5. 🖨️ PRINT etichete în depozit (Windows + Chrome)
 > 🔴 **Din 24–25 sep 2026 AWB-urile DPD se fac din ORDER HUB (contul `dpd-ro-arona`), nu din xConnector.** Etichetele astea
@@ -135,7 +137,7 @@ Parametrii exacți: `gigi:order-hub actiuni` (sau `skill_info`). Listele de obie
 | COD riscant nelivrat (serial-refuser etc.) | `gigi:cod-confirmation` | coada de confirmat înainte de expediere |
 | adresă greșită la colet neplecat | `gigi:cs-address-guard` | telefonează ÎNAINTE de pickup |
 | **comenzi DUBLATE** (același client, 2x) | `gigi:cs-duplicate-orders` | anulează dublura înainte să plece |
-| **ghost shipment** (AWB făcut, curier n-a scanat) | `gigi:cs-ghost-shipments` | + `xconnector not-downloaded --min-age-hours 48` |
+| **ghost shipment** (AWB făcut, curier n-a scanat) | `gigi:cs-ghost-shipments` | AWB-uri fără scanare de la curier |
 | întârzieri în tranzit | `gigi:cs-proactive-delays` | contactează clientul proactiv |
 | **refund promis dar neexecutat** | `gigi:cs-refund-watchdog` | risc ANPC/chargeback |
 | recuperare comenzi refuzate | `gigi:cs-refused-recovery` | re-câștigă COD-uri eșuate |
