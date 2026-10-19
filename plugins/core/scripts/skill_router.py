@@ -52,13 +52,18 @@ STOP = set(
 # descrierile sunt pe jumătate în engleză, cererile vin în română: punte minimă RO → EN (rădăcini de 6)
 SYNONYMS = {
     "reclam": ["ads"], "campan": ["campai"], "vandut": ["sales"], "vanzar": ["sales"], "vinde": ["sales"],
-    "comand": ["order"], "telefo": ["phone"], "client": ["custom"], "stocul": ["stoc", "stock"],
+    "comand": ["order", "comenz"], "comenz": ["comand", "order"], "venit": ["intrat"], "intrat": ["venit"], "telefo": ["phone"], "client": ["custom"], "stocul": ["stoc", "stock"],
     "stoc": ["stock"], "pret": ["price"], "pretur": ["price"], "factur": ["invoic"], "livrar": ["delive"],
     "livrat": ["delive"], "refuz": ["refusa"], "retur": ["return"], "profit": ["pnl"], "colete": ["parcel"],
     "colet": ["parcel"], "produs": ["produc"], "magazi": ["store", "shop"], "tichet": ["ticket"],
     "raspun": ["reply"], "poze": ["image"], "imagin": ["image"], "cheltu": ["spend"], "buget": ["budget"],
     "portof": ["portfo"], "scade": ["mutare", "stoc"], "scadem": ["mutare", "stoc"], "muta": ["mutare"],
     "mutat": ["mutare"], "recept": ["recepti"], "neplec": ["neplecate"], "deadst": ["lichid", "stoc"],
+}
+# Înlocuite de Order Hub din 6-oct-2026 (shared/CS.md §4): routerul nu mai trimite agenți spre ele
+DEPRECATE = {
+    "gigi:cs-actions", "mcp:arona-fulfillment/xc_order_cancel", "mcp:arona-fulfillment/xc_awb_make",
+    "mcp:arona-fulfillment/xc_awb_void", "mcp:arona-fulfillment/xc_awb_regen", "mcp:arona-fulfillment/xc_inv_make",
 }
 TRIVIAL = re.compile(r"^(da|nu|ok|okay|yes|no|go|continua|continue|mersi|multumesc|super|perfect|bine)\b[.! ]*$", re.I)
 
@@ -287,7 +292,7 @@ def lexical(query, cat):
     df = Counter(w for d in docs for w in set(d))
     out = []
     for s, d, sl in zip(cat, docs, slugs):
-        if re.match(r"^\W*(⛔|DEPRECAT|COMASAT)", s.get("description") or "", re.I):
+        if s["name"] in DEPRECATE or re.match(r"^\W*(⛔|DEPRECAT|COMASAT)", s.get("description") or "", re.I):
             continue  # skill comasat/șters — routerul nu trimite agenți spre el
         tf = Counter(d)
         sc, hits = 0.0, 0
@@ -328,6 +333,7 @@ def rank(query, cat):
         fused[n] += 1 / (60 + i)
         if top_lex >= 4.0 and sc >= 0.45 * top_lex:
             keep.add(n)
+    sem = [(sc, n) for sc, n in sem if n not in DEPRECATE]
     for i, (sc, n) in enumerate(sem):
         fused[n] += 0.25 / (60 + i)  # semanticul e mai slab pe română (măsurat oct-2026) — cântărește mai puțin
         if sc >= 0.5:
