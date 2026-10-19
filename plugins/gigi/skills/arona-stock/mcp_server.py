@@ -11,8 +11,8 @@ data/locations.db și tokenurile Shopify), prin ssh cu cheie (core/scripts/arona
   - scripts/stoc_live.py și scripts/stoc_blocat.py = din git, trimise pe stdin (`python -`), fără copiere pe server.
 reorder_planner.py rulează local (metrics, read-only).
 
-Read-only by default. Singura scriere expusă = ponderi_stoc(apply=true) (reguli PRODUCT_STORE + sync MANUAL);
-fără apply e DRY-RUN. Secretele nu trec prin MCP: serverul de scripturi le ia singur din KB / .env.
+Read-only by default. Scrieri expuse (toate DRY-RUN fără apply=true): ponderi_stoc (reguli PRODUCT_STORE + sync
+MANUAL), receptie_container și mutare_stoc (numărătoarea din AWB Arona, locations.db — scripts/stoc_scriere.py). Secretele nu trec prin MCP: serverul de scripturi le ia singur din KB / .env.
 
 Register: claude mcp add --scope user arona-stock -- uv run <abs path>/mcp_server.py
 """
@@ -34,6 +34,7 @@ from mcp.server.fastmcp import FastMCP  # noqa: E402
 mcp = FastMCP("arona-stock")
 STOC_LIVE = os.path.join(HERE, "scripts", "stoc_live.py")
 STOC_BLOCAT = os.path.join(HERE, "scripts", "stoc_blocat.py")
+STOC_SCRIERE = os.path.join(HERE, "scripts", "stoc_scriere.py")
 REORDER = os.path.normpath(os.path.join(HERE, "..", "reorder-planner", "scripts", "reorder_planner.py"))
 REMOTE = "cd /root/Scripturi && set -a && . ./.env && set +a && "
 OUTDIR = "/tmp/arona_stock_mcp"
@@ -176,6 +177,52 @@ def stoc_bucket_vs_shopify(cod: str = "LOC-TELIU") -> str:
            "from api.scan import _ss_creds;print(_ss_creds()[1])')\" && ")
     cmd += _py("station_report.py", ["--code=" + cod, "--out=%s/station_live.json" % OUTDIR])
     return _vps(cmd, timeout=900)
+
+
+@mcp.tool()
+def receptie_container(container: str, statie: str, lista: str = "", include_grandia: bool = False,
+                       include_necunoscute: bool = False, de_la: str = "", motiv: str = "", apply: bool = False,
+                       force: bool = False) -> str:
+    """RECEPȚIA unui container în AWB Arona: pune marfa pe „Fără raft · <stație>" (LOC-UZINA-2 / LOC-TELIU).
+    container = „C66" sau mai multe („C54, 55, 56"); statie = Uzina 2 / Teliu (Bartolomeu refuzat: acolo marfa se
+    scanează pe raft). Liniile vin din container_expected (sincronizat lunea din foaia „Tom - recepții containere")
+    sau din `lista` lipită („ha-0941 3000, ha-1177 2000", cu UN container). Sare Grandia (include_grandia=true o pune),
+    liniile fără SKU și ambalajele necunoscute în catalog (include_necunoscute=true); codul de bare ambiguu oprește.
+    Pe fiecare SKU scade ce s-a RECEPȚIONAT deja (MOTIV „Receptie Cxx" / jurnal receipts) și ce a pus deja depozitul
+    pe rafturi sau pe „Fără raft" de la sosire (fereastra de_la = data sosirii − 1 zi). DRY-RUN implicit (tabel per SKU:
+    foaie / recepționat / pus deja / DE PUS / înainte→după). apply=true scrie DOAR coloana DE PUS (user receptie-owner,
+    MOTIV, receipts, container_meta.arrived_at), după backup al locations.db + jurnal; refuză un container deja
+    recepționat parțial și aceeași recepție repetată în 24h fără force=true. Masterul stock-sync se actualizează la
+    rularea awb_to_stocksync (L–V 15:30 / 23:30) — nu se scrie în stock-sync și nici în Shopify (D-023)."""
+    args = ["receptie", "--container", container, "--statie", statie, "--lista", lista, "--de-la", de_la,
+            "--motiv", motiv]
+    for flag, on in (("--include-grandia", include_grandia), ("--include-necunoscute", include_necunoscute),
+                     ("--apply", apply), ("--force", force)):
+        if on:
+            args.append(flag)
+    return _vps(_py("-", args), STOC_SCRIERE, timeout=300, ok_rc=(0, 3))
+
+
+@mcp.tool()
+def mutare_stoc(lista: str, din: str, in_: str, rafturi: str = "", de_la: str = "", fara_scanare: bool = False,
+                prag: int = 5, motiv: str = "", apply: bool = False, force: bool = False) -> str:
+    """MUTARE de marfă între stații (Bartolomeu / Uzina 2 / Teliu) în AWB Arona, fără dublă numărare.
+    lista = cum scrie ownerul: „1844 -400 0115-240", „HA-0115 240", „0302-80buc" (1844 -> ha-1844), sau „azi" =
+    ce a apărut NOU azi pe rafturile destinației (≥ prag buc/SKU) și are stoc la sursă („ce s-a pus azi la Bartolomeu
+    trebuie scăzut din Uzina"). din / in_ = stațiile. Spre BARTOLOMEU: se scade DOAR la sursă și doar cât a scanat
+    Bartolomeu (restul rămâne la sursă, altfel dispare de pe site; fara_scanare=true scade oricum, la cererea
+    ownerului); la Bartolomeu nu se scrie nimic. Spre Uzina 2 / Teliu: adaugă pe „Fără raft" al destinației (minus ce
+    a scanat deja) și scade la sursă, în aceeași tranzacție. Nu scade a doua oară ce a trecut deja prin aplicație
+    („din Fără raft · Uzina 2", transfer între stații) sau printr-o mutare anterioară cu MOTIV. Sursa = „Fără raft"
+    al stației (apoi Depozit mic); dacă nu ajunge, se oprește și listează rafturile — alegi cu rafturi="ha-1844=RF-…".
+    de_la = începutul ferestrei (implicit azi). DRY-RUN implicit; apply=true scrie (user corectie-owner, MOTIV,
+    backup locations.db + jurnal), refuză aceeași listă în 24h fără force=true. Masterul se actualizează la awb_to_stocksync."""
+    args = ["mutare", "--lista", lista, "--din", din, "--in", in_, "--rafturi", rafturi, "--de-la", de_la,
+            "--prag", prag, "--motiv", motiv]
+    for flag, on in (("--fara-scanare", fara_scanare), ("--apply", apply), ("--force", force)):
+        if on:
+            args.append(flag)
+    return _vps(_py("-", args), STOC_SCRIERE, timeout=300, ok_rc=(0, 3))
 
 
 @mcp.tool()
