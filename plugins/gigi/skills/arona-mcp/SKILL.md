@@ -22,6 +22,7 @@ flag-uri, iar output-ul e curat. Cazi pe CLI (`uv run …`) DOAR pt ce n-are în
 | **arona-fulfillment** (CS + livrare) | `gigi/skills/xconnector/mcp_server.py` | `cs_customer`, `cs_wismo`, `cs_conversation`, `xc_links`, `xc_summary`, `xc_address_issues`, `xc_not_downloaded`, `xc_order_cancel`, `xc_awb_make`, `xc_awb_void`, `xc_awb_regen`, `xc_inv_make` (acțiunile = dry-run) |
 | **arona-profit** (P&L + livrabilitate) | `gigi/skills/multi-brand-pnl/mcp_server.py` | `pnl`, `pnl_today`, `fulfillment`, `breakeven` |
 | **arona-catalog** (produse + inventar) | `gigi/skills/product-sales/mcp_server.py` | `product_sales`, `stock_alerts`, `returns_rma`, `reviews` |
+| **arona-stock** (stock-sync + depozite + rafturi) | `gigi/skills/arona-stock/mcp_server.py` | `stoc_produs`, `stoc_statie`, `stoc_erori`, `magazin_ok`, `stoc_blocat`, `ponderi_stoc` (gated), `stoc_bucket_vs_shopify`, `reorder_plan` |
 | **arona-social** (social organic) | `gigi/skills/social-post/mcp_server.py` | `social_listen`, `social_post_list`, `social_post` (gated), `competitor_ads` |
 | **arona-cs-inbox** (inbox Richpanel) | `gigi/skills/cs-draft-reply/mcp_server.py` | `cs_draft` (gated), `richpanel_triage` (gated), `richpanel_janitor` (gated), `cs_sentiment`, `cs_sla` |
 | **arona-tom** (WMS / aprovizionare) | `gigi/skills/tom/mcp_server.py` | `tom_pos`, `tom_po_get`, `tom_shipments`, `tom_ghost`, `tom_events`, `tom_product` |
