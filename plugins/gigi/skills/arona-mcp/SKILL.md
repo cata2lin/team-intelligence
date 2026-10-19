@@ -30,8 +30,9 @@ flag-uri, iar output-ul e curat. Cazi pe CLI (`uv run …`) DOAR pt ce n-are în
 | **arona-orderhub** (Order Hub = SURSA DE ADEVĂR pt comenzi/statusuri — NU AWBprint) | `gigi/skills/order-hub/mcp_server.py` | `oh_comanda`, `oh_actiuni`, `oh_operatie`, `oh_rata_livrare`, `oh_proba` (nu scrie), `oh_executa` (gated: confirmare din probă + OK-ul omului) |
 | **arona-marketplace** (eMAG RO/BG/HU · Trendyol RO/BG/GR · Okazii · Pepita — prin Order Hub) | `gigi/skills/arona-marketplace/mcp_server.py` | `mkt_conexiuni`, `mkt_comenzi`, `mkt_listare`, `trendyol_produse`, `trendyol_awb_list`, `trendyol_split` (dry-run), `emag_tracker`, `emag_concurenta`, `okazii_feed`, `emag_pret_proba`, `mkt_pret_tinta`, `emag_oferte`/`mkt_leaga_oferte`/`emag_listeaza`/`okazii_adauga` (PROBĂ fără apply), `trendyol_pret` (preview + apply + confirm, regula profit 20%) |
 | **arona-kb** (baza de cunoștințe SharedClaude — READ ONLY, fără secrete) | `gigi/skills/arona-kb/mcp_server.py` | `kb_utilizare_skilluri`, `kb_comparatie`, `kb_goluri`, `kb_activitate`, `kb_resurse` |
+| **arona-depozit** (depozit: print pe stații din OH, rafturi, culegere, scanări, utilizatorii scanerului) | `gigi/skills/arona-depozit/mcp_server.py` | `print_coada`, `print_istoric`, `print_reset` (gated: parola de reset de la om), `raft_continut`, `unde_e_produsul`, `rafturi_statie`, `produs_istoric`, `picking_live`, `picking_raport`, `picking_comanda`, `lot_continut`, `picking_neculese`, `scanari_anomalii`, `lipsa_marfa`, `scanner_utilizatori`, `scanner_aproba`/`scanner_aloca_statie`/`scanner_acces` (gated) |
 > **SEO/analytics/ClickUp/Richpanel/postgres = MCP-uri OFICIALE deja existente** (GA4, Search Console, dataforseo, clickup, richpanel, postgres-*) — nu le dublăm.
-> **10 servere arona · ~85 tool-uri.** Domenii rămase eventual: fiscal (SmartBill e deja în arona-fulfillment `xc_inv_make`; e-Transport = VPS), content-generation (articole = flux interactiv, nu MCP-natural).
+> **12 servere arona · ~108 tool-uri.** Domenii rămase eventual: fiscal (SmartBill e deja în arona-fulfillment `xc_inv_make`; e-Transport = VPS), content-generation (articole = flux interactiv, nu MCP-natural).
 
 **Convenții comune:** read-only by default; **mutațiile Google Ads/Meta/TikTok = DRY-RUN dacă nu pui `apply=true`**;
 **mutațiile Shopify cer `confirm_mutation=true`** (Shopify n-are dry-run); acțiunile pe comandă și AWB (`xc_order_cancel`, `xc_awb_void`, `xc_awb_regen`, `xc_awb_make`) întreabă întâi Order Hub, care hotărăște pe orice comandă pe care o cunoaște.
@@ -40,7 +41,7 @@ Credențiale din KB (self-provisioning la pornire, nu se printează). Toate = wr
 ## 🔧 REGULA #2 — când apare o capabilitate nouă, ADAUG-O la MCP-ul potrivit
 Ai făcut un tool nou (script) care se potrivește unui domeniu → **nu-l lăsa doar CLI**, adaugă-l ca tool în serverul potrivit:
 1. **Alege serverul** pe domeniu: ads/merchant/shopify/meta/tiktok → `arona-ads`; CS/xConnector/AWB → `arona-fulfillment`;
-   P&L/livrabilitate/breakeven → `arona-profit`; comenzi/statusuri/acțiuni Order Hub → `arona-orderhub`. (Domeniu nou fără server → creează unul nou pe același tipar.)
+   P&L/livrabilitate/breakeven → `arona-profit`; comenzi/statusuri/acțiuni Order Hub → `arona-orderhub`; print/rafturi/culegere/scaner → `arona-depozit`. (Domeniu nou fără server → creează unul nou pe același tipar.)
 2. **Adaugă un `@mcp.tool()`** în `mcp_server.py`-ul acelui skill — wrapper subțire (subprocess pe scriptul testat via `_run`/`_env`):
    ```python
    @mcp.tool()
