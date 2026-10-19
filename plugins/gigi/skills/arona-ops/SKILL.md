@@ -1,5 +1,5 @@
 ---
-name: arona-ops
+name: gigi:arona-ops
 description: "MCP-ul arona-ops — sănătatea CRONURILOR ARONA, READ ONLY: ~115 joburi pe serverul de scripturi (84.46.242.181, root + ceilalți useri + /etc/cron.d) și ~30 pe gazda Order Hub (m23726). Crontab parsat (programare, log, heartbeat legat cu && sau ; — `;` = DEFECT), starea unui job (ultima rulare, coada logului, liniile de eroare, journal CMD, procese agățate), lista de probleme (Traceback, script lipsă, Google Ads v22, heartbeat întârziat, log tăcut, avertismente 401/404/STOP/deprecated), data_health (raport fără mail) și paritatea git↔VPS. Use when: 'ce cron e stricat', 'a rulat jobul X', 'de ce n-a mers cronul', 'ce crăpă în tăcere', 'heartbeat-uri', 'cronuri pe v22', 'log-ul jobului', 'e sănătos serverul de scripturi', 'data health', 'paritate deploy', 'git vs VPS'. Triggers: cron, crontab, heartbeat, data_health, watchdog, job stricat, silent failure, deploy parity, ops."
 category: dev-tools
 version: 1.0.0
