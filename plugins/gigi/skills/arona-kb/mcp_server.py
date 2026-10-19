@@ -11,6 +11,7 @@ READ ONLY. Tabelul `secrets` NU e citit de niciun tool (nici valori, nici nume).
 Register: claude mcp add --scope user arona-kb -- uv run <abs path>/plugins/gigi/skills/arona-kb/mcp_server.py
 """
 import difflib
+import json
 import os
 import re
 import subprocess
@@ -26,13 +27,21 @@ SKILL_SAU_ARONA = "(entity_type='skill' OR (entity_type='mcp' AND entity_name LI
 
 
 def _dsn():
+    """KB_DATABASE_URL din mediu; altfel din ~/.claude/settings.json (env, unde îl pune onboarding-ul),
+    apoi din launchctl (macOS). Valoarea nu se printează niciodată."""
     url = os.environ.get("KB_DATABASE_URL", "").strip()
     if url:
         return url
-    # Fallback: profilul shell-ului (unde onboarding-ul pune KB_DATABASE_URL), fără să-l printăm.
     try:
-        r = subprocess.run(["zsh", "-lic", 'printf %s "$KB_DATABASE_URL"'], capture_output=True, text=True, timeout=20)
-        return r.stdout.strip().splitlines()[-1] if r.stdout.strip() else ""
+        with open(os.path.expanduser("~/.claude/settings.json"), encoding="utf-8") as f:
+            url = (json.load(f).get("env") or {}).get("KB_DATABASE_URL", "").strip()
+        if url:
+            return url
+    except Exception:
+        pass
+    try:
+        return subprocess.run(["launchctl", "getenv", "KB_DATABASE_URL"], capture_output=True, text=True,
+                              timeout=10).stdout.strip()
     except Exception:
         return ""
 
