@@ -28,7 +28,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Skill|mcp__.*",
+        "matcher": "Skill|Read|mcp__.*",
         "hooks": [
           { "type": "command", "command": "uv run --no-project \"${CLAUDE_PLUGIN_ROOT}/scripts/kb_hook_log.py\"", "timeout": 15 }
         ]

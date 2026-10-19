@@ -23,6 +23,22 @@ def main():
     if tool == "Skill":
         name = ti.get("name") or ti.get("skill") or ti.get("command") or "skill"
         et, act, summ = "skill", "used", f"skill {name}"
+    elif tool == "Read":
+        # skill_router trimite agentul să CITEASCĂ skill-urile care există doar în Second Brain;
+        # fără asta, exact folosirile noi nu apăreau în statistici
+        p = (ti.get("file_path") or "").replace("\\", "/")
+        marker = "/.cache/arona-skills/skills/"
+        if marker not in p or not p.endswith("/SKILL.md"):
+            sys.exit(0)
+        parts = p.split(marker, 1)[1].split("/")
+        if len(parts) < 3:
+            sys.exit(0)
+        name = f"{parts[0]}:{parts[1]}"
+        et, act, summ = "skill", "read", f"skill {name} (citit din cache)"
+    elif tool in ("mcp__second-brain__read_skill", "mcp__second-brain__run_skill"):
+        name = ti.get("skill") or "skill"
+        act = "read" if tool.endswith("read_skill") else "used"
+        et, summ = "skill", f"skill {name} (second-brain {act})"
     elif tool.startswith("mcp__"):
         parts = tool.split("__")
         server = parts[1] if len(parts) > 1 else tool

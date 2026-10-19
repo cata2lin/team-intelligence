@@ -57,6 +57,8 @@ SYNONYMS = {
     "livrat": ["delive"], "refuz": ["refusa"], "retur": ["return"], "profit": ["pnl"], "colete": ["parcel"],
     "colet": ["parcel"], "produs": ["produc"], "magazi": ["store", "shop"], "tichet": ["ticket"],
     "raspun": ["reply"], "poze": ["image"], "imagin": ["image"], "cheltu": ["spend"], "buget": ["budget"],
+    "portof": ["portfo"], "scade": ["mutare", "stoc"], "scadem": ["mutare", "stoc"], "muta": ["mutare"],
+    "mutat": ["mutare"], "recept": ["recepti"], "neplec": ["neplecate"], "deadst": ["lichid", "stoc"],
 }
 TRIVIAL = re.compile(r"^(da|nu|ok|okay|yes|no|go|continua|continue|mersi|multumesc|super|perfect|bine)\b[.! ]*$", re.I)
 
@@ -154,6 +156,35 @@ def sb_call(method, path, body=None, timeout=10.0):
         return http(method, base + path, body, tok, timeout)
 
 
+def mcp_tools():
+    """Tool-urile serverelor MCP stdio din ~/.claude.json care rulează un mcp_server.py al nostru
+    (arona-*), citite cu ast din sursă — fără să pornim serverele."""
+    import ast
+    out = {}
+    try:
+        conf = json.loads((HOME / ".claude.json").read_text(encoding="utf-8"))
+    except Exception:
+        return out
+    for server, spec in (conf.get("mcpServers") or {}).items():
+        src = next((a for a in spec.get("args") or [] if str(a).endswith("mcp_server.py")), None)
+        if not src or not os.path.isfile(src):
+            continue
+        try:
+            tree = ast.parse(Path(src).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for fn in tree.body:
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            if not any("tool" in ast.unparse(d) for d in fn.decorator_list):
+                continue
+            doc = re.sub(r"\s+", " ", ast.get_docstring(fn) or "").strip()
+            key = f"mcp:{server}/{fn.name}"
+            out[key] = {"name": key, "description": doc[:400], "installed": True,
+                        "mcp_tool": f"mcp__{server}__{fn.name}"}
+    return out
+
+
 def sync():
     """Catalog = Second Brain (sursa canonică) ∪ skill-urile instalate local. Corpurile SKILL.md din
     Second Brain se descarcă incremental (după updated_at) ca agentul să le poată CITI ca fișier."""
@@ -164,6 +195,7 @@ def sync():
     lock.write_text(str(os.getpid()))
     try:
         cat = local_skills()
+        cat.update(mcp_tools())
         old = {}
         if CATALOG.exists():
             try:
@@ -235,7 +267,7 @@ def load_catalog():
         except Exception:
             pass
     spawn_sync()
-    return list(local_skills().values())
+    return list(local_skills().values()) + list(mcp_tools().values())
 
 
 # ---------------------------------------------------------------- scorare
@@ -306,6 +338,8 @@ def rank(query, cat):
 
 
 def how_to_use(s):
+    if s.get("mcp_tool"):
+        return f"tool MCP → cheamă `{s['mcp_tool']}` (încarcă-l cu ToolSearch dacă e amânat)"
     if s.get("installed"):
         return "instalat → invocă-l cu Skill tool"
     if s.get("path"):
@@ -313,8 +347,24 @@ def how_to_use(s):
     return "doar în Second Brain → second-brain skill_info / run_skill"
 
 
+CONTINUARE = re.compile(r"^(si|și|dar|pai|păi|ok|bine|nu|da|deci|atunci|acum|mai|hai|vezi|zi|spune)\b", re.I)
+
+
 def log_gap(prompt, session_id):
-    """Golul ajunge în KB (events) prin același buffer pe care Stop hook-ul îl golește."""
+    """Golul ajunge în KB (events) prin același buffer pe care Stop hook-ul îl golește.
+    Doar cereri de lucru: o replică scurtă sau de continuare („păi de unde să știu", „și 152?")
+    nu e un skill lipsă — pe 19-oct 42 din 56 de goluri erau zgomot de felul ăsta."""
+    words = re.findall(r"\w+", prompt)
+    if len(words) < 6 or CONTINUARE.match(prompt.strip()):
+        return
+    stamp = CACHE / f".gap_{re.sub(r'[^A-Za-z0-9-]', '', session_id or 'nosession')[:64]}"
+    try:
+        if stamp.exists() and time.time() - stamp.stat().st_mtime < 1200:
+            return
+        CACHE.mkdir(parents=True, exist_ok=True)
+        stamp.write_text("")
+    except Exception:
+        pass
     summary = re.sub(r"\d{6,}", "#", re.sub(r"\s+", " ", prompt))[:200]
     rec = {"ts": time.time(), "type": "skill_gap", "action": "no_match", "name": "skill-router", "summary": summary}
     try:
