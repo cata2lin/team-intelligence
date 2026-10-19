@@ -19,7 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
 OH = os.path.join(HERE, "order_hub.py")
 RATA = os.path.join(HERE, "scripts", "oh_delivery_rate.py")
-CITIRI = {"actiuni", "comanda", "operatie"}
+CITIRI = {"actiuni", "comanda", "operatie", "neplecate"}
 
 
 def _kb(k):
@@ -131,9 +131,20 @@ def oh_rata_livrare(since: str = "2026-07", store: str = "", min_orders: int = 5
     return _run(RATA, a, timeout=330)
 
 
-# TODO oh_neexpediate_pe_sku(sku): OH n-are încă o citire pe SKU accesibilă cu cheia CS (/api/cs are doar comanda,
-# actiuni, operatie; lentila „Unfulfilled” din /api/orders cere sesiunea Shopify). Se adaugă când există un script
-# testat (sau un GET /api/cs/...) — NU interoga AWBprint pentru asta.
+@mcp.tool()
+def oh_neplecate_pe_sku(sku: str, magazin: str = "", limita: int = 200) -> str:
+    """Comenzile NEPLECATE care conțin un SKU (sau un cod de bare), din Order Hub — NU din AWBprint. Doar citire.
+    „Neplecată" = exact filtrul „Neplecate" din OH: neanulată, niciun colet plecat, etichetele vii nepreluate de curier;
+    fără etichetă, nici Shopify n-o știe expediată sau arhivată. Fără comenzile demo.
+    sku = SKU-ul (fără majuscule, merge și SKU-ul unui set nativ Shopify) sau un cod de bare (8-14 cifre, tradus în
+    SKU-uri); magazin = opțional: numele EXACT din OH (ex. „MagDeal.ro"), id-ul sau domeniul .myshopify;
+    limita = câte comenzi listează (1-1000; totalurile sunt complete).
+    Întoarce totalul, pe magazin (fără AWB / AWB nepreluat / pe hold) și pe comandă: număr, data, stare, bucăți, AWB,
+    hold + motivul tichetului CS. Folosește-l la „ce comenzi așteaptă produsul X", stoc 0, fantomă pe raft."""
+    a = ["neplecate", "--sku", sku, "--limita", str(max(1, min(int(limita or 200), 1000)))]
+    if magazin:
+        a += ["--magazin", magazin]
+    return _run(OH, a, timeout=120)
 
 
 # ─────────── ACȚIUNI (probă → om → execuție) ───────────

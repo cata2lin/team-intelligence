@@ -10,6 +10,7 @@ două trepte: PROBA (nu scrie nimic: planul, blocajele, confirmarea) și EXECUȚ
   order_hub.py actiuni                                   # ce acțiuni există, cu parametrii lor
   order_hub.py comanda --comanda GT000001                 # fișa comenzii din Order Hub
   order_hub.py operatie --id 123                         # ce s-a întâmplat cu o execuție (după un timeout)
+  order_hub.py neplecate --sku HA-0001 [--magazin grandia] [--limita 200] [--json]   # comenzile neplecate pe SKU
   order_hub.py <actiune> --comanda X --utilizator Raluca --motiv "..." [--<param> valoare ...]            # probă
   order_hub.py <actiune> ... --peste cod1,cod2 --confirmare <din probă> --apply                           # execuție
 
@@ -325,6 +326,29 @@ def afiseaza(d):
         print("  confirmare: " + d["confirmare"])
 
 
+def afiseaza_neplecate(d, limita_rand=200):
+    """Rezumatul compact al GET /api/cs/neplecate: totalul, pe magazin, apoi o linie pe comandă."""
+    print("Neplecate cu %s (SKU-uri căutate: %s): %s comenzi · %s bucăți%s"
+          % (d.get("sku"), ", ".join(d.get("skuri_cautate") or []), d.get("total_comenzi"), d.get("total_bucati"),
+             " · magazin: %s" % d["magazin"]["nume"] if d.get("magazin") else ""))
+    print("  definiție: %s" % d.get("definitie"))
+    if d.get("mesaj"):
+        print("  " + str(d["mesaj"]))
+    for m in d.get("pe_magazin") or []:
+        print("  %-22s %4d comenzi · %4d buc · fără AWB %d · AWB nepreluat %d · pe hold %d"
+              % (m.get("magazin"), m.get("comenzi", 0), m.get("bucati", 0), m.get("fara_awb", 0),
+                 m.get("awb_nepreluat", 0), m.get("pe_hold", 0)))
+    for c in (d.get("comenzi") or [])[:limita_rand]:
+        h = c.get("hold") or {}
+        t = h.get("tichet_cs") or {}
+        motiv = (" · hold" if h.get("pe_hold") else "") + ((" · CS: %s" % t.get("eticheta")) if t.get("eticheta") else "")
+        print("  %-12s %-20s %s · %s · %s buc%s%s" % (
+            c.get("comanda"), (c.get("magazin") or "")[:20], (c.get("creata_la") or "")[:16].replace("T", " "),
+            c.get("stare"), c.get("bucati"), (" · AWB " + ",".join(c.get("awb") or [])) if c.get("awb") else "", motiv))
+    if d.get("trunchiat"):
+        print("  … listă trunchiată la %s comenzi (totalul de sus e complet; --limita până la 1000)" % d.get("limita"))
+
+
 # ───────────────────────── comenzi ─────────────────────────
 class ArgumenteGresite(Exception):
     pass
@@ -372,6 +396,20 @@ def main(argv=None):
             s, d = http("GET", "/api/cs/comanda?" + urllib.parse.urlencode(q), token=token)
             print(json.dumps(d, ensure_ascii=False, indent=1)[:20000])
             return 0 if s == 200 else _iesire(2, "fisa", "HTTP %s %s" % (s, _detaliu(d)))
+        if op == "neplecate":
+            ap = Parser(prog="order_hub.py neplecate")
+            ap.add_argument("--sku", required=True); ap.add_argument("--magazin")
+            ap.add_argument("--limita", type=int, default=200); ap.add_argument("--json", action="store_true")
+            a = ap.parse_args(lipeste_valori(argv[1:], {"--sku", "--magazin", "--limita"}))
+            q = {"sku": a.sku, "limita": a.limita, **({"magazin": a.magazin} if a.magazin else {})}
+            s, d = http("GET", "/api/cs/neplecate?" + urllib.parse.urlencode(q), token=token)
+            if s != 200 or not isinstance(d, dict) or not d.get("ok"):
+                return _iesire(2, plic(d).get("rezultat") or "neplecate", "HTTP %s %s" % (s, _detaliu(d)))
+            if a.json:
+                print(json.dumps(d, ensure_ascii=False, indent=1))
+            else:
+                afiseaza_neplecate(d)
+            return 0
         if op == "operatie":
             ap = Parser(prog="order_hub.py operatie")
             ap.add_argument("--id", required=True, type=int)

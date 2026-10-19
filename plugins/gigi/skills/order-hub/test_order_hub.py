@@ -73,6 +73,12 @@ class H(BaseHTTPRequestHandler):
         assert self.headers.get("Authorization") == "Bearer " + CHEIE
         if self.path == "/api/cs/actiuni":
             return self._trimite(200, SCHEMA)
+        if self.path.startswith("/api/cs/neplecate?"):
+            CERUTE.append(self.path)
+            if "sku=NIMIC" in self.path:
+                return self._trimite(404, {"ok": False, "rezultat": "necunoscuta", "scris": "nimic",
+                                           "mesaj": "magazin: x · necunoscut în organizație"})
+            return self._trimite(200, NEPLECATE)
         if self.path.startswith("/api/cs/operatie/") and self.path.rsplit("/", 1)[-1] in OPERATII:
             return self._trimite(200, OPERATII[self.path.rsplit("/", 1)[-1]])
         self._trimite(404, {"detail": {"rezultat": "necunoscuta"}})
@@ -88,6 +94,17 @@ class H(BaseHTTPRequestHandler):
             self.send_response(302); self.send_header("Location", "http://altundeva.invalid/"); self.end_headers(); return
         status, d = r
         self._trimite(status, d)
+
+
+CERUTE = []
+NEPLECATE = {"ok": True, "rezultat": "neplecate", "scris": "nimic", "sku": "TST-0001", "skuri_cautate": ["tst-0001"],
+             "din_cod_de_bare": [], "magazin": None, "definitie": "filtrul Neplecate din OH",
+             "total_comenzi": 2, "total_bucati": 3, "limita": 1, "trunchiat": True,
+             "pe_magazin": [{"magazin": "Magazin Test", "store_id": 1, "comenzi": 2, "bucati": 3, "fara_awb": 1,
+                             "awb_nepreluat": 1, "pe_hold": 1}],
+             "comenzi": [{"comanda": "TST1001", "magazin": "Magazin Test", "creata_la": "2026-10-15T10:00:00+00:00",
+                          "stare": "awb_nepreluat", "bucati": 2, "awb": ["00000000001"],
+                          "hold": {"pe_hold": True, "tichet_cs": {"eticheta": "oprită în Shopify"}}}]}
 
 
 srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
@@ -339,6 +356,19 @@ with tempfile.TemporaryDirectory() as d:
         vechi = G.verifica(cs_, cm_)
     check("6 --verifica: manifest la zi = 0, unul vechi = 1 și numește acțiunea", la_zi == 0 and vechi == 1
           and "comanda-noua" in buf.getvalue(), (la_zi, vechi, buf.getvalue()))
+
+cod, out = run("neplecate", "--sku", "TST-0001", "--magazin", "Magazin Test", "--limita", "1")
+check("7 neplecate: GET cu sku/magazin/limita, totalul, magazinul, comanda cu AWB și hold",
+      cod == 0 and CERUTE and "sku=TST-0001" in CERUTE[-1] and "limita=1" in CERUTE[-1]
+      and "magazin=Magazin+Test" in CERUTE[-1] and "2 comenzi · 3 bucăți" in out and "TST1001" in out
+      and "AWB 00000000001" in out and "CS: oprită în Shopify" in out and "trunchiată" in out and CHEIE not in out,
+      (cod, out))
+cod, out = run("neplecate", "--sku", "TST-0001", "--json")
+check("7 neplecate --json = răspunsul întreg", cod == 0 and json.loads(out)["total_comenzi"] == 2, out[:200])
+cod, out = run("neplecate", "--sku", "NIMIC")
+check("7 neplecate: 404 → cod 2, cu OH_REZULTAT", cod == 2 and "OH_REZULTAT" in out, out)
+cod, out = run("neplecate")
+check("7 neplecate fără --sku → cod 2, nimic trimis", cod == 2 and "nimic trimis" in out, out)
 
 srv.shutdown()
 print()

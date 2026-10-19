@@ -33,7 +33,7 @@ Rata de livrare: `uv run scripts/oh_delivery_rate.py --store grandia --age 14` (
 | Comenzi noi | `comanda-noua` (pe `--magazin`), `schimb` (swap), `retrimitere` (resend gratuit), `inlocuire` |
 | Bani | `factura`, `factura-storno`, `rambursare`, `ramburs-platit` |
 | Altele | `retur`, `retur-curier`, `retur-anulare`, `cerere-curier`, `punct-ridicare`, `taguri`, `email-comanda` |
-| Citiri | `actiuni` (parametrii exacți), `comanda` (fișa), `operatie --id N` |
+| Citiri | `actiuni` (parametrii exacți), `comanda` (fișa), `operatie --id N`, `neplecate --sku <SKU/cod de bare> [--magazin <nume exact>] [--limita N] [--json]` (comenzile neplecate pe SKU, pe magazin — filtrul „Neplecate” din OH; MCP: `oh_neplecate_pe_sku`) |
 
 Blocajele pe care nici un om nu le poate trece în Order Hub (ex. pauza de AWB a magazinului, comandă rambursată,
 arhivată sau expediată în Shopify) sunt `imposibil` și aici.
