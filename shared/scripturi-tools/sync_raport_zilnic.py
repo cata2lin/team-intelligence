@@ -134,7 +134,11 @@ def _pg_connect(url):
         return pg8000.dbapi.connect(**kw)
 
 
-WAREHOUSE_SINCE_MONTH = "2026-05"   # warehouse-ul TikTok e COMPLET din 2026-05 (12+ conturi); înainte doar 4
+WAREHOUSE_SINCE_MONTH = "2026-05"   # de aici override-ul vine din cache.daily_ad_spend_ron (TikTok din warehouse)
+# ATENȚIE: warehouse-ul TikTok NU era complet din 2026-05. Pe 19-oct-2026 lipseau la nivel de CAMPANIE
+# 1-30 mai pe Grandia RO, Nubra, Gento.ro și Casa ofertelor (~42k RON; Grandia 1.198 vs 27.772 live).
+# Umplut cu tiktok_warehouse_sync.py --start/--end. App-ul metrics trage doar ultimele 30 de zile,
+# deci o gaură mai veche NU se umple singură: verifică live vs warehouse înainte să te bazezi pe o lună.
 
 def warehouse_overrides(since_month=WAREHOUSE_SINCE_MONTH):
     """Override ad-spend per (month,prefix) din cache.daily_ad_spend_ron (metrics, AUTORITATIV: Meta=Graph,
