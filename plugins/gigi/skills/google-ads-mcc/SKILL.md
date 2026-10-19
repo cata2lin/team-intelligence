@@ -1,5 +1,4 @@
 ---
----
 name: google-ads-mcc
 description: Read and operate any Google Ads account linked under the team MCC (API v24; v22 blocked by Google since 17-oct-2026) — live performance reports, budget/bidding/status/keyword/negative mutations, full Search campaign creation, and the end-to-end video pipeline (upload to YouTube + attach to Performance Max). Plus an optimization playbook and PMax asset-group asset management. Credentials (MCC developer token + OAuth refresh token) come from the `metrics` DB; no per-account login. Read-only by default; mutations are dry-run unless explicitly applied. Use for any live Google Ads work on a brand (Esteban, Belasil, Grandia, …) without screenshots.
 version: 1.0.1
