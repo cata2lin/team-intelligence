@@ -87,7 +87,7 @@ def cmd_produs(a):
         if not d:
             print("\n[barcode %s] fără master în stock-sync (sau eroare de citire)" % bc)
             continue
-        bw = ", ".join("%s %d" % (w["warehouse"], w["units"]) for w in d.get("byWarehouse") or [])
+        bw = ", ".join("%s %d" % (w.get("warehouse") or "fără depozit", w.get("units") or 0) for w in d.get("byWarehouse") or [])
         print("\n[barcode %s] MASTER: %s · %s · total %s buc · siguranță %s"
               % (bc, d.get("name"), d.get("status"), d.get("totalUnits"), d.get("safetyStock")))
         print("  pe depozite: %s" % (bw or "-"))
@@ -98,7 +98,7 @@ def cmd_produs(a):
         print("  %-22s %7s %7s  %-38s %s" % ("magazin", "are", "alocat", "per depozit (unități)", "regula"))
         for s in sorted(d.get("stores") or [], key=lambda x: -(x.get("currentUnits") or 0)):
             pe_magazin_listate.add(s.get("storeId"))
-            dep = " ".join("%s:%d" % (w["warehouse"][:4], w.get("units") or 0) for w in s.get("byWarehouse") or [])
+            dep = " ".join("%s:%d" % ((w.get("warehouse") or "fără")[:4], w.get("units") or 0) for w in s.get("byWarehouse") or [])
             r = s.get("rule") or {}
             rg = "%s %s" % (r.get("scope") or "", ("%.2f%%" % r["percent"]) if r.get("percent") is not None
                             else ("flat %s" % r.get("flatQuantity") if r.get("flatQuantity") is not None else (r.get("type") or "")))
