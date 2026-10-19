@@ -25,6 +25,7 @@ Email DOAR pe abateri NOI (state file), pe același drum ca data_health (Gmail S
   .venv/bin/python promo_watchdog.py                        # doar raport în consolă
   .venv/bin/python promo_watchdog.py --email X --key ...    # + email pe abateri NOI
   .venv/bin/python promo_watchdog.py --days 5 --always      # fereastră + forțează email
+  .venv/bin/python promo_watchdog.py --no-state             # probă: fără stare, fără email
 """
 import os, re, sys, json, argparse
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -38,6 +39,10 @@ SURPRISE_QTY = 2                    # oferta „2+1": exact 2 parfumuri → +1 s
 STATE = os.environ.get("PROMO_WATCHDOG_STATE", "/root/Scripturi/data/.promo_watchdog_seen.json")
 OK, CRIT = "OK", "CRIT"
 DRAFT_SOURCES = {"shopify_draft_order"}   # comenzi făcute de CS (draft) — Flow NU se declanșează → NU le semnala
+# Comenzi refăcute de CS prin Order Hub: gratuitatea 2+1 e pusă ca linie la 0 RON, nu ca discount.
+CS_APPS = {"order hub"}
+LEGACY_BXGY_WORDS = ("2+1", "2 plus 1", "cadou", "gratis")   # titluri vechi (ex LAB „2 plus 1 cadou / 50 ml")
+MAX_ORDER_PAGES = 100  # 100×100 comenzi; EST face ~1.100/zi (3.405 pe 3 zile la 11-oct) → rezervă pt vârfuri
 
 
 def gql(st, q):
@@ -45,8 +50,8 @@ def gql(st, q):
 
 
 def _size_of(sku):
-    """Mărimea din SKU (orice format): '15-50ml'→'50ml', '81-100ml'→'100ml', 'gt-35'/'33'→'one'."""
-    s = (sku or "").strip().lower()
+    """Mărimea din SKU (orice format): '15-50ml'→'50ml', '81-100ml'→'100ml', '181-50 ml'→'50ml', 'gt-35'/'33'→'one'."""
+    s = (sku or "").strip().lower().replace(" ", "")
     if s.endswith("-50ml"):
         return "50ml"
     if s.endswith("-100ml"):
@@ -104,13 +109,15 @@ def load_catalog(st):
     for _ in range(12):
         after = ', after:"%s"' % cursor if cursor else ""
         q = ('query{ products(first:100, query:"collection_title:\'Toate parfumurile\'"%s){ '
-             'pageInfo{ hasNextPage endCursor } edges{ node{ variants(first:12){ edges{ node{ sku } } } } } } }' % after)
+             'pageInfo{ hasNextPage endCursor } edges{ node{ title variants(first:12){ edges{ node{ sku } } } } } } }' % after)
         r = gql(st, q)
         pr = (r.get("data") or {}).get("products") or {}
         for e in pr.get("edges") or []:
+            ptitle = e["node"].get("title")
             for v in (e["node"].get("variants") or {}).get("edges") or []:
                 sku = (v["node"].get("sku") or "").strip()
-                if sku:
+                # surpriza (0 RON) NU e parfum vândut: în 2+1 ar număra drept „cumpărat" → parfum gratis în plus
+                if sku and not _is_surprise(sku, ptitle):
                     cat.setdefault(_size_of(sku), set()).add(sku)   # perfum = orice variantă din 'Toate parfumurile'
         if not pr.get("pageInfo", {}).get("hasNextPage"):
             break
@@ -119,14 +126,31 @@ def load_catalog(st):
 
 
 def recent_orders(st, days):
-    q = ('query{ orders(first:120, sortKey:CREATED_AT, reverse:true, query:"created_at:>%s AND status:any"){ '
-         'edges{ node{ name createdAt cancelledAt tags sourceName '
-         'discountApplications(first:10){ edges{ node{ __typename '
-         '... on AutomaticDiscountApplication{ title } ... on DiscountCodeApplication{ code } } } } '
-         'lineItems(first:30){ edges{ node{ sku title quantity } } } } } } }'
-         % _since(days))
-    d = gql(st, q)
-    return [e["node"] for e in (((d.get("data") or {}).get("orders") or {}).get("edges") or [])]
+    """TOATE comenzile din fereastră (paginat). Înainte: first:120 fără paginare = ~5h din 3 zile pe EST."""
+    out, cursor = [], None
+    for _ in range(MAX_ORDER_PAGES):
+        after = ', after:"%s"' % cursor if cursor else ""
+        q = ('query{ orders(first:100%s, sortKey:CREATED_AT, reverse:true, query:"created_at:>%s AND status:any"){ '
+             'pageInfo{ hasNextPage endCursor } '
+             'edges{ node{ name createdAt cancelledAt tags sourceName app{ name } '
+             'totalDiscountsSet{ shopMoney{ amount } } '
+             'discountApplications(first:10){ edges{ node{ __typename '
+             '... on AutomaticDiscountApplication{ title } ... on DiscountCodeApplication{ code } '
+             '... on ManualDiscountApplication{ title } } } } '
+             'lineItems(first:40){ edges{ node{ sku title quantity lineItemGroup{ title } '
+             'originalUnitPriceSet{ shopMoney{ amount } } } } } } } } }'
+             % (after, _since(days)))
+        d = gql(st, q)
+        if d.get("errors"):
+            raise RuntimeError("orders query: %s" % str(d["errors"])[:200])
+        od = (d.get("data") or {}).get("orders") or {}
+        out += [e["node"] for e in od.get("edges") or []]
+        if not (od.get("pageInfo") or {}).get("hasNextPage"):
+            break
+        cursor = od["pageInfo"]["endCursor"]
+    else:
+        raise RuntimeError("peste %d pagini de comenzi — mărește MAX_ORDER_PAGES" % MAX_ORDER_PAGES)
+    return out
 
 
 def _since(days):
@@ -177,21 +201,33 @@ def check_store(store, days, rows):
         tags = [str(x).lower() for x in (o.get("tags") or [])]
         lis = [li["node"] for li in (o.get("lineItems") or {}).get("edges") or []]
         # unități de parfum pe mărime (parfum = SKU în catalog; surpriza/cutie excluse)
-        by_size = {}
+        by_size = {}        # toate parfumurile (pt surpriză)
+        loose_by_size = {}  # DOAR parfumurile din afara seturilor (pt 2+1)
         has_surp = False
+        has_free_perfume = False
         for li in lis:
             sku = (li.get("sku") or "").strip()
             if _is_surprise(sku, li.get("title")):
                 has_surp = True; continue
             if sku in perfume_skus and not _is_giftbox(sku, li.get("title")):
-                by_size[_size_of(sku)] = by_size.get(_size_of(sku), 0) + (li.get("quantity") or 0)
+                qty = li.get("quantity") or 0
+                by_size[_size_of(sku)] = by_size.get(_size_of(sku), 0) + qty
+                # set Shopify Bundles (ex EST „Dark Leather" 98 RON = 3 parfumuri): 2+1 e DEJA în prețul setului
+                if not li.get("lineItemGroup"):
+                    loose_by_size[_size_of(sku)] = loose_by_size.get(_size_of(sku), 0) + qty
+                if _money(li.get("originalUnitPriceSet")) == 0:
+                    has_free_perfume = True   # gratuitate pusă ca linie la 0 RON (refacere CS)
         total_perf = sum(by_size.values())
         has_box = any(_is_giftbox(li.get("sku"), li.get("title")) for li in lis)
-        # discount 2+1 aplicat pe comandă?
-        disc_titles = [(e["node"].get("title") or e["node"].get("code") or "").lower()
-                       for e in (o.get("discountApplications") or {}).get("edges") or []]
-        has_bxgy = any("2+1" in t or "2 plus 1" in t or "cadou" in t or "gratis" in t for t in disc_titles)
-        is_draft = (o.get("sourceName") or "") in DRAFT_SOURCES
+        # discount 2+1 aplicat pe comandă? = titlul unui BxGy activ al magazinului (orice nume) sau un titlu vechi
+        apps = [e["node"] for e in (o.get("discountApplications") or {}).get("edges") or []]
+        has_bxgy = any(a.get("__typename") == "AutomaticDiscountApplication" and (a.get("title") or "") in discounts
+                       for a in apps) or any(w in (a.get("title") or a.get("code") or "").lower()
+                                             for a in apps for w in LEGACY_BXGY_WORDS)
+        # alt discount (cod UGC 100% ex CRISTINAU, manual) → oferta e înlocuită intenționat, nu „ratată"
+        has_other_disc = (not has_bxgy) and bool(apps) and _money(o.get("totalDiscountsSet")) > 0
+        is_draft = (o.get("sourceName") or "") in DRAFT_SOURCES \
+            or ((o.get("app") or {}).get("name") or "").strip().lower() in CS_APPS
 
         # ---- Check 2: SURPRIZĂ lipsă (DOAR client, nu draft/CS; exact 2 parfumuri; nu tagat farasurpriza)
         if surprise_on and total_perf == SURPRISE_QTY and not has_surp and not is_draft \
@@ -200,8 +236,8 @@ def check_store(store, days, rows):
                          "%s: 2 parfumuri, plasată de client%s, FĂRĂ surpriză" % (name, " + cutie cadou" if has_box else "")))
 
         # ---- Check 3: 2+1 lipsă (3+ parfumuri de ACEEAȘI mărime, fără discount aplicat) — DOAR client, nu draft/CS
-        if not has_bxgy and not is_draft:
-            for size, qty in by_size.items():
+        if not has_bxgy and not is_draft and not has_other_disc and not has_free_perfume:
+            for size, qty in loose_by_size.items():
                 if qty >= 3:
                     # dacă discountul e pe LISTĂ de produse (LabNoir), poate un produs lipsește din listă
                     if disc_is_products:
@@ -215,6 +251,13 @@ def check_store(store, days, rows):
                         why = " (discount pe colecție%s → NEaplicat, ex. cutii cadou blochează)" % (" + cutie cadou" if has_box else "")
                     rows.append((CRIT, "%s.2+1.%s.%s" % (store, name, size),
                                  "%s: %d parfumuri %s fără 2+1%s" % (name, qty, size if size != "one" else "", why)))
+
+
+def _money(ms):
+    try:
+        return float(((ms or {}).get("shopMoney") or {}).get("amount") or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _slug(s):
@@ -262,6 +305,8 @@ def main():
     ap.add_argument("--from", dest="sender", default="gheorghe.beschea@overheat.agency")
     ap.add_argument("--key", default="/root/Scripturi/google_credentials.json")
     ap.add_argument("--always", action="store_true", help="email chiar dacă nimic nou")
+    ap.add_argument("--no-state", action="store_true",
+                    help="probă: NU citește/scrie fișierul de stare și NU trimite email")
     a = ap.parse_args()
 
     stores = [s.strip().upper() for s in (a.stores.split(",") if a.stores else STORES) if s.strip()]
@@ -285,6 +330,9 @@ def main():
     print(report)
 
     # email DOAR pe abateri NOI (chei nevăzute)
+    if a.no_state:
+        print("\n[--no-state] stare neatinsă, fără email")
+        return 1 if bad else 0
     seen = _load_seen()
     cur_keys = set(k for _, k, _ in bad)
     new_keys = cur_keys - seen

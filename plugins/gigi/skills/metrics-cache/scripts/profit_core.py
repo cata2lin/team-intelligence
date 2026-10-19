@@ -58,6 +58,16 @@ PREFIX_AWB_DOMAIN = {
     "BON": "casaofertelor.ro", "COV": "covoria.ro", "APR": "apreciat.ro", "LUX": "nocturnalux.ro",
     "ROSSI": "rossinails.ro", "NUB": "nubra", "CZ": "bonhaus.cz", "PL": "bonhaus.pl", "BONBG": "bonhaus.bg",
     "NOC": "nocturna.ro", "PAT": "cepatai.ro", "BG": "nocturna.bg",
+    # Adaugate 31 aug 2026. Lipseau din mapare, desi comenzile lor EXISTA in AWBprint —
+    # deci costul de transport nu se putea citi deloc pentru ele. Legatura a fost dedusa
+    # din orders.store_uid: fiecare prefix duce la exact un magazin, cu numarul de comenzi
+    # care se potriveste cu reconcilierea (SK 220, HU 189, ORC 189, LAB 3.450, MD 117 — numar de comenzi, nu nr. de comanda).
+    "LAB": "labnoir.ro", "MD": "duppo.md",
+    # SK / HU / ORC n-au inca denumire in AWBprint — figureaza cu identificatorul brut.
+    # Cand li se pune numele (bonhaus.sk, bonhaus.hu, oriceredus.ro), se inlocuieste aici.
+    "SK": "ee9c0806-71fb-4475-a120-43c87e4ba0e1-1786621084-2JVFQ716LH",
+    "HU": "89ac70a9-2ccf-4386-b905-cb858119ae14-1786621119-X2CTQOL3Q6",
+    "ORC": "37c35854-8b4b-4f40-9ccc-79522fc526d6-1786618849-SE8MNAKFPG",
 }
 
 def refusal_transport_multiplier(status_category: str, is_intl: bool = False) -> float:
@@ -116,8 +126,12 @@ PREFIX_BRAND = {
     "LUX": "Nocturna Lux",
     # lipseau, desi au comenzi reale in profit_orders (masurat 26-aug-2026, tot istoricul):
     "LAB": "Lab Noir",   # 3.145 comenzi; brand real in metrics (slug lab-noir)
+    "BUC": "De la Bucsa",  # 11-oct-2026: ~1.000 livrate/luna, marketing 0 in P&L fara asta
+    "SK": "Bonhaus SK",    # 11-oct-2026: brand existent acum in metrics
+    "ART": "Artevita",  # 11-oct-2026: magazin OH, comenzi ART####
+    "ORC": "Orice Redus", "HU": "Bonhaus HU",  # 11-oct-2026: branduri create in metrics
     "DUPBG": "Duppo BG",  # 31 comenzi; NU are brand in metrics -> nu primeste judet la join
-    # ⚠️ inca lipsesc (fara brand sigur in metrics, nu ghicim): SK 181, ORC 160, HU 132, MD 45.
+    # ⚠️ inca lipsesc (fara brand sigur in metrics, nu ghicim): ORC 160, HU 132, MD 45. (SK adaugat 11-oct.)
     # ⚠️ "Bonhaus BG" apare pe DOUA prefixe (BG si BONBG), iar tabelele nu sunt de acord ce e BG:
     #    aici + fulfillment_analytics.PREFIX_TO_STORE zic bonhaus.bg, PREFIX_AWB_DOMAIN si
     #    deliverability_monitor.PREFIX_TO_SLUG zic nocturna.bg. Pana se lamureste, `brand_aliases()`

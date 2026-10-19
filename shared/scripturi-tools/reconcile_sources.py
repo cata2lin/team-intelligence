@@ -30,6 +30,9 @@ PF_DB = "/root/Scripturi/data/profitability.db"
 
 # AWBprint pune tot runul de litere din order_number ca prefix (NUBRA/GRAND); engine folosește NUB/GRAN.
 AWB_TO_ENGINE = {"NUBRA": "NUB", "GRAND": "GRAN"}
+# Magazine pe care AWBprint nu le-a avut NICIODATA (nu trec prin Frisbo): fara referinta pentru livrate.
+# Fara lista asta, cu _drift care alerteaza pe referinta 0, ar suna zilnic degeaba.
+NOT_IN_AWBPRINT = {"DUPBG"}   # duppo.bg — verificat 11-oct-2026: 0 comenzi in AWBprint, nici un prefix DUP
 # volumul sub care ignorăm driftul procentual (zgomot pe branduri mici — ROSSI/COV/CARP)
 MIN_ORDERS = 40
 MIN_MKT_RON = 3000
@@ -71,8 +74,14 @@ def _months(n):
 
 
 def _drift(a, b):
-    """Drift semnat al lui a față de b (referință). None dacă b e 0."""
-    return None if not b else (a - b) / b * 100.0
+    """Drift semnat al lui a față de b (referință). None doar dacă AMBELE sunt 0.
+
+    Referința 0 cu engine > 0 NU e „n/a": e cel mai grav caz. Așa a stat CZ/PL/SK/ORC din 27-sep —
+    eng=1108 livrate, AWBprint=0 (statusurile nu mai veneau) — afișat „drift n/a" și exclus din alertă.
+    Îl raportăm ca 999% ca să treacă de orice prag."""
+    if not b:
+        return None if not a else 999.0
+    return (a - b) / b * 100.0
 
 
 def gather(months):
@@ -99,6 +108,8 @@ def gather(months):
             awb[AWB_TO_ENGINE.get(pfx, pfx)] = awb.get(AWB_TO_ENGINE.get(pfx, pfx), 0) + n
 
         for pfx in sorted(set(eng) | set(awb)):
+            if pfx in NOT_IN_AWBPRINT:
+                continue
             e = eng.get(pfx, {}).get("delivered", 0)
             a = awb.get(pfx, 0)
             rows.append({"month": month, "prefix": pfx, "brand": eng.get(pfx, {}).get("brand", pfx),

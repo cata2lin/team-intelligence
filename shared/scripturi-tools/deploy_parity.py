@@ -12,9 +12,18 @@ IDENTIC / DIFERĂ / LIPSEȘTE. Auto-descoperă (nu manifest hardcodat care se î
 
 Rulează pe VPS (are checkout-ul git + fișierele flat local — fără SSH). Cron-abil, email pe drift NOU.
 
+OGLINZI (11-oct-2026): flat NU e singura copie EXECUTATĂ. run_cache.sh rulează build_cache.py din
+WORKING TREE-ul checkout-ului (și importă ad_spend_live/tt_attrib de acolo), iar /root/ad-spend/run_daily.sh
+rulează ad_spend_live.py + google_product_spend.py din /root/ad-spend/skills/. Comparam doar flat↔git, deci
+exact copiile care rulau au divergat nevăzut (build_cache cu ON CONFLICT pe un PK care nu exista în git,
+ad_spend_live în 3 variante). Acum se compară și:
+  checkout:<rel>  — working tree /root/Scripturi/team-intelligence vs origin/main (edituri necomise / HEAD în urmă)
+  ad-spend:<rel>  — /root/ad-spend/skills/<skill>/... vs plugins/gigi/skills/<skill>/... din origin/main
+
   deploy_parity.py check                         # tabel paritate (exit 1 dacă e drift)
   deploy_parity.py check --email X --key ...      # + email DOAR pe drift nou (tranziție)
   deploy_parity.py deploy --apply                 # copiază git(origin/main) → flat pt cele DIFERITE (cu .bak)
+  deploy_parity.py deploy --apply --mirrors       # + și în oglinzile checkout / ad-spend (cu .bak)
                                                   # ⚠ direcția „git = adevăr"; NU rula orbește dacă VPS e înainte
 """
 import os, sys, glob, hashlib, argparse, subprocess, sqlite3, shutil
@@ -32,6 +41,13 @@ SCAN_DIRS = [
     "shared/scripturi-tools",
     "plugins/core/scripts",
 ]
+# Oglinzi = alte copii ale fișierelor din git care RULEAZĂ în producție. (nume, rădăcină, prefix git)
+# Rădăcina + (rel fără prefix) = calea oglinzii. PARITY_MIRRORS=0 le dezactivează.
+MIRRORS = [
+    ("checkout", REPO, ""),
+    ("ad-spend", "/root/ad-spend/skills", "plugins/gigi/skills/"),
+]
+MIRROR_EXT = (".py", ".sh")
 IGNORE = {"__init__.py", "kb.py", "kb_env.py", "pg_mcp_launch.py", "mcp_env_launch.py",
           "sqlite_ssh_mcp_launch.py", "ro_sqlite_mcp.py"}  # launchere MCP, nu se deployează flat
 
@@ -86,6 +102,40 @@ def discover():
     return out
 
 
+def discover_mirrors():
+    """→ list de (label, rel, mirror_path). Doar fișierele care EXISTĂ în oglindă (o oglindă e un
+    subset: ad-spend are doar 4 skill-uri). Pt checkout luăm tot ce e versionat sub plugins/ și shared/."""
+    if os.environ.get("PARITY_MIRRORS", "1") == "0":
+        return []
+    out = []
+    for name, root, prefix in MIRRORS:
+        if not os.path.isdir(root):
+            continue
+        scope = [prefix.rstrip("/")] if prefix else ["plugins", "shared"]
+        r = subprocess.run(["git", "-C", REPO, "ls-tree", "-r", "--name-only", REF, "--"] + scope,
+                           capture_output=True, text=True)
+        for rel in sorted(r.stdout.splitlines()):
+            if not rel.endswith(MIRROR_EXT) or not rel.startswith(prefix):
+                continue
+            mp = os.path.join(root, rel[len(prefix):])
+            if os.path.exists(mp):
+                out.append(("%s:%s" % (name, rel[len(prefix):]), rel, mp))
+    return out
+
+
+def _compare(gblob, path):
+    try:
+        with open(path, "rb") as f:
+            fblob = f.read()
+    except OSError:
+        fblob = None
+    if gblob is None:
+        return "GIT-LIPSĂ"
+    if fblob is None:
+        return "FLAT-LIPSĂ"
+    return "IDENTIC" if _md5(gblob) == _md5(fblob) else "DIFERĂ"
+
+
 def check():
     rows = []
     for rel, flat, b in discover():
@@ -105,7 +155,18 @@ def check():
         else:
             st = "DIFERĂ"
         rows.append((st, b, rel))
+    for label, rel, mp in discover_mirrors():
+        rows.append((_compare(_git_blob(rel), mp), label, rel))
     return rows
+
+
+def _target(label, rel):
+    """Calea de pe disc pt un rând din check(): flat (basename) sau oglindă (nume:cale)."""
+    if ":" not in label:
+        return os.path.join(FLAT, label)
+    name, sub = label.split(":", 1)
+    root = next(r for n, r, _ in MIRRORS if n == name)
+    return os.path.join(root, sub)
 
 
 def _state():
@@ -123,7 +184,9 @@ def main():
     pc.add_argument("--all", action="store_true", help="arată și IDENTIC")
     pd = sub.add_parser("deploy", help="copiază git(origin/main) → flat pt cele DIFERITE")
     pd.add_argument("--apply", action="store_true", help="chiar copiază (altfel dry-run)")
-    pd.add_argument("--only", help="doar acest basename")
+    pd.add_argument("--only", help="doar acest basename / etichetă (ex. checkout:plugins/.../build_cache.py)")
+    pd.add_argument("--mirrors", action="store_true",
+                    help="scrie și în oglinzile checkout / ad-spend (implicit doar flat)")
     a = ap.parse_args()
     cmd = a.cmd or "check"
 
@@ -132,11 +195,12 @@ def main():
     drift = [r for r in rows if r[0] in ("DIFERĂ", "FLAT-LIPSĂ")]
 
     if cmd == "deploy":
-        todo = [r for r in rows if r[0] == "DIFERĂ" and (not a.only or r[1] == a.only)]
+        todo = [r for r in rows if r[0] == "DIFERĂ" and (not a.only or r[1] == a.only)
+                and (a.mirrors or ":" not in r[1])]
         if not todo:
             print("Nimic de deployat (nicio divergență DIFERĂ)."); return 0
         for st, b, rel in todo:
-            dst = os.path.join(FLAT, b)
+            dst = _target(b, rel)
             print("%s  %s → %s" % ("APLIC" if a.apply else "DRY", rel, dst))
             if a.apply:
                 shutil.copy2(dst, dst + ".bak_" + datetime.utcnow().strftime("%Y%m%d_%H%M%S"))
@@ -150,9 +214,13 @@ def main():
     out = ["PARITATE COD git(%s) ↔ VPS flat — %s UTC" % (REF, datetime.utcnow().strftime("%Y-%m-%d %H:%M")), ""]
     if drift:
         out.append("🔴 DIVERGENȚE (%d):" % len(drift))
-        out += ["  %-11s %-26s %s" % (st, b, rel) for st, b, rel in drift]
+        out += ["  %-11s %-26s %s" % (st, b, rel) for st, b, rel in drift if ":" not in b]
+        mir = [r for r in drift if ":" in r[1]]
+        if mir:
+            out.append("  — oglinzi executate (checkout / ad-spend):")
+            out += ["  %-11s %s" % (st, b) for st, b, _ in mir]
     else:
-        out.append("🟢 Toate fișierele flat sunt identice cu git (%d verificate)." % len(rows))
+        out.append("🟢 Toate fișierele flat + oglinzile sunt identice cu git (%d verificate)." % len(rows))
     if a.__dict__.get("all"):
         out += ["", "IDENTIC:"] + ["  %s" % b for st, b, _ in rows if st == "IDENTIC"]
     out += ["", "Ce DIFERĂ = fișier flat pe VPS ≠ git. Poate fi VPS-înainte (fix necomis → adu-l în git) sau "

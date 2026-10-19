@@ -7,6 +7,7 @@ CAMPAIGN_KEYWORD substring) -> USD->RON (fx_rates) -> spend per grup/zi -> aloca
 
 Expune wms_group_spend_ron(pf_conn, metrics_cur, lo, hi) -> {group: ron}.
 """
+import re as _re
 from collections import defaultdict
 
 
@@ -26,16 +27,26 @@ def _usd_ron(fx, date):
 
 
 def _load_nomen(pf_conn):
-    acc = defaultdict(list); key = defaultdict(list)
+    """(acc, key). `key` = keyword-uri potrivite pe „campanie + ad name", în DOUĂ trepte:
+    întâi TOATE CAMPAIGN_KEYWORD (cel mai lung câștigă), abia apoi AD_KEYWORD. Treapta a doua a
+    fost multă vreme INERTĂ (regulile existau în wms_nomen dar nu se încărcau), ceea ce lăsa
+    nemapat spend-ul de pe „Lavete abrazive"/„Lavete magice" — 2,2% din total. Ordinea pe trepte
+    e obligatorie: un AD_KEYWORD lung nu are voie să fure o campanie care are deja keyword propriu."""
+    acc = defaultdict(list); tiered = defaultdict(list)
     for plat, grp, mt, pat in pf_conn.execute(
         "SELECT platform,product_group,map_type,pattern FROM wms_nomen "
         "UNION ALL SELECT platform,product_group,map_type,pattern FROM wms_nomen_extra"):
         if mt == "ACCOUNT":
             acc[plat].append(((pat or "").strip().lower(), grp))
         elif mt == "CAMPAIGN_KEYWORD":
-            key[plat].append((_norm(pat), grp))
-    for plat in key:   # cel mai LUNG keyword (cel mai specific) câștigă — „COVORAȘ MAGIC" bate „MAGDEAL"
-        key[plat].sort(key=lambda x: -len(x[0]))
+            tiered[plat].append((0, _norm(pat), grp))
+        elif mt == "AD_KEYWORD":
+            tiered[plat].append((1, _norm(pat), grp))
+    key = defaultdict(list)
+    for plat, items in tiered.items():
+        # treapta ASC, apoi cel mai LUNG keyword — „COVORAȘ MAGIC" bate „MAGDEAL"
+        items.sort(key=lambda x: (x[0], -len(x[1])))
+        key[plat] = [(p, g) for _, p, g in items]
     return acc, key
 
 
@@ -45,12 +56,40 @@ def _norm(s):
     return (s or "").translate(_DIAC).upper().strip()
 
 
+# Keyword-uri care TREBUIE să se potrivească drept CUVÂNT ÎNTREG, nu ca substring.
+# „TEST" prindea în „TESTARE"/„TESTER" → „KIT DE TESTARE A CALITĂȚII APEI HA-0461" și
+# „TESTER APA HA-0461" (produse reale) cădeau în grupul `Test`, care e EXCLUS din alocarea de
+# marketing → produsul apărea cu marketing zero și CPA fals.
+# ⚠️ NU adăuga „GT" aici: `GT1`/`GT2`/`GT3` sunt campanii George Talent reale; cu graniță de
+# cuvânt ar cădea pe regula de cont (`ROSSI Nails Romania` → Rossi) și ar fi mai rău.
+_TOKEN_ONLY = {"TEST"}          # explicit: are 4 caractere, deci nu intra sub regula de mai jos
+_SHORT_MAX = 3                  # pattern-urile de <=3 caractere se potrivesc DOAR ca cuvant intreg
+
+
+def _kw_hit(p, c):
+    """Potrivire keyword. Pattern-urile SCURTE (<=3 car: 'LM'=laveta magica, 'LA'=laveta abraziva,
+    'GT', plus codurile de magazin 'CO'/'RB'/'OZ'/'MD') si cele din _TOKEN_ONLY cer GRANITA DE
+    CUVANT — altfel 'LA' prinde in 'LAVETA'/'ALESSIO' si un cont intreg cade fals pe un produs.
+    Aceeasi regula exista deja pe calea cache (meta-ads/prodmap.py::_pat_matches).
+    CRATIMA face parte din granita (nu e separator): altfel 'CO' prinde in 'PATUT CO-SLEEPER' si
+    'LA' in 'Copy of LA-ROK_b' (id de creative). Masurat pe wms_ad_spend 12 luni: pt cele doua
+    pattern-uri scurte existente diferenta e ZERO (GT 291.964 USD identic, LM 0), iar CO/RB/OZ/MD
+    raman curate. Textul potrivit include SI ad_name, de aceea 'OF' NU e folosit ca pattern aici:
+    numele de reclama contin 'Copy of' -> 47.266 USD s-ar ruta gresit. 'OF' exista doar pe calea
+    de BRAND (Mapping col F), care se uita EXCLUSIV la numele campaniei."""
+    if len(p) <= _SHORT_MAX or p in _TOKEN_ONLY:
+        return _re.search(r"(?<![A-Z0-9-])" + _re.escape(p) + r"(?![A-Z0-9-])", c) is not None
+    return p in c
+
+
 def _group_of(acc, key, plat, account, campaign, ad_name=""):
     a = (account or "").strip().lower()
     c = _norm((campaign or "") + " " + (ad_name or ""))   # campanie + AD NAME (FB), insensibil la diacritice
     # CAMPAIGN_KEYWORD prioritar (per-produs, cel mai lung/specific), apoi ACCOUNT (fallback brand)
     for p, g in key[plat]:
-        if p and p in c:
+        if not p:
+            continue
+        if _kw_hit(p, c):
             return g
     for p, g in acc[plat]:
         if a == p:
@@ -127,7 +166,6 @@ def _daily_order_weights(pf_conn, lo, hi):
         for s in {x.strip().upper() for x in str(skus).split(",") if x.strip()}:
             w[(d, (prefix or "").strip())][s] += 1
     return w
-import re as _re
 _SKU_IN_CAMP = _re.compile(r"HA-\d{3,5}")   # cod SKU HA-#### în numele campaniei (ex. „...ROATA ABDOMINALĂ HA-0420-")
 
 
