@@ -8,7 +8,7 @@ from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
 from PIL import Image, ImageDraw, ImageFont
 
-API="v22"
+API=os.environ.get("GADS_API_VERSION","v24")
 CID="6858257397"
 ASSET_GROUP=f"customers/{CID}/assetGroups/6728753344"
 CAMPAIGN=f"customers/{CID}/campaigns/24007250520"

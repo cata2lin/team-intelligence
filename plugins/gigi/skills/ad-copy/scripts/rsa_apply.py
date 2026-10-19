@@ -13,7 +13,7 @@ Edit the RSAS list (cid, ad_id, headlines[15], descriptions[≤4]) then:
 import os, sys
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
-API=os.environ.get("GADS_API_VERSION","v21")
+API=os.environ.get("GADS_API_VERSION","v24")
 
 # --- the differentiated sets. Belasil Non-Brand: 3 ad groups, each on its OWN keyword theme. ---
 CANTITATE=["Detergent Bidon 10 Litri","Detergent Lichid 5 Litri","200 de Spălări pe Bidon",

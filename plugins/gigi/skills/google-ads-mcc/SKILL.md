@@ -1,6 +1,8 @@
 ---
+---
 name: google-ads-mcc
-description: Read and operate any Google Ads account linked under the team MCC (API v22) — live performance reports, budget/bidding/status/keyword/negative mutations, full Search campaign creation, and the end-to-end video pipeline (upload to YouTube + attach to Performance Max). Plus an optimization playbook and PMax asset-group asset management. Credentials (MCC developer token + OAuth refresh token) come from the `metrics` DB; no per-account login. Read-only by default; mutations are dry-run unless explicitly applied. Use for any live Google Ads work on a brand (Esteban, Belasil, Grandia, …) without screenshots.
+description: Read and operate any Google Ads account linked under the team MCC (API v24; v22 blocked by Google since 17-oct-2026) — live performance reports, budget/bidding/status/keyword/negative mutations, full Search campaign creation, and the end-to-end video pipeline (upload to YouTube + attach to Performance Max). Plus an optimization playbook and PMax asset-group asset management. Credentials (MCC developer token + OAuth refresh token) come from the `metrics` DB; no per-account login. Read-only by default; mutations are dry-run unless explicitly applied. Use for any live Google Ads work on a brand (Esteban, Belasil, Grandia, …) without screenshots.
+version: 1.0.1
 ---
 
 # Google Ads via the team MCC
@@ -10,6 +12,10 @@ The team runs a **Google Ads Manager account (MCC)** whose API credentials live 
 under the MCC** — you only need the child account's **customer ID**.
 
 > **MCC (login-customer-id): `7467110480`** (NOVOS DIGITAL SRL)
+
+> 🔴 **API v22 BLOCAT de Google din 17-oct-2026** (`UNSUPPORTED_VERSION`, 400 INVALID_ARGUMENT). **Default-ul e acum `v24`** în `gads.py` și în toate scripturile active (citesc `GADS_API_VERSION`, implicit `v24`); MCP-ul `arona-ads` primește și `GADS_API_VERSION=v24` în env. Verificat 19-oct: `set-status` / `set-tcpa` / `set-budget` în validateOnly + `gads_portfolio` / `profit_verdict` pe v24.
+> - Dacă Google blochează și v24: `GADS_API_VERSION=v25 uv run gads.py …` (un singur loc de schimbat). `create-demandgen` rulează deja pe v25.
+> - Scripturile one-off (`fix_*`, `build_*`, `swap_*`, `add_belasil_*`) au încă versiunea scrisă literal — editează-le înainte să le refolosești.
 
 > 🚀 **Lansare Google Ads pe un magazin NOU** (cont + link MCC + conversie COD/native + Brand+PMax + cablare „CPA și financiar") → playbook end-to-end + gotcha-uri: **`reference/store-launch-playbook.md`** (dovedit pe Bonhaus PL / Gento / Carpetto / CZ).
 
@@ -144,7 +150,7 @@ claude mcp add --scope user arona-ads -- uv run /Users/gheorghebeschea/.claude/p
 > reports (idee din nicolasacchi/merchant-cli) = de adăugat în Python, nu adopta binarul Go.
 
 ## 1a. Tooling in-house adăugat (25-iul-2026, din deep research — capabilități pe care nu le aveam)
-Native Python, se leagă de wrapper-ul v22. Toate READ-ONLY / DRY (doar raportează candidați; aplici cu `add-negatives`/`add-keywords`).
+Native Python, se leagă de wrapper-ul `gads.py` (default v24). Toate READ-ONLY / DRY (doar raportează candidați; aplici cu `add-negatives`/`add-keywords`).
 ```bash
 # n-gram search-term mining (replică Optmyzr/Opteo): risipă (candidați negative) + câștigători (candidați keyword)
 uv run ngram_miner.py --customer 5031005158 --days 30 --brand "george talent,gt" --min-cost 25
@@ -314,7 +320,7 @@ A PMax asset group needs a full set before it serves beyond Shopping. Build with
 - **Image cap = 20 per asset group** (all ratios combined). Over it → `resourceCountLimitExceededError: RESOURCE_LIMIT` (the whole add silently no-ops under partialFailure). To add more, **remove some first** (`{"remove":"<asset_group_asset resource_name>"}`) in a prior call, then create. Aim for a balanced mix (~8 landscape / 8 square / 3 portrait), not 14 of one ratio. Template: **`swap_belasil_images.py`**.
 - Removed links still appear in reports — filter **`asset_group_asset.status='ENABLED'`** to count what's live.
 - **`asset_group.status='ENABLED'` nu e suficient** — AGs dintr-o campanie REMOVED/PAUSED tot apar. Join pe `campaign.status` sau rulează `audit_campaigns.py` ca să știi ce servește cu adevărat.
-- **API version**: folosim **v22** (v21 blocat aug 2026). `API="v22"` în `gads.py` și toate scripturile.
+- **API version**: folosim **v24** (v22 blocat 17-oct-2026, v21 blocat aug 2026). Un singur buton: env `GADS_API_VERSION` (implicit `v24`) în `gads.py` și scripturile active.
 - **Python 3.14 argparse**: `%` în help strings trebuie escaped ca `%%` (altfel `ValueError: badly formed help string`).
 - The UI **"Generate images" (Gemini)** is the fast way to satisfy the image minimum (UI-only, on-brand from the site); a human clicks it, you add text via API. Branded copy-on-image banners (Chrome-rendered, exact 1.91:1 / 1:1 / 4:5 — pad with `sips --padToHeightWidth`) complement Gemini's product shots: template **`add_belasil_banners.py`** + `belasil-creatives/banners.html`.
 - **Premium cutout banners (preferred over copy-on-a-box):** use the **`gigi:ad-banners`** skill to background-remove a real product photo from the NAS (rembg) and place it on a dark "cutout + glow" layout, captured at native size (no sips padding). Upload any local PNGs with **`add_pmax_images.py`** (env `CIDARG` / `AGARG` / `DIRARG` / `IMGSARG=[["file.png","MARKETING_IMAGE"],…]`, dry-run → `--apply`). At the 20-image cap, do the remove-then-add swap in one atomic `assetGroupAssets:mutate` and look up the new image assets by `asset.name` to avoid duplicates.
@@ -504,7 +510,7 @@ Pașii repetabili pentru a lansa un brand pe Google Ads de la zero. Template scr
 7. **Imagini** — poze hero → crop la **1:1 / 1.91:1 / 4:5** + logo. Sursă: Shopify (`shopify_gql`) SAU **warehouse `products.featuredImageUrl`** (token-free — folosește când tokenul magazinului e mort/rotativ, ex. **Nubra**).
 8. **Build** (`build_all.py`): PMax skelet atomic (budget + campanie `maximizeConversions{targetCpaMicros}` + `shoppingSetting.merchantId` + geo RO `2642` + **lang RO `1032`** + asset group + listing group `UNIT_INCLUDED/SHOPPING`) → assets (text + imagini; **BN+LOGO la nivel CAMPANIE** fiindcă Brand Guidelines ON, restul la asset group) → Brand Search → Non-Brand Search → enable PMax.
    - 🔴 **LIMBĂ: RO = `languageConstants/1032`. NU `1038` = CATALANĂ!** Bug istoric în acest playbook: Gento/GT/Nubra/Carpetto au fost lansate pe `1038` (catalană) → Search sufocat (reach ≈0 în RO; PMax tolerează). Reparate iun 2026 (adăugat 1032). Verifică mereu: `SELECT language_constant.name FROM language_constant WHERE language_constant.id=<X>`. (CZ = `1021`, EN = `1000`.)
-   - 🔴 **v22: câmp OBLIGATORIU pe `campaign.create`** → `containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING"` (altfel `REQUIRED` error).
+   - 🔴 **v22+ (probabil și v24 — neverificat): câmp OBLIGATORIU pe `campaign.create`** → `containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING"` (altfel `REQUIRED` error).
    - **Fără feed / stoc parțial → Search, NU PMax.** Dacă Merchant Center feed-ul nu e gata (sau catalogul are stoc parțial — ex. ROSSI: doar 1 kit pe stoc), lansează **Brand Search + Non-Brand Search cu finalUrl pe PAGINA produsului in-stock** (control total, zero risc de a promova epuizate), ori **DSA** (crawl domeniu) pt catalog random fără feed (ex. Bonhaus CZ). PMax îl adaugi când feed-ul/stocul e ok. Template: `cz-creatives/build_search.py`, `rossi-creatives/build_search.py`.
 9. **Bidding cont NOU = cold-start**: PMax pe **Maximize Conversions PUR (fără target)** — `create-pmax` pune asta by default (`--bidding maxconv`); value-bidding cold-startează la 0 impresii (lecția Carpetto/Nocturna/Bonhaus PL). Un PMax deja creat pe value-bidding → repară cu `set-maxconv`. **NU pune tCPA/tROAS până ai 15-30 conversii** (nici tCPA strâns — sufocă servirea la cont fără istoric). După prag → `set-tcpa` ≈ target, apoi `set-troas` ~2,5. Rețeta completă pe etape mai jos.
 10. **UTM** — `customer.final_url_suffix = utm_source=google&utm_medium=cpc&utm_campaign={campaignid}&utm_content={creative}&utm_term={keyword}` (gclid acoperă GA4 nativ; UTM acoperă warehouse/Shopify). Setat pe toate conturile.

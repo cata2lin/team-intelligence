@@ -138,7 +138,7 @@ def cmd_gads(a):
     if role not in GADS_ROLES:
         sys.exit(f"Rol Google Ads invalid: {a.role}. Alege: {', '.join(GADS_ROLES)}")
     tok, dev, mcc = _gads_creds()
-    API = "v21"
+    API = os.environ.get("GADS_API_VERSION","v24")
     H = {"Authorization": f"Bearer {tok}", "developer-token": dev,
          "login-customer-id": mcc, "Content-Type": "application/json"}
 

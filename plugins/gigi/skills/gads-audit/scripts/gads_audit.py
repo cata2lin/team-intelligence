@@ -21,6 +21,7 @@ Verificări (fiecare = un flag cu severitate + acțiune sugerată):
 import os, sys, json, argparse, subprocess
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
+API = os.environ.get("GADS_API_VERSION","v24")  # Google blochează versiunile vechi (v22 din 17-oct-2026)
 
 def kb(k): return subprocess.run(["uv","run",os.path.join(os.path.dirname(__file__),"..","..","..","..","core","scripts","kb.py"),"secret-get",k],capture_output=True,text=True,timeout=60).stdout.strip()
 _OK={"host","port","dbname","user","password","sslmode","connect_timeout","application_name","channel_binding"}
@@ -32,7 +33,7 @@ CUR_LANG={"RON":("RO","1032","2642"), "CZK":("CZ","1021","2203"), "BGN":("BG","1
 DRAIN_MIN=200.0; CAPPED_LOST=0.15; CAPPED_ROAS=3.0; DRAIN_ROAS=2.0
 
 def gads(H, cid, query):
-    j=requests.post(f"https://googleads.googleapis.com/v21/customers/{cid}/googleAds:searchStream",headers=H,json={"query":query},timeout=90).json()
+    j=requests.post(f"https://googleads.googleapis.com/{API}/customers/{cid}/googleAds:searchStream",headers=H,json={"query":query},timeout=90).json()
     return [x for ch in j for x in ch.get("results",[])] if isinstance(j,list) else []
 
 def audit_account(H, cid, name, cur):
@@ -130,7 +131,7 @@ def main():
                 ops=[{"campaignCriterionOperation":{"create":{"campaign":camp,"language":{"languageConstant":f"languageConstants/{exp_id}"}}}} for camp,ls in has.items() if exp_id not in ls]
                 ops+=[{"campaignCriterionOperation":{"remove":rn}} for rn in cat_rn]  # scoate Catalan(1038)
                 if ops:
-                    rr=requests.post(f"https://googleads.googleapis.com/v21/customers/{ac['id']}/googleAds:mutate",headers=H,json={"mutateOperations":ops,"partialFailure":True},timeout=60)
+                    rr=requests.post(f"https://googleads.googleapis.com/{API}/customers/{ac['id']}/googleAds:mutate",headers=H,json={"mutateOperations":ops,"partialFailure":True},timeout=60)
                     print(f"      ✓ FIX-LANG: +{exp_lang}/−Catalan pe {len(ops)} op ({rr.status_code})")
     print(f"\n{'='*72}\nTOTAL: {total} flag-uri pe {len(accts)} conturi. Fix sigur auto: --fix-language.\n{'='*72}")
 
