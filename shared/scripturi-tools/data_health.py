@@ -79,6 +79,18 @@ def _judge(rows, key, ts, sla_h, note=""):
 
 # ---------------------------------------------------------------- checks
 
+# Sursele care TREBUIE să ruleze programat, cu SLA-ul în minute. Toate patru sunt cronuri
+# Inngest la 10 minute; SLA-ul e larg intenționat, ca o rulare ratată să nu dea alarmă, dar
+# o oprire reală să iasă în aceeași zi. Adaugi o sursă programată nouă → o treci și aici,
+# altfel moartea ei rămâne invizibilă (vezi comentariul din check_metrics).
+SCHEDULED_SOURCES = {
+    "SHOPIFY": 120,
+    "FACEBOOK_ADS": 120,
+    "GOOGLE_ADS": 120,
+    "TIKTOK_ADS": 120,
+}
+
+
 def check_metrics(rows, ctx):
     """Warehouse: spend per platformă (brand + per-SKU), P&L pe brand, curs valutar, sync_runs."""
     dsn = _dsn("DATABASE_URL_METRICS")
@@ -139,19 +151,42 @@ def check_metrics(rows, ctx):
     rows.append((CRIT if tt else OK, "tiktok_token",
                  "%d tokenuri cer re-autorizare" % tt if tt else "ok"))
 
-    # sync_runs: o sursă care rulează dar eșuează 100% e mai rea decât una care nu rulează
+    # sync_runs: o sursă care rulează dar eșuează 100% e mai rea decât una care nu rulează.
+    # ⚠️ ȘI MAI RĂU: o sursă care TACE COMPLET. Varianta veche făcea GROUP BY source, deci
+    # raporta doar sursele care AVEAU rânduri — o sursă oprită de tot dispărea pur și simplu
+    # din raport, fără nicio linie roșie. Exact așa a stat TIKTOK_ADS nesincronizat din
+    # 2026-05 până pe 2026-09-08: funcțiile Inngest nu erau înregistrate, nu rula nimic, și
+    # fiindcă nu exista niciun rând, watchdog-ul n-avea ce să înroșească. Absența nu se
+    # măsura. Acum sursele așteptate sunt declarate explicit și lipsa lor e CRIT.
     # status e enum (SyncRunStatus) → cast la text, altfel ILIKE crapă
-    cur.execute("""SELECT source,
+    cur.execute("""SELECT source::text,
                           COUNT(*) FILTER (WHERE status::text ILIKE '%%fail%%') f,
-                          COUNT(*) FILTER (WHERE status::text NOT ILIKE '%%fail%%') s
-                   FROM sync_runs WHERE "createdAt" > NOW() - INTERVAL '24 hours'
-                   GROUP BY source ORDER BY 1""")
-    got = cur.fetchall()
+                          COUNT(*) FILTER (WHERE status::text NOT ILIKE '%%fail%%') s,
+                          MAX("startedAt") ultima
+                   FROM sync_runs
+                   WHERE "createdAt" > NOW() - INTERVAL '24 hours'
+                   GROUP BY 1 ORDER BY 1""")
+    got = {r[0]: r[1:] for r in cur.fetchall()}
     if not got:
-        rows.append((WARN, "sync_runs", "nicio rulare în 24h"))
-    for src, f, s in got:
+        rows.append((CRIT, "sync_runs", "nicio rulare în 24h, pe nicio sursă"))
+    for src in sorted(set(got) | set(SCHEDULED_SOURCES)):
+        if src not in got:
+            rows.append((CRIT, "sync_runs.%s" % src.lower(),
+                         "TĂCERE TOTALĂ 24h — cron programat lipsă (funcție neînregistrată în Inngest?)"))
+            continue
+        f, s, ultima = got[src]
         st = CRIT if (f and not s) else (WARN if f > s else OK)
-        rows.append((st, "sync_runs.%s" % src.lower(), "%d ok / %d eșuate în 24h" % (s, f)))
+        det = "%d ok / %d eșuate în 24h" % (s, f)
+        # ⚠️ "startedAt" e timestamp FĂRĂ fus, stocat în UTC, iar NOW() e timestamptz pe
+        # Europe/Bucharest: comparate direct, fereastra se mută cu 3 ore și verificarea
+        # iese fals-verde. De-aia se scade explicit din ora UTC.
+        sla_min = SCHEDULED_SOURCES.get(src)
+        if sla_min and ultima is not None:
+            age_min = (datetime.utcnow() - ultima).total_seconds() / 60.0
+            if age_min > sla_min:
+                st = CRIT
+                det += " · ultima acum %.0f min (SLA %d)" % (age_min, sla_min)
+        rows.append((st, "sync_runs.%s" % src.lower(), det))
     cx.close()
 
 
@@ -173,7 +208,11 @@ def check_awbprint(rows, ctx):
     cx.close()
 
 
-AWB_EVENT_LOG = "/root/Scripturi/logs/xc_awb_events.jsonl"
+# ⚠️ Sursa a fost /root/Scripturi/logs/xc_awb_events.jsonl, scris de xc_fulfill.sh. La cutover-ul pe
+# Order Hub (20-aug) acel script a ajuns sa sara toata flota, deci logul a ramas ORFAN: producatorul
+# a fost retras intentionat, verificatorul a ramas sa se uite la el si a raportat 18 zile la rand
+# „niciun AWB — cronul e mort complet", in timp ce depozitul facea ~2.500 etichete pe zi.
+# Acum masuram EFECTUL la sursa lui: etichetele din AWBprint. Vezi [[awb-log-orfan-dupa-cutover-oh]].
 # Praguri pe FEREASTRA ORARĂ de până acum (vezi mai jos), calibrate pe 7 zile reale de trafic:
 # Praguri CALIBRATE prin backtest pe 9 zile reale (nu ghicite). Cu 5/2 și fără condiția de consistență
 # dădea 3 fals pozitive de weekend: Rossi și Covoria aveau 0 AWB la 09:15, dar 8 pe toată ziua — magazine

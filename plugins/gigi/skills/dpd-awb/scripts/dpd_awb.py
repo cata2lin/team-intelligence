@@ -185,8 +185,35 @@ def print_price(d):
     return None
 
 
+def pdf_pages(path):
+    """Cate pagini are PDF-ul — ca sa se VADA in iesire ca sunt cate colete, nu una."""
+    try:
+        import re
+        d = open(path, "rb").read()
+        return len(re.findall(rb"/Type\s*/Page[^s]", d)) or 1
+    except Exception:
+        return 1
+
+
+def parcel_ids(auth, awb):
+    """Id-urile TUTUROR coletelor unei expedieri, in ordinea lor.
+
+    ⚠️ Nu sunt consecutive cu AWB-ul si nu apar in /track/. Primul colet ARE id-ul expedierii
+    (11 cifre), urmatoarele au alt format (14 cifre): 81300000001 → 81300000000025, …00039.
+    Cine ghiceste „AWB+1" primeste „Barcode not found" si crede ca expedierea are un singur colet.
+    """
+    s, d = call(auth, "/shipment/info/", {"shipmentIds": [awb]})
+    sh = (d.get("shipments") or [d])[0] if isinstance(d, dict) else {}
+    parcels = ((sh.get("content") or {}).get("parcels")) or []
+    ids = [p["id"] for p in sorted(parcels, key=lambda p: p.get("seqNo", 0)) if p.get("id")]
+    return ids or [awb]
+
+
 def fetch_label(auth, awb, out_dir):
-    body = {"parcels": [{"parcel": {"id": awb}}], "format": "pdf", "paperSize": "A6"}
+    # cate colete, atatea pagini. Cu un singur id in `parcels`, /print/ intoarce O pagina chiar
+    # daca expedierea are trei — si doua cutii pleaca fara eticheta.
+    ids = parcel_ids(auth, awb)
+    body = {"parcels": [{"parcel": {"id": i}} for i in ids], "format": "pdf", "paperSize": "A6"}
     s, data = call(auth, "/print/", body, raw=True)
     if isinstance(data, bytes) and data[:4] == b"%PDF":
         os.makedirs(out_dir, exist_ok=True)
@@ -248,7 +275,7 @@ def main():
     print("     tracking: https://tracking.dpd.ro/?shipmentNumber=%s" % awb)
     path = fetch_label(auth, awb, os.path.expanduser(a.out or "~/Downloads"))
     if path:
-        print("  📄 etichetă: %s" % path)
+        print("  📄 etichetă: %s (%d pagini, cate una de colet)" % (path, pdf_pages(path)))
     else:
         print("  ⚠️ AWB făcut dar eticheta nu s-a putut descărca (reia cu /print/).")
 
