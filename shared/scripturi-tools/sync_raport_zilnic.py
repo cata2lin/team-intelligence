@@ -139,6 +139,7 @@ WAREHOUSE_SINCE_MONTH = "2026-05"   # de aici override-ul vine din cache.daily_a
 # 1-30 mai pe Grandia RO, Nubra, Gento.ro și Casa ofertelor (~42k RON; Grandia 1.198 vs 27.772 live).
 # Umplut cu tiktok_warehouse_sync.py --start/--end. App-ul metrics trage doar ultimele 30 de zile,
 # deci o gaură mai veche NU se umple singură: verifică live vs warehouse înainte să te bazezi pe o lună.
+WAREHOUSE_NAME_ALIASES = {"casa ofertelor": "BON"}   # brands.name (lower) -> prefix engine
 
 def warehouse_overrides(since_month=WAREHOUSE_SINCE_MONTH):
     """Override ad-spend per (month,prefix) din cache.daily_ad_spend_ron (metrics, AUTORITATIV: Meta=Graph,
@@ -157,6 +158,10 @@ def warehouse_overrides(since_month=WAREHOUSE_SINCE_MONTH):
     except Exception:
         pass
     nlow = {(k or "").strip().lower(): v for k, v in name2pfx.items()}
+    # Numele din warehouse care nu se potrivesc cu BRAND_TO_PREFIX / PREFIX_BRAND. Casa Ofertelor (BON)
+    # apare în RZ2 ca „Bonhaus RO” și în profit_core ca „Bonhaus”, deci fără alias override-ul BON
+    # rămânea pe RZ2 (cu TikTok-ul phantom al conturilor partajate) în loc de warehouse.
+    nlow.update(WAREHOUSE_NAME_ALIASES)
     # Include GRANDIA: daily_ad_spend_ron are toate 3 canale complet din 2026-05 (Google PMax 150k + Meta +
     # TikTok), pe când grandia_overrides (feed-ul agenției SkilledPPC) A MURIT ~24-iun → subnumără ~45k și dă
     # GRAN fals-POZITIV. Rulăm DUPĂ grandia_overrides → câștigăm pt lunile >= 2026-05; istoricul < 2026-05 rămâne
