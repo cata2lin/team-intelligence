@@ -107,8 +107,12 @@ def accounts_for(brand):
         sys.stderr.write(f"[tt] cont din mapping fără potrivire în DB: '{miss}'\n")
     return [{"adv":r["adv"],"nm":r["nm"],"cur":r["cur"],"tok":r["tok"],"filter":byname.get(r["nm"].strip().lower())} for r in rows]
 
+_DENIED=set()   # advertiseri fără permisiune în rularea curentă: nu-i mai întrebăm la fiecare fereastră
+
 def tk_get(path, token, params):
     import time
+    adv=str(params.get("advertiser_id",""))
+    if adv and adv in _DENIED: return []
     out=[]; page=1
     while True:
         p=dict(params); p["page"]=page; p.setdefault("page_size",1000)
@@ -121,6 +125,11 @@ def tk_get(path, token, params):
                 sys.stderr.write(f"[tt] request eșuat după retry: {type(e).__name__} — întorc parțial\n"); return out
             code=j.get("code")
             if code==0: break
+            # 40001 „No permission to operate advertiser” = cont ieșit din token (vândut/închis), nu o eroare
+            # trecătoare: cu 6 reîncercări pe fiecare fereastră, rularea de 05:30 stătea ore întregi pe două conturi.
+            if code==40001 and "no permission" in str(j.get("message","")).lower():
+                if adv: _DENIED.add(adv)
+                sys.stderr.write(f"[tt] {code}: {j.get('message','')[:160]} — sar peste advertiser\n"); return out
             transient = code in (40100,40016,50000,40001) or "rate" in str(j.get("message","")).lower() or "too many" in str(j.get("message","")).lower()
             if transient and attempt<5:
                 time.sleep(min(90,5*(2**attempt))); continue
