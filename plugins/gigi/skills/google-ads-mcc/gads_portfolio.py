@@ -35,15 +35,18 @@ with cnx.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cu:
     FX={r["f"]:float(r["rate"]) for r in cu.fetchall()}
 FX["RON"]=1.0
 # nume cont Google → cheie brandref
-ALIASES=[("grandia","grandia"),("gt","gt"),("george","gt"),("nubra","nubra"),("belasil","belasil"),
+ALIASES=[("grandia","grandia"),("gt","gt"),("george","gt"),("nubra","nubra"),
  ("ofertele","ofertele"),("gento","gento"),("carpetto","carpetto"),("rossi","rossi"),("nocturna","nocturna"),
+ ("esteban","esteban"),("maison","esteban"),("apreciat","apreciat"),("reduceri","reduceri"),("magdeal","magdeal"),
+ ("lab noir","labnoir"),("labnoir","labnoir"),
  ("bonhaus pl","bonhaus_pl"),("bonhaus cz","bonhaus_cz"),("bonhaus bg","bonhaus_bg"),("casa ofertelor","casaofertelor")]
-def be_for(name):
+# verdict pe TARGET CPA all-channel (decizie owner 20-oct-2026), nu pe breakeven. BE rămâne fallback.
+def tgt_for(name):
     low=(name or "").lower()
     for sub,key in ALIASES:
         if sub in low:
             ref=br.get(key) or {}
-            return ref.get("breakeven_cpa"), ref.get("scale_cpa")
+            return ref.get("target_cpa_allchannel"), ref.get("breakeven_cpa")
     return None,None
 c=g.get_connection(None)
 accs=g.search(c,g._digits(c["mcc"]),"SELECT customer_client.id,customer_client.descriptive_name,customer_client.currency_code FROM customer_client WHERE customer_client.manager=false AND customer_client.status='ENABLED'")
@@ -55,14 +58,15 @@ def totals(cid,rng):
 rows=[]
 for a in accs:
     cid=gv(a,"customerClient.id"); nm=gv(a,"customerClient.descriptiveName") or ""; cur=gv(a,"customerClient.currencyCode") or "RON"; fx=FX.get(cur,1.0)
+    if "belasil" in nm.lower(): continue   # brand VÂNDUT 20-oct-2026 — scos din raport
     c30,v30,val30=totals(cid,"LAST_30_DAYS"); c7,v7,_=totals(cid,"LAST_7_DAYS")
-    be,scale=be_for(nm)
+    tgt,be=tgt_for(nm)
     rows.append({"nm":nm,"cur":cur,"cost30":c30*fx,"conv30":v30,"val30":val30*fx,
                  "cpa30":(c30/v30*fx) if v30 else 0,"roas30":(val30/c30) if c30 else 0,
-                 "cost7":c7*fx,"cpa7":(c7/v7*fx) if v7 else 0,"be":be,"scale":scale})
+                 "cost7":c7*fx,"cpa7":(c7/v7*fx) if v7 else 0,"tgt":tgt,"be":be})
 rows.sort(key=lambda x:-x["cost30"])
 print("═══════ PERFORMANȚĂ PORTOFOLIU GOOGLE ADS (RON, toate conturile ENABLED) ═══════")
-print(f"{'cont':16}{'cur':4}{'spend30':>9}{'conv':>6}{'CPA':>5}{'ROAS':>5}{'venit':>9} |{'CPA7z':>6}{'trend':>7}  vs BE")
+print(f"{'cont':16}{'cur':4}{'spend30':>9}{'conv':>6}{'CPA':>5}{'ROAS':>5}{'venit':>9} |{'CPA7z':>6}{'trend':>7}  vs ȚINTĂ")
 T=dict(cost30=0,conv30=0,val30=0,cost7=0,cost7conv=0)
 tconv7=0
 for r in rows:
@@ -71,13 +75,16 @@ for r in rows:
     if r["cpa30"] and r["cpa7"]:
         d=(r["cpa7"]-r["cpa30"])/r["cpa30"]*100; trend=f"{'↓' if d<0 else '↑'}{abs(d):.0f}%"
     v="—"
-    if r["be"] and r["cpa30"]:
-        v="🟢SCALE" if r["cpa30"]<=(r["scale"] or 0) else ("🟡HOLD" if r["cpa30"]<=r["be"] else "🔴CUT")
-        v+=f" (BE{r['be']:.0f})"
+    if r["tgt"] and r["cpa30"]:
+        t=r["tgt"]
+        v="🟢" if r["cpa30"]<=t else ("🟡" if r["cpa30"]<=t*1.25 else "🔴")
+        v+=f" ț{t:.0f}"
+    elif r["be"] and r["cpa30"]:
+        v="🟢" if r["cpa30"]<=r["be"] else "🔴"; v+=f" BE{r['be']:.0f}"
     print(f"{r['nm'][:15]:16}{r['cur']:4}{r['cost30']:>9,.0f}{r['conv30']:>6.0f}{r['cpa30']:>5.0f}{r['roas30']:>5.1f}{r['val30']:>9,.0f} |{r['cpa7']:>6.0f}{trend:>7}  {v}")
 tcpa=T["cost30"]/T["conv30"] if T["conv30"] else 0; troas=T["val30"]/T["cost30"] if T["cost30"] else 0
 print("─"*78)
 print(f"{'TOTAL':20}{T['cost30']:>9,.0f}{T['conv30']:>6.0f}{tcpa:>5.0f}{troas:>5.1f}{T['val30']:>9,.0f}")
 print(f"\nSpend 30z: {T['cost30']:,.0f} RON · Conv: {T['conv30']:,.0f} · CPA: {tcpa:.0f} · ROAS(Google): {troas:.1f} · Venit: {T['val30']:,.0f} RON")
 print(f"Spend 7z: {T['cost7']:,.0f} RON")
-print("⚠️ ROAS/venit = raportat Google (~1.5× umflat); vs BE la nivel de cont e GROSIER → per-campanie = profit_verdict.py")
+print("⚠️ ROAS/venit = raportat Google (~1.5× umflat). Verdict = CPA vs ȚINTĂ all-channel (target_cpa_allchannel, decizie owner 20-oct): 🟢≤țintă · 🟡≤țintă×1.25 · 🔴>țintă. Per-campanie = profit_verdict.py")
