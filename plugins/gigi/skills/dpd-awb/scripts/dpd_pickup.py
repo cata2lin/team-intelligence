@@ -23,6 +23,7 @@ DPD cere ora de disponibilitate STRICT în viitor) · --end HH:MM (ultima oră d
 DPD o poate scurta la cut-off-ul zonei). --autoAdjust e pornit (mută pe ziua următoare dacă a trecut cut-off-ul).
 """
 import json, urllib.request, urllib.error, subprocess, datetime, argparse, sys, os
+from zoneinfo import ZoneInfo
 
 BASE = "https://api.dpd.ro/v1"
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -84,8 +85,18 @@ def main():
     name = snd.get("clientName") or snd.get("contactName") or "Expeditor"
     npar = (sh.get("content") or {}).get("parcelsCount", "?")
 
-    now = datetime.datetime.now()
-    ready = (now + datetime.timedelta(minutes=a.ready_in)).strftime("%Y-%m-%dT%H:%M:%S+0300")
+    # Ora ROMANIEI, nu a serverului.
+    #
+    # Era `datetime.now()` (ora masinii) formatata cu un offset HARDCODAT `+0300`. Pe un server
+    # care nu e pe fusul Romaniei, cele doua nu se potrivesc si ora ceruta iese in TRECUT — DPD
+    # raspunde `readinessTime.readiness_expired` si curierul nu e chemat, desi AWB-ul s-a facut.
+    # Masurat 10-sep-2026: VPS pe Europe/Berlin (+0200), Romania pe +0300 → ora ceruta era cu 30
+    # de minute in urma, exact cat era marja. Doua etichete emise, zero curieri chemati.
+    #
+    # `%z` pe un datetime cu fus scrie singur +0300 vara si +0200 iarna, deci nu se strica nici
+    # la schimbarea orei din ultima duminica din octombrie.
+    now = datetime.datetime.now(ZoneInfo("Europe/Bucharest"))
+    ready = (now + datetime.timedelta(minutes=a.ready_in)).strftime("%Y-%m-%dT%H:%M:%S%z")
     print("AWB %s · %s colet(e) · ridicare de la: %s" % (awb, npar, (snd.get("address") or {}).get("fullAddressString", "?")))
     print("  contact: %s · %s | disponibil de la %s → până la %s" % (name, phone or "—", ready, a.end))
     if not a.apply:

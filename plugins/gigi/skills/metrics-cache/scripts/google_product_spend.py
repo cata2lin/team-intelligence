@@ -3,13 +3,11 @@
 # dependencies = ["requests>=2.31", "psycopg2-binary>=2.9"]
 # ///
 """
-Google per-SKU spend pentru conturile PMax (INCL Grandia). Trage shopping_performance_view
-(segments.product_item_id + metrics.cost_micros) via MCC (gads.py), mapează product_item_id
-(ultimul număr = variant shopifyNumericId) → variants.sku, scrie cache.product_ad_spend
-(platform='google', source='google_pmax'). Conturi RON → fără FX.
-⚠️ Grandia (9069610821) e cont AGENȚIE — `google_ads_product_insights_daily` e GOL pt el (sync-ul
-nativ nu-l acoperă), de-aia Google-ul Grandiei ajungea UNMAPPED în cache.product_ad_spend. Adăugat
-aici (2026-07-24) ca să vină per-produs LIVE din shopping_performance_view, ca restul.
+Google per-SKU spend pentru conturile PMax (în afară de Grandia, care vine deja nativ din
+google_ads_product_insights_daily). Trage shopping_performance_view (segments.product_item_id +
+metrics.cost_micros) via MCC (gads.py), mapează product_item_id (ultimul număr = variant
+shopifyNumericId) → variants.sku, scrie cache.product_ad_spend (platform='google', source='google_pmax').
+Conturi RON → fără FX. Aditiv: nu atinge sursa google_product_insights (Grandia).
 
   cd .../google-ads-mcc && DATABASE_URL_METRICS=... uv run <acest dir>/google_product_spend.py --since 2025-01-01 --apply
 """
@@ -20,10 +18,9 @@ sys.path.insert(0, os.environ.get("GADS_DIR") or str(Path(__file__).resolve().pa
 sys.path.insert(0, "/root/Scripturi")   # core.stores (Shopify tokens) pe VPS
 import gads
 
-# conturi ARONA pe Google (RON), INCL Grandia (agenție, native insights gol → live). account_id → (brand metrics, prefix store).
+# conturi ARONA pe Google (RON), FĂRĂ Grandia (deja nativ). account_id → (brand metrics, prefix store).
 ACCOUNTS = {"5229815058": ("Esteban", "EST"), "7566352958": ("Belasil", "BELA"),
-            "4069952156": ("Carpetto", "CARP"), "8148962111": ("Gento", "GEN"),
-            "9069610821": ("Grandia", "GRAN")}
+            "4069952156": ("Carpetto", "CARP"), "8148962111": ("Gento", "GEN")}
 
 
 def shopify_variant_skus(shop, token):
@@ -91,7 +88,14 @@ def main():
             ron = int(r.get("metrics", {}).get("costMicros", 0)) / 1e6
             agg[(seg["date"], sku, bid)] += ron; nm += 1
         print(f"  {brand}: {len(rows)} product-rows, {nm} mapate ({len(vskus)} variants Shopify)")
-    out = [(d, bid, sku, None, "google", round(v, 2), "google_pmax") for (d, sku, bid), v in agg.items() if v > 0]
+    # brand_id face parte din PK (date, brand_id, sku, platform) => NOT NULL. Un rand fara brand
+    # nu poate fi scris; il raportam explicit in loc sa lasam insertul sa crape pe tot lotul.
+    _fara_brand = {k: v for k, v in agg.items() if v > 0 and k[2] is None}
+    if _fara_brand:
+        sys.stderr.write("\u26a0 %d chei Google fara brand_id = %d RON NU se scriu\n"
+                         % (len(_fara_brand), round(sum(_fara_brand.values()))))
+    out = [(d, bid, sku, None, "google", round(v, 2), "google_pmax")
+           for (d, sku, bid), v in agg.items() if v > 0 and bid is not None]
     print(f"[google_pmax] {len(out)} rânduri (date×sku); unmatched item_ids: {unmatched}; spend total {round(sum(x[5] for x in out))} RON")
     for d, bid, sku, _, _, sp, _ in sorted(out, key=lambda x: -x[5])[:8]:
         print(f"    {d} {sku[:30]:30} {sp:>8.0f}")
@@ -99,8 +103,10 @@ def main():
         print("DRY-RUN — nimic scris."); return
     execute_values(cur,
         "INSERT INTO cache.product_ad_spend (date,brand_id,sku,product_title,platform,spend_ron,source) VALUES %s "
-        "ON CONFLICT (date,sku,platform) DO UPDATE SET spend_ron=EXCLUDED.spend_ron, "
-        "brand_id=COALESCE(EXCLUDED.brand_id,cache.product_ad_spend.brand_id), source=EXCLUDED.source",
+        # PK-ul real e (date, brand_id, sku, platform). Fara brand_id in cheia de conflict, Postgres
+        # arunca InvalidColumnReference si NIMIC nu se scrie — asa au stat meta/tiktok/google inghetate.
+        "ON CONFLICT (date,brand_id,sku,platform) DO UPDATE SET spend_ron=EXCLUDED.spend_ron, "
+        "source=EXCLUDED.source",
         out, page_size=2000)
     mconn.commit(); print(f"[google_pmax] APPLIED — {len(out)} rânduri.")
 

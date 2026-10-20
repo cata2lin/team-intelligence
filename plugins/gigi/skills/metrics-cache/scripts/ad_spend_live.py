@@ -25,7 +25,15 @@ for d in ("meta-ads", "tiktok-ads"):
     sys.path.insert(0, str(SKILLS / d))
 KB = Path.home() / ".claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py"
 if not KB.exists():  # VPS / alt layout
-    for cand in [SKILLS.parent / "core/scripts/kb.py", Path.home() / ".claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py"]:
+    # SKILLS = .../plugins/<autor>/skills, deci core/ e la SKILLS.parent.PARENT (adica .../plugins/).
+    # `SKILLS.parent` cauta in .../plugins/<autor>/core/scripts/kb.py — cale care nu exista nicaieri.
+    # Efect masurat pe VPS (5-sep-2026): kb.py negasit -> kb_secret() intoarce "" -> json.loads("")
+    # -> JSONDecodeError -> `live_rows` prinsa de un except larg in build_cache -> "doar google".
+    # cache.product_ad_spend a ramas fara meta/tiktok din 18-aug, TACUT, cu cronul iesind cu succes.
+    for cand in [SKILLS.parent.parent / "core/scripts/kb.py",
+                 SKILLS.parent / "core/scripts/kb.py",
+                 Path("/root/Scripturi/team-intelligence/plugins/core/scripts/kb.py"),
+                 Path.home() / ".claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py"]:
         if cand.exists(): KB = cand; break
 
 
@@ -129,16 +137,86 @@ def single_sku_groups():
         return {}
 
 
+_EAN_RE = re.compile(r"(?<!\d)(\d{13})(?!\d)")
+
+
+def barcode_skus(cur):
+    """EAN-13 → SKU from the Shopify variants in the warehouse. A barcode on several SKUs counts only
+    when one SKU holds at least 3/4 of its variants (set-5-lavete-magice 9 × set-5-m 1); the
+    2000000000… placeholders are shared by unrelated products and never count."""
+    cur.execute(
+        "SELECT barcode, sku, count(*) FROM variants "
+        "WHERE \"deletedAt\" IS NULL AND barcode ~ '^[0-9]{13}$' AND COALESCE(sku, '') <> '' "
+        "AND barcode NOT LIKE '2000000000%' GROUP BY barcode, sku"
+    )
+    by_code = defaultdict(dict)
+    for code, sku, n in cur.fetchall():
+        by_code[code][sku] = n
+    out = {}
+    for code, skus in by_code.items():
+        sku, n = max(skus.items(), key=lambda kv: kv[1])
+        if n >= 0.75 * sum(skus.values()):
+            out[code] = sku
+    return out
+
+
+_HANDLE_RE = re.compile(r"/products/([a-z0-9][a-z0-9\-]*)")
+LANDING_CACHE = Path(__file__).resolve().parent / "ad_landing_cache.json"
+# Perfume brands stay brand-level on purpose (owner, 2026-10-12): no landing-page lookup for them.
+PERFUME_BRANDS = {"Esteban", "George Talent", "Nubra", "Lab Noir", "Labnoir", "DUPPO", "Belasil"}
+
+
+def handle_skus(cur):
+    """(brand_id, product handle) → SKU, for products whose variants all carry one SKU."""
+    cur.execute(
+        'SELECT p."brandId", p.handle, min(v.sku) FROM products p JOIN variants v ON v."productId" = p.id '
+        'WHERE p."deletedAt" IS NULL AND v."deletedAt" IS NULL AND COALESCE(v.sku, \'\') <> \'\' '
+        'GROUP BY 1, 2 HAVING count(DISTINCT lower(v.sku)) = 1'
+    )
+    return {(b, h): sku for b, h, sku in cur.fetchall() if h}
+
+
+def landing_handles(meta, ad_ids, tok):
+    """ad_id → product handles in the ad's creative links. The ad's landing page never changes, so
+    the answer is cached on disk and only new ads cost a Graph call (50 per call)."""
+    try:
+        cache = json.loads(LANDING_CACHE.read_text())
+    except (OSError, ValueError):
+        cache = {}
+    todo = [a for a in ad_ids if a not in cache]
+    for i in range(0, len(todo), 50):
+        chunk = todo[i:i + 50]
+        try:
+            r = meta.requests.get(f"https://graph.facebook.com/{meta.VER}/", timeout=60, params={
+                "ids": ",".join(chunk), "access_token": tok,
+                "fields": "creative{object_story_spec,asset_feed_spec,link_url}"})
+            data = r.json() if r.status_code == 200 else {}
+        except Exception:
+            data = {}
+        for ad_id in chunk:
+            if ad_id in data:
+                cache[ad_id] = sorted(set(_HANDLE_RE.findall(json.dumps(data[ad_id]))))
+    if todo:
+        try:
+            LANDING_CACHE.write_text(json.dumps(cache))
+        except OSError:
+            pass
+    return {a: cache.get(a) or [] for a in ad_ids}
+
+
 def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
     """[(date, brand_id, sku_or_group, product_title, platform, spend_ron, source)] aggregated.
     since='YYYY-MM-DD' overrides days; until='YYYY-MM-DD' caps the end (default today).
     platforms = subset of ('meta','tiktok') — trage/scrie doar platformele cerute (ex. doar TikTok,
     fără să atingă Facebook + fără apeluri Meta/Google Sheets)."""
     import meta, tiktok, prodmap, datetime
+    import tt_attrib   # aici, nu mai jos: și calea Meta are nevoie de canonical_brand
     end = until or datetime.date.today().isoformat()
     start = since or (datetime.date.today() - datetime.timedelta(days)).isoformat()
     mconn = metrics_conn(); mcur = mconn.cursor()
-    name2id = brand_name_to_id(mcur); mconn.close()
+    name2id = brand_name_to_id(mcur)
+    ean2sku = barcode_skus(mcur)
+    handle2sku = handle_skus(mcur); mconn.close()
     g2sku = single_sku_groups()
     brands = list(json.loads((SKILLS / "meta-ads/brand_map.json").read_text()).keys())
 
@@ -147,6 +225,13 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
     seen = set()                   # dedup shared accounts: (platform, acct, date, campaign, ad)
 
     def classify(platform, account, campaign, ad):
+        text = f"{campaign or ''} {ad or ''}"
+        if not prodmap.ha_code(text):
+            # Newer campaigns end with the product's EAN ("ALEX STRATEGY #4 7865789069743"):
+            # it names exactly one product, so it wins over any keyword rule.
+            sku = next((ean2sku[e] for e in _EAN_RE.findall(text) if e in ean2sku), None)
+            if sku:
+                return sku, campaign[:60]
         g = prodmap.product_of(platform, account, campaign, ad)
         if g == "Unmapped":
             return f"UNMAPPED:{account}", "(nemapat)"
@@ -156,6 +241,7 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
         return (sku, g) if sku else (g, g)  # single-product group -> SKU; else keep group label
 
     def bid_for(brand):
+        brand = tt_attrib.canonical_brand(brand)
         return name2id.get(brand.strip().lower()) or name2id.get(brand.replace(" RO", "").strip().lower())
 
     # ---- Meta (Facebook/Instagram): pull each ad account ONCE, attribute via exact Mapping ----
@@ -171,18 +257,32 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
             brand = resolve_brand(nm, fb_entries)
             if not brand:
                 continue  # non-ARONA account (BauBax, intl Rossi, etc.)
+            brand = tt_attrib.canonical_brand(brand)   # „Bonhaus RO" -> „Casa Ofertelor"
             # metrics has no 'Bonhaus RO/SK', 'Esteban Parfum' etc → fold into parent (first word)
             bid = name2id.get(brand.strip().lower()) or name2id.get(brand.strip().lower().split()[0])
+            unresolved = []                            # (day, ad_id, spend, campaign) left on account/brand
             for cs, ce in _month_chunks(start, end):   # monthly chunks (Meta rejects long daily ad-level spans)
                 for r in meta.graph(f"https://graph.facebook.com/{meta.VER}/{aid}/insights",
-                        {"level": "ad", "fields": "campaign_name,ad_name,spend", "time_increment": "1",
+                        {"level": "ad", "fields": "campaign_name,ad_name,ad_id,spend", "time_increment": "1",
                          "time_range": json.dumps({"since": cs, "until": ce}), "limit": "500", "access_token": tok}):
                     d = r.get("date_start"); camp = r.get("campaign_name", ""); adn = r.get("ad_name", "")
                     sp = meta.conv(float(r.get("spend", 0)), cur, meta._pdate(d), idx_meta)  # per-day FX
                     if sp <= 0: continue
                     # TEST campaigns tracked SEPARATELY (bucket 'TEST'), excluded from real products (ca RZ2)
                     key, lbl = ("TEST", "(produse de test)") if prodmap.is_test(camp) else classify("facebook", nm, camp, adn)
+                    if r.get("ad_id") and (key.startswith("UNMAPPED:")
+                                           or (key in prodmap.BRAND_GROUPS and key not in PERFUME_BRANDS)):
+                        unresolved.append((d, r["ad_id"], sp, camp, key, lbl))
+                        continue
                     agg[(d, bid, key, "meta")] += sp; title[key] = lbl
+            # Ads named only "AD - 12" (Artevita "NEW TEST STRATEGY"): the product is the page the ad
+            # links to. One landing product → that SKU; otherwise the account/brand result stands.
+            handles = landing_handles(meta, sorted({u[1] for u in unresolved}), tok) if unresolved else {}
+            for d, ad_id, sp, camp, key, lbl in unresolved:
+                skus = {handle2sku.get((bid, h)) for h in handles.get(ad_id, [])} - {None}
+                if len(skus) == 1:
+                    key, lbl = skus.pop(), camp[:60]
+                agg[(d, bid, key, "meta")] += sp; title[key] = lbl
 
     # ---- TikTok ----
     # Un advertiser poate rula MAI MULTE branduri (cont PARTAJAT). Atribuirea corectă, INDEPENDENTĂ de ordinea
@@ -192,31 +292,13 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
     #     (brandul pt care e dedicat, filter None); fără token ȘI fără owner → orfan (se raportează, nu se inventează).
     #   - cont DEDICAT (nimeni nu-l împrumută) → brandul iterat.
     # Token-ul cel mai lung câștigă (evită fals-pozitive la tokeni scurți ca 'GT'). seen-dedup → fiecare campanie 1×.
+    # Atribuirea pe brand vine din tt_attrib — modulul CANONIC, același folosit de build_cache pentru
+    # cache.daily_ad_spend_ron. Aici era o COPIE a aceleiași logici; copia rămânea în urmă la fiecare
+    # regulă nouă (ex. codurile scurte CO/RB/OZ/MD din numele campaniei, 2026-08), deci calea per-SKU
+    # și calea per-brand dădeau branduri diferite pe aceeași campanie. O singură sursă acum.
     import brandmap
-    tt_token2brand = {}; tt_owner = {}; tt_shared = set()
-    for b in brands:
-        try: accs = brandmap.tiktok_accounts(b)
-        except Exception: continue
-        for e in accs:
-            nm = (e.get("name") or "").strip().lower(); f = (e.get("campaign_filter") or "").strip()
-            if not nm: continue
-            if f:                                   # b împrumută contul nm cu token f
-                tt_token2brand[f.lower()] = b; tt_shared.add(nm)
-            else:                                   # b deține contul nm (dedicat) → owner
-                tt_owner.setdefault(nm, b)
-    tt_tokens = sorted(tt_token2brand, key=len, reverse=True)   # cel mai specific (lung) întâi
-    # Reguli de brand SPECIFICE pe cont (au prioritate înaintea token-ului global + owner). Pe contul
-    # 'Belasil', Esteban rulează teste de creative numite 'NEW TIKTOK' fără token ESTEBAN → tot Esteban
-    # (regulă confirmată de user); restul fără token (și fără 'esteban') rămâne brandul owner = Belasil.
-    ACCT_BRAND_RULES = {"belasil": [("new tiktok", "Esteban")]}
-    # OWNER explicit pt conturile partajate de MAI MULTE branduri cu token (nu se poate exprima prin
-    # Mapping ca la Belasil, fiindcă brandurile astea AU token). Campaniile fără token de pe contul ăsta
-    # = brandul de mai jos (identificat din creative/produs de user 2026-06-19):
-    #   ROSSI Nails Romania → Rossi Nails (untokened-ul, inclusiv 'New Win Product', e al brandului contului);
-    #   Carpetto → Rossi Nails (creative KIT Polish/unghii); Nocturna.ro → Nocturna (creative NOCTURNA/Pijamale);
-    #   Nocturna Europa → Ofertele Zilei (oferte gospodărie).
-    ACCT_DEFAULT_OWNER = {"rossi nails romania": "Rossi Nails", "carpetto": "Rossi Nails",
-                          "nocturna.ro": "Nocturna", "nocturna europa": "Ofertele Zilei"}
+    M_tt = tt_attrib.build_maps(brands, brandmap.tiktok_accounts)
+    tt_shared = M_tt["shared"]
     tt_lost = defaultdict(float)   # (acct,campaign) -> spend orfan (cont partajat, fără token ȘI fără owner)
 
     if "tiktok" in platforms:
@@ -238,11 +320,7 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
                     except Exception: _day = None
                     sp = tiktok.conv(tiktok._f(m, "spend"), r["_cur"], _day, idx_tt)
                     if acct_l in tt_shared:    # cont PARTAJAT → regulă-cont, token global, owner Mapping, owner explicit
-                        cl = (camp or "").lower()
-                        brand_row = (next((br for kw, br in ACCT_BRAND_RULES.get(acct_l, []) if kw in cl), None)
-                                     or next((tt_token2brand[t] for t in tt_tokens if t in cl), None)
-                                     or tt_owner.get(acct_l)
-                                     or ACCT_DEFAULT_OWNER.get(acct_l))
+                        brand_row = tt_attrib.attribute(r["_acct"], camp, M_tt)
                         if not brand_row:
                             if sp > 0: tt_lost[(r["_acct"], camp)] += sp
                             seen.add(k)   # orfan numărat O DATĂ (contul partajat e iterat de mai multe branduri)
@@ -260,21 +338,31 @@ def live_rows(days=14, since=None, until=None, platforms=("meta", "tiktok")):
             for (ac, cp), v in sorted(tt_lost.items(), key=lambda x: -x[1])[:6]:
                 sys.stderr.write(f"    {ac} | {cp[:55]} | {round(v)} RON\n")
 
-    # dedup pe PK (date, sku, platform): un grup account-scoped (ex. "Covoare" pe 2 magazine) ar produce
-    # 2 rânduri cu același (date,key,platform) și brand_id diferit → coliziune ON CONFLICT. Sumăm + brand dominant.
-    final = {}  # (date, key, platform) -> [spend_total, brand_id_dominant, max_contrib]
+    # dedup pe PK REAL (date, brand_id, sku, platform). ⚠️ Înainte cheia era (date,key,platform) și
+    # spend-ul mai multor branduri se colapsa pe „brandul dominant" — un grup account-scoped (ex. „Covoare"
+    # pe 2 magazine) muta banii celuilalt magazin pe brandul greșit. PK-ul include brand_id, deci fiecare
+    # brand își păstrează suma proprie. Vezi auditul 05-sep-2026.
+    final = {}  # (date, brand_id, key, platform) -> spend_total
+    unmapped = {}  # chei fara brand rezolvat -> nu pot fi scrise (brand_id e in PK => NOT NULL)
     for (d, bid, key, plat), sp in agg.items():
         if not d:
             continue
-        k = (d, key, plat); cur = final.get(k)
-        if cur is None:
-            final[k] = [sp, bid, sp]
-        else:
-            cur[0] += sp
-            if sp > cur[2]:
-                cur[1], cur[2] = bid, sp
+        if bid is None:
+            unmapped[(d, key, plat)] = unmapped.get((d, key, plat), 0.0) + sp
+            continue
+        k = (d, bid, key, plat)
+        final[k] = final.get(k, 0.0) + sp
+    if unmapped:
+        # NU le lipim pe „brandul dominant" ca inainte — aia muta banii pe brandul GRESIT si o facea
+        # tacut. Le raportam explicit: spend real care exista, dar pe care nu-l putem atribui.
+        tot = sum(unmapped.values())
+        sys.stderr.write("\n\u26a0 %d chei FARA brand rezolvat = %d RON NU se scriu in cache.product_ad_spend\n"
+                         "   (brand_id face parte din PK, deci nu poate fi NULL). Top:\n"
+                         % (len(unmapped), round(tot)))
+        for (d, key, plat), v in sorted(unmapped.items(), key=lambda x: -x[1])[:10]:
+            sys.stderr.write("    %s %-6s | %-45s | %d RON\n" % (d, plat, str(key)[:45], round(v)))
     out = [(d, brand, key, title.get(key, key), plat, round(tot, 2), "meta_tiktok_campaign_map")
-           for (d, key, plat), (tot, brand, _) in final.items()]
+           for (d, brand, key, plat), tot in final.items()]
     return out
 
 
@@ -310,12 +398,12 @@ def main():
     from psycopg2.extras import execute_values
     mconn = metrics_conn(); mcur = mconn.cursor()
     # PUR UPSERT (fără DELETE): la --platform tiktok, rândurile au toate platform='tiktok' → ON CONFLICT
-    # atinge DOAR PK-urile (date,sku,'tiktok'); Facebook (platform='meta') rămâne intact. Cheile noi ⊇ cele
+    # atinge DOAR PK-urile (date,brand_id,sku,'tiktok'); Facebook (platform='meta') rămâne intact. Cheile noi ⊇ cele
     # vechi (același mapping de produs, doar atribuirea de brand + acoperirea diferă) → fără rânduri orfane.
     # Sigur la rulări parțiale (rețea flaky): nu pierde date existente, doar le actualizează/adaugă.
     execute_values(mcur,
         "INSERT INTO cache.product_ad_spend (date,brand_id,sku,product_title,platform,spend_ron,source) VALUES %s "
-        "ON CONFLICT (date,sku,platform) DO UPDATE SET spend_ron=EXCLUDED.spend_ron, brand_id=COALESCE(EXCLUDED.brand_id,cache.product_ad_spend.brand_id), source=EXCLUDED.source, computed_at=now()",
+        "ON CONFLICT (date,brand_id,sku,platform) DO UPDATE SET spend_ron=EXCLUDED.spend_ron, source=EXCLUDED.source, computed_at=now()",
         rows, page_size=2000)
     # IDEMPOTENT: șterge cheile SKU stale (mapping vechi/dublu-cont) DOAR în scope-urile (date,brand,platform)
     # reîmprospătate ACUM. Filtrul pe platform respectă --platform tiktok (nu atinge Meta). Vezi [[sku-ad-spend-mapping]].
