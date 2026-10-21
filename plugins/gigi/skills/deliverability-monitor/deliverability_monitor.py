@@ -19,7 +19,7 @@ doar pentru brandurile RO (EST/GT/NUB/GRAN/RED/BON/OFER/MAG/...); brandurile
 straine (CZ/PL/BG) n-au shippingProvince populat -> apar ca '?'.
 
 Calculeaza: rata de refuz, venitul-la-risc si transportul irosit
-(colete refuzate x cost_per_parcel x2 = dus-intors) pe brand, pe curier,
+(colete refuzate x cost real/colet x1 — HARTA: „NU x2", pe RO nu exista cost de retur) pe brand, pe curier,
 pe judet si pe SKU. Scoate la suprafata buzunarele judet x curier x brand cele
 mai scumpe ca ops sa poata bloca judete, sa stranga validarea adresei la COD,
 sau sa schimbe curierul pe regiune.
@@ -375,7 +375,9 @@ class Bucket:
 
 def wasted_transport(refused, prefix, transport):
     cpp = transport.get(prefix, 0.0)
-    return refused * cpp * 2  # dus + intors
+    # x1, nu x2 (Orchestrator/owner, 22-oct-2026, regula din HARTA/profit_core.refusal_transport_multiplier): coletul
+    # plecat costa o data; pe RO nu exista cost de retur, iar pe intl costul e deja mai mare.
+    return refused * cpp
 
 
 # ---------------- formatting -----------------
@@ -397,9 +399,9 @@ def main():
     ap.add_argument("--limit", type=int, default=20)
     ap.add_argument("--min-sent", type=int, default=30,
                     help="ignora bucketele cu mai putine colete trimise (zgomot)")
-    ap.add_argument("--source", choices=["awb", "oh", "vps"], default="awb",
-                    help="awb = AWBprint (default, instant, judet inclus; statusurile INTL inghetate din 27-sep); "
-                         "oh = Order Hub (statusuri din colete, inclusiv intl, transport real); "
+    ap.add_argument("--source", choices=["awb", "oh", "vps"], default="oh",
+                    help="oh = Order Hub (implicit: statusuri din colete, inclusiv intl, transport real); "
+                         "awb = AWBprint (statusurile INTL inghetate din 27-sep, subnumara Bucsa); "
                          "vps = profitability.db de pe VPS prin SSH + judet din metrics (incomplet)")
     a = ap.parse_args()
     brand = resolve_brand(a.brand)
@@ -441,7 +443,7 @@ def main():
     print("  Colete REFUZATE:                           %s" % m(tot.refused))
     print("  Rata refuz:                                %.1f%%" % tot.rate)
     print("  Venit la risc (refuzat, valuta mixta):     ~%s" % m(tot.rev_risk))
-    print("  Transport IROSIT (refuz x cost x2):        ~%s RON" % m(tot_wasted))
+    print("  Transport IROSIT (refuz x cost real):      ~%s RON" % m(tot_wasted))
 
     # ---------------- BY BRAND ----------------
     if a.by == "brand":
