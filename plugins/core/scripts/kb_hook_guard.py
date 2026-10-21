@@ -6,6 +6,9 @@ permission decision:
   - ask   : require explicit user confirmation
   - (none): allow normal flow (exit 0, no output)
 
+`KB_GUARD_ASK=off` in env sare peste ASK (al meu si al echipei) — opt-out PERSONAL, pus in
+`~/.claude/settings.json`, pentru cine nu vrea sa fie intrebat. DENY nu se atinge niciodata.
+
 Rules = built-in critical defaults (always on) + team rules synced from the DB
 into ~/.claude/team-guardrails.json (see kb_guard_sync.py) or the plugin's
 committed guardrails.json. No DB call here -> no latency on the hot path.
@@ -46,6 +49,19 @@ def load_custom():
     return [], []
 
 
+def ask_oprit() -> bool:
+    """Omul a cerut sa nu mai fie intrebat: `KB_GUARD_ASK=off` in env.
+
+    PERSONAL, nu pentru echipa: variabila se pune in `~/.claude/settings.json` al fiecaruia, nu in plugin.
+    Sare DOAR peste ASK — cel built-in si cel din regulile echipei. DENY ramane intreg, inclusiv regulile
+    sincronizate din DB (DDL distructiv, DELETE si UPDATE fara WHERE, dump de baza, reset de schema).
+
+    De ce ca intrerupator si nu prin stergerea regulilor: ASK-urile sunt bune pentru ceilalti, iar o lista
+    stearsa din plugin ar dispărea la toata lumea, tacut, la urmatorul sync.
+    """
+    return (os.environ.get("KB_GUARD_ASK") or "").strip().lower() == "off"
+
+
 def _decide(decision, reason):
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
@@ -70,12 +86,13 @@ def main():
                 _decide("deny", reason)
         except re.error:
             continue
-    for pat, reason in ASK + cask:
-        try:
-            if re.search(pat, cmd):
-                _decide("ask", reason)
-        except re.error:
-            continue
+    if not ask_oprit():
+        for pat, reason in ASK + cask:
+            try:
+                if re.search(pat, cmd):
+                    _decide("ask", reason)
+            except re.error:
+                continue
     sys.exit(0)  # allow
 
 
