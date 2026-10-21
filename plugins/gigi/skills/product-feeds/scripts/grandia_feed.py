@@ -117,13 +117,23 @@ if __name__=="__main__":
     if not TOKEN: sys.exit("lipseste SHOPIFY_GRAN_TOKEN")
     prods=fetch_all()
     outdir=sys.argv[1] if len(sys.argv)>1 else "."
+    instock=[p for p in prods if p["instock"]]
+    # Garda: un raspuns Shopify ciudat (0 produse / stoc 0 aproape peste tot) nu are voie sa goleasca feed-urile.
+    # Iesim cu eroare -> nu vine heartbeat -> data_health alerteaza; feed-urile vechi raman pe loc.
+    if len(prods)<100 or len(instock)<0.5*len(prods):
+        sys.exit(f"GARDA: produse={len(prods)} in_stock={len(instock)} - nu suprascriu feed-urile")
     g=google_feed(prods)
     # feed-uri servite la feed.grandia.ro/<nume>
-    feeds={"favi.xml": g, "google.xml": g}   # Favi acceptă formatul Google Shopping
+    # Favi taxeaza click si pe out_of_stock -> in favi.xml intra DOAR produsele cu stoc (21.10.2026).
+    feeds={"favi.xml": google_feed(instock), "google.xml": g}   # Favi acceptă formatul Google Shopping
     try:
         feeds["compari.xml"]=compari_feed(prods)   # dacă funcția e definită
     except NameError:
         pass
+    # scriere atomica: Favi/Google nu trebuie sa prinda niciodata un fisier scris pe jumatate (cron la 15 min)
     for name,content in feeds.items():
-        open(os.path.join(outdir,name),"w",encoding="utf-8").write(content)
-    print(f"produse: {len(prods)} | in_stock: {sum(1 for p in prods if p['instock'])} | feed-uri: {', '.join(feeds)}")
+        tmp=os.path.join(outdir,"."+name+".tmp")
+        open(tmp,"w",encoding="utf-8").write(content)
+        os.chmod(tmp,0o644)
+        os.replace(tmp,os.path.join(outdir,name))
+    print(f"produse: {len(prods)} | in_stock: {len(instock)} | feed-uri: {', '.join(feeds)}")
