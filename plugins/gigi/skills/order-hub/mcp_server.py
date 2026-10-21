@@ -29,8 +29,49 @@ def _kb(k):
         return ""
 
 
-if not os.environ.get("OH_CS_SB_TOKEN"):
-    os.environ["OH_CS_SB_TOKEN"] = _kb("OH_CS_SB_TOKEN")
+# CARE CHEIE, ÎN CE ORDINE (21-oct-2026, când MCP-ul a ajuns pe mașinile echipei)
+#   1. `OH_CS_SB_TOKEN` din ENV — mașinile CS o pun explicit; are scopurile de SCRIERE;
+#   2. cheia OMULUI de pe mașina asta, din seif: `OH_CS_TOKEN_<handle>` (handle-ul din `kb.py whoami`). Așa
+#      istoricul comenzii arată cine a apăsat, iar revocarea e pe un singur om;
+#   3. `OH_CS_SB_TOKEN` din seif — comportamentul de până acum, ca mașinile CS de azi să nu se strice;
+#   4. `OH_TEAM_READ_TOKEN` din seif — DOAR `cs.citire`.
+# Cu o cheie de citire, `oh_proba` și `oh_executa` nu se înregistrează deloc: nu apar în lista de unelte a
+# sesiunii. Altfel omul le-ar vedea, le-ar chema și ar primi 403 — același refuz, dar după ce a crezut că poate.
+#
+# ⚠️ ONEST: gardul ăsta e o CONVENȚIE, nu o barieră. `kb.py secret-get` citește `SELECT value FROM secrets WHERE
+# key = …`, fără nicio filtrare pe om, deci orice mașină cu bootstrap-ul de KB poate lua ORICE cheie, inclusiv pe
+# cea de scriere. Bariera reală se face doar scoțând cheia comună din seif (să stea doar în env-ul mașinilor CS)
+# sau filtrând secretele pe om în KB. Decizia e a ownerului; aici doar nu dăm scrierea din greșeală.
+def _handle():
+    try:
+        out = subprocess.run(["uv", "run", KB, "whoami"], capture_output=True, text=True, timeout=60).stdout
+        for bucata in out.split("|"):
+            if "employee:" in bucata:
+                return bucata.split(":", 1)[1].strip().lower()
+    except Exception:
+        pass
+    return ""
+
+
+def _alege_cheia():
+    """(token, poate_scrie) — vezi ordinea de mai sus. Nu printează niciodată cheia."""
+    t = os.environ.get("OH_CS_SB_TOKEN")
+    if t:
+        return t, True
+    h = _handle()
+    if h:
+        t = _kb("OH_CS_TOKEN_%s" % h.upper())
+        if t:
+            return t, True
+    t = _kb("OH_CS_SB_TOKEN")
+    if t:
+        return t, True
+    return (os.environ.get("OH_TEAM_READ_TOKEN") or _kb("OH_TEAM_READ_TOKEN") or ""), False
+
+
+_TOKEN, POATE_SCRIE = _alege_cheia()
+if _TOKEN:
+    os.environ["OH_CS_SB_TOKEN"] = _TOKEN          # clientul `order_hub.py` citește o singură variabilă
 
 
 def _env():
@@ -148,38 +189,42 @@ def oh_neplecate_pe_sku(sku: str, magazin: str = "", limita: int = 200) -> str:
 
 
 # ─────────── ACȚIUNI (probă → om → execuție) ───────────
-@mcp.tool()
-def oh_proba(actiune: str, comanda: str, utilizator: str, params_json: str = "{}", motiv: str = "",
-             magazin: str = "") -> str:
-    """PROBA unei acțiuni Order Hub — NU scrie nimic. Întoarce plan, blocaje (clasa imposibil/politica),
-    peste_necesar și confirmare (valabilă 15 min). actiune = nume din oh_actiuni (ex. anulare, refacere, adresa,
-    oprire, eliberare, factura, rambursare); utilizator = numele omului de la CS, cum îl spune el (nu-l alege tu);
-    params_json = parametrii acțiunii ca obiect JSON, ex. {"colete": 2}. comanda-noua: comanda="" și magazin=..."""
-    try:
-        a = _actiune(actiune, comanda, utilizator, motiv, params_json, magazin, "")
-    except ValueError as e:
-        return "parametru: %s · nimic trimis" % e
-    return _run(OH, a, timeout=150)
+# PROBA și EXECUȚIA se înregistrează DOAR cu cheia de scriere (vezi POATE_SCRIE). Pe o mașină cu cheia
+# de citire, uneltele astea nu există — nu sunt doar refuzate.
+if POATE_SCRIE:
+    @mcp.tool()
+    def oh_proba(actiune: str, comanda: str, utilizator: str, params_json: str = "{}", motiv: str = "",
+                 magazin: str = "") -> str:
+        """PROBA unei acțiuni Order Hub — NU scrie nimic. Întoarce plan, blocaje (clasa imposibil/politica),
+        peste_necesar și confirmare (valabilă 15 min). actiune = nume din oh_actiuni (ex. anulare, refacere, adresa,
+        oprire, eliberare, factura, rambursare); utilizator = numele omului de la CS, cum îl spune el (nu-l alege tu);
+        params_json = parametrii acțiunii ca obiect JSON, ex. {"colete": 2}. comanda-noua: comanda="" și magazin=..."""
+        try:
+            a = _actiune(actiune, comanda, utilizator, motiv, params_json, magazin, "")
+        except ValueError as e:
+            return "parametru: %s · nimic trimis" % e
+        return _run(OH, a, timeout=150)
 
 
-@mcp.tool()
-def oh_executa(actiune: str, comanda: str, utilizator: str, motiv: str, confirmare: str, params_json: str = "{}",
-               peste: str = "", magazin: str = "") -> str:
-    """EXECUȚIA unei acțiuni Order Hub (<actiune>-apply). Cheam-o DOAR după ce ai arătat omului planul și blocajele
-    din oh_proba și ți-a dat OK explicit — serverul nu mai cere aprobare, tu ești poarta. Aceiași parametri ca la
-    probă + motiv + confirmare (din probă); peste = exact codurile din peste_necesar (virgulă), doar cu acordul
-    omului; un blocaj `imposibil` nu se trece. ⚠️ Banii (factura, factura-storno, rambursare, ramburs-platit) sunt
-    IREVERSIBILI. Cod 2 plan_schimbat/expirata = probă nouă; 4 = parțial, NU repeta; 5 = repetă IDENTIC sau
-    oh_operatie, NU probă nouă."""
-    if not (confirmare or "").strip():
-        return "confirmare: lipsește (vine din oh_proba) · nimic trimis"
-    if not (motiv or "").strip():
-        return "motiv: lipsește · nimic trimis"
-    try:
-        a = _actiune(actiune, comanda, utilizator, motiv, params_json, magazin, peste, confirmare)
-    except ValueError as e:
-        return "parametru: %s · nimic trimis" % e
-    return _run(OH, a + ["--apply"], timeout=150, executie=True)
+    @mcp.tool()
+    def oh_executa(actiune: str, comanda: str, utilizator: str, motiv: str, confirmare: str, params_json: str = "{}",
+                   peste: str = "", magazin: str = "") -> str:
+        """EXECUȚIA unei acțiuni Order Hub (<actiune>-apply). Cheam-o DOAR după ce ai arătat omului planul și blocajele
+        din oh_proba și ți-a dat OK explicit — serverul nu mai cere aprobare, tu ești poarta. Aceiași parametri ca la
+        probă + motiv + confirmare (din probă); peste = exact codurile din peste_necesar (virgulă), doar cu acordul
+        omului; un blocaj `imposibil` nu se trece. ⚠️ Banii (factura, factura-storno, rambursare, ramburs-platit) sunt
+        IREVERSIBILI. Cod 2 plan_schimbat/expirata = probă nouă; 4 = parțial, NU repeta; 5 = repetă IDENTIC sau
+        oh_operatie, NU probă nouă."""
+        if not (confirmare or "").strip():
+            return "confirmare: lipsește (vine din oh_proba) · nimic trimis"
+        if not (motiv or "").strip():
+            return "motiv: lipsește · nimic trimis"
+        try:
+            a = _actiune(actiune, comanda, utilizator, motiv, params_json, magazin, peste, confirmare)
+        except ValueError as e:
+            return "parametru: %s · nimic trimis" % e
+        return _run(OH, a + ["--apply"], timeout=150, executie=True)
+
 
 
 if __name__ == "__main__":

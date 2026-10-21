@@ -50,6 +50,18 @@ import configure  # noqa: E402  reuse set_env_vars / set_plugins / ensure_import
 MARKETPLACE_REPO = "cata2lin/team-intelligence"   # GitHub owner/repo (the marketplace source)
 MARKETPLACE_NAME = "team-intelligence"            # name in .claude-plugin/marketplace.json
 
+# MCP servers registered for EVERY teammate (21-oct-2026). Until now these were added by hand on each machine
+# (`claude mcp add --scope user ...`), so in practice only one person had them -- which is why Anne could not read
+# Order Hub and counted orders from AWBprint instead (~10% short: the international statuses there are frozen).
+# Keep this list SHORT: only servers that are useful to everyone and read-only by default. The Order Hub server
+# picks its own key (see its header): the person's own key if the vault has one, otherwise the team read-only key,
+# and it hides the write tools when it only has a read key.
+MCP_SERVERS = {
+    "arona-orderhub": "plugins/gigi/skills/order-hub/mcp_server.py",
+    "arona-stock": "plugins/gigi/skills/arona-stock/mcp_server.py",
+    "arona-depozit": "plugins/gigi/skills/arona-depozit/mcp_server.py",
+}
+
 
 def _ask(label, default=None, secret=False):
     suffix = f" [{default}]" if default else ""
@@ -267,9 +279,21 @@ def main():
             _run([cli, "plugin", "marketplace", "add", MARKETPLACE_REPO], check=False)
             for p in plugins:
                 _run([cli, "plugin", "install", f"{p}@{MARKETPLACE_NAME}", "--scope", "user"], check=False)
+            for nume, cale in sorted(MCP_SERVERS.items()):
+                abs_cale = os.path.join(REPO, cale.replace("/", os.sep))
+                if not os.path.exists(abs_cale):
+                    print(f"   (skip MCP {nume}: {abs_cale} missing)")
+                    continue
+                # idempotent: remove first (ignores "not found"), then add -- re-running the installer must not
+                # fail just because the server is already registered
+                _run([cli, "mcp", "remove", "--scope", "user", nume], check=False)
+                _run([cli, "mcp", "add", "--scope", "user", nume, "--", "uv", "run", abs_cale], check=False)
+            print(f"   [ok] MCP servers registered (user scope): {', '.join(sorted(MCP_SERVERS))}")
         else:
             print("\n   (claude CLI not on PATH -- the plugins are enabled in settings.json and")
             print("    will load when you start Claude Code; no further action needed.)")
+            print("    [!] the arona MCP servers need the CLI: install it, then re-run this onboarding,")
+            print(f"        or add them by hand: claude mcp add --scope user <name> -- uv run {REPO}/<path>")
     if not npx_ok:
         print("\n   [!] Node.js / npx not found -- install it (https://nodejs.org) so the 5")
         print("       read-only Postgres MCP servers can start. The DB/KB still work without it.")
