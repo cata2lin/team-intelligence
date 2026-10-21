@@ -19,6 +19,7 @@ query($cursor: String) {
       carac: metafield(namespace: "custom", key: "caracteristici_produs") { value }
       gpc1: metafield(namespace: "mm-google-shopping", key: "google_product_category") { value }
       gpc2: metafield(namespace: "mc-facebook", key: "google_product_category") { value }
+      category { fullName }
     } }
   }
 }"""
@@ -72,7 +73,9 @@ def fetch_all():
                 compare=v.get("compareAtPrice") or "",
                 instock=bool(v.get("availableForSale")) or (v.get("inventoryQuantity") or 0)>0,
                 params=parse_params((n.get("carac") or {}).get("value")),
-                gpc=((n.get("gpc1") or {}).get("value") or (n.get("gpc2") or {}).get("value") or "").strip(),
+                # categoria Google: ID-ul din metafield; altfel calea din taxonomia standard Shopify (aliniată cu cea Google)
+                gpc=((n.get("gpc1") or {}).get("value") or (n.get("gpc2") or {}).get("value")
+                     or ((n.get("category") or {}).get("fullName") or "").replace("Uncategorized","") or "").strip(),
             ))
         if not p["pageInfo"]["hasNextPage"]: break
         cursor=p["pageInfo"]["endCursor"]
