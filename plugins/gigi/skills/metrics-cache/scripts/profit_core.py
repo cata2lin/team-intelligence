@@ -12,14 +12,37 @@ Din auditul celor 5 scripturi (2026-06-20): înainte fiecare trata TVA/COGS/tran
 from collections import defaultdict
 
 # ---- TVA per ȚARĂ (nu per prefix arbitrar) ----
-VAT_BY_COUNTRY = {"RO": 0.21, "BG": 0.20, "CZ": 0.21, "PL": 0.23, "HU": 0.27, "SK": 0.23, "HR": 0.25}  # SK 23% din 2025
-PREFIX_COUNTRY = {"BG": "BG", "BONBG": "BG", "CZ": "CZ", "PL": "PL", "LUX": "RO", "NOC": "RO"}  # restul = RO
+VAT_BY_COUNTRY = {"RO": 0.21, "BG": 0.20, "CZ": 0.21, "PL": 0.23, "HU": 0.27, "SK": 0.23, "HR": 0.25,
+                  "MD": 0.20}  # SK 23% din 2025; MD = Moldova (Going Stellar SRL, altă firmă)
+PREFIX_COUNTRY = {"BG": "BG", "BONBG": "BG", "CZ": "CZ", "PL": "PL", "LUX": "RO", "NOC": "RO",
+                  "HU": "HU", "SK": "SK", "MD": "MD"}  # restul = RO
+# ⚠️ Prefixul NU e de ajuns la magazinele care vând în mai multe țări dintr-unul singur: măsurat pe
+# 22-oct-2026, **DUPBG (Duppo EU) are comenzi în EUR, HUF ȘI CZK** sub același prefix. Pentru ele,
+# țara se ia din MONEDA comenzii, nu din prefix — altfel o comandă maghiară primește TVA 21% în loc
+# de 27%. De aceea există `vat_for_order`, care preferă țara explicită, apoi moneda, apoi prefixul.
+CURRENCY_COUNTRY = {"RON": "RO", "CZK": "CZ", "HUF": "HU", "PLN": "PL", "MDL": "MD", "BGN": "BG",
+                    "EUR": "BG"}  # EUR = Bulgaria la noi (BG a trecut la euro); de revizuit dacă apare alt stat
+
 
 def vat_for_country(country: str) -> float:
     return VAT_BY_COUNTRY.get((country or "RO").upper(), 0.21)
 
 def vat_for_prefix(prefix: str) -> float:
     return vat_for_country(PREFIX_COUNTRY.get(prefix, "RO"))
+
+
+def vat_for_order(prefix: str = "", currency: str = "", country: str = "") -> float:
+    """TVA-ul unei COMENZI: țara explicită > moneda comenzii > prefixul magazinului.
+
+    Prefixul minte la magazinele multi-țară (Duppo EU vinde în BG, HU și CZ dintr-unul singur), iar
+    `vat_for_prefix` rămâne doar pentru compatibilitate cu apelurile vechi.
+    """
+    if country:
+        return vat_for_country(country)
+    c = CURRENCY_COUNTRY.get((currency or "").upper())
+    if c:
+        return vat_for_country(c)
+    return vat_for_prefix(prefix)
 
 # ---- COGS în RON (override are prioritate, ca engine-ul; conversie din moneda magazinului) ----
 def cogs_ron(qty=0, line_cogs_store=None, unit_cost_store=None, rate_store=1.0, override=None, fx=None) -> float:
@@ -73,6 +96,46 @@ REVENUE_STATUSES = {"Livrata"}
 
 def is_revenue(status_category: str) -> bool:
     return status_category in REVENUE_STATUSES
+
+# ---- Marfa DATĂ GRATIS: cost de marketing, nu COGS ----
+# Praful de sub covor al oricărui raport de profit: o comandă LIVRATĂ cu venit 0 (mostră, influencer,
+# UGC, cadou, înlocuire gratuită) are cost de marfă real, dar zero venit. Dacă intră în COGS, raportul
+# arată pierdere acolo unde de fapt am făcut marketing.
+# Măsurat pe 22-oct-2026, sep+oct: **1.261 de comenzi livrate cu venit 0, cu 47.189 lei marfă** —
+# Grandia 16.330, Esteban 10.085 (476 comenzi), Artevita 3.523, GT 2.685. Pe Artevita asta ducea
+# COGS-ul la 140,5% (40 din 63 de comenzi erau gratuite); fără ele iese 36,6%, adică normal.
+# Regula e aceeași pe TOATE magazinele — inclusiv comenzile de influencer MD de 0 MDL și UGC-urile.
+SAMPLE_REVENUE_EPS = 0.005          # sub jumătate de ban = venit zero (evită erorile de rotunjire)
+
+
+def is_sample_order(status_category: str, revenue) -> bool:
+    """Comandă livrată cu venit 0 ⇒ marfă dată gratis. Costul ei e marketing, nu COGS.
+
+    Doar pe LIVRATE: o comandă anulată sau refuzată n-a dat marfa nimănui, deci nu e nici mostră.
+    """
+    return is_revenue(status_category) and float(revenue or 0) <= SAMPLE_REVENUE_EPS
+
+
+def split_cogs_vs_samples(orders):
+    """Împarte comenzile în „vândute" și „date gratis".
+
+    orders = iterabil de (status_category, revenue, cogs).
+    Întoarce (venit, cogs_vandut, cost_mostre, numar_mostre) — toate în moneda primită, fără conversii.
+    COGS% corect = cogs_vandut / venit; `cost_mostre` se adaugă la marketing, nu la COGS.
+    """
+    venit = cogs_vandut = cost_mostre = 0.0
+    n = 0
+    for status, revenue, cogs in orders:
+        if not is_revenue(status):
+            continue                                  # necomandă de venit: nu intră nici în COGS
+        if is_sample_order(status, revenue):
+            cost_mostre += float(cogs or 0)
+            n += 1
+        else:
+            venit += float(revenue or 0)
+            cogs_vandut += float(cogs or 0)
+    return venit, cogs_vandut, cost_mostre, n
+
 
 # ---- Marketing alocat pe COMENZI (CPA uniform pe categorie/brand) ----
 def allocate_marketing_by_orders(cache_rows, sold_skus, sku_to_group, orders_count, brand_orders):
