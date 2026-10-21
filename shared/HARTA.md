@@ -37,6 +37,8 @@
 
 ## „Vreau …" → unde mă duc
 - **Status comandă / livrate / refuzate** → **Order Hub** (MCP `arona-orderhub`: `oh_comanda`, `oh_rata_livrare`) — NU AWBprint (statusurile intl sunt înghețate acolo din 27-sep).
+- **Livrabilitate pe comandă, pe lună** (stare din colete + transport real fără TVA) → OH `GET /api/cs/livrabilitate?luna=AAAA-LL`; `gigi:deliverability-monitor` îl folosește implicit. ⚠️ AWBprint SUBNUMĂRĂ Bucșa (sep: 1.307 vs 1.535 trimise în OH).
+- **Transport real pe comandă** → OH `GET /api/cs/cost-transport` (`shipments.cost_transport`: factura DPD, altfel prețul curierului la creare; fără TVA). AWBprint `orders.transport_cost` n-are valori din 28-aug.
 - **Stoc pe produs / stație / „de ce n-apare pe site"** → MCP `arona-stock` (`stoc_produs`, `stoc_statie`, `magazin_ok`, `stoc_blocat`, `ponderi_stoc` dry-run).
 - **Instrucțiunile unui skill care nu e instalat local** → `second-brain` `read_skill` (hook-ul `skill_router` îți propune skill-urile singur).
 - **Profit/contribuție per SKU sau categorie** → `profit_by_sku.py` (NU fulfillment-analytics — ăla e breakeven/AWB analytics).
