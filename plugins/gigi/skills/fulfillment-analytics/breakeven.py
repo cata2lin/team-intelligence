@@ -147,7 +147,62 @@ def _shopify_cost_map(prefix):
     return m
 
 
-def analyze(cur, key, days, sample, fx):
+# ── Order Hub: livrarea, AOV-ul și transportul REAL (Orchestrator/owner, 22-oct-2026) ──
+# AWBprint are statusurile internaționale înghețate din 27-sep și `transport_cost` gol din 28-aug, deci D-ul intl ieșea
+# prea bun și transportul median 0. `--source oh` le ia din `GET /api/cs/livrabilitate` (starea din colete, transportul
+# fără TVA). COGS% rămâne din AWBprint line_items × Shopify (mutarea lui e pasul de cost, S2).
+_OH_NORM = {"GRAND": "GRAN", "NUBRA": "NUB"}
+_oh_cache = {}
+
+
+def _oh_luna(luna):
+    if luna not in _oh_cache:
+        import json, urllib.request
+        tok = os.getenv("OH_CS_SB_TOKEN") or _kb_secret("OH_CS_SB_TOKEN")
+        baza = os.getenv("OH_CS_BASE", "https://orderhub.arona.ro").rstrip("/")
+        req = urllib.request.Request(baza + "/api/cs/livrabilitate?luna=" + luna,
+                                     headers={"Authorization": "Bearer " + (tok or ""), "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=300) as r:
+            _oh_cache[luna] = json.loads(r.read().decode("utf-8"))
+    return _oh_cache[luna]
+
+
+def oh_livrare(prefix, days):
+    """(delivered, refused, aov, transport_median_fara_tva) din Order Hub pe ultimele `days` zile, pe prefixul comenzii."""
+    import datetime as dt, re
+    azi = dt.date.today()
+    de_la = azi - dt.timedelta(days=days)
+    luni, z = [], de_la.replace(day=1)
+    while z <= azi:
+        luni.append(z.strftime("%Y-%m"))
+        z = (z.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
+    livr = refuz = 0
+    totaluri, transport = [], []
+    for luna in luni:
+        d = _oh_luna(luna)
+        col = {c: i for i, c in enumerate(d["coloane"])}
+        for x in d["randuri"]:
+            if x[col["zi"]] < de_la.isoformat():
+                continue
+            m = re.match(r"^[A-Za-z]+", x[col["comanda"]] or "")
+            p = (m.group(0) if m else "").upper()
+            if _OH_NORM.get(p, p) != prefix:
+                continue
+            st = x[col["stare"]]
+            if x[col["total"]] and x[col["total"]] > 0:
+                totaluri.append(float(x[col["total"]]))
+            if st == "Livrata":
+                livr += 1
+            elif st == "Refuzata":
+                refuz += 1
+            t = x[col["transport_fara_tva"]]
+            if t and t > 0 and st in ("Livrata", "Refuzata", "In curs de livrare"):
+                transport.append(float(t))
+    aov = sum(totaluri) / len(totaluri) if totaluri else 0.0
+    return livr, refuz, aov, (median(transport) if transport else 0.0)
+
+
+def analyze(cur, key, days, sample, fx, source="awb"):
     cfg = STORES[key]; awb = f"%{cfg['awb']}%"
     W = "frisbo_created_at >= now() - interval '%d days'" % days
 
@@ -163,6 +218,9 @@ def analyze(cur, key, days, sample, fx):
     delivered, refused, aov, t_med = cur.fetchone()
     delivered, refused = int(delivered or 0), int(refused or 0)
     aov, t_med = float(aov or 0), float(t_med or 0)
+    t_fara_tva = None
+    if source == "oh":
+        delivered, refused, aov, t_fara_tva = oh_livrare(cfg["shop"], days)
     D = delivered / (delivered + refused) if (delivered + refused) else 0
 
     # COGS% from line_items × Shopify cost
@@ -190,7 +248,7 @@ def analyze(cur, key, days, sample, fx):
     aov_ron = aov * rate
     vat_rev = VAT.get(cfg["country"], VAT_RO)
     rev_ex = aov_ron / (1 + vat_rev)
-    t_ex = t_med / (1 + VAT_RO)
+    t_ex = t_fara_tva if t_fara_tva is not None else t_med / (1 + VAT_RO)   # OH dă transportul deja fără TVA
     if cogs_pct is None:
         return dict(key=key, aov_ron=aov_ron, cur=cfg["cur"], cogs_pct=None, match=match,
                     D=D, t_ex=t_ex, contrib=None, be_cpa=None, be_roas=None)
@@ -210,6 +268,8 @@ def main():
     ap.add_argument("--store", default="all", help="esteban|belasil|carpetto|gento|all")
     ap.add_argument("--days", type=int, default=60)
     ap.add_argument("--sample", type=int, default=4000, help="comenzi pt COGS (line_items)")
+    ap.add_argument("--source", choices=["awb", "oh"], default="awb",
+                    help="livrarea/AOV/transportul: awb = AWBprint (intl înghețat din 27-sep), oh = Order Hub")
     a = ap.parse_args()
     keys = list(STORES) if a.store == "all" else [a.store.lower()]
     cn = awb_conn(); cur = cn.cursor()
@@ -220,7 +280,7 @@ def main():
     for k in keys:
         if k not in STORES:
             print(f"  {k}: necunoscut (alege din {', '.join(STORES)})"); continue
-        r = analyze(cur, k, a.days, a.sample, fx)
+        r = analyze(cur, k, a.days, a.sample, fx, a.source)
         if r["cogs_pct"] is None:
             print(f"{k:13} {r['cur']:>4} {r['aov_ron']:8.0f} {'  n/a':>6} {r['match']*100:5.0f}% "
                   f"{r['D']*100:5.0f}% {r['t_ex']:9.2f} {'COGS indisponibil (token Shopify?)':>0}")
