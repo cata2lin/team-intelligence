@@ -78,6 +78,22 @@ def fetch_all():
         cursor=p["pageInfo"]["endCursor"]
     return out
 
+# Produse respinse de Favi ("products-not-included-in-favi") pt ca productType-ul nostru nu se potriveste cu nicio
+# categorie Favi (lista: favi.ro/partner-dashboard/category-list). Le trimitem in favi.xml cu calea categoriei Favi.
+# Doar unde categoria chiar se potriveste - nu fortam produse auto/beauty/jucarii in categorii false (21.10.2026).
+FAVI_TYPE = {
+    "HA-2046-1": "decorațiuni > accesorii pentru animale de companie",
+    "HA-0829":   "grădină > grădinărit > unelte de grădină",
+    "HA-161":    "textile de uz casnic > perne și fețe de perne",
+    "HA-1163":   "bucătărie > organizare și curățenie > organizatoare pentru bucătărie",
+    "HA-1297":   "bucătărie > organizare și curățenie > organizatoare pentru bucătărie",
+    "HA-0189":   "bucătărie > ajutoare în bucătărie > ustensile de bucătărie",
+    "HA-0134":   "echipament pentru baie > curățenie > produse de curățenie",
+    "HA-0936":   "echipament pentru baie > curățenie > mașini de spălat rufe",
+    "HA-0416":   "camera copiilor > pentru nou-născuți > accesorii baie copii",
+    "HA-0967":   "camera copiilor > pentru nou-născuți > accesorii baie copii",
+}
+
 # --- parametri Favi: din metafield-ul custom.caracteristici_produs (rich text cu "Cheie: valoare") ---
 SKIP_PARAMS={"în colet","întreținere","atenționări","utilizare","utilizare recomandată","conținut","conținut pachet",
              "conținut set + acoperire","se folosește la","folosire","proprietăți cheie","funcții","bun de știut"}
@@ -176,7 +192,8 @@ def google_feed(prods, favi=False, ship=None):
              f'<g:brand>{cdata(p["brand"])}</g:brand>']
         if p["sku"]: it.append(f'<g:mpn>{sx.escape(p["sku"])}</g:mpn>')
         if p["ean"] and (not favi or valid_gtin(p["ean"])): it.append(f'<g:gtin>{sx.escape(p["ean"])}</g:gtin>')
-        if p["ptype"]: it.append(f'<g:product_type>{cdata(p["ptype"])}</g:product_type>')
+        ptype=(FAVI_TYPE.get(p["sku"]) if favi else None) or p["ptype"]
+        if ptype: it.append(f'<g:product_type>{cdata(ptype)}</g:product_type>')
         if favi:
             if p["gpc"]: it.append(f'<g:google_product_category>{sx.escape(p["gpc"])}</g:google_product_category>')
             pm=dict((k.lower(),v) for k,v in p["params"])
