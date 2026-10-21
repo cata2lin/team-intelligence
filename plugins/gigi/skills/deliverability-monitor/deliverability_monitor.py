@@ -297,6 +297,49 @@ def fetch_awb(month, brand):
     return {"rows": rows, "transport": transport, "titles": {}}
 
 
+# ---------------- Order Hub (sursa de adevar pt statusuri, inclusiv internationalele) -----------------
+# AWBprint are statusurile internationale INGHETATE din 27-sep (refuzurile CZ/BG/HU/SK lipsesc -> rata intl iesea
+# mai buna). Orchestrator/owner, 22-oct-2026: monitorul trece pe Order Hub (`GET /api/cs/livrabilitate`, starea din
+# colete, transportul real fara TVA). Cheia = OH_CS_SB_TOKEN din seif, ca la gigi:order-hub.
+OH_BAZA = os.environ.get("OH_CS_BASE", "https://orderhub.arona.ro").rstrip("/")
+
+
+def _token_oh():
+    t = os.environ.get("OH_CS_SB_TOKEN")
+    if t:
+        return t.strip()
+    kb = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "core", "scripts", "kb.py")
+    return subprocess.run(["uv", "run", kb, "secret-get", "OH_CS_SB_TOKEN"], capture_output=True, text=True).stdout.strip()
+
+
+def fetch_oh(month, brand):
+    """Aceeasi forma ca fetch_awb, din Order Hub. transport = costul REAL mediu/colet per prefix (factura DPD sau pretul
+    de la creare, fara TVA)."""
+    import re
+    import urllib.request
+    req = urllib.request.Request(OH_BAZA + "/api/cs/livrabilitate?luna=" + month,
+                                 headers={"Authorization": "Bearer " + _token_oh(), "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=300) as r:
+        d = json.loads(r.read().decode("utf-8"))
+    col = {c: i for i, c in enumerate(d["coloane"])}
+    rows, tcost = [], {}
+    for x in d["randuri"]:
+        nume = x[col["comanda"]] or ""
+        m = re.match(r"^[A-Za-z]+", nume)
+        pfx = _AWB_NORM.get((m.group(0) if m else "").upper(), (m.group(0) if m else "").upper())
+        if not pfx or (brand and pfx != brand):
+            continue
+        rows.append({"prefix": pfx, "order_name": nume, "revenue": float(x[col["total"]] or 0),
+                     "currency": x[col["moneda"]] or "RON", "status": x[col["stare"]] or "",
+                     "courier": _awb_courier(x[col["curier"]]), "courier_status": x[col["ultim_status"]] or "",
+                     "skus": x[col["skus"]] or "", "province": (x[col["judet"]] or "").strip() or "?"})
+        t = x[col["transport_fara_tva"]]
+        if t and float(t) > 0 and x[col["stare"]] in SENT:
+            tcost.setdefault(pfx, []).append(float(t))
+    transport = {p: (sum(v) / len(v)) for p, v in tcost.items()}
+    return {"rows": rows, "transport": transport, "titles": {}}
+
+
 # ---------------- aggregation -----------------
 def split_skus(s):
     out = []
@@ -354,13 +397,14 @@ def main():
     ap.add_argument("--limit", type=int, default=20)
     ap.add_argument("--min-sent", type=int, default=30,
                     help="ignora bucketele cu mai putine colete trimise (zgomot)")
-    ap.add_argument("--source", choices=["awb", "vps"], default="awb",
-                    help="awb = AWBprint (default, instant, ~99%%, toate 21 magazinele, judet inclus); "
+    ap.add_argument("--source", choices=["awb", "oh", "vps"], default="awb",
+                    help="awb = AWBprint (default, instant, judet inclus; statusurile INTL inghetate din 27-sep); "
+                         "oh = Order Hub (statusuri din colete, inclusiv intl, transport real); "
                          "vps = profitability.db de pe VPS prin SSH + judet din metrics (incomplet)")
     a = ap.parse_args()
     brand = resolve_brand(a.brand)
 
-    data = fetch_awb(a.month, brand) if a.source == "awb" else fetch_vps(a.month, brand)
+    data = {"awb": fetch_awb, "oh": fetch_oh, "vps": fetch_vps}[a.source](a.month, brand)
     rows = data["rows"]
     transport = data["transport"]
     titles = data["titles"]
@@ -373,7 +417,7 @@ def main():
     # --------- judet (awb: direct din shipping_address; vps: join in metrics) ----------
     prov = {}
     if a.by in ("county", "pocket"):
-        if a.source == "awb":
+        if a.source in ("awb", "oh"):
             prov = {r["order_name"]: r.get("province", "?") for r in rows}
         else:
             prov = fetch_provinces(a.month, prefixes)
