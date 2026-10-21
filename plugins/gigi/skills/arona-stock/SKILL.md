@@ -2,7 +2,7 @@
 name: arona-stock
 description: "MCP-ul arona-stock — întrebările de STOC prin tool-uri tipate, live: bazinul stock-sync (sync.arona.ro) pe depozite Bartolomeu / Uzina 2 / Teliu și pe magazine, rafturile AWB Arona per stație, erorile care îngheață bazine, sănătatea unui magazin (magazin-ok), marfa blocată (stoc-blocat), ponderile per magazin (ponderi-stoc, dry-run), planul de reaprovizionare, plus SCRIERI cu dry-run: RECEPȚIA unui container pe o stație și MUTAREA de marfă între stații fără dublă numărare. Use when: 'băgă în stoc containerul C53 la Teliu', 'recepția pe C54, 55, 56', '1844 -400 0115-240 au fost mutate de la Uzina la Bartolomeu, scade-le de la Uzina', 'ce a fost adăugat la Bartolomeu azi trebuie scăzut din Uzina', 'depozitul are marfă dar magazinul arată 0', 'se vinde pe stoc 0', 'unde e fizic produsul', 'ce e pe Uzina 2', 'de ce e înghețat bazinul', 'e ok magazinul X', 'marfă invizibilă', 'cât stoc primește fiecare magazin', 'cât reaprovizionez'. Triggers: stoc produs, stoc statie, stock-sync, bazin, ponderi, magazin ok, stoc blocat, reorder, receptie container, mutare stoc, scade din Uzina."
 category: operations
-version: 1.1.0
+version: 1.1.2
 ---
 
 # arona-stock — MCP pentru stoc
@@ -12,7 +12,7 @@ Server: `mcp_server.py` (FastMCP, stdio). Register:
 
 | Tool | Ce răspunde | Sursă |
 |---|---|---|
-| `stoc_produs(sku)` | bazin + per depozit + NUMĂRAT? + per magazin (unități, depozit, regulă) + listinguri nelegate + rafturi fizice | `scripts/stoc_live.py produs` |
+| `stoc_produs(sku)` | bazin + per depozit + NUMĂRAT? / ESTIMAT (Teliu) + per magazin (unități, depozit, regulă) + listinguri nelegate + rafturi fizice | `scripts/stoc_live.py produs` |
 | `stoc_statie(statie)` | ce e pe rafturile unei stații, bucket-uri LOC-*, poziții negative | `scripts/stoc_live.py statie` |
 | `stoc_erori(cod)` | erori DESCHISE stock-sync (bazine înghețate, COUNTED_STORE_RISE_IGNORED…) | `scripts/stoc_live.py erori` |
 | `magazin_ok(magazin)` | problemă de business + cauză tehnică pe fiecare variantă | `/root/Scripturi/magazin_ok.py` (SB `gigi:magazin-ok`) |
@@ -61,8 +61,12 @@ testată doar pe o COPIE a bazei.
 ## Capcane (de ce cifrele diferă)
 - **Trei cifre**: raftul (AWB Arona, fizic) ≠ masterul stock-sync ≠ ce arată Shopify. Un produs NUMĂRAT
   (`countedWarehouses` nevid) își ia stocul din raft: cifra bătută în Shopify e ignorată; marfa se pune pe raft.
+- **Teliu = ESTIMAT (neinventariat)**, nu numărat (ownerul, 21-oct-2026): rămâne vandabil și rămâne în
+  `countedWarehouses` (regula D-023 din stock-sync neschimbată — scoaterea lui ar muta cantități), dar `stoc_produs`
+  îl afișează „ESTIMAT (neinventariat)". Nu-l folosi ca dovadă de stoc numărat.
 - Bazinul e (produs × DEPOZIT): un magazin care nu expune depozitul cu marfa primește 0, oricât procent ar avea.
 - `magazin_ok` ia vânzările 30z din AWBprint (în urmă față de Order Hub) — pentru comenzi/statusuri folosește OH.
+- `magazin_ok`: stock-sync poate ține unități pe un rând de depozit `null` (fără depozit); apare ca `FARA DEPOZIT` în `marfa_in_stock_sync` / „DEPOZIT GRESIT” (reparat 21-oct, înainte crăpa cu TypeError, ex. Apreciat).
 
 ## Neexpuse (TODO — scrieri fără dry-run testat)
 Ajustare master direct în stock-sync (`POST /v1/master-products/:id/stock-adjustments`) — recepția și mutarea se fac

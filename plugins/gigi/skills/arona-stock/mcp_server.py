@@ -89,7 +89,7 @@ def _env():
 @mcp.tool()
 def stoc_produs(sku: str, top: int = 12) -> str:
     """Stocul unui produs dintr-o privire, LIVE: bazinul stock-sync (total, pe depozite BARTOLOMEU/UZINA_2/TELIU,
-    dacă e NUMĂRAT în AWB Arona — atunci cifra pusă în Shopify e ignorată), fiecare magazin (cât are, cât i s-a alocat,
+    dacă e NUMĂRAT în AWB Arona — atunci cifra pusă în Shopify e ignorată; Teliu apare ESTIMAT (neinventariat)), fiecare magazin (cât are, cât i s-a alocat,
     din ce depozit, regula de distribuție), listingurile NElegate (MISSING_BARCODE, NO_MASTER_MATCH, INACTIVE…)
     și rafturile fizice din AWB Arona per stație (cu sinonimele SKU-ului). Răspunde la „depozitul are marfă dar
     magazinul arată 0", „de ce se vinde pe stoc 0", „unde e fizic produsul". sku = SKU exact (ex. HA-0000). Doar citire."""

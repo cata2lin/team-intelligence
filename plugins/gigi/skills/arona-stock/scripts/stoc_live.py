@@ -6,7 +6,7 @@ Rulează PE serverul de scripturi (are nevoie de api/scan.py pentru stock-sync �
 De pe laptop, MCP-ul arona-stock îl trimite prin ssh pe stdin (`.venv/bin/python - <subcomanda>`),
 deci NU trebuie copiat pe server.
 
-  produs --sku HA-0000          bazin stock-sync (total + per depozit + numărat/necontat), per magazin
+  produs --sku HA-0000          bazin stock-sync (total + per depozit + numărat / ESTIMAT Teliu / nenumărat), per magazin
                                 (unități, per depozit, regula), listinguri nelegate (MISSING_BARCODE…)
                                 și rafturile fizice per stație — cele trei cifre puse una lângă alta
   statie --statie "Uzina 2"     ce e pe rafturile unei stații: total, nr SKU, cele mai mari poziții
@@ -28,6 +28,14 @@ from api.scan import _ss_get  # noqa: E402
 LOC_DB = "file:/root/Scripturi/data/locations.db?mode=ro"
 STATII = {"bartolomeu": "Bartolomeu", "uzina 2": "Uzina 2", "uzina2": "Uzina 2", "uzina_2": "Uzina 2",
           "teliu": "Teliu", "parfumuri": "Parfumuri"}
+# Depozitele a căror cifră e ESTIMATĂ, nu numărată (Teliu, neinventariat — ownerul, 20/21-oct-2026). Doar eticheta.
+ESTIMATE = {"TELIU"}
+ETICHETA_ESTIMAT = "ESTIMAT (neinventariat)"
+
+
+def e_estimat(depozit_sau_statie):
+    """TELIU (stock-sync) sau „Teliu" / „Teliu - stoc suspect" (statia din AWB Arona)."""
+    return str(depozit_sau_statie or "").strip().upper().replace(" ", "_").startswith("TELIU")
 
 
 def _q(s):
@@ -87,13 +95,25 @@ def cmd_produs(a):
         if not d:
             print("\n[barcode %s] fără master în stock-sync (sau eroare de citire)" % bc)
             continue
-        bw = ", ".join("%s %d" % (w.get("warehouse") or "fără depozit", w.get("units") or 0) for w in d.get("byWarehouse") or [])
+        bw = ", ".join("%s %d%s" % (w.get("warehouse") or "fără depozit", w.get("units") or 0,
+                                    " (estimat)" if e_estimat(w.get("warehouse")) else "")
+                       for w in d.get("byWarehouse") or [])
         print("\n[barcode %s] MASTER: %s · %s · total %s buc · siguranță %s"
               % (bc, d.get("name"), d.get("status"), d.get("totalUnits"), d.get("safetyStock")))
         print("  pe depozite: %s" % (bw or "-"))
         cw = d.get("countedWarehouses") or []
-        print("  NUMĂRAT în AWB Arona: %s%s" % (", ".join(cw) if cw else "NU (stocul vine din magazine)",
-              "  → cifra pusă în Shopify e ignorată; marfa se pune pe raft" if cw else ""))
+        # Teliu e ESTIMAT, nu numărat (ownerul, 20/21-oct-2026): rămâne vandabil și în lista `countedWarehouses` din
+        # stock-sync (regula D-023 neschimbată), dar cifra lui nu e o numărătoare. Doar eticheta se schimbă aici.
+        numarate = [w for w in cw if not e_estimat(w)]
+        estimate = [w for w in cw if e_estimat(w)]
+        if not cw:
+            print("  NUMĂRAT în AWB Arona: NU (stocul vine din magazine)")
+        if numarate:
+            print("  NUMĂRAT în AWB Arona: %s  → cifra pusă în Shopify e ignorată; marfa se pune pe raft"
+                  % ", ".join(numarate))
+        if estimate:
+            print("  %s: %s  → vandabil, dar cifra nu e numărată (inventar planificat)"
+                  % (ETICHETA_ESTIMAT, ", ".join(estimate)))
         print("  ultima alocare: %s · văzut: %s" % (d.get("deliveredAt"), d.get("lastSeenAt")))
         print("  %-22s %7s %7s  %-38s %s" % ("magazin", "are", "alocat", "per depozit (unități)", "regula"))
         for s in sorted(d.get("stores") or [], key=lambda x: -(x.get("currentUnits") or 0)):
@@ -124,7 +144,7 @@ def cmd_produs(a):
             if not code.upper().startswith("LOC-REBUT"):
                 pe[stn] += q
         for stn, q in pe.most_common():
-            print("  %-26s %6d buc" % (stn, q))
+            print("  %-26s %6d buc%s" % (stn, q, ("  " + ETICHETA_ESTIMAT) if e_estimat(stn) else ""))
         for code, stn, q, s_ in sorted(rows, key=lambda r: -r[2])[:a.top]:
             print("    %-26s %-14s %6d  %s" % (code, stn[:14], q, s_))
         reb = sum(q for code, _, q, _ in rows if code.upper().startswith("LOC-REBUT"))
