@@ -9,6 +9,8 @@ Token resolution order:
   1. $SHOPIFY_STORES_CSV  (a CSV *path* OR the raw CSV text)
   2. ./stores.csv in the current working dir
   3. KB secret SHOPIFY_STORES_CSV  (via kb.py secret-get — canonical/freshest)
+A row whose token is `OAUTH:<APP>_CLIENT_ID+SECRET` (ORC, SK, HU, MD, …) gets a ~24h token
+minted via client_credentials from the KB secrets <APP>_CLIENT_ID / <APP>_CLIENT_SECRET.
 
 ⚠ OAuth-rotation stores (e.g. NUB/Nubra) have a DEAD static token by design.
    For those, run this on the production dashboard server using core.stores
@@ -20,7 +22,7 @@ Usage:
   shopify_gql.py --prefix EST --query-file q.graphql --vars '{"q":"name:EST100"}'
   shopify_gql.py --prefix GT --rest themes.json
 """
-import argparse, csv, io, json, os, subprocess, sys, time, urllib.request, urllib.error
+import argparse, csv, io, json, os, re, subprocess, sys, time, urllib.request, urllib.error
 
 API_VERSION = "2026-01"
 OAUTH_PREFIXES = {"NUB"}  # static token is dead by design — resolve on the server
@@ -59,8 +61,35 @@ def resolve_store(prefix):
         if (row.get("prefix") or "").strip().lstrip("﻿").upper() == prefix.upper():
             shop = (row.get("shop") or "").strip().replace("https://", "").strip("/")
             token = (row.get("token") or "").strip()
+            if token.startswith("OAUTH:"):
+                token = _mint_token(shop, token)
             return shop, token
     raise SystemExit(f"prefix {prefix!r} not found in stores.csv")
+
+
+def _kb_secret(name):
+    kb = _find_kb()
+    if kb:
+        out = subprocess.run(["uv", "run", kb, "secret-get", name], capture_output=True, text=True)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    return (os.getenv(name) or "").strip() or None
+
+
+def _mint_token(shop, marker):
+    """Rows like ORC/SK/HU/MD/DUPBG/BUC/LAB carry `OAUTH:<APP>_CLIENT_ID+SECRET`, not a token: the ~24h token is
+    issued by the store's own app via client_credentials (same as cs_actions / xconnector). Never printed."""
+    m = re.match(r"^OAUTH:([A-Z0-9_]+)_CLIENT_ID\+SECRET$", marker)
+    if not m or not re.match(r"^[a-z0-9][a-z0-9-]*\.myshopify\.com$", shop):
+        raise SystemExit(f"bad OAUTH marker or shop domain for {shop} in stores.csv")
+    cid, csec = _kb_secret(m.group(1) + "_CLIENT_ID"), _kb_secret(m.group(1) + "_CLIENT_SECRET")
+    if not (cid and csec):
+        raise SystemExit(f"missing {m.group(1)}_CLIENT_ID / _CLIENT_SECRET (KB or env)")
+    body = json.dumps({"client_id": cid, "client_secret": csec, "grant_type": "client_credentials"}).encode()
+    res = _request(f"https://{shop}/admin/oauth/access_token", {"Content-Type": "application/json"}, body)
+    if not res.get("access_token"):
+        raise SystemExit(f"token not issued for {shop}")
+    return res["access_token"]
 
 
 def _request(url, headers, data=None):

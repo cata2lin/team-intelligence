@@ -1,6 +1,7 @@
 ---
 name: shopify-stores
 description: How to programmatically access ANY of the team's Shopify stores (Esteban, GT, Nubra, Grandia, Bonhaus, Rossi, … ~21 shops) for both reads and mutations via the Admin GraphQL API — resolve the right shop domain + access token (including the OAuth token-rotation stores where the static token is dead by design), run queries and mutations with rate-limit-safe backoff, read/write theme assets, and do it without ever leaking a token. Includes a full mutation cookbook (reference/mutations.md)- products, variants & prices, inventory, media, collections, tags & metafields, order update/cancel/edit, refunds, fulfillment, draft orders, discounts (BXGY 2+1, codes), publications, blog articles, webhooks, bulk operations. Use whenever a script/task needs to talk to a Shopify store's Admin API, you hit a 401 / "Invalid API key or access token", you need a fresh token for an OAuth store (e.g. Nubra), or you need ANY mutation (change price/stock, add/remove order items, refund, create draft order, create discount, publish/unpublish, post a blog article, bulk export).
+version: 1.0.1
 ---
 
 # shopify-stores
@@ -116,6 +117,14 @@ PY
   access token still works**, but won't renew forever — Nubra's ARONA app needs a
   fresh OAuth re-auth (`exchange_code`) at some point. If Nubra suddenly 401s
   everywhere, that's why.
+
+### 3b. Client-credentials stores (ORC, SK, HU, MD, DUPBG, BUC, LAB)
+Their `stores.csv` token is a **marker**, not a token: `OAUTH:<APP>_CLIENT_ID+SECRET`. The ~24h token is
+minted from the store's own app (`POST /admin/oauth/access_token`, `grant_type=client_credentials`) with the KB
+secrets `<APP>_CLIENT_ID` / `<APP>_CLIENT_SECRET`. `scripts/shopify_gql.py` (and `shopify_theme.py`, which reuses
+its resolver) does this automatically since 1.0.1 — before, it sent the marker as the token and got a 401
+(ORC, 21-oct). **Do not** replace the marker in `SHOPIFY_STORES_CSV` with a minted token: it expires in a day
+and `cs_actions` / `xconnector` rely on the marker.
 
 ## 4. Mutations — the patterns you'll actually use
 
@@ -283,6 +292,7 @@ Reversible any time with `publishablePublish`.
 | A store's shop+token | `core.stores.get_store("<PFX>")` |
 | Fresh token for an OAuth store (NUB) | run on the **server** via `get_store` |
 | 401 "Invalid API key" | it's an OAuth-rotation store → §3 |
+| 401 on ORC/SK/HU/MD/DUPBG/BUC/LAB | client-credentials marker → §3b (`shopify_gql.py` ≥ 1.0.1 mints it) |
 | Run a query/mutation | `scripts/shopify_gql.py --prefix GT --query '…'` |
 | Make product non-addable | `publishableUnpublish` Online Store + Shop, verify `.js` = 404 |
 | Bulk tag orders | reuse `shopify_tag_orders_parallel.py` |
