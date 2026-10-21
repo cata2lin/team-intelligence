@@ -93,6 +93,9 @@ FAVI_TYPE = {
     "HA-0416":   "camera copiilor > pentru nou-născuți > accesorii baie copii",
     "HA-0967":   "camera copiilor > pentru nou-născuți > accesorii baie copii",
     "SET-BEBE":  "camera copiilor > pentru nou-născuți > accesorii baie copii",
+    # încadrate greșit de Favi (CPC scump): căpșuni -> „clapete rezervor wc”, coș scurgere -> „chiuvete de bucătărie”
+    "HA-0397":   "bucătărie > ajutoare în bucătărie > ustensile de bucătărie",
+    "HA-0437":   "bucătărie > organizare și curățenie > site chiuvetă",
     "2303219":   "grădină > wellness pentru acasă > accesorii pentru saună",
     "GD-IL-EXT-51703": "grădină > iluminat exterior",
     "10346":     "corpuri de iluminat > plafoniere",
