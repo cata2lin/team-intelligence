@@ -52,6 +52,8 @@ SCUTITE = {
 }
 
 erori = []
+# apelurile la care cheile vin prin `**{...}`: nu se pot verifica pe AST, deci se listeaza la rulare
+NEVERIFICABILE: list = []
 
 
 def ok(nume, cond, detaliu=""):
@@ -113,7 +115,7 @@ def apeluri_fara_stdin(cale):
         arb = ast.parse(io.open(cale, encoding="utf-8").read())
     except SyntaxError:
         return ["(nu se parseaza)"]
-    rele = []
+    rele, neverificabile = [], NEVERIFICABILE
     for n in ast.walk(arb):
         if not isinstance(n, ast.Call):
             continue
@@ -123,9 +125,55 @@ def apeluri_fara_stdin(cale):
             continue
         if (os.path.relpath(cale, RAD), f.attr) in SCUTITE:
             continue
-        if "stdin" not in {k.arg for k in n.keywords if k.arg}:
+        chei = {k.arg for k in n.keywords if k.arg}
+        # `**{...}` (keyword cu arg None) = cheile se decid la rulare, deci AST-ul nu le vede. Tiparul e legitim
+        # acolo unde `stdin=` si `input=` se exclud (`arona-marketplace`: ori trimiti text, ori inchizi stdin),
+        # deci nu e eroare — dar se RAPORTEAZA, ca sa nu se ascunda nimic in spatele lui.
+        if any(k.arg is None for k in n.keywords):
+            neverificabile.append("linia %d: %s.%s( prin **kwargs" % (n.lineno, f.value.id, f.attr))
+            continue
+        if "stdin" not in chei:
             rele.append("linia %d: %s.%s(" % (n.lineno, f.value.id, f.attr))
     return rele
+
+
+def apeluri_cu_stdin_si_input(cale):
+    """Apelurile care dau `stdin=` ȘI `input=` — subprocess le refuza: „stdin and input arguments may not both
+    be used".
+
+    De ce exista testul: fixul din 22-oct a adaugat `stdin=DEVNULL` peste un `input=stdin` existent
+    (`arona-marketplace/mcp_server.py`) si a picat `mkt_comenzi`. Garda de atunci cerea doar PREZENTA lui
+    `stdin=`, deci n-a vazut coliziunea — o garda care verifica forma, nu efectul.
+    `input=` inseamna deja stdin, deci acolo NU se mai pune `stdin=`.
+    """
+    try:
+        arb = ast.parse(io.open(cale, encoding="utf-8").read())
+    except SyntaxError:
+        return []
+    rele = []
+    for n in ast.walk(arb):
+        if not isinstance(n, ast.Call):
+            continue
+        f = n.func
+        if not (isinstance(f, ast.Attribute) and f.attr in METODE
+                and isinstance(f.value, ast.Name) and f.value.id in MODULE):
+            continue
+        chei = {k.arg for k in n.keywords if k.arg}
+        if "stdin" in chei and "input" in chei:
+            rele.append("linia %d: %s.%s( stdin= SI input=" % (n.lineno, f.value.id, f.attr))
+    return rele
+
+
+def test_niciun_apel_nu_da_stdin_si_input():
+    """Pe TOT repo-ul, nu doar pe inchiderea MCP: coliziunea crapa la rulare, oriunde e."""
+    import glob
+    rele = {}
+    for p in sorted(glob.glob(os.path.join(RAD, "plugins/**/*.py"), recursive=True)
+                    + glob.glob(os.path.join(RAD, "shared/**/*.py"), recursive=True)):
+        r = apeluri_cu_stdin_si_input(p)
+        if r:
+            rele[os.path.relpath(p, RAD)] = r
+    ok("niciun apel cu stdin= si input= deodata", not rele, str(rele)[:400])
 
 
 def test_garda_statica():
@@ -144,6 +192,9 @@ def test_garda_statica():
             rele[os.path.relpath(p, RAD)] = r
     ok("niciun subproces fara stdin= in serverele MCP", not rele,
        "; ".join("%s %s" % (k, v) for k, v in rele.items())[:600])
+    if NEVERIFICABILE:
+        print("  nota  %d apel(uri) cu chei prin **kwargs (verificate de mana): %s"
+              % (len(NEVERIFICABILE), "; ".join(NEVERIFICABILE)[:300]))
     # timeout: un copil fara stdin, dar fara termen, tot poate atarna
     fara_tm = {}
     for p in fise:
@@ -277,6 +328,7 @@ def test_live():
 
 if __name__ == "__main__":
     test_garda_statica()
+    test_niciun_apel_nu_da_stdin_si_input()
     test_lansatoarele_nu_primesc_devnull()
     test_reproducerea()
     test_live()

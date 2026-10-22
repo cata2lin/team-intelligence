@@ -85,8 +85,13 @@ def _local(script, args, timeout=300, env=None):
 def _oh(cmd, stdin=None, timeout=900):
     """Comandă pe serverul OH (ssh cu cheie, ca order-hub/oh_delivery_rate.py)."""
     try:
-        r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", OH_HOST, cmd], input=stdin,
-                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, stdin=subprocess.DEVNULL)
+        # `input=` ÎNSEAMNĂ deja stdin (subprocess scrie textul în el), deci `stdin=` pe lângă el e o eroare:
+        # „stdin and input arguments may not both be used". Fixul de stdin=DEVNULL din 22-oct l-a adăugat peste
+        # `input=stdin` și a picat `mkt_comenzi`. Când nu avem text de trimis, închidem stdin explicit — altfel
+        # copilul ar moșteni canalul MCP (vezi plugins/core/scripts/test_mcp_stdin.py).
+        r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", OH_HOST, cmd],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                           **({"input": stdin} if stdin is not None else {"stdin": subprocess.DEVNULL}))
     except subprocess.TimeoutExpired:
         return "⚠ a depășit %d s pe OH (o probă nu scrie nimic; o aplicare POATE să fi rulat — verifică cu mkt_listare)" % timeout
     out = _fmt(r.stdout, r.stderr, r.returncode)
