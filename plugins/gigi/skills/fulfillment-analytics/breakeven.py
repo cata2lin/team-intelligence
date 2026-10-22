@@ -268,9 +268,18 @@ def main():
     ap.add_argument("--store", default="all", help="esteban|belasil|carpetto|gento|all")
     ap.add_argument("--days", type=int, default=60)
     ap.add_argument("--sample", type=int, default=4000, help="comenzi pt COGS (line_items)")
-    ap.add_argument("--source", choices=["awb", "oh"], default="awb",
+    ap.add_argument("--source", choices=["awb", "oh"], default=None,
                     help="livrarea/AOV/transportul: awb = AWBprint (intl înghețat din 27-sep), oh = Order Hub")
     a = ap.parse_args()
+    if a.source is None:  # S1: implicit din comutatorul din baza (profit_settings.status_sursa)
+        try:
+            import sqlite3 as _sq
+            _cx = _sq.connect("/root/Scripturi/data/profitability.db")
+            _v = (_cx.execute("SELECT value FROM profit_settings WHERE key='status_sursa'").fetchone() or ["awb"])[0]
+            _cx.close()
+            a.source = "oh" if str(_v).lower() == "oh" else "awb"
+        except Exception:
+            a.source = "awb"
     keys = list(STORES) if a.store == "all" else [a.store.lower()]
     cn = awb_conn(); cur = cn.cursor()
     fx = _fx_map()
