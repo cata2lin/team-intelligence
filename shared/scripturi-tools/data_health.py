@@ -287,8 +287,11 @@ def check_awb_output(rows, ctx):
         rows.append((CRIT, "awb.output", "niciun AWB în order_awbs în ultimele 8 zile — nici depozitul, nici sync-ul AWBprint nu produc"))
         return
 
+    INTL_OH = {"duppo","duppobg","duppocz","duppohu","duppomd","bonhaus"}  # intl: etichete DPD in OH, nu AWBprint -> nu alarma (restaurat 22-oct)
     live = tot_today = 0
     for store, byday in sorted(win.items()):
+        if store in INTL_OH:
+            continue  # intl via OH: AWBprint nu vede etichetele lor
         vals = [byday.get(d, 0) for d in hist_days]
         base = sum(vals) / 7.0
         nz = sum(1 for v in vals if v > 0)      # în câte din cele 7 zile a produs până la ora asta
