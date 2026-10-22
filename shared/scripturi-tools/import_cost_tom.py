@@ -179,7 +179,6 @@ def construieste(serie: list) -> tuple:
             "master_id": master,
             "sursa": "tom",
             "nota": ("PO %s" % po) + ("" if transport else " · transport lipsă în TOM"),
-            "introdus_de": "import_cost_tom",
         })
     rez = {"randuri": len(randuri), "sarite": len(sarite), "fara_transport": fara_transport,
            "loturi": len({r["lot"] for r in randuri}),
@@ -188,12 +187,15 @@ def construieste(serie: list) -> tuple:
 
 
 def trimite(randuri: list, aplica: bool) -> dict:
-    tok = secret("OH_PRODUS_COST_TOKEN") if aplica else secret("OH_CS_SB_TOKEN")
+    # ⚠️ POST cere scopul `produs.cost` CHIAR ȘI la dry_run (cheia CS întoarce 403, verificat 22-oct):
+    # siguranța e `dry_run`, nu cheia.
+    tok = secret("OH_PRODUS_COST_TOKEN")
     if not tok:
-        return {"eroare": "lipsește cheia din seif (OH_PRODUS_COST_TOKEN / OH_CS_SB_TOKEN)"}
+        return {"eroare": "lipsește OH_PRODUS_COST_TOKEN din seif (scop produs.cost)"}
     r = requests.post(OH + "/api/produs/cost",
                       headers={"Authorization": "Bearer " + tok, "Content-Type": "application/json"},
-                      json={"loturi": randuri, "dry_run": not aplica}, timeout=180)
+                      json={"loturi": randuri, "dry_run": not aplica,
+                            "introdus_de": "import_cost_tom (TOM + curs BNR istoric)"}, timeout=300)
     try:
         return {"cod_http": r.status_code, "raspuns": r.json()}
     except ValueError:
@@ -234,7 +236,19 @@ def main() -> int:
 
     if a.trimite:
         print("trimit la %s (%s)" % (OH, "APLIC" if a.aplica else "dry_run"))
-        print(json.dumps(trimite(randuri, a.aplica), ensure_ascii=False)[:1500])
+        rasp = trimite(randuri, a.aplica)
+        j = (rasp.get("raspuns") or {}) if isinstance(rasp.get("raspuns"), dict) else {}
+        print("http %s · scrise %s · sumar %s" % (rasp.get("cod_http"), j.get("scrise"), j.get("sumar")))
+        if j.get("regula"):
+            print("regula OH:", j["regula"])
+        # `rezultate` vine în ORDINEA loturilor trimise ⇒ verificare rând cu rând
+        for i, r in enumerate(j.get("rezultate") or []):
+            if r.get("rezultat") in ("nelegat", "respins"):
+                t = randuri[i] if i < len(randuri) else {}
+                print("  %-9s %-16s lot %-22s %s" % (r.get("rezultat"), r.get("cod") or t.get("cod"),
+                                                     r.get("lot") or t.get("lot"), r.get("motiv")))
+        if not j:
+            print(json.dumps(rasp, ensure_ascii=False)[:800])
     else:
         print("nu am trimis nimic (fără --trimite)")
     return 0
