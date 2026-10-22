@@ -2288,6 +2288,17 @@ def get_report(
         log.warning("transport real AWBprint indisponibil (%s); fallback cost_per_parcel flat", e)
         real_transport_eng = {}
 
+    # Transportul din ORDER HUB (pasul S1, 22-oct-2026): costul real pe comandă (ex-TVA, factura DPD sau prețul
+    # curierului la creare) + etichetele anulate dar facturate. În UMBRĂ: se calculează în paralel, se scrie în
+    # `profit_transport_umbra`, iar raportul întoarce cifra veche; `TRANSPORT_SURSA=oh` o comută (vezi core/transport_oh).
+    try:
+        from core import transport_oh as _toh
+        oh_transport = _toh.pe_comenzi(month_list)
+        _sursa_transport = _toh.sursa_activa()
+    except Exception as e:
+        log.warning("transport OH indisponibil (%s); umbra goală", e)
+        _toh, oh_transport, _sursa_transport = None, {}, "awbprint"
+
     # Collect unmapped statuses across all orders
     all_unmapped = defaultdict(int)
     status_mapping = _load_status_mapping()
@@ -2421,6 +2432,12 @@ def get_report(
             plecate += 1
             _rt = real_transport_eng.get((prefix, o.get("order_name")))
             _t_exvat += _rt if (_rt and _rt > 0) else (tc["cost"] / 1.21)
+        # UMBRA Order Hub: aceeași comandă, costul din OH (plasa = același flat); scrisă, nu folosită — decât comutat.
+        if _toh is not None and (oh_transport or _sursa_transport == "oh"):
+            _t_oh, _pl_oh, _cu_oh, _anul_oh = _toh.transport_oh_prefix(prefix_orders, oh_transport, tc["cost"] / 1.21)
+            _toh.scrie_umbra(str(DB_PATH), ",".join(month_list), prefix, _pl_oh, _cu_oh, _t_exvat, _t_oh + _anul_oh, _anul_oh)
+            if _sursa_transport == "oh":
+                _t_exvat = _t_oh + _anul_oh
         transport_total = _t_exvat * (1 + vat_rate)
 
         # Marketing: override takes priority, else daily_perf
