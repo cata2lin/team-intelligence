@@ -15,7 +15,7 @@ import os, re, subprocess
 max_=max
 HERE=os.path.dirname(os.path.abspath(__file__))
 KB=os.path.join(HERE,"..","..","..","core","scripts","kb.py")
-def _kb(k): return subprocess.run(["uv","run",KB,"secret-get",k],capture_output=True,text=True).stdout.strip()
+def _kb(k): return subprocess.run(["uv","run",KB,"secret-get",k],capture_output=True,text=True, stdin=subprocess.DEVNULL, timeout=120).stdout.strip()
 if not os.environ.get("DATABASE_URL_METRICS"): os.environ["DATABASE_URL_METRICS"]=_kb("DATABASE_URL_METRICS")
 def _env():
     e=dict(os.environ); e.pop("VIRTUAL_ENV",None); return e
@@ -28,7 +28,7 @@ SENT=os.path.join(HERE,"..","cs-sentiment","cs_sentiment.py")
 SLA=os.path.join(HERE,"..","cs-sla-dashboard","cs_sla_dashboard.py")
 INTL=os.path.join(HERE,"..","cs-international","cs_intl.py")
 def _run(script, args, timeout=200):
-    r=subprocess.run(["uv","run",script]+args,capture_output=True,text=True,env=_env(),timeout=timeout)
+    r=subprocess.run(["uv","run",script]+args,capture_output=True,text=True,env=_env(),timeout=timeout, stdin=subprocess.DEVNULL)
     if r.returncode!=0:
         # eroare = eroare MCP (isError), nu text care arată a rezultat gol: din oct-2026 Richpanel a
         # schimbat schema și uneltele „mergeau" cu 0 tichete

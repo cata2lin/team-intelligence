@@ -41,7 +41,7 @@ def _dsn():
         pass
     try:
         return subprocess.run(["launchctl", "getenv", "KB_DATABASE_URL"], capture_output=True, text=True,
-                              timeout=10).stdout.strip()
+                              timeout=10, stdin=subprocess.DEVNULL).stdout.strip()
     except Exception:
         return ""
 

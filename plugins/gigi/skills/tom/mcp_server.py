@@ -12,7 +12,7 @@ Register: claude mcp add --scope user arona-tom -- uv run <abs path>/mcp_server.
 import os, subprocess
 HERE=os.path.dirname(os.path.abspath(__file__))
 KB=os.path.join(HERE,"..","..","..","core","scripts","kb.py")
-def _kb(k): return subprocess.run(["uv","run",KB,"secret-get",k],capture_output=True,text=True).stdout.strip()
+def _kb(k): return subprocess.run(["uv","run",KB,"secret-get",k],capture_output=True,text=True, stdin=subprocess.DEVNULL, timeout=120).stdout.strip()
 if not os.environ.get("DATABASE_URL_METRICS"): os.environ["DATABASE_URL_METRICS"]=_kb("DATABASE_URL_METRICS")
 def _env():
     e=dict(os.environ); e.pop("VIRTUAL_ENV",None); return e
@@ -20,7 +20,7 @@ from mcp.server.fastmcp import FastMCP
 mcp=FastMCP("arona-tom")
 TOM=os.path.join(HERE,"scripts","tom.py")
 def _run(args, timeout=200):
-    r=subprocess.run(["uv","run",TOM]+args,capture_output=True,text=True,env=_env(),timeout=timeout)
+    r=subprocess.run(["uv","run",TOM]+args,capture_output=True,text=True,env=_env(),timeout=timeout, stdin=subprocess.DEVNULL)
     return ((r.stdout or "").strip() or "(fără output)")+(("\n[stderr] "+(r.stderr or "")[:400]) if r.returncode!=0 else "")
 
 @mcp.tool()

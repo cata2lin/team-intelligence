@@ -22,7 +22,7 @@ KB = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
 
 def _kb(k):
     return subprocess.run(["uv", "run", KB, "secret-get", k],
-                          capture_output=True, text=True).stdout.strip()
+                          capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120).stdout.strip()
 
 
 for s in ("DATABASE_URL_AWBPRINT", "DATABASE_URL_METRICS"):
@@ -39,7 +39,7 @@ def _env():
 
 def _run(skill, name, args, timeout=600):
     r = subprocess.run(["uv", "run", os.path.join(SK, skill, name)] + [str(a) for a in args],
-                       capture_output=True, text=True, env=_env(), timeout=timeout)
+                       capture_output=True, text=True, env=_env(), timeout=timeout, stdin=subprocess.DEVNULL)
     out = (r.stdout or "").strip() or "(fără output)"
     if r.returncode != 0:
         out += "\n[stderr] " + (r.stderr or "")[:400]

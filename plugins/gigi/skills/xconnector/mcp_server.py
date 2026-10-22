@@ -13,7 +13,7 @@ Register: claude mcp add --scope user arona-fulfillment -- uv run <abs path>/mcp
 import os, subprocess
 HERE=os.path.dirname(os.path.abspath(__file__))
 KB=os.path.join(HERE,"..","..","..","core","scripts","kb.py")
-def _kb(k): return subprocess.run(["uv","run",KB,"secret-get",k],capture_output=True,text=True).stdout.strip()
+def _kb(k): return subprocess.run(["uv","run",KB,"secret-get",k],capture_output=True,text=True, stdin=subprocess.DEVNULL, timeout=120).stdout.strip()
 for s in ("DATABASE_URL_AWBPRINT","DATABASE_URL_METRICS"):
     if not os.environ.get(s): os.environ[s]=_kb(s)
 def _env():
@@ -25,7 +25,7 @@ def _run(script, args, timeout=180):
     # UTF-8 la ambele capete: cu codecul consolei (cp1252 pe Windows), „═ ✅ ⛔" din ieșire nu se decodau și unealta
     # întorcea „(fără output)" chiar după o acțiune executată.
     try:
-        r=subprocess.run(["uv","run",script]+args,capture_output=True,text=True,encoding="utf-8",errors="replace",env=_env(),timeout=timeout)
+        r=subprocess.run(["uv","run",script]+args,capture_output=True,text=True,encoding="utf-8",errors="replace",env=_env(),timeout=timeout, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired as e:   # pe Windows, `uv run` nu-și oprește copilul: ce a apucat să spună rămâne
         out = e.stdout or ""
         if isinstance(out, bytes):

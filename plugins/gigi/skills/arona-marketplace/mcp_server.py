@@ -59,7 +59,7 @@ def _env():
 def _kb(k):
     try:
         return subprocess.run(["uv", "run", "-q", KB, "secret-get", k], capture_output=True, text=True,
-                              timeout=60, env=_env()).stdout.strip()
+                              timeout=60, env=_env(), stdin=subprocess.DEVNULL).stdout.strip()
     except Exception:
         return ""
 
@@ -76,7 +76,7 @@ def _fmt(out, err, rc):
 def _local(script, args, timeout=300, env=None):
     try:
         r = subprocess.run(["uv", "run", "-q", script] + args, capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", env=env or _env(), timeout=timeout)
+                           errors="replace", env=env or _env(), timeout=timeout, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         return "⚠ a depășit %d s" % timeout
     return _fmt(r.stdout, r.stderr, r.returncode)
@@ -86,7 +86,7 @@ def _oh(cmd, stdin=None, timeout=900):
     """Comandă pe serverul OH (ssh cu cheie, ca order-hub/oh_delivery_rate.py)."""
     try:
         r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", OH_HOST, cmd], input=stdin,
-                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         return "⚠ a depășit %d s pe OH (o probă nu scrie nimic; o aplicare POATE să fi rulat — verifică cu mkt_listare)" % timeout
     out = _fmt(r.stdout, r.stderr, r.returncode)

@@ -234,7 +234,7 @@ def reorder_plan(brand: str, days: int = 28, lead_days: int = 30, safety_days: i
     args = ["--brand", brand, "--days", str(days), "--lead-days", str(lead_days), "--safety-days", str(safety_days),
             "--top", str(top)] + (["--only-reorder"] if only_reorder else [])
     try:
-        r = subprocess.run(["uv", "run", "-q", REORDER] + args, capture_output=True, text=True, env=_env(), timeout=300)
+        r = subprocess.run(["uv", "run", "-q", REORDER] + args, capture_output=True, text=True, env=_env(), timeout=300, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         return "reorder_planner: timeout (300 s)"
     return _fmt(r.stdout, r.stderr, r.returncode)

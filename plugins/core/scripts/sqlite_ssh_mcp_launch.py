@@ -48,7 +48,7 @@ def main():
     local_server = os.path.join(HERE, "ro_sqlite_mcp.py")
     scp = subprocess.run(["sshpass", "-e", "scp", "-o", "StrictHostKeyChecking=no", "-o", "LogLevel=ERROR",
                           local_server, "%s@%s:%s" % (user, host, REMOTE_SERVER)],
-                         env=env, capture_output=True, text=True)
+                         env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120)
     if scp.returncode != 0:
         sys.stderr.write("[sqlite_ssh_mcp] scp eșuat: %s\n" % scp.stderr.strip()); sys.exit(1)
 

@@ -102,7 +102,7 @@ def secret(key: str) -> str:
         return ""
     try:
         return subprocess.run(["uv", "run", kb, "secret-get", key],
-                              capture_output=True, text=True, timeout=60).stdout.strip()
+                              capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL).stdout.strip()
     except Exception:
         return ""
 

@@ -76,7 +76,7 @@ def cheie():
     if not v and _kb_path():
         try:
             v = subprocess.run(["uv", "run", _kb_path(), "secret-get", TOKEN_ENV], capture_output=True,
-                               text=True, timeout=30).stdout.strip()
+                               text=True, timeout=30, stdin=subprocess.DEVNULL).stdout.strip()
         except Exception:
             v = ""
     if not re.match(r"^ohsvc\.[a-z0-9][a-z0-9_-]{1,31}\.\S{32,}$", v):

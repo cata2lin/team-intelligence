@@ -12,7 +12,7 @@ Register: claude mcp add --scope user arona-profit -- uv run <abs path>/mcp_serv
 import os, subprocess
 HERE=os.path.dirname(os.path.abspath(__file__))
 KB=os.path.join(HERE,"..","..","..","core","scripts","kb.py")
-def _kb(k): return subprocess.run(["uv","run",KB,"secret-get",k],capture_output=True,text=True).stdout.strip()
+def _kb(k): return subprocess.run(["uv","run",KB,"secret-get",k],capture_output=True,text=True, stdin=subprocess.DEVNULL, timeout=120).stdout.strip()
 for s in ("DATABASE_URL_AWBPRINT","DATABASE_URL_METRICS"):
     if not os.environ.get(s): os.environ[s]=_kb(s)
 def _env():
@@ -23,7 +23,7 @@ PNL=os.path.join(HERE,"multi_brand_pnl.py")
 FA=os.path.join(HERE,"..","fulfillment-analytics","fulfillment_analytics.py")
 BE=os.path.join(HERE,"..","fulfillment-analytics","breakeven.py")
 def _run(script, args, timeout=200):
-    r=subprocess.run(["uv","run",script]+args,capture_output=True,text=True,env=_env(),timeout=timeout)
+    r=subprocess.run(["uv","run",script]+args,capture_output=True,text=True,env=_env(),timeout=timeout, stdin=subprocess.DEVNULL)
     return ((r.stdout or "").strip() or "(fără output)")+(("\n[stderr] "+(r.stderr or "")[:400]) if r.returncode!=0 else "")
 
 @mcp.tool()

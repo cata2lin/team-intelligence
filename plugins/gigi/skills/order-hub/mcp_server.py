@@ -24,7 +24,7 @@ CITIRI = {"actiuni", "comanda", "operatie", "neplecate"}
 
 def _kb(k):
     try:
-        return subprocess.run(["uv", "run", KB, "secret-get", k], capture_output=True, text=True, timeout=60).stdout.strip()
+        return subprocess.run(["uv", "run", KB, "secret-get", k], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL).stdout.strip()
     except Exception:
         return ""
 
@@ -44,7 +44,7 @@ def _kb(k):
 # sau filtrând secretele pe om în KB. Decizia e a ownerului; aici doar nu dăm scrierea din greșeală.
 def _handle():
     try:
-        out = subprocess.run(["uv", "run", KB, "whoami"], capture_output=True, text=True, timeout=60).stdout
+        out = subprocess.run(["uv", "run", KB, "whoami"], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL).stdout
         for bucata in out.split("|"):
             if "employee:" in bucata:
                 return bucata.split(":", 1)[1].strip().lower()
@@ -86,7 +86,7 @@ mcp = FastMCP("arona-orderhub")
 def _run(script, args, timeout=180, executie=False):
     try:
         r = subprocess.run(["uv", "run", "-q", script] + args, capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", env=_env(), timeout=timeout)
+                           errors="replace", env=_env(), timeout=timeout, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired as e:
         out = e.stdout or ""
         if isinstance(out, bytes):

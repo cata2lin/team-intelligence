@@ -19,7 +19,7 @@ GEN=os.path.join(HERE,"scripts","gen.py")
 SCRUB=os.path.join(HERE,"..","ai-scrub","scrub.py")
 YT=os.path.join(HERE,"..","youtube","execution","fetch_channel_data.py")
 def _run(script, args, timeout=300):
-    r=subprocess.run(["uv","run",script]+args,capture_output=True,text=True,env=_env(),timeout=timeout)
+    r=subprocess.run(["uv","run",script]+args,capture_output=True,text=True,env=_env(),timeout=timeout, stdin=subprocess.DEVNULL)
     return ((r.stdout or "").strip() or "(fără output)")+(("\n[stderr] "+(r.stderr or "")[:400]) if r.returncode!=0 else "")
 
 @mcp.tool()

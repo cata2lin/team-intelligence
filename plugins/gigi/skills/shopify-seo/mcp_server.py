@@ -29,7 +29,7 @@ def _env():
 
 def _run(script, args, timeout=600):
     r = subprocess.run(["uv", "run", script] + [str(a) for a in args],
-                       capture_output=True, text=True, env=_env(), timeout=timeout)
+                       capture_output=True, text=True, env=_env(), timeout=timeout, stdin=subprocess.DEVNULL)
     out = (r.stdout or "").strip() or "(fără output)"
     if r.returncode != 0:
         out += "\n[stderr] " + (r.stderr or "")[:400]

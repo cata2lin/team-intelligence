@@ -14,7 +14,7 @@ Register (Claude Code / config MCP):
 import os, sys, json, subprocess, importlib.util
 HERE=os.path.dirname(os.path.abspath(__file__))
 KB=os.path.join(HERE,"..","..","..","core","scripts","kb.py")
-def _kb(k): return subprocess.run(["uv","run",KB,"secret-get",k],capture_output=True,text=True).stdout.strip()
+def _kb(k): return subprocess.run(["uv","run",KB,"secret-get",k],capture_output=True,text=True, stdin=subprocess.DEVNULL, timeout=120).stdout.strip()
 if not os.environ.get("DATABASE_URL_METRICS"): os.environ["DATABASE_URL_METRICS"]=_kb("DATABASE_URL_METRICS")
 # gads.py e import-safe (CLI sub if __name__) → îl importăm pt read-uri structurate
 _spec=importlib.util.spec_from_file_location("gads",os.path.join(HERE,"gads.py")); g=importlib.util.module_from_spec(_spec); _spec.loader.exec_module(g)
@@ -26,7 +26,7 @@ MERCHANT=os.path.join(HERE,"..","merchant-center-feed","merchant_feed.py")
 def _run(script, args, timeout=240):
     """Rulează un script din skill prin uv, întoarce stdout (reutilizează tool-urile testate + dry-run-ul lor)."""
     env=_env()
-    r=subprocess.run(["uv","run",os.path.join(HERE,script)]+args,capture_output=True,text=True,env=env,timeout=timeout)
+    r=subprocess.run(["uv","run",os.path.join(HERE,script)]+args,capture_output=True,text=True,env=env,timeout=timeout, stdin=subprocess.DEVNULL)
     out=(r.stdout or "").strip()
     if r.returncode!=0: out+=("\n[stderr] "+(r.stderr or "")[:500])
     return out or "(fără output)"
@@ -79,7 +79,7 @@ def gads_change_history(customer_id: str, days: int = 8) -> str:
 def merchant_feed_health(merchant_id: str) -> str:
     """Sănătatea feed-ului Google Shopping pt un Merchant Center: produse ELIGIBLE / LIMITED / DISAPPROVED + motive."""
     env=_env()
-    r=subprocess.run(["uv","run",MERCHANT,"--store",merchant_id],capture_output=True,text=True,env=env,timeout=240)
+    r=subprocess.run(["uv","run",MERCHANT,"--store",merchant_id],capture_output=True,text=True,env=env,timeout=240, stdin=subprocess.DEVNULL)
     return ((r.stdout or "").strip() or "(fără output)")+(("\n[stderr] "+r.stderr[:300]) if r.returncode!=0 else "")
 
 MERCHANT_REP=os.path.join(HERE,"..","merchant-center-feed","merchant_reports.py")
@@ -87,14 +87,14 @@ MERCHANT_REP=os.path.join(HERE,"..","merchant-center-feed","merchant_reports.py"
 def merchant_performance(store: str, days: int = 30, top: int = 30) -> str:
     """PERFORMANCE per produs în Merchant Center (clicuri/impresii/CTR/conv) + lista ZOMBIE (0 clicuri). store=nume (grandia/esteban) sau merchant_id. Zombie = candidați pt shopify_feed_gaps/feed_attr_filler."""
     env=_env()
-    r=subprocess.run(["uv","run",MERCHANT_REP,"--store",store,"--days",str(days),"--top",str(top)],capture_output=True,text=True,env=env,timeout=240)
+    r=subprocess.run(["uv","run",MERCHANT_REP,"--store",store,"--days",str(days),"--top",str(top)],capture_output=True,text=True,env=env,timeout=240, stdin=subprocess.DEVNULL)
     return ((r.stdout or "").strip() or "(fără output)")+(("\n[stderr] "+r.stderr[:300]) if r.returncode!=0 else "")
 
 # ─────────────────── WRITE (dry-run default) ───────────────────
 def _write(sub, args, apply):
     a=list(args)+(["--apply"] if apply else [])
     env=_env()
-    r=subprocess.run(["uv","run",os.path.join(HERE,"gads.py"),sub]+a,capture_output=True,text=True,env=env,timeout=120)
+    r=subprocess.run(["uv","run",os.path.join(HERE,"gads.py"),sub]+a,capture_output=True,text=True,env=env,timeout=120, stdin=subprocess.DEVNULL)
     return ((r.stdout or "")+((r.stderr or "")[:400])).strip()
 
 @mcp.tool()
@@ -128,7 +128,7 @@ SHOPIFY_GQL=os.path.join(HERE,"..","shopify-stores","scripts","shopify_gql.py")
 def shopify_stores() -> str:
     """Listează prefixele magazinelor Shopify ale echipei (GT, EST, NUB, …) — fără tokenuri. Începe de aici."""
     env=_env()
-    r=subprocess.run(["uv","run",SHOPIFY_GQL,"--list"],capture_output=True,text=True,env=env,timeout=90)
+    r=subprocess.run(["uv","run",SHOPIFY_GQL,"--list"],capture_output=True,text=True,env=env,timeout=90, stdin=subprocess.DEVNULL)
     return ((r.stdout or "").strip() or "(fără output)")+(("\n[stderr] "+r.stderr[:300]) if r.returncode!=0 else "")
 
 @mcp.tool()
@@ -140,14 +140,14 @@ def shopify_graphql(prefix: str, query: str, variables: str = "{}", confirm_muta
     if is_mut and not confirm_mutation:
         return "⛔ Query-ul pare o MUTAȚIE (scrie în magazin, fără dry-run pe Shopify). Rerulează cu confirm_mutation=true dacă chiar vrei să execuți."
     env=_env()
-    r=subprocess.run(["uv","run",SHOPIFY_GQL,"--prefix",prefix,"--query",query,"--vars",variables],capture_output=True,text=True,env=env,timeout=120)
+    r=subprocess.run(["uv","run",SHOPIFY_GQL,"--prefix",prefix,"--query",query,"--vars",variables],capture_output=True,text=True,env=env,timeout=120, stdin=subprocess.DEVNULL)
     return ((r.stdout or "").strip() or "(fără output)")+(("\n[stderr] "+r.stderr[:400]) if r.returncode!=0 else "")
 
 # ─────────────────── META / TIKTOK ADS (paid-media hub) ───────────────────
 META=os.path.join(HERE,"..","meta-ads","meta.py")
 TIKTOK=os.path.join(HERE,"..","tiktok-ads","tiktok.py")
 def _ext(path, args, timeout=180):
-    r=subprocess.run(["uv","run",path]+args,capture_output=True,text=True,env=_env(),timeout=timeout)
+    r=subprocess.run(["uv","run",path]+args,capture_output=True,text=True,env=_env(),timeout=timeout, stdin=subprocess.DEVNULL)
     return ((r.stdout or "").strip() or "(fără output)")+(("\n[stderr] "+(r.stderr or "")[:400]) if r.returncode!=0 else "")
 @mcp.tool()
 def meta_report(brand: str, level: str = "campaign", range: str = "last_30d", sort: str = "spend") -> str:
@@ -199,7 +199,7 @@ def shopify_feed_gaps(prefix: str, limit: int = 40, enrich: bool = False, brand:
     if enrich: a.append("--enrich")
     if brand: a+=["--brand",brand]
     env=_env()
-    r=subprocess.run(["uv","run",os.path.join(HERE,"shopify_feed_gaps.py")]+a,capture_output=True,text=True,env=env,timeout=320)
+    r=subprocess.run(["uv","run",os.path.join(HERE,"shopify_feed_gaps.py")]+a,capture_output=True,text=True,env=env,timeout=320, stdin=subprocess.DEVNULL)
     return ((r.stdout or "").strip() or "(fără output)")+(("\n[stderr] "+r.stderr[:300]) if r.returncode!=0 else "")
 
 
@@ -207,7 +207,7 @@ def shopify_feed_gaps(prefix: str, limit: int = 40, enrich: bool = False, brand:
 def _sib(skill, name, args, timeout=420):
     """Rulează un script dintr-un skill FRATE (../<skill>/<name>)."""
     r=subprocess.run(["uv","run",os.path.join(HERE,"..",skill,name)]+[str(x) for x in args],
-                     capture_output=True,text=True,env=_env(),timeout=timeout)
+                     capture_output=True,text=True,env=_env(),timeout=timeout, stdin=subprocess.DEVNULL)
     return ((r.stdout or "").strip() or "(fără output)")+(("\n[stderr] "+(r.stderr or "")[:300]) if r.returncode!=0 else "")
 
 @mcp.tool()
