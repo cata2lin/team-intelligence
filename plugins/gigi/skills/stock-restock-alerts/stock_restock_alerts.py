@@ -32,6 +32,13 @@ import os, sys, subprocess, argparse, urllib.parse, datetime
 import pg8000.dbapi
 
 
+# Locațiile ÎNGHEȚATE nu se citesc (S3 „Stoc cu o definiție", varianta A, 22-oct-2026): metrics scrie zilnic un rând
+# și pentru locațiile pe care Shopify nu le mai actualizează — „Bonhaus BG" sub Casa Ofertelor (aceeași locație Shopify
+# ca a magazinului Bonhaus BG, oprită din 28-apr, 101.592 buc constant) și Covoria (magazin oprit, din 6-oct). Regula:
+# o locație contează doar dacă metrics a reîmprospătat-o în ultimele 3 zile.
+LOCATII_VII = (' AND "locationId" IN (SELECT id FROM locations'
+               ' WHERE "updatedAt" >= NOW() - INTERVAL \'3 days\')')
+
 def get_conn():
     url = os.environ.get("DATABASE_URL_METRICS")
     if not url:
@@ -81,10 +88,10 @@ def load_skus(cur, brand, window, max_real=100000):
         'WITH cur AS ('
         '  SELECT "variantId", sku, "productTitle", "variantTitle", "productType", vendor,'
         '         "quantityAvailable" qa, "costPerItem" cpi, price, "retailValue" rv'
-        '  FROM inventory_daily_snapshots WHERE "brandId"=%s AND "snapshotDate"=%s'
+        '  FROM inventory_daily_snapshots WHERE "brandId"=%s AND "snapshotDate"=%s' + LOCATII_VII +
         '), old AS ('
         '  SELECT "variantId", "quantityAvailable" qa'
-        '  FROM inventory_daily_snapshots WHERE "brandId"=%s AND "snapshotDate"=%s'
+        '  FROM inventory_daily_snapshots WHERE "brandId"=%s AND "snapshotDate"=%s' + LOCATII_VII +
         ') '
         'SELECT cur.sku, cur."productTitle", cur."variantTitle", cur."productType", cur.vendor,'
         '       cur.qa, cur.cpi, cur.price, cur.rv, old.qa '
