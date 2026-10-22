@@ -34,8 +34,6 @@ SCAN_DIRS = [
 ]
 IGNORE = {
     "profit_core.py",  # exceptie 22-oct: main c7bb744 (TVA pe tara) asteapta OK owner; VPS ramane pe versiunea veche -> nu alarma paritate
-    "ad_spend_live.py",  # HOLD 22-oct: barcode/handle/landing EAN->SKU schimba atribuirea product_ad_spend; asteapta OK owner (cifre P&L)
-    "build_cache.py",  # HOLD 22-oct: PREFIX_TO_BRAND adauga ORC/HU/ART in brand_pnl_monthly (0->real); asteapta OK owner (cifre P&L)
     "__init__.py", "kb.py", "kb_env.py", "pg_mcp_launch.py", "mcp_env_launch.py",
           "sqlite_ssh_mcp_launch.py", "ro_sqlite_mcp.py"}  # launchere MCP, nu se deployează flat
 
