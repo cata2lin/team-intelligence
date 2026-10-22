@@ -334,13 +334,24 @@ def check_profitdb(rows, ctx):
     # proaspăt. Un magazin cu volum (≥ 50 de comenzi în ultimele 14 zile) a cărui ultimă comandă e mai veche de 36 h
     # = descărcarea lui s-a oprit. Plus: luna curentă comparată cu backup-ul de dinaintea ultimului sync
     # (`_bak_po_<lună>`): un prefix cu sub 90% din backup a fost rescris cu o listă incompletă.
+    # Magazinele scoase din sincronizare (`active=0` în stores.csv: Belasil, vândut 20-oct) nu se mai descarcă, deci nu
+    # se judecă. Un magazin activ fără comenzi noi poate fi și liniște reală (Orice Redus, 20–22 oct), de aceea
+    # prospețimea pe prefix e AVERTISMENT; compararea cu backup-ul de mai jos rămâne critică.
+    inactive = set()
+    try:
+        import csv as _csv
+        with open("/root/Scripturi/stores.csv", newline="") as fh:
+            inactive = {r.get("prefix", "").strip() for r in _csv.DictReader(fh) if str(r.get("active", "1")).strip() == "0"}
+    except (OSError, ValueError):
+        pass
     cur.execute("""SELECT prefix, MAX(created_at), COUNT(*) FROM profit_orders
                     WHERE created_at >= datetime('now', '-14 days') GROUP BY prefix HAVING COUNT(*) >= 50""")
     for pfx, mx, n in cur.fetchall():
         age = _age_h(mx)
-        if age is not None and age > 36:
-            rows.append((CRIT, "profit_orders.%s" % pfx,
-                         "ultima comandă %s · %.0fh (SLA 36h) pe %d comenzi/14z → descărcarea s-a oprit" % (str(mx)[:16], age, n)))
+        if pfx not in inactive and age is not None and age > 36:
+            rows.append((WARN, "profit_orders.%s" % pfx,
+                         "ultima comandă %s · %.0fh (SLA 36h) pe %d comenzi/14z → descărcarea s-a oprit sau magazinul e liniștit"
+                         % (str(mx)[:16], age, n)))
     bak = "_bak_po_" + cur_month.replace("-", "")
     try:
         cur.execute("SELECT b.prefix, COUNT(*) FROM %s b WHERE b.month=? GROUP BY b.prefix" % bak, (cur_month,))
