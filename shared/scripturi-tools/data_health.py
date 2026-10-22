@@ -31,6 +31,19 @@ ICON = {OK: "🟢", WARN: "🟡", CRIT: "🔴"}
 
 def _send_email(to, subject, body, key, sender):
     """Identic cu check_token_expiry.py — SA cu delegare domain-wide, scope gmail.modify."""
+    _OWNER = {"gheorghe.beschea@overheat.agency", "contact@nocturna.ro"}  # owner: NU mai primeste mail
+    _lst = [a.strip() for a in (to.split(",") if isinstance(to, str) else list(to)) if a and a.strip()]
+    _own = [a for a in _lst if a in _OWNER]
+    _lst = [a for a in _lst if a not in _OWNER]
+    if _own:
+        try:
+            import briefing_alert as _ba
+            _ba.scrie(subject, body)
+        except Exception:
+            pass
+    if not _lst:
+        return
+    to = ",".join(_lst)
     import base64
     from email.mime.text import MIMEText
     from google.oauth2 import service_account
@@ -480,6 +493,76 @@ def check_gads_feed(rows, ctx):
                      % (str(st.get("moment"))[:16], len(mag))))
 
 
+def check_sync_rows(rows, ctx):
+    """(a) Sync „reușit" care scrie 0 rânduri = minciună: `lastSyncAt` avansează, dar nimic nu intră.
+    `sync_runs.processedRecords`=0 pe rulări marcate OK (status fără „fail"), cu eșecuri pe rânduri →
+    sursa pare proaspătă dar e goală. Exact cazul Google-ads 972 eșecuri/24h cu timestamp care avansează."""
+    dsn = _dsn("DATABASE_URL_METRICS")
+    if not dsn:
+        rows.append((WARN, "sync_rows", "lipsește DATABASE_URL_METRICS")); return
+    import psycopg2
+    cx = psycopg2.connect(dsn); cur = cx.cursor()
+    cur.execute("""SELECT source,
+                          COALESCE(SUM("processedRecords"), 0),
+                          COALESCE(SUM("failedRecords"), 0),
+                          COUNT(*)
+                     FROM sync_runs
+                    WHERE "createdAt" > NOW() - INTERVAL '24 hours'
+                      AND status::text NOT ILIKE '%%fail%%'
+                    GROUP BY source ORDER BY 1""")
+    for src, proc, fail, n in cur.fetchall():
+        if proc == 0 and fail > 0:
+            rows.append((CRIT, "sync_rows.%s" % src.lower(),
+                         "%d rulari marcate ok, 0 randuri scrise, %d esecuri pe randuri - timestamp avanseaza fals" % (n, fail)))
+    cx.close()
+
+
+def check_transport_real(rows, ctx):
+    """(f1) Costul de transport REAL per comandă (AWBprint.orders.transport_cost, autoritativ). Dacă nu mai
+    intră, P&L-ul cade pe transport flat (fantomă, CZ +80k etc.). A înghețat tăcut pe 28-aug-2026 (sursa a
+    trecut pe Order Hub) și nimeni n-a prins ~2 luni. Freshness + acoperire pe fereastra așezată."""
+    dsn = _dsn("DATABASE_URL_AWBPRINT")
+    if not dsn:
+        rows.append((WARN, "transport.real", "lipsește DATABASE_URL_AWBPRINT")); return
+    import psycopg2
+    cx = psycopg2.connect(dsn); cur = cx.cursor()
+    cur.execute("SELECT MAX(frisbo_created_at) FROM orders WHERE transport_cost > 0")
+    _judge(rows, "transport.real", cur.fetchone()[0], 72, "ultima comandă cu transport real (altfel P&L pe flat)")
+    cur.execute("""SELECT COUNT(*) FILTER (WHERE transport_cost > 0), COUNT(*)
+                     FROM orders
+                    WHERE frisbo_created_at BETWEEN NOW() - INTERVAL '37 days' AND NOW() - INTERVAL '7 days'
+                      AND (currency = 'RON' OR currency IS NULL)""")
+    cu, tot = cur.fetchone()
+    if tot and tot >= 500:
+        pct = 100.0 * cu / tot
+        st = OK if pct >= 80 else (WARN if pct >= 50 else CRIT)
+        rows.append((st, "transport.acoperire", "%.0f%% comenzi RON cu transport real (37..7z, prag 80%%)" % pct))
+    cx.close()
+
+
+def check_transport_mom(rows, ctx):
+    """(f2) lei/colet lună-pe-lună (RON, transport real > 0). Drift mare = schimbare de tarifare curier sau
+    date stricate. Se activează singur când există ≥2 luni cu date suficiente (azi: transport real înghețat)."""
+    dsn = _dsn("DATABASE_URL_AWBPRINT")
+    if not dsn:
+        return
+    import psycopg2
+    cx = psycopg2.connect(dsn); cur = cx.cursor()
+    cur.execute("""SELECT to_char(frisbo_created_at, 'YYYY-MM'), AVG(transport_cost)::float, COUNT(*)
+                     FROM orders
+                    WHERE frisbo_created_at > NOW() - INTERVAL '75 days' AND transport_cost > 0
+                      AND (currency = 'RON' OR currency IS NULL)
+                    GROUP BY 1 HAVING COUNT(*) >= 200 ORDER BY 1 DESC LIMIT 2""")
+    g = cur.fetchall(); cx.close()
+    if len(g) < 2:
+        rows.append((WARN, "transport.lei_colet", "sub 2 luni cu date suficiente (transport real nu mai intră?)"))
+        return
+    (m1, a1, _n1), (m0, a0, _n0) = g[0], g[1]
+    drift = abs(a1 - a0) / a0 * 100 if a0 else 0
+    rows.append((WARN if drift > 25 else OK, "transport.lei_colet",
+                 "%s %.2f vs %s %.2f lei/colet (%.0f%% drift)" % (m1, a1, m0, a0, drift)))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Watchdog de prospețime a datelor ARONA")
     ap.add_argument("--email", help="destinatar (email trimis DOAR dacă e ceva roșu)")
@@ -490,7 +573,8 @@ def main():
 
     rows = []
     ctx = {}  # check_metrics populează cache_fresh înainte ca check_profitdb să-l citească
-    for fn in (check_metrics, check_awbprint, check_awb_output, check_profitdb,
+    for fn in (check_metrics, check_sync_rows, check_awbprint, check_awb_output,
+               check_transport_real, check_transport_mom, check_profitdb,
                check_gads_feed, check_oh_mirror, check_heartbeats):
         try:
             fn(rows, ctx)
