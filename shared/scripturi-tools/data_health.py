@@ -329,6 +329,32 @@ def check_profitdb(rows, ctx):
     cur.execute("SELECT MAX(created_at) FROM profit_orders")
     _judge(rows, "profit_orders", cur.fetchone()[0], 30)
 
+    # PE MAGAZIN, nu doar pe tot tabelul (22-oct-2026): Esteban a rămas fără comenzile din 13–21 oct (9.622 pierdute,
+    # ~1,14 M lei), iar verificarea de mai sus a rămas verde fiindcă celelalte magazine țineau MAX(created_at)
+    # proaspăt. Un magazin cu volum (≥ 50 de comenzi în ultimele 14 zile) a cărui ultimă comandă e mai veche de 36 h
+    # = descărcarea lui s-a oprit. Plus: luna curentă comparată cu backup-ul de dinaintea ultimului sync
+    # (`_bak_po_<lună>`): un prefix cu sub 90% din backup a fost rescris cu o listă incompletă.
+    cur.execute("""SELECT prefix, MAX(created_at), COUNT(*) FROM profit_orders
+                    WHERE created_at >= datetime('now', '-14 days') GROUP BY prefix HAVING COUNT(*) >= 50""")
+    for pfx, mx, n in cur.fetchall():
+        age = _age_h(mx)
+        if age is not None and age > 36:
+            rows.append((CRIT, "profit_orders.%s" % pfx,
+                         "ultima comandă %s · %.0fh (SLA 36h) pe %d comenzi/14z → descărcarea s-a oprit" % (str(mx)[:16], age, n)))
+    bak = "_bak_po_" + cur_month.replace("-", "")
+    try:
+        cur.execute("SELECT b.prefix, COUNT(*) FROM %s b WHERE b.month=? GROUP BY b.prefix" % bak, (cur_month,))
+        in_bak = dict(cur.fetchall())
+        cur.execute("SELECT prefix, COUNT(*) FROM profit_orders WHERE month=? GROUP BY prefix", (cur_month,))
+        viu = dict(cur.fetchall())
+        for pfx, n in in_bak.items():
+            if n >= 100 and viu.get(pfx, 0) < n * 0.9:
+                rows.append((CRIT, "profit_orders.%s" % pfx,
+                             "luna %s: %d în %s, %d acum (−%.0f%%) → sync-ul a rescris magazinul cu o listă incompletă"
+                             % (cur_month, n, bak, viu.get(pfx, 0), 100 - 100.0 * viu.get(pfx, 0) / n)))
+    except sqlite3.Error:
+        pass
+
     for tbl, key in (("profit_order_lines", "profit_lines"), ("profit_marketing_override", "marketing_ovr")):
         cur.execute("SELECT MAX(month) FROM %s" % tbl)
         mx = cur.fetchone()[0]

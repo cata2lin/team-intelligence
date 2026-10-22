@@ -823,12 +823,19 @@ def _pick_latest_fulfillment_awb(fulfillments):
     return best_awb, best_comp, best_ds or latest_ds
 
 
+class FetchIncomplet(RuntimeError):
+    """Descărcarea unui magazin s-a oprit înainte de ultima pagină. NU se întoarce lista parțială ca și cum ar fi
+    completă: până pe 22-oct-2026 cele patru ieșiri de mai jos întorceau tăcut ce apucaseră, apelantul ștergea
+    rândurile vechi ale magazinului și le înlocuia cu bucata — Esteban a rămas cu 9.762 de comenzi din 19.384
+    (13–21 oct, ~1,14 M lei venit), fără niciun rând de eroare în log."""
+
+
 async def _fetch_orders_for_store(
     client: httpx.AsyncClient, shop: str, token: str,
     start_utc: datetime, end_utc: datetime, prefix: str,
     progress_cb=None
 ) -> List[dict]:
-    """Fetch all orders for a store in a month via GraphQL."""
+    """Fetch all orders for a store in a month via GraphQL. Ridică FetchIncomplet la orice oprire înainte de final."""
     url = f"https://{shop}/admin/api/{DEFAULT_API_VERSION}/graphql.json"
     headers = {"X-Shopify-Access-Token": token, "Content-Type": "application/json"}
 
@@ -848,34 +855,45 @@ async def _fetch_orders_for_store(
         page += 1
         payload = {"query": ORDERS_GQL, "variables": {"q": q, "cursor": cursor}}
 
+        ultima = None
         for attempt in range(5):
             try:
                 r = await client.post(url, headers=headers, json=payload, timeout=60.0)
                 if r.status_code == 429:
-                    await asyncio.sleep(2.0)
+                    ultima = "HTTP 429"
+                    await asyncio.sleep(2.0 * (attempt + 1))
                     continue
                 break
-            except Exception:
-                await asyncio.sleep(1.0)
+            except Exception as e:
+                ultima = "%s: %s" % (type(e).__name__, str(e)[:120])
+                await asyncio.sleep(1.0 * (attempt + 1))
         else:
-            break
+            raise FetchIncomplet("%s: pagina %d, %d comenzi până aici — 5 încercări eșuate (%s)"
+                                 % (prefix, page, len(orders), ultima))
 
         if r.status_code != 200:
-            log.error("%s: HTTP %s", shop, r.status_code)
-            break
+            raise FetchIncomplet("%s: pagina %d, %d comenzi până aici — HTTP %s" % (prefix, page, len(orders), r.status_code))
 
         try:
             j = r.json()
         except Exception:
-            break
+            raise FetchIncomplet("%s: pagina %d, %d comenzi până aici — răspuns fără JSON" % (prefix, page, len(orders)))
 
-        # Throttle
+        # GraphQL întoarce HTTP 200 și la THROTTLED / erori de query: `errors` prezent, `data` null. Înainte, `data`
+        # null se citea ca „fără pagina următoare" și lista parțială trecea drept completă.
+        if j.get("errors") or j.get("data") is None:
+            raise FetchIncomplet("%s: pagina %d, %d comenzi până aici — GraphQL: %s"
+                                 % (prefix, page, len(orders), str(j.get("errors"))[:200]))
+
+        # Throttle: așteaptă să se refacă cel puțin cât a costat pagina asta, altfel următoarea e THROTTLED
         try:
-            ts = ((j.get("extensions") or {}).get("cost") or {}).get("throttleStatus") or {}
-            cur = int(ts.get("currentlyAvailable", 999))
+            cost = (j.get("extensions") or {}).get("cost") or {}
+            ts = cost.get("throttleStatus") or {}
+            cur = float(ts.get("currentlyAvailable", 999))
             rr = float(ts.get("restoreRate", 50))
-            if cur < 50 and rr > 0:
-                await asyncio.sleep(min((50 - cur) / rr, 3.0))
+            nevoie = float(cost.get("actualQueryCost") or cost.get("requestedQueryCost") or 0)
+            if rr > 0 and cur < max(50.0, nevoie):
+                await asyncio.sleep(min((max(50.0, nevoie) - cur) / rr + 0.2, 20.0))
         except Exception:
             pass
 
@@ -1658,18 +1676,25 @@ async def run_profitability(req: RunRequest):
                         try:
                             orders = await _fetch_orders_for_store(client, shop, token, start_utc, end_utc, prefix)
                         except Exception as e:
+                            # magazinul rămâne cu rândurile lui vechi în bază (vezi `esuate` la salvare): o listă goală
+                            # sau parțială NU înlocuiește o lună întreagă
                             log.error("Eroare Shopify %s: %s", shop, e)
-                            orders = []
+                            return prefix, None, str(e)[:200]
 
-                        return prefix, orders
+                        return prefix, orders, None
 
+                esuate = {}
                 # Fetch all stores concurrently (max 5 at a time via semaphore)
                 tasks = [asyncio.create_task(fetch_store(s)) for s in stores]
                 for coro in asyncio.as_completed(tasks):
                     try:
-                        pfx, orders = await coro
-                        all_orders.extend(orders)
+                        pfx, orders, eroare = await coro
                         completed_stores += 1
+                        if orders is None:
+                            esuate[pfx] = eroare
+                            yield f"data: {json.dumps({'type': 'error', 'phase': 1, 'progress': completed_stores, 'total': total_stores, 'message': f'{pfx}: EȘUAT — rândurile vechi rămân ({eroare})'})}\n\n"
+                            continue
+                        all_orders.extend(orders)
                         yield f"data: {json.dumps({'type': 'progress', 'phase': 1, 'progress': completed_stores, 'total': total_stores, 'message': f'{pfx}: {len(orders)} comenzi'})}\n\n"
                     except Exception as e:
                         completed_stores += 1
@@ -1760,7 +1785,9 @@ async def run_profitability(req: RunRequest):
                 # scos din sincronizare (marcat `active=0` în stores.csv, ex. BG/nocturna.bg în
                 # aug-2026) și-ar pierde altfel TOT istoricul la prima re-sincronizare a unei luni
                 # vechi — ștergerea era pe toată luna, iar re-inserarea aducea doar magazinele active.
-                _synced = sorted({st["prefix"] for st in stores})
+                # Un magazin a cărui descărcare a EȘUAT (`esuate`) nu se șterge: păstrează rândurile de la rularea
+                # trecută, cu statusurile lor, până la o descărcare completă.
+                _synced = sorted({st["prefix"] for st in stores} - set(esuate))
                 _pp = ",".join("?" * len(_synced))
                 conn.execute(f"DELETE FROM profit_orders WHERE month=? AND prefix IN ({_pp})",
                              [month] + _synced)
@@ -1788,6 +1815,8 @@ async def run_profitability(req: RunRequest):
                     ))
 
             yield f"data: {json.dumps({'type': 'progress', 'phase': 2, 'progress': total_stores, 'total': total_stores, 'message': f'{len(all_orders)} comenzi salvate!'})}\n\n"
+            if esuate:
+                yield f"data: {json.dumps({'type': 'error', 'phase': 2, 'message': 'EȘUAT la descărcare, rândurile vechi păstrate: ' + ', '.join(sorted(esuate))})}\n\n"
 
         # Phase 3: Tracking (reads AWBs from DB)
         # If orders already existed (re-sync), only track non-closed orders
