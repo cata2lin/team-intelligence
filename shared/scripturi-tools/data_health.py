@@ -330,7 +330,7 @@ def check_profitdb(rows, ctx):
     _judge(rows, "profit_orders", cur.fetchone()[0], 30)
 
     # PE MAGAZIN, nu doar pe tot tabelul (22-oct-2026): Esteban a rămas fără comenzile din 13–21 oct (9.622 pierdute,
-    # ~1,14 M lei), iar verificarea de mai sus a rămas verde fiindcă celelalte magazine țineau MAX(created_at)
+    # ~1,2 M lei), iar verificarea de mai sus a rămas verde fiindcă celelalte magazine țineau MAX(created_at)
     # proaspăt. Un magazin cu volum (≥ 50 de comenzi în ultimele 14 zile) a cărui ultimă comandă e mai veche de 36 h
     # = descărcarea lui s-a oprit. Plus: luna curentă comparată cu backup-ul de dinaintea ultimului sync
     # (`_bak_po_<lună>`): un prefix cu sub 90% din backup a fost rescris cu o listă incompletă.
