@@ -2,7 +2,7 @@
 name: arona-scentum
 description: "MCP-ul arona-scentum — citiri TIPATE din Scentum ERP (producția de parfumuri: Esteban, Nubra, GT, Lab Noir, Blink, Duppo, Zafra…), READ ONLY, în loc de SQL brut prin postgres-scentum. Stocul de esențe (și ambalaje/alcool/bază) cu semnal de recomandă (CRITIC <14 zile, COMANDĂ <74), fișa unei arome (stoc pe lanț esență→bază→produs finit, maturare, magazine, rețeta/BOM, necesar, livrări), livrările LIV-n (skipped / în ledger), necesarele de producție, loturile la maturat, consumul pe perioadă, comenzile la furnizor (PO ESENTE/AMBALAJE) și un SELECT liber păzit. Use when: 'cât stoc de esență avem', 'ce esențe trebuie comandate', 'fișa aromei 73', 'Good Girl în Scentum', 'ce e în LIV-88', 'livrările de săptămâna asta', 'necesarul EST-OCT', 'ce mai e de produs', 'ce iese de la maturat', 'consum esențe pe octombrie', 'PO esențe deschise'. Triggers: scentum, esență, esente, maturare, LIV-, necesar, plan producție, rețetă, BOM, consum esențe, PO esențe."
 category: dev-tools
-version: 1.0.0
+version: 1.0.1
 ---
 
 # arona-scentum — MCP READ ONLY peste Scentum ERP
@@ -52,3 +52,8 @@ Stocul împins în magazine după o recepție: `andreea:receptie-livrari-erp`.
 - `products.supplier_id` e gol la majoritatea esențelor: furnizorul afișat vine din ultimul lot recepționat.
 - Stocul din magazine din fișă e **oglinda** Scentum (`shopify_inventory_levels`), nu Shopify live. Pentru stocul
   real pe magazine/stații: MCP `arona-stock`.
+- `scentum_sql` trimite SQL-ul **brut**, fără `vars` (`_q(..., None)`). Așa trebuie să rămână: psycopg2 face
+  interpolare `%` ori de câte ori `vars` nu e None (**inclusiv tuplul gol**), așa că un `LIKE 'CUT-%'` sau
+  `ILIKE '%print%'` era citit ca placeholder și întorcea `IndexError: tuple index out of range`
+  (reparat 22-oct-2026). Tool-urile tipate rămân pe `_q(sql, (param,))` — acolo interpolarea e dorită.
+  Regresia e prinsă de `uv run test_mcp_server.py` (nu cere baza de date).

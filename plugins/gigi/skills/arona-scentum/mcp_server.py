@@ -71,13 +71,24 @@ def _dsn():
 
 
 def _q(sql, args=()):
+    """Interogare read-only. `args=None` = SQL BRUT, trimis neatins.
+
+    ⚠️ psycopg2 face interpolare `%` ori de câte ori `vars` nu e None — inclusiv
+    pentru tuplul gol. Un SELECT scris de om conține `%` literal (`LIKE 'CUT-%'`,
+    `ILIKE '%print%'`), iar driverul îl citea ca placeholder și arunca
+    `IndexError: tuple index out of range`. De aceea `scentum_sql` trimite
+    `args=None`, iar aici nu mai dăm `vars` deloc în cazul ăla.
+    """
     conn = psycopg2.connect(_dsn(), connect_timeout=20, application_name="arona-scentum-mcp")
     try:
         conn.set_session(readonly=True, autocommit=False)
         with conn.cursor() as cur:
             cur.execute("SET LOCAL statement_timeout = '30s'")
             cur.execute("SET LOCAL TIME ZONE 'UTC'")
-            cur.execute(sql, args)
+            if args is None:
+                cur.execute(sql)
+            else:
+                cur.execute(sql, args)
             cols = [d[0] for d in cur.description]
             return cols, cur.fetchall()
     finally:
@@ -657,7 +668,8 @@ def scentum_sql(select: str, limita: int = 200) -> str:
         if m:
             return f"Refuzat: „{m.group(0).strip()}” nu e permis într-un SELECT read-only."
         n = max(1, min(int(limita), 1000))
-        cols, rows = _q(f"SELECT * FROM (\n{s}\n) AS _q LIMIT {n}")
+        # args=None: SQL-ul omului are '%' literal în LIKE/ILIKE — nu e placeholder.
+        cols, rows = _q(f"SELECT * FROM (\n{s}\n) AS _q LIMIT {n}", None)
         return _tab(cols, rows, f"{len(rows)} rânduri" + (" (atins LIMIT)" if len(rows) == n else ""))
     except Exception as e:
         return _err(e)
