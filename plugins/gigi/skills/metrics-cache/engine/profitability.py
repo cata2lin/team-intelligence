@@ -2132,6 +2132,28 @@ def get_report(
             return False
         orders = [o for o in orders if not _is_excluded(o)]
 
+    # S1-status (22-oct-2026): livrat/refuzat din Order Hub cand comutatorul profit_settings.status_sursa='oh'
+    # (comutator in BAZA, principiul 10). Suprascrie status_category in-memory cu starea OH (din colete);
+    # NU scrie in profit_orders -> rollback = flag inapoi + rebuild. Inert cand flag='awbprint'. Vezi core/status_oh.
+    try:
+        from core import status_oh as _soh
+        _css = sqlite3.connect(str(DB_PATH), timeout=60.0)
+        _sursa_status = _soh.sursa_activa(_css); _css.close()
+        if _sursa_status == "oh":
+            _oh_stare = {}
+            for _m in month_list:
+                for _k, _v in _soh.pe_comenzi(_m).items():
+                    _oh_stare[_k] = _v[0]
+            _nflip = 0
+            for o in orders:
+                _s = _oh_stare.get((o.get("order_name") or "").strip())
+                if _s and _s != o.get("status_category"):
+                    o["status_category"] = _s
+                    _nflip += 1
+            log.info("status OH comutat: %d comenzi reclasificate din OH", _nflip)
+    except Exception as e:
+        log.warning("status OH indisponibil (%s); ramane cascada veche", e)
+
     # Exchange rates (use first month for rates)
     # corpul ruleaza in threadpool (@greu): cursul se ia pe o bucla PROPRIE a firului. `anyio.from_thread.run`
     # l-ar fi rulat pe bucla principala (conectarea la metrics + SQLite = 1,35 s de scanari blocate, recenzia V90)
@@ -2432,9 +2454,11 @@ def get_report(
             plecate += 1
             _rt = real_transport_eng.get((prefix, o.get("order_name")))
             _t_exvat += _rt if (_rt and _rt > 0) else (tc["cost"] / 1.21)
-        # UMBRA Order Hub: aceeași comandă, costul din OH (plasa = același flat); scrisă, nu folosită — decât comutat.
+        # UMBRA Order Hub: aceeași comandă, costul din OH, apoi realul AWBprint, apoi flat; scrisă, nu folosită — decât comutat.
         if _toh is not None and (oh_transport or _sursa_transport == "oh"):
-            _t_oh, _pl_oh, _cu_oh, _anul_oh = _toh.transport_oh_prefix(prefix_orders, oh_transport, tc["cost"] / 1.21)
+            _t_oh, _pl_oh, _cu_oh, _anul_oh = _toh.transport_oh_prefix(
+                prefix_orders, oh_transport, tc["cost"] / 1.21,
+                real_pe_comanda=lambda _n, _p=prefix: real_transport_eng.get((_p, _n)))
             _toh.scrie_umbra(str(DB_PATH), ",".join(month_list), prefix, _pl_oh, _cu_oh, _t_exvat, _t_oh + _anul_oh, _anul_oh)
             if _sursa_transport == "oh":
                 _t_exvat = _t_oh + _anul_oh
