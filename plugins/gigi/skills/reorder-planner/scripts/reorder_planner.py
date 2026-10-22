@@ -46,6 +46,9 @@ def main():
              SUM(s."quantityOnHand") oh, SUM(s."quantityIncoming") inc,
              MAX(s."costPerItem") cost, MAX(s.price) price, MAX(s."productTitle") title
       FROM inventory_daily_snapshots s JOIN brands b ON b.id=s."brandId"
+      -- locațiile înghețate nu se citesc (S3, 22-oct-2026): „Bonhaus BG" sub Casa Ofertelor (oprită din 28-apr,
+      -- 101.592 buc constant) și Covoria (oprit din 6-oct) — contează doar ce a reîmprospătat metrics în 3 zile
+      JOIN locations l ON l.id=s."locationId" AND l."updatedAt" >= NOW() - INTERVAL '3 days'
       WHERE TRIM(b.name) ILIKE %s AND s."snapshotDate" >= CURRENT_DATE - %s
       GROUP BY s.sku, s."snapshotDate"),
     lagged AS (SELECT sku,d,oh,inc,cost,price,title,
