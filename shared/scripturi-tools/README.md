@@ -84,3 +84,27 @@ lista de PUSH dar nu și în cea din care se construiește pagina → cele 484 d
 
 **Deploy:** `scp parcel_density_app.py parcel_shop_index.py colete_app.sh $VPS:/root/Scripturi/` + `pm2 restart colete`.
 Regenerarea listei de produse: `parcel_colete.sh list --apply` (cron luni 6:00).
+
+## `deconturi_ramburs.py` — deconturile de ramburs de la curieri → un rând per AWB
+
+Un singur loc care știe formatele trimise de curieri pe `contact@rossinails.ro`. Ieșirea e contractul
+cu starea „Ramburs virat" din Order Hub:
+
+```
+curier · awb · suma · moneda · data_virarii · data_livrarii · referinta_client · referinta_decont · tip · fisier
+```
+
+```python
+from deconturi_ramburs import parseaza_fisier, parseaza_director
+randuri = parseaza_director("/cale/catre/atasamente")
+```
+
+Recunoaște: **DPD** `COD_<contract>_<AAAA.LL.ZZ>_*.xls` (decont pe AWB, `Reference 1` = numărul comenzii
+noastre) · **Sameday** `*-ramburs-de-transferat-ron.xlsx` (detaliul e pe foaia `expeditii`, nu pe prima).
+**FAN** `Expeditii_FAN_*` / `Comenzi_FAN_*` NU sunt deconturi — sunt liste de expediții; se întorc cu
+`tip="expeditii"`, ca să nu intre din greșeală într-o reconciliere.
+
+⚠️ La reconciliere, grupează pe **COMANDĂ**, nu pe AWB (rambursul se încasează o dată, chiar dacă sunt
+mai multe colete), și ține minte că AWB-urile DPD sunt **secvențiale**: doar un AWB de **14 cifre** e
+colet-copil al unui părinte de 11 cu același prefix de 10. Măsurat pe aug–oct 2026 în
+`jurnal/2026-10-23-ramburs-neincasat.md`.
