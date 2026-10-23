@@ -117,6 +117,26 @@
 
 > **Deploy corect = `deploy.sh --apply`**, NU scp manual (scp-ul manual = cauza divergențelor git↔VPS). Vezi memoria [[data-health-watchdog]].
 
+## ⚠️ Capcana de diagnostic: pe hosturile cu SPA, codul HTTP nu răspunde la întrebarea pusă
+
+Găsită pe 23-oct-2026, verificând dacă niște fișiere cu credentialе au fost servite pe web.
+
+**Problema:** `location / { try_files $uri $uri/ /index.html; }` întoarce **pagina SPA cu status 200**
+pentru orice cale necunoscută. În logurile nginx de pe 38.242 apar **151 de `200` pe `/.env`, 89 pe
+`/.git/config`, 45 pe `/.env.bak`** — citite repede, par „le-am dat fișierul”. Nu sunt: e pagina.
+
+**Cum se deosebește:** prin **dimensiunea răspunsului**, nu prin cod. `index.html` are **456 de octeți pe
+`awb.arona.ro`, 458 pe `bi.arona.ro`, și 308–311 în logurile mai vechi** — SPA-ul își schimbă mărimea la
+fiecare build, deci nu căuta o valoare fixă într-un log vechi.
+
+**Și `404` nu răspunde nici el.** Pe 84.46 același robot primește 404, pe 38.242 primește 200 — aceeași
+cerere, concluzii opuse, după host. **Întrebarea care decide e unde e RĂDĂCINA WEB**, nu ce cod iese: pe
+`awb.arona.ro` e `/opt/awb-print/frontend/dist`, iar fișierele căutate stăteau în `backend/` și
+`frontend/src/` — în afara rădăcinii, deci inaccesibile prin HTTP, indiferent de cod.
+
+**Deci: NU pune alertă pe „200 pe căi sensibile”** — pe orice host cu SPA ar țipăi zilnic, și în câteva
+zile n-ar mai citi-o nimeni. Condiția corectă e **dimensiune diferită de `index.html`**.
+
 ## Lecții/capcane salvate (în KB: `kb.py resource-list`)
 - **Cache/backfill FAIL-SAFE**: nu face DELETE pe istoric apoi reinsert condiționat — un pull eșuat șterge tot. Pur upsert. Învelește apelurile externe în retry-on-timeout (googleapiclient aruncă TimeoutError brut, nu RequestException).
 - **Shopify token permanent (`shpat_`)**: nu-l trece prin OAuth refresh; setează expires_at în viitor.
