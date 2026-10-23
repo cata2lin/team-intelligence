@@ -85,12 +85,20 @@ def main():
     no_test = "LOWER(COALESCE(tags,'')) NOT LIKE '%test%'"
     # 1. per linie (HA + prefixe), pe status: rev/cogs/plecate
     lines_sql = f"""
-      SELECT lbl, status_category st, COUNT(*) c, SUM(revenue) rev, SUM(cogs) cogs FROM (
-        SELECT CASE WHEN skus LIKE 'HA-%' THEN 'HA'
-                    WHEN prefix IN ({",".join("'%s'"%p for p in prefixes)}) THEN prefix
-                    END lbl, status_category, revenue, cogs
-        FROM profit_orders WHERE month IN {mlist} AND {no_test}
-          AND (skus LIKE 'HA-%' OR prefix IN ({",".join("'%s'"%p for p in prefixes)})) )
+      SELECT lbl, status_category st, COUNT(*) c, SUM(rev_lei) rev, SUM(cogs) cogs FROM (
+        SELECT CASE WHEN o.skus LIKE 'HA-%' THEN 'HA'
+                    WHEN o.prefix IN ({",".join("'%s'"%p for p in prefixes)}) THEN o.prefix
+                    END lbl, o.status_category,
+               -- ⚠️ UNITĂȚI AMESTECATE: `revenue` e în MONEDA MAGAZINULUI, iar `cogs` în LEI. Fără
+               -- conversie, CZK și HUF (monede mici, sume brute uriașe) umflau venitul: găleata HA
+               -- ieșea cu +320.637 lei pe septembrie (20,5%) și +414.954 pe octombrie (32,9%), fiindcă
+               -- Bonhaus CZ e cel mai mare contribuitor la ea. COGS-ul NU se convertește: e deja în lei.
+               o.revenue * COALESCE(fx.rate_to_ron, 1.0) rev_lei, o.cogs
+        FROM profit_orders o
+        LEFT JOIN profit_exchange_rates fx
+               ON fx.month = o.month AND fx.currency = COALESCE(NULLIF(o.currency,''),'RON')
+        WHERE o.month IN {mlist} AND {no_test.replace("tags", "o.tags")}
+          AND (o.skus LIKE 'HA-%' OR o.prefix IN ({",".join("'%s'"%p for p in prefixes)})) )
       WHERE lbl IS NOT NULL GROUP BY lbl, st"""
     rows = remote(lines_sql)
 
