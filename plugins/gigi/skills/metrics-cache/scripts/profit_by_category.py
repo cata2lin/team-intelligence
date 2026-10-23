@@ -60,10 +60,28 @@ def main():
     # 1) revenue/cogs per category from the engine's profit_orders (delivered only)
     cx = sqlite3.connect(a.db); cx.row_factory = sqlite3.Row
     cat = defaultdict(lambda: {"orders": 0, "revenue": 0.0, "cogs": 0.0})
-    for r in cx.execute("SELECT revenue,cogs,skus,status_category FROM profit_orders WHERE month=? AND status_category='Livrata'", (a.month,)):
+    fara_curs = set()
+    # ⚠️ UNITĂȚI AMESTECATE: `revenue` e în MONEDA MAGAZINULUI, iar `cogs` în LEI. Raportul agregă pe
+    # CATEGORIE, deci peste magazine — fără conversie, CZK (1 CZK = 0,22 lei) și HUF (0,0144) se adunau
+    # brut și umflau venitul: pe august, total raportat 11.381.900 în loc de 8.479.046, adică
+    # +2.902.854 lei (34,2%); septembrie +1.666.211 (19,3%); octombrie +1.146.791 (17,6%). Marja brută
+    # pe categorie era deci greșită pe orice categorie vândută și pe magazinele străine.
+    # COGS-ul NU se convertește: e deja în lei, pe toate magazinele.
+    for r in cx.execute("""
+            SELECT o.revenue * COALESCE(fx.rate_to_ron, 1.0) rev_lei, o.cogs, o.skus, o.status_category,
+                   o.currency, fx.rate_to_ron
+            FROM profit_orders o
+            LEFT JOIN profit_exchange_rates fx
+                   ON fx.month = o.month AND fx.currency = COALESCE(NULLIF(o.currency,''),'RON')
+            WHERE o.month = ? AND o.status_category = 'Livrata'""", (a.month,)):
+        if r["rate_to_ron"] is None and (r["currency"] or "RON").upper() != "RON":
+            fara_curs.add((r["currency"] or "?").upper())   # nu tăcem: o monedă fără curs intră 1:1
         c = order_category(r["skus"], s2g)
-        cat[c]["orders"] += 1; cat[c]["revenue"] += r["revenue"] or 0; cat[c]["cogs"] += r["cogs"] or 0
+        cat[c]["orders"] += 1; cat[c]["revenue"] += r["rev_lei"] or 0; cat[c]["cogs"] += r["cogs"] or 0
     cx.close()
+    if fara_curs:
+        print("ATENTIE: monede fara curs in profit_exchange_rates, luate 1:1 (venit SUBestimat): %s"
+              % ", ".join(sorted(fara_curs)), file=sys.stderr)
 
     # 2) marketing per category from metrics cache.product_ad_spend (my per-SKU spend), same month
     import psycopg2
