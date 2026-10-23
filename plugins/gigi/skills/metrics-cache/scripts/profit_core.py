@@ -9,6 +9,8 @@ comandă. Pur funcții (fără I/O) — apelantul pasează datele. Regula: Contr
 
 Din auditul celor 5 scripturi (2026-06-20): înainte fiecare trata TVA/COGS/transport/marketing/bundle diferit.
 """
+import datetime as _dt
+import os
 from collections import defaultdict
 
 # ---- TVA per ȚARĂ (nu per prefix arbitrar) ----
@@ -45,6 +47,130 @@ def vat_for_order(prefix: str = "", currency: str = "", country: str = "") -> fl
     return vat_for_prefix(prefix)
 
 # ---- COGS în RON (override are prioritate, ca engine-ul; conversie din moneda magazinului) ----
+# ─────────────────────────── COGS pe LOT, din Order Hub (S2) ───────────────────────────
+# De ce aici: `profit_core` e singura bibliotecă pe care o importă toate motoarele de profit, deci
+# regula „costul vine din lotul valabil la data comenzii" trebuie să stea tot aici, lângă `cogs_ron`.
+# Aplicația AWB are propria copie (`app/services/cogs_sursa.py`) fiindcă e alt depozit de cod — două
+# baze de cod, dar fiecare cu UN singur loc, nu cu o copie pe fiecare cititor.
+#
+# Două capcane care strică cifra dacă le sari:
+#   · `produs_cost.cost_lei_buc` e EX-TVA, iar `sku_costs.cost` era CU TVA → cine ținea costul cu TVA
+#     înmulțește cu (1 + TVA-ul țării), prin `vat_for_prefix` / `vat_for_order`;
+#   · un cod NUMERIC înseamnă produse diferite pe magazine diferite. Fără magazin, garda din Order Hub
+#     refuză codurile ambigue (`COD_AMBIGUU`) și le lasă pe cascada veche — asta e intenționat.
+
+OH_API = os.environ.get("ORDER_HUB_API", "https://orderhub.arona.ro")
+OH_LOT_MAX = 2000
+
+
+def cost_loturi_oh(coduri, token: str, magazin: str = None, timeout: int = 240) -> dict:
+    """{cod_jos: [(data_lot, cost_ex_tva, are_navlu)] descrescător} din `POST /api/produs/cost/lot` cu istoric.
+
+    `are_navlu` = `transport_inclus` de pe lot (OH PR #18). „Nu știu" (Order Hub mai vechi decât câmpul)
+    se citește „nu are": un lot fără navlu n-are voie să treacă drept complet — vezi `cost_lot_la`.
+
+    O singură cerere pentru toată harta: un P&L pe lună are comenzi din 30 de zile diferite, iar
+    lotul valabil se alege local, cu `cost_lot_la`. Ridică RuntimeError dacă OH nu răspunde —
+    apelantul decide (de obicei: rămâne pe costul vechi și SPUNE că a rămas).
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    lista = sorted({str(c).strip() for c in (coduri or []) if str(c or "").strip()})
+    out = {}
+    for i in range(0, len(lista), OH_LOT_MAX):
+        corp = {"istoric": True,
+                "perechi": [{"cod": c, **({"magazin": magazin} if magazin else {})}
+                            for c in lista[i:i + OH_LOT_MAX]]}
+        cerere = urllib.request.Request(
+            OH_API.rstrip("/") + "/api/produs/cost/lot", data=_json.dumps(corp).encode(),
+            method="POST", headers={"Content-Type": "application/json",
+                                    "Authorization": "Bearer " + (token or "")})
+        try:
+            with urllib.request.urlopen(cerere, timeout=timeout) as r:
+                d = _json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                # cheie greșită / scop lipsă (ruta cere `cs.citire`): NU e „OH căzut" — e o configurare
+                # stricată care, înghițită, ar arăta exact ca „lotul n-are navlu". Oprim tare.
+                raise PermissionError("Order Hub %d pe /api/produs/cost/lot: cheia nu are acces "
+                                      "(scopul cs.citire) — repară cheia, nu continua pe Shopify" % e.code) from e
+            raise RuntimeError("Order Hub n-a dat costurile pe lot: HTTP %s" % e.code) from e
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            raise RuntimeError("Order Hub n-a dat costurile pe lot: %s: %s" % (type(e).__name__, e)) from e
+        if not isinstance(d, dict) or not d.get("ok"):
+            raise RuntimeError("Order Hub a refuzat cererea de costuri: %s" % str(d)[:200])
+        for rand in d.get("rezultate") or []:
+            loturi = []
+            for l in rand.get("loturi") or []:
+                zi, cost = l.get("data_lot"), l.get("cost_lei_buc")
+                if not zi or cost is None:
+                    continue
+                are_navlu = bool(l.get("transport_inclus")) if "transport_inclus" in l else False
+                try:
+                    loturi.append((_dt.date.fromisoformat(str(zi)[:10]), float(cost), are_navlu))
+                except (TypeError, ValueError):
+                    continue
+            if loturi:
+                loturi.sort(key=lambda x: x[0], reverse=True)
+                out[str(rand.get("cod") or "").strip().lower()] = loturi
+    return out
+
+
+def cost_lot_la(loturi, zi=None, doar_cu_navlu: bool = True):
+    """Costul EX-TVA al ultimului lot cu `data_lot` ≤ `zi` (fără `zi`: lotul curent).
+
+    None înseamnă „rămâi pe costul vechi": produsul n-are lot până la data asta, SAU lotul valabil n-are
+    navlu (`doar_cu_navlu`, implicit DA). Un lot cu `transport = 0` are doar marfa; preferat orbește, ar
+    înlocui un cost complet cu unul incomplet și ar SCĂDEA COGS-ul în tăcere — măsurat 23-oct-2026:
+    −22.084 lei pe 10 branduri, ascuns în agregat de Grandia +17.127 și DUPBG +4.674. Nu sărim pe un lot
+    mai vechi care are navlu: ăla e prețul altei luni. NU întoarcem 0 (ar trece drept marfă gratis).
+
+    Aceeași regulă o aplică engine-ul de brand și `profit_lines_sync`: o singură implementare, aici.
+    `zi` poate fi `date` sau text ISO; loturile vechi cu 2 câmpuri (fără navlu) contează „fără navlu".
+    """
+    if not loturi:
+        return None
+    if isinstance(zi, str):
+        zi = _dt.date.fromisoformat(zi[:10]) if zi.strip() else None
+
+    def _zi(x):
+        return x if isinstance(x, _dt.date) else _dt.date.fromisoformat(str(x)[:10])
+
+    def _bun(lot):
+        return (len(lot) > 2 and bool(lot[2])) or not doar_cu_navlu
+
+    if zi is None:
+        return loturi[0][1] if _bun(loturi[0]) else None
+    for lot in loturi:
+        if _zi(lot[0]) <= zi:
+            return lot[1] if _bun(lot) else None
+    return None
+
+
+TVA_COGS_RO = 1.21   # marfa o cumpărăm noi, în RO: costul cu TVA e mereu ×1,21, oricare ar fi țara vânzării
+
+
+def cost_unitar_linie(sku, zi, loturi=None, overrides=None, unit_cost_shopify=None):
+    """(cost pe bucată CU TVA RO, sursa) pentru o linie de comandă — aceeași precedență ca engine-ul:
+    override manual > lot Order Hub cu navlu (la data comenzii) > `costPerItem` Shopify > (None, "lipsa").
+
+    `loturi` = harta din `cost_loturi_oh` (None/{} = sursa OH oprită). Costul cu TVA, fiindcă așa e
+    convenția coloanei `line_cogs` / `profit_orders.cogs` (landed cost cu TVA RO, același pe toate magazinele).
+    """
+    sku = (sku or "").strip()
+    if sku and overrides and sku in overrides and overrides[sku] is not None:
+        return float(overrides[sku]), "override"
+    if sku and loturi:
+        ex = cost_lot_la(loturi.get(sku.lower()), zi)
+        if ex is not None:
+            return ex * TVA_COGS_RO, "lot"
+    if unit_cost_shopify is not None:
+        return float(unit_cost_shopify), "shopify"
+    return None, "lipsa"
+
+
 def cogs_ron(qty=0, line_cogs_store=None, unit_cost_store=None, rate_store=1.0, override=None, fx=None) -> float:
     """COGS în RON. Prioritate: override=(cost,currency) per-unit × qty (ca engine l.1509);
     altfel line_cogs_store (total pe linie) × rate_store [profit_by_sku];

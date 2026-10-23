@@ -41,7 +41,6 @@ ENGINE = [
     ("plugins/gigi/skills/metrics-cache/engine/transport_oh.py", "core/transport_oh.py"),
 ]
 IGNORE = {
-    "profit_core.py",  # exceptie 22-oct: main c7bb744 (TVA pe tara) asteapta OK owner; VPS ramane pe versiunea veche -> nu alarma paritate
     "__init__.py", "kb.py", "kb_env.py", "pg_mcp_launch.py", "mcp_env_launch.py",
           "sqlite_ssh_mcp_launch.py", "ro_sqlite_mcp.py"}  # launchere MCP, nu se deployează flat
 
