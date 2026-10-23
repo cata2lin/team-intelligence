@@ -24,8 +24,16 @@ KB = ("/Users/gheorghebeschea/.claude/plugins/marketplaces/team-intelligence/"
       "plugins/core/scripts/kb.py")
 PRAG_LUNI = 4.0            # calibrat: peste 4 luni, sell-through-ul la 90 de zile cade la 9%
 PRAG_NOU = 300             # produs nou: peste atat fara test = blocat
+# Masurat pe istoric (23-oct): sub 500 de bucati sell-through-ul la 90 de zile e 26-41%, peste
+# 500 cade la 9-15%. 44 de linii peste prag inseamna 817.337 lei, jumatate din capitalul cohortei,
+# la 12% sell-through median. Regula asta prinde cazul pe care lunile de stoc il lasa sa treaca:
+# cele 35.000 de lavete (149.940 lei blocati) erau "3 luni de stoc" la ritmul de atunci.
+PRAG_BUCATI = 500
 PRAG_REFUZ = 20.0          # %
-CUTOFF = {"vara": (11, 1), "craciun": (7, 1)}   # dupa 1 nov nu mai comanzi vara; dupa 1 iul, Craciun
+# Cutoff-ul se refera la DATA COMENZII, nu a vanzarii: marfa comandata in iulie ajunge in
+# august-septembrie, la coada sezonului. Masurat: produsele de vara comandate dupa 1 iunie au
+# vandut 0,3% in prima luna, fata de 4,0% la cele nesezoniere.
+CUTOFF = {"vara": (6, 1), "craciun": (7, 1)}
 VARA = re.compile(r"gradin|plaja|piscin|sezlong|racor|ventilator|aer condi|umbrel|camping", re.I)
 CRACIUN = re.compile(r"craciun|brad|ornament|instalatie lumin|cadou", re.I)
 
@@ -52,6 +60,40 @@ def hotness(skus):
         return {k.upper(): v for k, v in json.load(open(fis)).items() if not k.startswith("_")}
     except Exception:
         return {}
+
+
+def viteza_order_hub(skus):
+    """Bucati plecate in ultimele 30 de zile, din Order Hub (sursa de adevar pe comenzi).
+
+    Rulez printr-un heredoc pe stdin, nu cu `python3 -c`: comanda trece prin ssh, apoi prin
+    docker exec, si ghilimelele imbricate se pierd pe drum — prima varianta esua tacut si garda
+    cadea pe metrics, adica exact pe sursa incompleta pe care voiam s-o evitam.
+    """
+    cod = (
+        "import os, psycopg2\n"
+        "d = os.environ['DATABASE_URL'].replace('+asyncpg', '')\n"
+        "c = psycopg2.connect(d); u = c.cursor()\n"
+        "u.execute(\"SELECT upper(li.sku), sum(li.quantity)::int FROM line_items li \"\n"
+        "          \"JOIN orders o ON o.id = li.order_id \"\n"
+        "          \"WHERE o.created_at > now() - interval '30 days' AND li.sku IS NOT NULL \"\n"
+        "          \"GROUP BY 1\")\n"
+        "print(chr(10).join('%s|%d' % (a, b) for a, b in u.fetchall()))\n")
+    try:
+        r = subprocess.run(
+            ["ssh", "-o", "ConnectTimeout=15", "root@161.97.69.226",
+             "docker exec -i -w /app orderhub-web python3 -"],
+            input=cod, capture_output=True, text=True, timeout=180)
+        cerute = {x.upper() for x in skus}
+        out = {}
+        for linie in r.stdout.splitlines():
+            if "|" not in linie:
+                continue
+            s, q = linie.rsplit("|", 1)
+            if s.strip().upper() in cerute:
+                out[s.strip().upper()] = int(q)
+        return (out, "Order Hub") if out else ({}, "")
+    except Exception:
+        return {}, ""
 
 
 def kituri():
@@ -83,10 +125,27 @@ def date_de_fond(skus):
         out[s]["nume"] = nume or ""
     tom.close()
 
+    # ⚠ Viteza NU se ia din `metrics.order_line_items`: acolo LIPSESC magazine intregi
+    # (MagDeal.ro, De la Bucsa, Bonhaus.pl/.hu, Portal, Orice Redus) — masurat pe HA, aug+sep 2026:
+    # 29.698 bucati in metrics fata de 44.629 in Order Hub, adica 33% lipsa. Pe HA viteza reala e
+    # de 1,58-1,68x cea din metrics, deci garda ar supraestima lunile de stoc si ar bloca pe nedrept.
+    # Sursa buna e Order Hub; metrics ramane doar ca rezerva, cu avertisment in raport.
+    viteza, sursa_viteza = viteza_order_hub(skus)
+    if not viteza:
+        sursa_viteza = "metrics (REZERVA — lipsesc magazine, cifrele sunt sub realitate)"
+        met = conectare("DATABASE_URL_METRICS"); m = met.cursor()
+        m.execute("""SELECT upper(sku), sum(quantity)::int FROM order_line_items
+                     WHERE upper(sku) = ANY(%s) AND "createdAt" > now() - interval '30 days'
+                     GROUP BY 1""", (skus,))
+        viteza = {s: int(q or 0) for s, q in m.fetchall()}
+        met.close()
+    for s, q in viteza.items():
+        if s in out:
+            out[s]["viteza30"] = int(q or 0)
+    for s in out:
+        out[s]["sursa_viteza"] = sursa_viteza
     met = conectare("DATABASE_URL_METRICS"); m = met.cursor()
-    m.execute("""SELECT upper(sku), sum(quantity)::int FROM order_line_items
-                 WHERE upper(sku) = ANY(%s) AND "createdAt" > now() - interval '30 days'
-                 GROUP BY 1""", (skus,))
+    m.execute("""SELECT upper(sku), 0 FROM order_line_items WHERE false""", ())
     for s, q in m.fetchall():
         if s in out:
             out[s]["viteza30"] = int(q or 0)
@@ -100,6 +159,7 @@ def date_de_fond(skus):
     # Ambalajele (sticle, capace, cutii, etichete) NU se judeca pe viteza de vanzare: nu se vand,
     # se consuma. Fara exceptia asta garda bloca 43 din 47 de linii deschise, aproape toate
     # ambalaje Esteban/Lab Noir — adica ar fi fost ignorata din prima zi.
+    met = conectare("DATABASE_URL_METRICS"); m = met.cursor()
     m.execute("SELECT DISTINCT upper(sku) FROM variants WHERE upper(sku) = ANY(%s)", (skus,))
     vandabile = {r[0] for r in m.fetchall()}
     for s in out:
@@ -155,6 +215,10 @@ def verifica(linii, azi=None, blacklist=()):
             motive.append("produs de vara comandat dupa 1 noiembrie")
         if CRACIUN.search(nume) and (azi.month, azi.day) >= CUTOFF["craciun"]:
             motive.append("produs de Craciun comandat dupa 1 iulie")
+        if not componenta and q >= PRAG_BUCATI:
+            motive.append("%d bucati intr-o singura linie (peste %d): istoricul arata "
+                          "sell-through 9-15%% peste pragul asta, fata de 26-41%% sub el"
+                          % (q, PRAG_BUCATI))
         if s in blacklist:
             motive.append("SKU pe blacklist (stop la re-comanda)")
         if l.get("refuz") is not None and l["refuz"] > PRAG_REFUZ:

@@ -18,8 +18,9 @@ g.date_de_fond = lambda skus: {s: FOND.get(s.upper(), {}) for s in skus}
 import datetime
 NOIEMBRIE = datetime.date(2026, 11, 15)
 IUNIE = datetime.date(2026, 6, 15)
+MAI = datetime.date(2026, 5, 15)
 
-def ruleaza(linii, azi=IUNIE, blacklist=()):
+def ruleaza(linii, azi=MAI, blacklist=()):
     return {r["sku"]: r for r in g.verifica(linii, azi=azi, blacklist=blacklist)}
 
 def test(nume, cond):
@@ -30,8 +31,14 @@ bun = True
 r = ruleaza([{"sku": "HA-PLIN", "qty": 1000}])["HA-PLIN"]
 bun &= test("stoc plin peste 4 luni = blocat", r["blocat"] and "luni de stoc" in r["motive"][0])
 
-r = ruleaza([{"sku": "HA-BUN", "qty": 500}])["HA-BUN"]
-bun &= test("produs rapid, 3 luni = trece", not r["blocat"])
+r = ruleaza([{"sku": "HA-BUN", "qty": 400}])["HA-BUN"]
+bun &= test("produs rapid, sub 500 buc = trece", not r["blocat"])
+
+r = ruleaza([{"sku": "HA-BUN", "qty": 5000}])["HA-BUN"]
+bun &= test("5000 buc intr-o linie = blocat chiar daca produsul e rapid", r["blocat"])
+
+r = ruleaza([{"sku": "EST-CUTIE", "qty": 300000}])["EST-CUTIE"]
+bun &= test("ambalajul nu e judecat nici pe numarul de bucati", not r["blocat"])
 
 r = ruleaza([{"sku": "HA-NOU", "qty": 1000}])["HA-NOU"]
 bun &= test("produs nou peste testul de 300 = blocat", r["blocat"])
@@ -45,8 +52,9 @@ bun &= test("ambalajul nu se judeca pe viteza", not r["blocat"])
 r = ruleaza([{"sku": "HA-VARA", "qty": 100}], azi=NOIEMBRIE)["HA-VARA"]
 bun &= test("produs de vara comandat in noiembrie = blocat", r["blocat"])
 
-r = ruleaza([{"sku": "HA-VARA", "qty": 100}], azi=IUNIE)["HA-VARA"]
-bun &= test("acelasi produs in iunie = trece", not r["blocat"])
+MARTIE = datetime.date(2026, 3, 15)
+r = ruleaza([{"sku": "HA-VARA", "qty": 100}], azi=MARTIE)["HA-VARA"]
+bun &= test("acelasi produs comandat in martie = trece", not r["blocat"])
 
 r = ruleaza([{"sku": "HA-BUN", "qty": 100}], blacklist={"HA-BUN"})["HA-BUN"]
 bun &= test("blacklist = blocat", r["blocat"])
