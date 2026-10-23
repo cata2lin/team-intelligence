@@ -161,6 +161,25 @@ def load_real_transport(order_keys):
     return out
 
 
+def load_transport_oh(month):
+    """{order_name: transport ex-TVA} din Order Hub (`shipments.cost_transport`: factura DPD, altfel prețul curierului
+    la creare; plus etichetele anulate dar facturate) — aceeași sursă și aceeași funcție ca motorul P&L
+    (`core.transport_oh`, pasul S1). Gol dacă OH tace: umbra rămâne goală, raportul nu se schimbă."""
+    # cheia de citire: OH_CS_SB_TOKEN, altfel cea de cost (același scop `cs.citire`). Măsurat 23-oct: sub run.env-ul
+    # cronului, căutarea în seif a lui `transport_oh.token()` întorcea gol și umbra ieșea goală fără niciun mesaj.
+    if not os.environ.get("OH_CS_SB_TOKEN") and os.environ.get("OH_COST_TOKEN"):
+        os.environ["OH_CS_SB_TOKEN"] = os.environ["OH_COST_TOKEN"]
+    try:
+        from core import transport_oh as _toh
+        out = {n: (v[0] or 0) + (v[1] or 0) for n, v in _toh.pe_comenzi([month]).items()}
+        if not out:
+            sys.stderr.write("[transport-oh] Order Hub n-a întors nicio comandă pentru %s (cheie? rețea?)\n" % month)
+        return out
+    except Exception as e:
+        sys.stderr.write(f"[transport-oh] indisponibil ({type(e).__name__}: {str(e)[:80]}); umbra goală\n")
+        return {}
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("month"); ap.add_argument("--db", default="data/profitability.db")
     ap.add_argument("--top", type=int, default=25); a = ap.parse_args()
@@ -181,6 +200,12 @@ def main():
         cogs_sursa = (_cs["value"] if _cs else "engine") or "engine"
     except Exception:
         cogs_sursa = "engine"
+    # S1: transportul din Order Hub, în UMBRĂ până la `profit_settings.transport_sursa='oh'` (comutator în BAZĂ)
+    try:
+        _ts = cx.execute("SELECT value FROM profit_settings WHERE key='transport_sursa'").fetchone()
+        transport_sursa = (_ts["value"] if _ts else "awbprint") or "awbprint"
+    except Exception:
+        transport_sursa = "awbprint"
 
     # delivered lines, joined to status + monedă comandă
     rows = cx.execute("""
@@ -204,6 +229,13 @@ def main():
     parcel_cost = {}; tsrc = {}
     for k, sks in order_skus.items():
         parcel_cost[k], tsrc[k] = pc.parcel_transport(sks, dpd, tc.get(k[0], 0), real_cost=real_transport.get(k))
+    transport_oh = load_transport_oh(a.month)
+    sku_t = defaultdict(lambda: [0.0, 0.0])                  # umbra S1: transport vechi / OH, pe SKU
+    pref_t = defaultdict(lambda: [0.0, 0.0, 0, 0])           # același, pe PREFIX + comenzi / comenzi cu cost OH
+    for k in order_skus:
+        pref_t[k[0]][2] += 1
+        if k[1] in transport_oh:
+            pref_t[k[0]][3] += 1
 
     # name2id + prefix->brand_id (pt alocarea marketingului de brand pe SKU-urile brandului corect)
     import psycopg2
@@ -240,6 +272,12 @@ def main():
         # transport: 'awb'/'dpd' = cost real DEJA ex-TVA (transport_cost_fara_tva) → direct; 'estimat' =
         # cost_per_parcel GROSS (TVA transport = RO 21%) → /1.21. (NU /(1+vat): scotea TVA de două ori pe awb/dpd.)
         tcost = (parcel_cost[k] * share / 1.21) if tsrc[k] == "estimat" else (parcel_cost[k] * share)
+        # OH e deja ex-TVA; comanda fără cost în OH rămâne pe cascada veche (plasa)
+        tcost_oh = transport_oh[k[1]] * share if k[1] in transport_oh else tcost
+        sku_t[s][0] += tcost; sku_t[s][1] += tcost_oh
+        pref_t[r["prefix"]][0] += tcost; pref_t[r["prefix"]][1] += tcost_oh
+        if transport_sursa == "oh":
+            tcost = tcost_oh
         # umbră: același cost, dar din `produs_cost` (lotul valabil la DATA comenzii). Deja ex-TVA ⇒ fără /(1+vat).
         zi = (r["creat_la"] or "")[:10]
         c_oh = cost_oh_la(cost_oh.get((s, r["shop"])), zi)
@@ -367,6 +405,22 @@ def main():
                           f, ensure_ascii=False)
     else:
         print("\n[umbră COGS] niciun SKU cu cost pe lot în Order Hub — cascada veche e singura sursă")
+    if transport_oh:
+        tv = sum(x[0] for x in pref_t.values()); tn = sum(x[1] for x in pref_t.values())
+        print(f"\n=== UMBRĂ TRANSPORT (S1) — Order Hub vs cascada veche, comenzi livrate ({a.month}) ===")
+        print(f"  sursă ACTIVĂ: {transport_sursa}  ·  vechi {tv:.0f}  ·  OH {tn:.0f}  ·  diferență {tn-tv:+.0f} lei ex-TVA "
+              f"(profitul se mișcă invers)")
+        print(f"  {'prefix':10}{'vechi':>11}{'OH':>11}{'diferență':>12}{'comenzi':>9}{'cu cost OH':>12}")
+        for k, x in sorted(pref_t.items(), key=lambda z: -abs(z[1][1] - z[1][0])):
+            print(f"  {k:10}{x[0]:>11.0f}{x[1]:>11.0f}{x[1]-x[0]:>+12.0f}{x[2]:>9}{x[3]:>12}")
+        if os.environ.get("TRANSPORT_OH_JSON"):
+            with open(os.environ["TRANSPORT_OH_JSON"], "w", encoding="utf-8") as f:
+                json.dump({"luna": a.month, "sursa_activa": transport_sursa, "vechi": tv, "oh": tn,
+                           "pe_prefix": {k: {"vechi": x[0], "oh": x[1], "comenzi": x[2], "cu_cost_oh": x[3]}
+                                         for k, x in pref_t.items()},
+                           "pe_sku": {k: {"vechi": x[0], "oh": x[1]} for k, x in sku_t.items()}}, f, ensure_ascii=False)
+    else:
+        print("\n[umbră transport] Order Hub n-a dat costuri — cascada veche e singura sursă")
     from collections import Counter as _Counter
     _sc = _Counter(tsrc.values())
     _tot_ord = sum(_sc.values()) or 1
