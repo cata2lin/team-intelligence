@@ -32,6 +32,14 @@ SCAN_DIRS = [
     "shared/scripturi-tools",
     "plugins/core/scripts",
 ]
+# Engine-ul P&L nu stă flat, ci în subdirectoarele aplicației (23-oct-2026): fără perechile astea, un deploy din git
+# ar fi putut reverta tăcut comutarea S1 (status și transport din Order Hub), iar garda n-ar fi văzut nimic.
+ENGINE = [
+    ("plugins/gigi/skills/metrics-cache/engine/profitability.py", "api/profitability.py"),
+    ("plugins/gigi/skills/metrics-cache/engine/greu.py", "core/greu.py"),
+    ("plugins/gigi/skills/metrics-cache/engine/status_oh.py", "core/status_oh.py"),
+    ("plugins/gigi/skills/metrics-cache/engine/transport_oh.py", "core/transport_oh.py"),
+]
 IGNORE = {
     "profit_core.py",  # exceptie 22-oct: main c7bb744 (TVA pe tara) asteapta OK owner; VPS ramane pe versiunea veche -> nu alarma paritate
     "__init__.py", "kb.py", "kb_env.py", "pg_mcp_launch.py", "mcp_env_launch.py",
@@ -98,6 +106,10 @@ def discover():
                 sys.stderr.write("[parity] ⚠ coliziune basename %s: %s ȘI %s — verific ambele\n" % (b, seen[b], rel))
             seen[b] = rel
             out.append((rel, flat, b))
+    for rel, sub in ENGINE:
+        flat = os.path.join(FLAT, sub)
+        if os.path.exists(flat):
+            out.append((rel, flat, sub))
     return out
 
 

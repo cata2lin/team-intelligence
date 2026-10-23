@@ -24,6 +24,7 @@ import csv
 import json
 import logging
 import math
+import os
 import re
 import sqlite3
 import xml.etree.ElementTree as ET
@@ -654,8 +655,8 @@ async def _fetch_exchange_rates(month: str) -> Dict[str, float]:
 # ═══════════════════════════════════════════════════════════════
 
 ORDERS_GQL = """
-query($q: String!, $cursor: String) {
-  orders(first: 250, query: $q, after: $cursor, sortKey: CREATED_AT) {
+query($q: String!, $cursor: String, $first: Int = 250) {
+  orders(first: $first, query: $q, after: $cursor, sortKey: CREATED_AT) {
     pageInfo { hasNextPage endCursor }
     edges {
       node {
@@ -851,24 +852,43 @@ async def _fetch_orders_for_store(
     orders = []
     page = 0
 
+    pagina = 250
     while True:
         page += 1
-        payload = {"query": ORDERS_GQL, "variables": {"q": q, "cursor": cursor}}
+        payload = {"query": ORDERS_GQL, "variables": {"q": q, "cursor": cursor, "first": pagina}}
 
         ultima = None
-        for attempt in range(5):
+        for attempt in range(10):
             try:
                 r = await client.post(url, headers=headers, json=payload, timeout=60.0)
                 if r.status_code == 429:
                     ultima = "HTTP 429"
                     await asyncio.sleep(2.0 * (attempt + 1))
                     continue
+                # THROTTLED vine cu HTTP 200: găleata e golită de ALT client al aceluiași magazin (23-oct: GRAN la 152 din
+                # 2000, toate cele 4 luni picau din prima pagină). Așteptăm să se refacă cât cere pagina, apoi reîncercăm.
+                try:
+                    jt = r.json()
+                except Exception:
+                    jt = {}
+                if any("THROTTLED" in str(e) for e in (jt.get("errors") or [])):
+                    # alt client ține găleata aproape goală (GRAN, 23-oct: 50–210 din 2000): o pagină de 250 costă ~266
+                    # și nu încape niciodată → micșorăm pagina până încape
+                    if pagina > 25:
+                        pagina = max(25, pagina // 2)
+                        payload["variables"]["first"] = pagina
+                    c_ = (jt.get("extensions") or {}).get("cost") or {}
+                    ts_ = c_.get("throttleStatus") or {}
+                    lipsa = float(c_.get("requestedQueryCost") or 300) - float(ts_.get("currentlyAvailable") or 0)
+                    ultima = "THROTTLED"
+                    await asyncio.sleep(max(2.0, lipsa / float(ts_.get("restoreRate") or 50) + 1.0) * (1 + attempt * 0.5))
+                    continue
                 break
             except Exception as e:
                 ultima = "%s: %s" % (type(e).__name__, str(e)[:120])
                 await asyncio.sleep(1.0 * (attempt + 1))
         else:
-            raise FetchIncomplet("%s: pagina %d, %d comenzi până aici — 5 încercări eșuate (%s)"
+            raise FetchIncomplet("%s: pagina %d, %d comenzi până aici — 10 încercări eșuate (%s)"
                                  % (prefix, page, len(orders), ultima))
 
         if r.status_code != 200:
@@ -979,6 +999,93 @@ async def _fetch_orders_for_store(
         log.info("%s: filtered %d/%d orders outside month boundary",
                  prefix, before_count - len(filtered), before_count)
     return filtered
+
+
+# ─────────────── S2: costul pe LOT din Order Hub (sursa de adevăr pentru COGS) ───────────────
+# De ce o cerere cu istoric, nu una pe zi: un sync are comenzi din zile diferite, iar lotul valabil se
+# alege local, cu aceeași regulă ca în Order Hub (ultimul lot cu data_lot ≤ data comenzii).
+# ⚠️ `magazin` se trimite MEREU, și e domeniul MYSHOPIFY (`store_info["shop"]`), nu cel public: un cod
+# NUMERIC înseamnă produse diferite în magazine diferite. Fără el, pe Esteban codul `195` (parfum) ia
+# costul unei console de jocuri de pe George Talent.
+OH_API = os.environ.get("ORDER_HUB_API", "https://orderhub.arona.ro")
+OH_LOT_MAX = 2000
+
+
+VAT_COGS_RO = 0.21        # TVA-ul cu care intra marfa in RO; vezi `cogs_fara_tva`
+
+
+def _oh_token() -> str:
+    return (os.environ.get("OH_COST_TOKEN") or os.environ.get("OH_CS_SB_TOKEN") or "").strip()
+
+
+async def _cost_loturi_oh(client, magazin: str, coduri: list) -> dict:
+    """{cod_jos: [(data_lot, cost_ex_tva, are_navlu)] descrescător}. Nu aruncă: fără loturi, apelantul
+    rămâne pe Shopify și o spune în log — un Order Hub căzut n-are voie să scadă tăcut COGS-ul."""
+    token = _oh_token()
+    if not token or not coduri:
+        if not token:
+            log.warning("S2: fără cheie de Order Hub (OH_COST_TOKEN) — COGS rămâne pe Shopify")
+        return {}
+    out = {}
+    for i in range(0, len(coduri), OH_LOT_MAX):
+        corp = {"istoric": True,
+                "perechi": [{"cod": c, "magazin": magazin} for c in coduri[i:i + OH_LOT_MAX]]}
+        try:
+            r = await client.post(OH_API.rstrip("/") + "/api/produs/cost/lot", json=corp,
+                                  headers={"Authorization": "Bearer " + token}, timeout=180.0)
+            if r.status_code in (401, 403):
+                # cheie fără scopul `cs.citire`: o configurare stricată, nu „OH căzut". Înghițită, ar arăta
+                # exact ca „lotul n-are navlu" și COGS-ul ar trece tăcut pe Shopify → oprim rularea.
+                raise PermissionError("S2: Order Hub %d pe /api/produs/cost/lot (%s) — cheia OH_COST_TOKEN "
+                                      "n-are acces; repară cheia" % (r.status_code, magazin))
+            r.raise_for_status()
+            d = r.json()
+        except PermissionError:
+            raise
+        except Exception as e:
+            log.error("S2: Order Hub n-a dat costurile pentru %s (%s) — COGS rămâne pe Shopify",
+                      magazin, e)
+            return {}
+        if not isinstance(d, dict) or not d.get("ok"):
+            log.error("S2: Order Hub a refuzat cererea pentru %s: %s", magazin, str(d)[:160])
+            return {}
+        for rand in d.get("rezultate") or []:
+            lot = []
+            for l in rand.get("loturi") or []:
+                zi, cost = l.get("data_lot"), l.get("cost_lei_buc")
+                if zi and cost is not None:
+                    # „nu știu" (Order Hub mai vechi decât câmpul) se citește ca „nu are navlu"
+                    navlu = bool(l.get("transport_inclus")) if "transport_inclus" in l else False
+                    try:
+                        lot.append((str(zi)[:10], float(cost), navlu))
+                    except (TypeError, ValueError):
+                        continue
+            if lot:
+                lot.sort(key=lambda x: x[0], reverse=True)
+                out[str(rand.get("cod") or "").strip().lower()] = lot
+    log.info("S2: %s — %d din %d coduri au lot", magazin, len(out), len(coduri))
+    return out
+
+
+def _cost_lot_la(loturi, zi: str, doar_cu_navlu: bool = True):
+    """Costul EX-TVA al ultimului lot cu data ≤ `zi` (ISO). None = fără lot până la data asta, deci
+    comanda rămâne pe costul din Shopify. NU întoarcem 0: un 0 ar trece drept marfă gratis.
+
+    `doar_cu_navlu` (implicit DA, 23-oct-2026): un lot cu `transport = 0` are doar marfa, iar
+    `costPerItem` din Shopify are shipping-ul lui Tom DEJA înăuntru. Preferința pentru lot ar
+    înlocui deci un cost complet cu unul incomplet și ar SCĂDEA COGS-ul în tăcere: măsurat
+    −22.084 lei pe 10 branduri (iul–oct), ascuns în agregat de Grandia +17.127 și DUPBG +4.674.
+    Fără navlu ⇒ None ⇒ Shopify. Nu sărim pe un lot mai vechi cu navlu: ăla e prețul altei luni.
+    """
+    if not loturi:
+        return None
+    if not zi:
+        l = loturi[0]
+        return l[1] if (l[2] or not doar_cu_navlu) else None
+    for data_lot, cost, are_navlu in loturi:
+        if data_lot <= zi:
+            return cost if (are_navlu or not doar_cu_navlu) else None
+    return None
 
 
 async def _fetch_variant_costs(
@@ -1700,6 +1807,23 @@ async def run_profitability(req: RunRequest):
                         completed_stores += 1
                         log.error("Store fetch error: %s", e)
 
+                # --- S2: sursa COGS. Comutatorul e ACELAȘI ca în `profit_by_sku`
+                # (`profit_settings.cogs_sursa`: "engine" = Shopify costPerItem, "oh" = lotul din
+                # Order Hub), ca să nu existe două surse de adevăr pe aceeași mașină.
+                # Regula: preferă lotul valabil la DATA comenzii; produsul fără lot rămâne pe Shopify.
+                # Lotul e EX-TVA, iar `costPerItem` e CU TVA (dovedit: set-5-lavete-magice = 5,40 lei
+                # în Shopify, 4,5128 ex-TVA în lot → 4,5128 × 1,21 = 5,46). TVA-ul e cel ROMÂNESC,
+                # fiindcă marfa o cumpărăm noi, în RO — nu TVA-ul țării în care se vinde.
+                cogs_sursa = "engine"
+                try:
+                    with _db() as conn:
+                        _cs = conn.execute(
+                            "SELECT value FROM profit_settings WHERE key='cogs_sursa'").fetchone()
+                        cogs_sursa = (_cs["value"] if _cs else "engine") or "engine"
+                except Exception as e:
+                    log.warning("S2: cogs_sursa necitit (%s) — rămân pe engine", e)
+                log.info("S2: sursa COGS = %s", cogs_sursa)
+
                 # Phase 2: COGS
                 yield f"data: {json.dumps({'type': 'phase', 'phase': 2, 'message': 'Calcul COGS...', 'progress': 0, 'total': total_stores})}\n\n"
 
@@ -1729,6 +1853,12 @@ async def run_profitability(req: RunRequest):
                     if vset:
                         vinfo = await _fetch_variant_costs(client, shop, store_info["token"], list(vset))
 
+                    loturi_oh = {}
+                    if cogs_sursa == "oh":
+                        skuri = sorted({(i.get("sku") or "").strip() for i in vinfo.values()
+                                        if (i.get("sku") or "").strip()})
+                        loturi_oh = await _cost_loturi_oh(client, shop, skuri)
+
                     # Save SKU → title + image mapping
                     sku_titles = [(info["sku"], info.get("title", ""), info.get("image_url", ""))
                                   for info in vinfo.values()
@@ -1750,8 +1880,12 @@ async def run_profitability(req: RunRequest):
                             sku = info.get("sku") or ""
                             if sku:
                                 all_skus.append(sku)
+                            _lot = _cost_lot_la(loturi_oh.get(sku.lower()),
+                                                (o.get("created_at") or "")[:10]) if sku else None
                             if sku and sku in cogs_overrides:
-                                cogs += cogs_overrides[sku] * qty
+                                cogs += cogs_overrides[sku] * qty      # overrideul manual bate tot
+                            elif _lot is not None:
+                                cogs += _lot * 1.21 * qty              # lot ex-TVA → cu TVA, ca Shopify
                             elif info["unit_cost"] is not None:
                                 cogs += info["unit_cost"] * qty
                             else:
@@ -2489,7 +2623,13 @@ def get_report(
 
         # TVA calculations
         incasari_fara_tva = round(incasari_ron / (1 + vat_rate), 2)
-        cogs_fara_tva = round(cogs_total / (1 + vat_rate), 2)
+        # ⚠️ COGS-ul se neteaza cu TVA RO, NU cu TVA-ul tarii de vinzare. `cogs_total` e landed cost
+        # in RON cu TVA ROMANESC (vezi comentariul de la adunarea lui, mai sus: costul e INTRODUS in
+        # RON pe toate magazinele) — marfa o importam noi, in Romania. Impartirea la TVA-ul tarii
+        # scotea COGS ex-TVA prea mic pe HU (27%), PL si SK (23%) si prea mare pe BG (20%): acelasi
+        # produs, cumparat o data, ieseа cu alt cost ex-TVA in functie de unde s-a vindut.
+        # Venitul rămâne pe TVA-ul tarii — acolo e corect, TVA-ul de vinzare e al pietei.
+        cogs_fara_tva = round(cogs_total / (1 + VAT_COGS_RO), 2)
         # Transportul se introduce CU TVA → scădem TVA mereu, exact ca la încasări și COGS
         # (retroactiv pe toate lunile; flag-ul vat_included rămâne doar informativ)
         transport_fara_tva = round(transport_total / (1 + vat_rate), 2)
