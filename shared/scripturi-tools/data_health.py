@@ -415,6 +415,63 @@ def check_oh_mirror(rows, ctx):
     _judge(rows, "oh_mirror", datetime.fromisoformat(ts) if ts else None, 12, "punte Order Hub → scanner")
 
 
+APK_SERVIT = "/root/Scripturi/data/apps/awb-scanner.apk"
+APK_REPO = "/root/awb-scanner-mirror"
+
+
+def check_apk_vs_git(rows, ctx):
+    """APK-VS-GIT: APK-ul SERVIT are sursa in git? (23-oct-2026)
+
+    Pe 23-oct, APK-ul publicat era versionCode 261 (6.28) si depozitul avea 260 (6.27): sursa lui
+    6.28 statea pe o ramura pe care oglinda nu o aducea. S-a aflat din intamplare, cu un build de
+    6.29 pe 6.27 gata sa plece — adica o regresie tacuta pe toate terminalele.
+
+    Compara `versionCode` din APK-ul servit (citit cu `aapt`, sursa autoritara) cu cel mai mare
+    `versionCode` din `app/build.gradle.kts` pe ORICE ramura. WARN daca APK-ul e mai nou.
+    """
+    import re
+    import subprocess
+    if not os.path.exists(APK_SERVIT):
+        rows.append((WARN, "apk_vs_git", "lipseste APK-ul servit (%s)" % APK_SERVIT)); return
+    try:
+        b = subprocess.run(["aapt", "dump", "badging", APK_SERVIT], capture_output=True, text=True,
+                           timeout=120, stdin=subprocess.DEVNULL).stdout
+        m = re.search(r"versionCode='(\d+)'", b)
+        n = re.search(r"versionName='([^']*)'", b)
+        vc_apk = int(m.group(1)) if m else None
+        vn_apk = n.group(1) if n else "?"
+    except Exception as e:
+        rows.append((WARN, "apk_vs_git", "nu pot citi APK-ul (%s: %s)" % (type(e).__name__, str(e)[:80]))); return
+    if vc_apk is None:
+        rows.append((WARN, "apk_vs_git", "APK-ul servit n-are versionCode in badging")); return
+    if not os.path.isdir(os.path.join(APK_REPO, ".git")):
+        rows.append((WARN, "apk_vs_git", "lipseste depozitul %s" % APK_REPO)); return
+
+    def git(*a, timeout=180):
+        return subprocess.run(["git", "-C", APK_REPO, *a], capture_output=True, text=True,
+                              timeout=timeout, stdin=subprocess.DEVNULL)
+
+    # oglinda urmareste doar `main`: fara fetch pe toate ramurile, verificarea ar striga zilnic degeaba
+    git("fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*", timeout=300)
+    refs = [l.strip() for l in git("for-each-ref", "--format=%(refname)").stdout.splitlines() if l.strip()]
+    cel_mai_mare, unde = -1, "?"
+    for r in refs:
+        t = git("show", "%s:app/build.gradle.kts" % r).stdout
+        mm = re.search(r"versionCode\s*=\s*(\d+)", t)
+        if mm and int(mm.group(1)) > cel_mai_mare:
+            cel_mai_mare, unde = int(mm.group(1)), r.replace("refs/remotes/", "").replace("refs/heads/", "")
+    if cel_mai_mare < 0:
+        rows.append((WARN, "apk_vs_git", "n-am gasit versionCode pe nicio ramura (%d ref-uri)" % len(refs))); return
+    if vc_apk > cel_mai_mare:
+        rows.append((WARN, "apk_vs_git",
+                     "APK-ul servit e %d (%s), dar in git cel mai nou e %d (%s) — sursa celui din teren "
+                     "NU e in depozit; un build din git ar regresa terminalele"
+                     % (vc_apk, vn_apk, cel_mai_mare, unde)))
+    else:
+        rows.append((OK, "apk_vs_git", "APK servit %d (%s) <= git %d (%s)"
+                     % (vc_apk, vn_apk, cel_mai_mare, unde)))
+
+
 def check_heartbeats(rows, ctx):
     """Dead-man-switch: cronuri care pinguie pe SUCCES (heartbeat.py). Overdue = n-a rulat/a picat.
     Prinde exact golul pe care prospețimea datelor nu-l acoperă („cronul nu s-a executat deloc")."""
@@ -578,7 +635,7 @@ def main():
     ctx = {}  # check_metrics populează cache_fresh înainte ca check_profitdb să-l citească
     for fn in (check_metrics, check_sync_rows, check_awbprint, check_awb_output,
                check_transport_real, check_transport_mom, check_profitdb,
-               check_gads_feed, check_oh_mirror, check_heartbeats):
+               check_gads_feed, check_oh_mirror, check_heartbeats, check_apk_vs_git):
         try:
             fn(rows, ctx)
         except Exception as e:

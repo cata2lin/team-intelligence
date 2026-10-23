@@ -20,7 +20,9 @@ import parcel_shop_index as SI
 FILL = "--fill" in sys.argv
 MAP_PATH = "/root/Scripturi/data/sku_box_map.json"
 
-rows = SI.scan()
+# toate variantele: un produs cu mai multe variante intra in harta cu fiecare SKU, nu
+# doar cu primul. `parcel_density_push.py` ramane pe prima varianta (metafield de PRODUS).
+rows = SI.scan(toate_variantele=True)
 bysku = collections.defaultdict(list)
 for r in rows:
     bysku[r["sku"]].append(r)

@@ -38,9 +38,9 @@ STORES = {
     "nxfer1-n4.myshopify.com": "Carpetto",      # catalog propriu
 }
 
-Q = ('{ products(first:200%s){ pageInfo{ hasNextPage endCursor } edges{ node{ id title status tags '
+Q = ('{ products(first:%d%s){ pageInfo{ hasNextPage endCursor } edges{ node{ id title status tags '
      'featuredMedia{ preview{ image{ url } } } '
-     'variants(first:1){ edges{ node{ sku } } } '
+     'variants(first:%d){ edges{ node{ sku } } } '
      'c: metafield(namespace:"custom", key:"nr_cutii"){ value } '
      'p: metafield(namespace:"custom", key:"nr_produse"){ value } } } } }')
 SET = ('mutation($m:[MetafieldsSetInput!]!){ metafieldsSet(metafields:$m){ '
@@ -87,8 +87,17 @@ def fnum(v):
         return None
 
 
-def scan(stores=None, log=print):
-    """Scaneaza magazinele si intoarce randuri: dict(dom,label,gid,sku,title,img,status,tags,box,src)."""
+def scan(stores=None, log=print, toate_variantele=False):
+    """Scaneaza magazinele si intoarce randuri: dict(dom,label,gid,sku,title,img,status,tags,box,src).
+
+    `toate_variantele=True` scoate cate un rand pentru FIECARE varianta, nu doar pentru prima.
+    Implicit ramane prima varianta, fiindcă `parcel_density_push.py` scrie metafield-ul la
+    nivel de PRODUS: cu toate variantele, un produs cu variante masurate diferit (asternut
+    140/160/180) ar fi scris de mai multe ori, cu valori diferite. Harta SKU->colete
+    (`sku_box_map_build.py`) le cere pe toate, fiindca acolo cheia e SKU-ul.
+    """
+    # 50 x 100 de variante ramane sub plafonul de cost al query-ului; 200 x 100 il sare.
+    NV, NP = (100, 50) if toate_variantele else (1, 200)
     X = xconn()
     tok = tokens()
     rows = []
@@ -100,7 +109,7 @@ def scan(stores=None, log=print):
         cur, n = None, 0
         for _ in range(40):
             after = (', after:"%s"' % cur) if cur else ""
-            d = X.shopify_gql(dom, t, Q % after)
+            d = X.shopify_gql(dom, t, Q % (NP, after, NV))
             conn = ((d.get("data") or {}).get("products")) or {}
             if not conn and d.get("errors"):
                 log("%-16s EROARE: %s" % (STORES.get(dom, dom), str(d["errors"])[:120]))
@@ -109,18 +118,21 @@ def scan(stores=None, log=print):
                 p = e["node"]
                 tags = [x.lower() for x in (p.get("tags") or [])]
                 vs = ((p.get("variants") or {}).get("edges") or [])
-                sku = (vs[0]["node"].get("sku") or "").strip() if vs else ""
-                if not sku:
+                skus = [(v["node"].get("sku") or "").strip() for v in vs]
+                skus = [x for x in skus if x]
+                if not skus:
                     continue
                 c, pr = (p.get("c") or {}).get("value"), (p.get("p") or {}).get("value")
                 box, src = fnum(c), "nr_cutii"
                 if box is None:
                     box, src = fnum(pr), "nr_produse"
                 n += 1
-                rows.append({"dom": dom, "label": STORES.get(dom, dom), "gid": p["id"], "sku": sku,
-                             "title": p.get("title") or "", "status": p.get("status") or "",
-                             "img": (((p.get("featuredMedia") or {}).get("preview") or {}).get("image") or {}).get("url"),
-                             "tags": tags, "box": box, "src": (src if box is not None else None)})
+                img = (((p.get("featuredMedia") or {}).get("preview") or {}).get("image") or {}).get("url")
+                for sku in skus:
+                    rows.append({"dom": dom, "label": STORES.get(dom, dom), "gid": p["id"], "sku": sku,
+                                 "title": p.get("title") or "", "status": p.get("status") or "",
+                                 "img": img,
+                                 "tags": tags, "box": box, "src": (src if box is not None else None)})
             pi = conn.get("pageInfo") or {}
             if not pi.get("hasNextPage"):
                 break
