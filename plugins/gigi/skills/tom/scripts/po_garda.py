@@ -194,7 +194,7 @@ def verifica(linii, azi=None, blacklist=()):
     for l in linii:
         s = l["sku"].upper(); q = int(l["qty"])
         f = fond.get(s, {})
-        motive = []
+        motive, avertismente_marime = [], []
         viteza = f.get("viteza30") or 0
         total = (f.get("stoc") or 0) + (f.get("pe_drum") or 0) + q
         luni = (total / viteza) if viteza else None
@@ -216,15 +216,25 @@ def verifica(linii, azi=None, blacklist=()):
         if CRACIUN.search(nume) and (azi.month, azi.day) >= CUTOFF["craciun"]:
             motive.append("produs de Craciun comandat dupa 1 iulie")
         if not componenta and q >= PRAG_BUCATI:
-            motive.append("%d bucati intr-o singura linie (peste %d): istoricul arata "
-                          "sell-through 9-15%% peste pragul asta, fata de 26-41%% sub el"
-                          % (q, PRAG_BUCATI))
+            # Marimea singura NU blocheaza un produs care chiar se vinde: raftul metalic din
+            # TOM-075 are 739 buc/luna, deci 1.000 de bucati inseamna 1,4 luni — comanda sanatoasa.
+            # Blocheaza doar impreuna cu lunile de stoc; altfel ramane avertisment, fiindca peste
+            # 500 de bucati pariezi ca ritmul de azi tine luni intregi (cazul lavetelor).
+            if luni is not None and luni > PRAG_LUNI:
+                motive.append("%d bucati intr-o singura linie (peste %d) SI %.1f luni de stoc: "
+                              "istoricul arata sell-through 9-15%% peste pragul asta, fata de "
+                              "26-41%% sub el" % (q, PRAG_BUCATI, luni))
+            else:
+                avertismente_marime.append(
+                    "%d bucati intr-o singura linie: te bazezi pe ritmul de acum (%d/luna) pentru "
+                    "%.1f luni. Daca ritmul scade la jumatate, stocul tine de doua ori mai mult"
+                    % (q, viteza, luni or 0))
         if s in blacklist:
             motive.append("SKU pe blacklist (stop la re-comanda)")
         if l.get("refuz") is not None and l["refuz"] > PRAG_REFUZ:
             motive.append("refuz %.0f%%, peste pragul de %.0f%%" % (l["refuz"], PRAG_REFUZ))
         h = (hot or {}).get(s)
-        avertismente = []
+        avertismente = list(avertismente_marime)
         if h in ("SUPER COLD", "COLD"):
             avertismente.append("pagina eMAG e %s: cererea pe piata e mica" % h)
         elif h is None and not componenta:

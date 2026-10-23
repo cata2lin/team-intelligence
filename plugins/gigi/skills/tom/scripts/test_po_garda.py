@@ -34,8 +34,12 @@ bun &= test("stoc plin peste 4 luni = blocat", r["blocat"] and "luni de stoc" in
 r = ruleaza([{"sku": "HA-BUN", "qty": 400}])["HA-BUN"]
 bun &= test("produs rapid, sub 500 buc = trece", not r["blocat"])
 
+r = ruleaza([{"sku": "HA-BUN", "qty": 600}])["HA-BUN"]
+bun &= test("600 buc pe un produs rapid (3 luni) = trece, dar cu avertisment",
+            not r["blocat"] and any("te bazezi pe ritmul" in a for a in r["avertismente"]))
+
 r = ruleaza([{"sku": "HA-BUN", "qty": 5000}])["HA-BUN"]
-bun &= test("5000 buc intr-o linie = blocat chiar daca produsul e rapid", r["blocat"])
+bun &= test("5000 buc = blocat (si marime, si luni de stoc)", r["blocat"])
 
 r = ruleaza([{"sku": "EST-CUTIE", "qty": 300000}])["EST-CUTIE"]
 bun &= test("ambalajul nu e judecat nici pe numarul de bucati", not r["blocat"])
