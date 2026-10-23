@@ -20,8 +20,15 @@ import argparse, datetime, json, re, subprocess, sys
 import os
 AICI = os.path.dirname(os.path.abspath(__file__))
 KITURI = os.path.join(AICI, "po_garda_kituri.json")
-KB = ("/Users/gheorghebeschea/.claude/plugins/marketplaces/team-intelligence/"
-      "plugins/core/scripts/kb.py")
+# kb.py sta in alt loc pe laptop fata de VPS; iar pe VPS secretele vin de obicei din .env.
+# Fara cautarea asta, `secret()` intorcea text gol si psycopg2 incerca conexiunea locala, cu
+# rolul `root` inexistent — adica garda cadea tacut exact pe serverul unde ruleaza cronul.
+KB_CAI = [
+    "/Users/gheorghebeschea/.claude/plugins/marketplaces/team-intelligence/"
+    "plugins/core/scripts/kb.py",
+    "/root/Scripturi/team-intelligence/plugins/core/scripts/kb.py",
+]
+KB = next((c for c in KB_CAI if os.path.exists(c)), KB_CAI[0])
 PRAG_LUNI = 4.0            # calibrat: peste 4 luni, sell-through-ul la 90 de zile cade la 9%
 PRAG_NOU = 300             # produs nou: peste atat fara test = blocat
 # Masurat pe istoric (23-oct): sub 500 de bucati sell-through-ul la 90 de zile e 26-41%, peste
@@ -39,8 +46,15 @@ CRACIUN = re.compile(r"craciun|brad|ornament|instalatie lumin|cadou", re.I)
 
 
 def secret(k):
-    d = subprocess.run(["uv", "run", KB, "secret-get", k], capture_output=True, text=True).stdout.strip()
-    return re.sub(r"[?&]schema=[^&]*", "", d)      # Prisma pune ?schema=public, psycopg2 il refuza
+    """Intai din mediu (cronul de pe VPS incarca .env), apoi din KB."""
+    v = os.environ.get(k) or ""
+    if not v:
+        uv = "/root/.local/bin/uv" if os.path.exists("/root/.local/bin/uv") else "uv"
+        v = subprocess.run([uv, "run", KB, "secret-get", k],
+                           capture_output=True, text=True).stdout.strip()
+    if not v.startswith(("postgres://", "postgresql://")):
+        raise SystemExit("nu am obtinut %s (nici din mediu, nici din KB: %r)" % (k, v[:60]))
+    return re.sub(r"[?&]schema=[^&]*", "", v)      # Prisma pune ?schema=public, psycopg2 il refuza
 
 
 def conectare(cheie):
