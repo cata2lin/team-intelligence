@@ -29,7 +29,25 @@ Reguli (canonice, vezi memorie ha-vs-grandia-profit):
 """
 import argparse, json, os, sys
 VAT = 1.21
-DEALS_PREFIXES = ["MAG", "OFER", "RED", "BON"]   # magazinele unde se vand SKU-urile HA-*
+# „HA" = TOATE magazinele care vind HA, adica exact ce face eticheta `skus LIKE 'HA-%'` (decizia
+# ownerului prin Orchestrator, 23-oct-2026). NU tinem lista aici: ar minti. Prima versiune a acestui
+# comentariu enumera 9 magazine, din doua luni masurate — pe trei luni sint 13 (MAG, OFER, BON, RED,
+# CZ, BUC, BONBG, GRAN, PL, HU, SK, APR, ORC), si se schimba de la lună la lună. Raportul o deriva
+# singur, la fiecare rulare, in defalcarea pe magazin a liniei HA.
+
+# BAZA DE ALOCARE A MARKETINGULUI pentru linia HA. Principiul ownerului (23-oct-2026): unde venitul
+# HA intra in linie, intra si partea lui de marketing — din override-ul fiecarui magazin se da lui HA
+# o cota egala cu procentul lui de colete HA.
+#
+# NU e o lista codificata, dinadins: se DERIVA din date (vezi `ha_share`), adica toate magazinele cu
+# colete HA, MINUS cele raportate ca linie separata (`--prefixes`, de obicei GRAN). Altfel marketingul
+# Grandiei ar fi numarat o data la linia GRAN si partial din nou la HA — dublare.
+#
+# Lista veche era `["MAG","OFER","RED","BON"]`, cu comentariul „magazinele unde se vand SKU-urile
+# HA-*" — care NU era ce facea variabila, si oricum era incompleta: HA se vinde pe 13 magazine. Cu
+# baza derivata, trec in alocare si CZ (96.382 lei), Bucsa (93.943), BONBG (23.830), PL (14.911),
+# SK (5.017), HU (3.052), Apreciat (1.536) si ORC (830).
+
 SHIPPED = ("Livrata", "In curs de livrare", "Refuzata")
 
 # core/scripts in orice layout de instalare (clona repo, marketplace, plugin-cache
@@ -85,27 +103,54 @@ def main():
     no_test = "LOWER(COALESCE(tags,'')) NOT LIKE '%test%'"
     # 1. per linie (HA + prefixe), pe status: rev/cogs/plecate
     lines_sql = f"""
-      SELECT lbl, status_category st, COUNT(*) c, SUM(revenue) rev, SUM(cogs) cogs FROM (
-        SELECT CASE WHEN skus LIKE 'HA-%' THEN 'HA'
-                    WHEN prefix IN ({",".join("'%s'"%p for p in prefixes)}) THEN prefix
-                    END lbl, status_category, revenue, cogs
-        FROM profit_orders WHERE month IN {mlist} AND {no_test}
-          AND (skus LIKE 'HA-%' OR prefix IN ({",".join("'%s'"%p for p in prefixes)})) )
+      SELECT lbl, status_category st, COUNT(*) c, SUM(rev_lei) rev, SUM(cogs) cogs FROM (
+        SELECT CASE WHEN o.skus LIKE 'HA-%' THEN 'HA'
+                    WHEN o.prefix IN ({",".join("'%s'"%p for p in prefixes)}) THEN o.prefix
+                    END lbl, o.status_category,
+               -- ⚠️ UNITĂȚI AMESTECATE: `revenue` e în MONEDA MAGAZINULUI, iar `cogs` în LEI. Fără
+               -- conversie, CZK și HUF (monede mici, sume brute uriașe) umflau venitul: găleata HA
+               -- ieșea cu +320.637 lei pe septembrie (20,5%) și +414.954 pe octombrie (32,9%), fiindcă
+               -- Bonhaus CZ e cel mai mare contribuitor la ea. COGS-ul NU se convertește: e deja în lei.
+               o.revenue * COALESCE(fx.rate_to_ron, 1.0) rev_lei, o.cogs
+        FROM profit_orders o
+        LEFT JOIN profit_exchange_rates fx
+               ON fx.month = o.month AND fx.currency = COALESCE(NULLIF(o.currency,''),'RON')
+        WHERE o.month IN {mlist} AND {no_test.replace("tags", "o.tags")}
+          AND (o.skus LIKE 'HA-%' OR o.prefix IN ({",".join("'%s'"%p for p in prefixes)})) )
       WHERE lbl IS NOT NULL GROUP BY lbl, st"""
     rows = remote(lines_sql)
 
     # 2. transport costs + marketing override (toate prefixele relevante)
-    allp = list(set(prefixes + DEALS_PREFIXES))
+    # cautam transportul si marketingul pe TOATE magazinele care pot intra in alocare
+    allp = list(set(prefixes + [r["prefix"] for r in remote(
+        f"SELECT DISTINCT prefix FROM profit_orders WHERE month IN {mlist} AND skus LIKE 'HA-%'")]))
     inp = "(" + ",".join("'%s'" % p for p in allp) + ")"
     tcost = {r["prefix"]: r["cost_per_parcel"] for r in remote(
         f"SELECT prefix, AVG(cost_per_parcel) cost_per_parcel FROM profit_transport_costs WHERE month IN {mlist} AND prefix IN {inp} GROUP BY prefix")}
     mkt = {r["prefix"]: r["amount"] for r in remote(
         f"SELECT prefix, SUM(amount) amount FROM profit_marketing_override WHERE month IN {mlist} AND prefix IN {inp} GROUP BY prefix")}
     # 3. alocare marketing HA: cota HA din plecate per deals-prefix
+    # Baza derivata: orice magazin cu colete HA, mai putin cele raportate separat (ca sa nu dublam).
+    _exclus = ",".join("'%s'" % p for p in prefixes) or "''"
     ha_share = remote(f"""SELECT prefix,
         SUM(CASE WHEN skus LIKE 'HA-%' AND status_category IN {tuple(SHIPPED)} THEN 1 ELSE 0 END) ha,
         SUM(CASE WHEN status_category IN {tuple(SHIPPED)} THEN 1 ELSE 0 END) tot
-        FROM profit_orders WHERE month IN {mlist} AND prefix IN ({",".join("'%s'"%p for p in DEALS_PREFIXES)}) AND {no_test} GROUP BY prefix""")
+        FROM profit_orders WHERE month IN {mlist} AND {no_test} AND prefix NOT IN ({_exclus})
+        GROUP BY prefix HAVING ha > 0""")
+
+    # 3b. defalcarea liniei HA pe MAGAZIN: linia HA amesteca deals, Bonhaus CZ, Bucsa si Grandia,
+    # iar pina acum nu se vedea de unde vine marja. Venitul se converteste in lei (vezi nota de unitati).
+    ha_pe_magazin = remote(f"""
+        SELECT o.prefix,
+               SUM(CASE WHEN o.status_category = 'Livrata'
+                        THEN o.revenue * COALESCE(fx.rate_to_ron, 1.0) ELSE 0 END) rev,
+               SUM(CASE WHEN o.status_category = 'Livrata' THEN o.cogs ELSE 0 END) cogs,
+               SUM(CASE WHEN o.status_category IN {tuple(SHIPPED)} THEN 1 ELSE 0 END) plecate
+        FROM profit_orders o
+        LEFT JOIN profit_exchange_rates fx
+               ON fx.month = o.month AND fx.currency = COALESCE(NULLIF(o.currency,''),'RON')
+        WHERE o.month IN {mlist} AND o.skus LIKE 'HA-%' AND {no_test.replace("tags", "o.tags")}
+        GROUP BY o.prefix ORDER BY 2 DESC""")
 
     # agregare
     def blank(): return {"rev": 0.0, "cogs": 0.0, "plecate": 0}
@@ -138,7 +183,20 @@ def main():
         print(f"  = contribuție {contrib:>12,.0f}  − marketing {marketing:>11,.0f}")
         print(f"  = NET {net:>12,.0f}   ({net/rev_n*100:.1f}% margin)")
     if not a.no_ha:
-        print(f"\n(marketing HA alocat = {ha_mkt:,.0f} lei — cotă HA din override-ul {DEALS_PREFIXES})")
+        print(f"\n(marketing HA alocat = {ha_mkt:,.0f} lei — cota HA din override-ul a "
+              f"{len([s for s in ha_share if s['tot']])} magazine cu colete HA, "
+              f"fara cele raportate separat: {prefixes})")
+        print("\n--- linia HA, de unde vine: pe magazin (livrate, ex-TVA) ---")
+        print(f"  {'magazin':10}{'venit':>13}{'COGS':>12}{'marjă brută':>14}{'%':>7}{'plecate':>9}")
+        for s in ha_pe_magazin:
+            rv, cg = (s["rev"] or 0) / VAT, (s["cogs"] or 0) / VAT
+            if rv <= 0 and not s["plecate"]:
+                continue
+            m = rv - cg
+            print(f"  {s['prefix']:10}{rv:>13,.0f}{cg:>12,.0f}{m:>14,.0f}"
+                  f"{(100.0*m/rv if rv else 0):>6.0f}%{s['plecate']:>9,}")
+        print("  (marjă brută = venit − COGS, fără transport și marketing: alea se alocă doar pe "
+              "linia HA întreagă, nu pe magazin)")
 
     # --- Return on inventory (din profit_inventory_value, dacă există snapshot) ---
     try:

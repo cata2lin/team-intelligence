@@ -10,11 +10,12 @@ identical to the [ALS] P.Max group so both groups compete on real text.
 Run: DATABASE_URL_METRICS=$(kb.py secret-get DATABASE_URL_METRICS) \\
        uv run build_belasil_ag1_assets.py [--apply]
 """
+import os
 import os, sys, json
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
 
-API = "v22"
+API = os.environ.get("GADS_API_VERSION", "v24")
 CID = "7566352958"
 AG  = "customers/7566352958/assetGroups/6570921716"
 

@@ -3,10 +3,11 @@
 # dependencies = ["psycopg2-binary>=2.9", "requests>=2.31"]
 # ///
 """Disable Brand Guidelines on the Belasil PMax, then link all text assets to the asset group."""
+import os
 import os, sys, json
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
-API="v22"; CID="7566352958"; CAMP="customers/7566352958/campaigns/22478321481"; AG="customers/7566352958/assetGroups/6570957552"
+API = os.environ.get("GADS_API_VERSION", "v24"); CID="7566352958"; CAMP="customers/7566352958/campaigns/22478321481"; AG="customers/7566352958/assetGroups/6570957552"
 HEAD=["Detergent Gel Concentrat","200 de Spălări pe Bidon","Doar 0,49 lei pe Spălare","10L la 99 lei, de la 255",
  "Direct de la Producător","Balsam Inclus în Detergent","Spală Alb și Color","Detergent Rufe Premium",
  "4,7/5 din 1.250+ Recenzii","Parfum de Lungă Durată","Gel Dens, Delicat cu Tine","Transport Gratuit 150 lei",

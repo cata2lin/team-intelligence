@@ -44,8 +44,24 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
+import os
+
 import psycopg2
 import psycopg2.extras
+
+# Biblioteca CANONICĂ (vat / cogs / transport / marketing + costul pe lot, S2). Căile: în git stă în
+# `plugins/gigi/skills/metrics-cache/scripts`, pe VPS stă plat lângă scriptul asta. Dacă nu se găsește,
+# nu crăpăm: COGS-ul rămâne pe tabelul vechi, ca înainte, și o spunem în stderr.
+_AICI = Path(__file__).resolve()
+for _cale in (_AICI.parents[2] / "gigi/skills/metrics-cache/scripts", _AICI.parent, Path("/root/Scripturi")):
+    if (_cale / "profit_core.py").exists():
+        sys.path.insert(0, str(_cale))
+        break
+try:
+    import profit_core as pc
+except ImportError:                                    # pragma: no cover - doar pe o instalare incompletă
+    pc = None
+    print("WARN: profit_core nu s-a gasit — COGS ramane pe sku_costs", file=sys.stderr)
 import requests
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -65,7 +81,10 @@ VAT_DIVISOR = 1.0 + VAT_RATE
 REVENUE_STATUSES = {"PAID", "PARTIALLY_REFUNDED", "REFUNDED"}
 
 META_API_VERSION = "v23.0"
-GOOGLE_ADS_API_VERSION = "v20"
+# Google a blocat v20/v22 pe 17-oct-2026 („Version vXX is deprecated. Requests to this version will
+# be blocked") — pe v20 pasul de Google Ads răspundea 404 și OPREA toată rularea. Aceeași convenție
+# ca în `gigi:google-ads-mcc`: implicit v24, dar se poate muta din env fără deploy, la următorul blocaj.
+GOOGLE_ADS_API_VERSION = os.environ.get("GADS_API_VERSION", "v24")
 TIKTOK_API_BASE = "https://business-api.tiktok.com/open_api/v1.3"
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -324,6 +343,22 @@ def compute_cogs(awb_conn, included_orders: list[ShopifyOrder]) -> CogsResult:
             (skus_needed,))
         for r in rows:
             cost_map[r["sku"]] = (float(r["cost"]), r["currency"] or "RON")
+
+    # S2: costul vine din LOTUL valabil la data comenzii (Order Hub), iar `sku_costs` rămâne cascada
+    # veche pentru produsele fără lot. Regula e în `profit_core` (cost_loturi_oh / cost_lot_la), ca să
+    # nu existe două versiuni ale ei. Lotul e EX-TVA, iar aici COGS-ul se ține BRUT (`net_cogs` îl
+    # împarte la VAT_DIVISOR), deci se înmulțește înapoi cu VAT_DIVISOR.
+    # Fără magazin: `produs_cost` e pe PRODUS, iar codurile NUMERICE sunt refuzate de garda din OH
+    # (`COD_AMBIGUU`) și rămân pe costul vechi — intenționat, nu o scăpare.
+    loturi: dict[str, list] = {}
+    if skus_needed and pc is not None and os.environ.get("OH_COST_TOKEN"):
+        try:
+            loturi = pc.cost_loturi_oh(skus_needed, os.environ["OH_COST_TOKEN"])
+            print(f"COGS: {len(loturi)}/{len(skus_needed)} SKU-uri au lot in Order Hub", file=sys.stderr)
+        except RuntimeError as e:
+            print(f"WARN: {e} — COGS ramane pe sku_costs", file=sys.stderr)
+    elif skus_needed:
+        print("WARN: fara OH_COST_TOKEN — COGS ramane pe sku_costs (tabelul vechi)", file=sys.stderr)
     line_count = 0; units_sold = 0; gross_cogs = 0.0
     lines_missing = 0; units_missing = 0
     missing_skus: set[str] = set()
@@ -335,6 +370,10 @@ def compute_cogs(awb_conn, included_orders: list[ShopifyOrder]) -> CogsResult:
             line_count += 1
             units_sold += qty
             cm = cost_map.get(li["sku"])
+            ex_tva = pc.cost_lot_la(loturi.get((li["sku"] or "").strip().lower()),
+                                    o.created_at.date() if o.created_at else None) if loturi else None
+            if ex_tva is not None:
+                cm = (ex_tva * VAT_DIVISOR, "RON")
             if cm is None:
                 lines_missing += 1
                 units_missing += qty

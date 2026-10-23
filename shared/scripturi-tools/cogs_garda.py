@@ -64,9 +64,17 @@ def aduna(zile=30):
     cx.row_factory = sqlite3.Row
     cx.execute("PRAGMA query_only = 1")
     rows = cx.execute("""
-        SELECT pol.sku, po.shop, SUM(pol.qty) buc, SUM(pol.line_cogs) cogs, SUM(pol.line_revenue) venit
+        -- ⚠️ `line_revenue` e in MONEDA magazinului, iar `line_cogs` in LEI (unitati amestecate in
+        -- aceeasi tabela). Fara cursul din `profit_exchange_rates`, ordonarea pe venit punea produsele
+        -- din CZ (305 CZK) deasupra celor din RO (50 lei) pentru acelasi produs, iar HUF cu ~70x —
+        -- deci garda inspecta alte 50 de produse decit cele mai mari ca bani. Nicio cifra raportata
+        -- nu era greșita, doar selectia.
+        SELECT pol.sku, po.shop, SUM(pol.qty) buc, SUM(pol.line_cogs) cogs,
+               SUM(pol.line_revenue * COALESCE(fx.rate_to_ron, 1.0)) venit
         FROM profit_order_lines pol
         JOIN profit_orders po ON po.month=pol.month AND po.prefix=pol.prefix AND po.order_name=pol.order_name
+        LEFT JOIN profit_exchange_rates fx
+               ON fx.month = po.month AND fx.currency = COALESCE(NULLIF(po.currency,''),'RON')
         WHERE po.created_at >= date('now', ?) AND po.status_category='Livrata' AND pol.qty > 0
         GROUP BY pol.sku, po.shop ORDER BY venit DESC LIMIT ?""", ("-%d days" % zile, TOP)).fetchall()
     cx.close()

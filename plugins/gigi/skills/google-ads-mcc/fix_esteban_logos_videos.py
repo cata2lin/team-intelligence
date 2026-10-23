@@ -12,11 +12,12 @@ Esteban — două operații:
 
 Run: DATABASE_URL_METRICS=<dsn> uv run fix_esteban_logos_videos.py [--apply]
 """
+import os
 import os, sys, json
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
 
-API = "v22"
+API = os.environ.get("GADS_API_VERSION", "v24")
 CID = "5229815058"
 
 CAMPAIGN_RN = "customers/5229815058/campaigns/23924430848"

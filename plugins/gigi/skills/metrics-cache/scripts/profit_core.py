@@ -9,6 +9,8 @@ comandă. Pur funcții (fără I/O) — apelantul pasează datele. Regula: Contr
 
 Din auditul celor 5 scripturi (2026-06-20): înainte fiecare trata TVA/COGS/transport/marketing/bundle diferit.
 """
+import datetime as _dt
+import os
 from collections import defaultdict
 
 # ---- TVA per ȚARĂ (nu per prefix arbitrar) ----
@@ -45,6 +47,83 @@ def vat_for_order(prefix: str = "", currency: str = "", country: str = "") -> fl
     return vat_for_prefix(prefix)
 
 # ---- COGS în RON (override are prioritate, ca engine-ul; conversie din moneda magazinului) ----
+# ─────────────────────────── COGS pe LOT, din Order Hub (S2) ───────────────────────────
+# De ce aici: `profit_core` e singura bibliotecă pe care o importă toate motoarele de profit, deci
+# regula „costul vine din lotul valabil la data comenzii" trebuie să stea tot aici, lângă `cogs_ron`.
+# Aplicația AWB are propria copie (`app/services/cogs_sursa.py`) fiindcă e alt depozit de cod — două
+# baze de cod, dar fiecare cu UN singur loc, nu cu o copie pe fiecare cititor.
+#
+# Două capcane care strică cifra dacă le sari:
+#   · `produs_cost.cost_lei_buc` e EX-TVA, iar `sku_costs.cost` era CU TVA → cine ținea costul cu TVA
+#     înmulțește cu (1 + TVA-ul țării), prin `vat_for_prefix` / `vat_for_order`;
+#   · un cod NUMERIC înseamnă produse diferite pe magazine diferite. Fără magazin, garda din Order Hub
+#     refuză codurile ambigue (`COD_AMBIGUU`) și le lasă pe cascada veche — asta e intenționat.
+
+OH_API = os.environ.get("ORDER_HUB_API", "https://orderhub.arona.ro")
+OH_LOT_MAX = 2000
+
+
+def cost_loturi_oh(coduri, token: str, magazin: str = None, timeout: int = 240) -> dict:
+    """{cod_jos: [(data_lot, cost_ex_tva)] descrescător} din `POST /api/produs/cost/lot` cu istoric.
+
+    O singură cerere pentru toată harta: un P&L pe lună are comenzi din 30 de zile diferite, iar
+    lotul valabil se alege local, cu `cost_lot_la`. Ridică RuntimeError dacă OH nu răspunde —
+    apelantul decide (de obicei: rămâne pe costul vechi și SPUNE că a rămas).
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    lista = sorted({str(c).strip() for c in (coduri or []) if str(c or "").strip()})
+    out = {}
+    for i in range(0, len(lista), OH_LOT_MAX):
+        corp = {"istoric": True,
+                "perechi": [{"cod": c, **({"magazin": magazin} if magazin else {})}
+                            for c in lista[i:i + OH_LOT_MAX]]}
+        cerere = urllib.request.Request(
+            OH_API.rstrip("/") + "/api/produs/cost/lot", data=_json.dumps(corp).encode(),
+            method="POST", headers={"Content-Type": "application/json",
+                                    "Authorization": "Bearer " + (token or "")})
+        try:
+            with urllib.request.urlopen(cerere, timeout=timeout) as r:
+                d = _json.load(r)
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            raise RuntimeError("Order Hub n-a dat costurile pe lot: %s: %s" % (type(e).__name__, e)) from e
+        if not isinstance(d, dict) or not d.get("ok"):
+            raise RuntimeError("Order Hub a refuzat cererea de costuri: %s" % str(d)[:200])
+        for rand in d.get("rezultate") or []:
+            loturi = []
+            for l in rand.get("loturi") or []:
+                zi, cost = l.get("data_lot"), l.get("cost_lei_buc")
+                if not zi or cost is None:
+                    continue
+                try:
+                    loturi.append((_dt.date.fromisoformat(str(zi)), float(cost)))
+                except (TypeError, ValueError):
+                    continue
+            if loturi:
+                loturi.sort(key=lambda x: x[0], reverse=True)
+                out[str(rand.get("cod") or "").strip().lower()] = loturi
+    return out
+
+
+def cost_lot_la(loturi, zi=None):
+    """Costul EX-TVA al ultimului lot cu `data_lot` ≤ `zi` (fără `zi`: lotul curent).
+
+    None înseamnă „produsul n-are lot până la data asta" — comandă mai veche decât primul lot, sau
+    produs fără nicio recepție. Apelantul cade pe costul vechi; NU întoarcem 0, fiindcă un 0 ar
+    trece drept „marfă gratis" și ar umfla profitul.
+    """
+    if not loturi:
+        return None
+    if zi is None:
+        return loturi[0][1]
+    for data_lot, cost in loturi:
+        if data_lot <= zi:
+            return cost
+    return None
+
+
 def cogs_ron(qty=0, line_cogs_store=None, unit_cost_store=None, rate_store=1.0, override=None, fx=None) -> float:
     """COGS în RON. Prioritate: override=(cost,currency) per-unit × qty (ca engine l.1509);
     altfel line_cogs_store (total pe linie) × rate_store [profit_by_sku];

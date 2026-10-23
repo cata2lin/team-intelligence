@@ -11,7 +11,7 @@
 |---|---|---|---|
 | **AWB Arona** (`awb.arona.ro`) | secret `DATABASE_URL_AWBPRINT` | **Sursa de adevăr pentru transport REAL** (statusurile → Order Hub): `orders` (status, `total_price`, `line_items`, `currency`, `store_uid`, **`transport_cost`** = cost transport AUTORITATIV per comandă, gross, ~87% acoperire — UN AWB principal/comandă, exact cum e urcat în AWB Arona), `order_awbs` (detaliu per-AWB; rânduri multiple = în mare DUPLICATE → **NU suma**), `stores` (`uid`,`name`=domeniu public). | folosește **`orders.transport_cost`** (NU suma order_awbs — duplicatele multiplică); e gross → `/1.21` = ex-TVA (TVA transport = RO 21%, curierul e RO); `shopify_domain` e NULL → mapează prefix→domeniu (profit_core.PREFIX_AWB_DOMAIN); internațional în valută locală |
 | **metrics** | MCP `postgres-metrics` (RO) | Ad-spend (`*_insights_daily`), **`cache.product_ad_spend`** (spend per-SKU Meta+TikTok+Google), `cache.brand_pnl_monthly` (P&L canonic per brand), `fx_rates`, `brands` | conturi partajate TikTok = split pe token în nume; ad-spend sync parțial |
-| **profitability.db** (SQLite, VPS `/root/Scripturi/data/`) | engine `api.profitability` | `profit_orders` (per comandă: revenue=total în moneda magazinului, cogs, status_category, currency), `profit_order_lines` (per linie: sku/qty/line_revenue/line_cogs), `profit_cogs_override`, `profit_exchange_rates` (rate_to_ron/lună), `profit_transport_costs` | revenue/cogs în MONEDA magazinului (convertește cu rate_to_ron!); status livrare se stabilește prin maparea curier |
+| **profitability.db** (SQLite, VPS `/root/Scripturi/data/`) | engine `api.profitability` | `profit_orders` (per comandă: revenue=total în moneda magazinului, cogs, status_category, currency), `profit_order_lines` (per linie: sku/qty/line_revenue/line_cogs), `profit_cogs_override`, `profit_exchange_rates` (rate_to_ron/lună), `profit_transport_costs` | revenue/cogs în MONEDA magazinului (convertește cu rate_to_ron!); status livrare se stabilește prin maparea curier | · ⚠️ **UNITĂȚI AMESTECATE: `revenue` e în moneda magazinului, dar `cogs` și `profit_order_lines.line_cogs` sunt în LEI pe TOATE magazinele.** Dovadă (`set-5-lavete-magice`, oct-2026): 5,40 lei/buc brut pe CZ (CZK), 5,40 pe BONBG (EUR) ȘI 5,40 pe OFER (RON) — identice. Convertind COGS-ul „din moneda magazinului” ies artefacte: CZ +35.286 și BONBG −18.047 în loc de −1.295 și −33.
 | **Shopify** (per magazin) | `gigi:shopify-stores` | COGS (unitCost), produse, comenzi LIVE | unitCost în moneda magazinului; CZ/PL n-au unitCost setat; NUB token OAuth (e ok acum, expires 2099) |
 | **KB SharedClaude** | `core:knowledge-base` (`kb.py`) | secrete, log activitate, fișiere, **resurse/lecții** (`resource-list`) | secretele DOAR aici |
 
@@ -19,8 +19,10 @@
 > ⚠️ **DATELE: cache-urile derivate MINT per-brand — la verdict pe BANI confirmă la SURSĂ** (dovedit iun-2026, vezi [[profit-data-sources-truth]]):
 > - **LIVRATE / refuzate** → **Order Hub** (`oh_rata_livrare` / `gigi:oh-delivery-rate`), sursa de adevăr pentru statusuri. AWBprint (`gigi:fulfillment-analytics`) rămâne bun pentru **livratele RO** (sep-2026: identic cu OH la ±0,1% pe fiecare prefix) și pentru `transport_cost`, dar pe **refuzurile internaționale** diferă (SK2 49 vs 94, HU2 10 vs 29, ORC 21 vs 46) → intl doar din OH. Engine-ul/`multi_brand_pnl --range` SUB-numără livratele pe fereastră recentă (~1.6×) → nu judeca luna curentă pe livratele din engine.
 > - **SPEND Meta/TikTok per brand** → `cache.daily_ad_spend_ron` (warehouse) e **CORECT** — aplică Mapping-ul (cont/token din sheet „CPA și financiar", tab Mapping). ⚠️ **NU re-deriva din spend BRUT pe cont** (Graph API): conturile-s PARTAJATE (contul „Esteban 3" = OFERTELE, nu Esteban!) → suma pe cont ≠ atribuirea pe brand. ✅ **Grandia Meta = REPARAT 29-iun** (era `×curs_USD_zilnic` spurios pe FB în tabul „Grandia" din „CPA si financiar" — FB e RON, nu USD; scos ×curs pe 232 rânduri + MDC/cache refresh → warehouse acum **51k corect**; durabil via Curs valutar **D17='DA'**+**E17='DA'**, vezi [[profit-data-sources-truth]]). Excepție rămasă: **Belasil TikTok token-GOL** înghite Esteban (split, suma neschimbată). Verificare = `meta-ads`/`tiktok-ads` sau aplică Mapping-ul, NU spend brut pe cont.
-> - **COGS** → Shopify `variants.costPerItem` (SKU în `line_items→inventory_item→>'sku'`; engine sub-numără: 37% vs real 46%).
-> - Regula de aur: **livrare→Order Hub (RO merge și AWBprint), COGS→Shopify, transport→cascadă profit_core, spend→warehouse (aplică Mapping-ul, NU spend brut pe cont)**. Portofoliu iun 1-15 = **+513k** (engine −201k = greșit din sub-numărare livrate + Grandia over).
+> - **COGS** → **`produs_cost` din Order Hub: LOTUL valabil la DATA comenzii** (sursa canonică din 23-oct-2026, S2); produsul fără lot cade pe **Shopify `variants.costPerItem`** ca rezervă (SKU în `line_items→inventory_item→>'sku'`). Lotul e **ex-TVA**, `costPerItem` e **cu TVA** → la citire se înmulțește cu 1,21 (TVA-ul românesc: marfa o cumpărăm noi, în RO, nu TVA-ul țării de vânzare). ⚠️ `magazin` se trimite MEREU, ca **domeniu myshopify**, nu cel public: un cod NUMERIC înseamnă produse diferite pe magazine diferite (pe Esteban `195` = parfum, același cod pe George Talent = consolă de jocuri — fără magazin ies +7.624 lei falși). Comutatoare: `system_settings.cogs.sursa` în AWBprint, `profit_settings.cogs_sursa` în `profitability.db`; revenirea e o setare, nu un deploy. Regula stă într-un singur loc pe fiecare bază de cod: `app/services/cogs_sursa.py` (AWB) și `profit_core.cost_loturi_oh` / `cost_lot_la` (Scripturi).
+> - Regula de aur: **livrare→Order Hub (RO merge și AWBprint), COGS→lotul din Order Hub (Shopify doar ca rezervă), transport→cascadă profit_core, spend→warehouse (aplică Mapping-ul, NU spend brut pe cont)**. Portofoliu iun 1-15 = **+513k** (engine −201k = greșit din sub-numărare livrate + Grandia over).
+
+> - **TVA pe COGS: se netează cu TVA ROMÂNESC (21%), nu cu TVA-ul țării de vânzare.** Costul e **landed cost în RON**, cu TVA-ul plătit de noi la import — același număr pe toate magazinele (dovadă: `set-5-lavete-magice` = 5,40 lei/buc pe CZ, BONBG ȘI OFER). Împărțirea la TVA-ul țării dădea același produs cu alt cost ex-TVA în funcție de unde s-a vândut: prea mic pe HU (27%), PL și SK (23%), prea mare pe BG și MD (20%). Reparat 23-oct-2026 în `api/profitability.py`; efect mic (+16 lei pe aug–oct, maxim +175 pe HU în august), fiindcă CZ — cel mai mare brand străin — are oricum 21%. **Venitul rămâne pe TVA-ul țării**: acolo e corect, TVA-ul de vânzare e al pieței.
 
 **Regula unică**: `Contribuție = Venit − COGS − Transport − Marketing`, **ex-TVA** pe venit/COGS/transport (TVA deductibil), marketing NET, **doar comenzi LIVRATE**. Logica e într-un singur loc:
 
@@ -114,6 +116,26 @@
 | `deploy.sh` | Deploy GIT-DRIVEN sigur: `git fetch` + sync flat (via parity, cu `.bak`) + `pull --ff-only` checkout. Înlocuiește scp manual. | `ssh <vps> 'bash /root/Scripturi/deploy.sh --apply'` |
 
 > **Deploy corect = `deploy.sh --apply`**, NU scp manual (scp-ul manual = cauza divergențelor git↔VPS). Vezi memoria [[data-health-watchdog]].
+
+## ⚠️ Capcana de diagnostic: pe hosturile cu SPA, codul HTTP nu răspunde la întrebarea pusă
+
+Găsită pe 23-oct-2026, verificând dacă niște fișiere cu credentialе au fost servite pe web.
+
+**Problema:** `location / { try_files $uri $uri/ /index.html; }` întoarce **pagina SPA cu status 200**
+pentru orice cale necunoscută. În logurile nginx de pe 38.242 apar **151 de `200` pe `/.env`, 89 pe
+`/.git/config`, 45 pe `/.env.bak`** — citite repede, par „le-am dat fișierul”. Nu sunt: e pagina.
+
+**Cum se deosebește:** prin **dimensiunea răspunsului**, nu prin cod. `index.html` are **456 de octeți pe
+`awb.arona.ro`, 458 pe `bi.arona.ro`, și 308–311 în logurile mai vechi** — SPA-ul își schimbă mărimea la
+fiecare build, deci nu căuta o valoare fixă într-un log vechi.
+
+**Și `404` nu răspunde nici el.** Pe 84.46 același robot primește 404, pe 38.242 primește 200 — aceeași
+cerere, concluzii opuse, după host. **Întrebarea care decide e unde e RĂDĂCINA WEB**, nu ce cod iese: pe
+`awb.arona.ro` e `/opt/awb-print/frontend/dist`, iar fișierele căutate stăteau în `backend/` și
+`frontend/src/` — în afara rădăcinii, deci inaccesibile prin HTTP, indiferent de cod.
+
+**Deci: NU pune alertă pe „200 pe căi sensibile”** — pe orice host cu SPA ar țipăi zilnic, și în câteva
+zile n-ar mai citi-o nimeni. Condiția corectă e **dimensiune diferită de `index.html`**.
 
 ## Lecții/capcane salvate (în KB: `kb.py resource-list`)
 - **Cache/backfill FAIL-SAFE**: nu face DELETE pe istoric apoi reinsert condiționat — un pull eșuat șterge tot. Pur upsert. Învelește apelurile externe în retry-on-timeout (googleapiclient aruncă TimeoutError brut, nu RequestException).
