@@ -40,6 +40,20 @@ def conectare(cheie):
     return psycopg2.connect(secret(cheie))
 
 
+def hotness(skus):
+    """Cat de cautata e pagina produsului pe eMAG: HOT / STANDARD / COLD / SUPER COLD.
+
+    E doar un AVERTISMENT, niciodata blocaj: semnalul exista numai pentru produsele care au deja
+    pagina pe eMAG (14 din 211 masurate pe 23-oct), iar o parte din EAN-urile noastre sunt generate
+    intern si nu se potrivesc cu nicio pagina. Lipsa paginii NU inseamna produs slab.
+    """
+    fis = os.path.join(AICI, "po_garda_hotness.json")
+    try:
+        return {k.upper(): v for k, v in json.load(open(fis)).items() if not k.startswith("_")}
+    except Exception:
+        return {}
+
+
 def kituri():
     """componenta -> kitul a carui viteza o mosteneste (vezi po_garda_kituri.json)"""
     try:
@@ -115,6 +129,7 @@ def date_de_fond(skus):
 def verifica(linii, azi=None, blacklist=()):
     azi = azi or datetime.date.today()
     fond = date_de_fond([l["sku"] for l in linii])
+    hot = hotness([l["sku"] for l in linii])
     rez = []
     for l in linii:
         s = l["sku"].upper(); q = int(l["qty"])
@@ -144,11 +159,18 @@ def verifica(linii, azi=None, blacklist=()):
             motive.append("SKU pe blacklist (stop la re-comanda)")
         if l.get("refuz") is not None and l["refuz"] > PRAG_REFUZ:
             motive.append("refuz %.0f%%, peste pragul de %.0f%%" % (l["refuz"], PRAG_REFUZ))
+        h = (hot or {}).get(s)
+        avertismente = []
+        if h in ("SUPER COLD", "COLD"):
+            avertismente.append("pagina eMAG e %s: cererea pe piata e mica" % h)
+        elif h is None and not componenta:
+            avertismente.append("produsul n-are pagina pe eMAG, deci nu avem semnal de cerere de acolo")
         rez.append({"sku": s, "qty": q, "nume": (f.get("nume") or "")[:50],
                     "componenta": bool(componenta), "viteza_din_kit": f.get("viteza_din_kit"),
                     "stoc": f.get("stoc"), "pe_drum": f.get("pe_drum"), "viteza30": viteza,
                     "luni_dupa_comanda": round(luni, 1) if luni else None,
-                    "blocat": bool(motive), "motive": motive})
+                    "blocat": bool(motive), "motive": motive,
+                    "hotness": h, "avertismente": avertismente})
     return rez
 
 
@@ -187,6 +209,8 @@ def main():
             else:
                 print("ok      %-11s %6d buc · %.1f luni dupa comanda"
                       % (r["sku"], r["qty"], r["luni_dupa_comanda"] or 0))
+            for av in r.get("avertismente") or []:
+                print("        ⚠ %s" % av)
     n = sum(1 for r in rez if r["blocat"])
     print("\n%d linii, %d blocate" % (len(rez), n), file=sys.stderr if a.json else sys.stdout)
     sys.exit(1 if n else 0)
