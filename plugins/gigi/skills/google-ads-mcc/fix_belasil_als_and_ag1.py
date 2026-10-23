@@ -16,11 +16,12 @@ Operații:
 
 Run: DATABASE_URL_METRICS=<dsn> uv run fix_belasil_als_and_ag1.py [--apply]
 """
+import os
 import os, sys, json
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
 
-API = "v22"
+API = os.environ.get("GADS_API_VERSION", "v24")
 CID = "7566352958"
 
 AG1 = "customers/7566352958/assetGroups/6570921716"

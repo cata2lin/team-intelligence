@@ -3,10 +3,11 @@
 # dependencies = ["psycopg2-binary>=2.9", "requests>=2.31"]
 # ///
 """Satisfy PMax Brand Guidelines (campaign-level business name + logo), then link asset-group text."""
+import os
 import os, sys, json, base64
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
-API="v22"; CID="7566352958"; CAMP="customers/7566352958/campaigns/22478321481"; AG="customers/7566352958/assetGroups/6570957552"
+API = os.environ.get("GADS_API_VERSION", "v24"); CID="7566352958"; CAMP="customers/7566352958/campaigns/22478321481"; AG="customers/7566352958/assetGroups/6570957552"
 LOGODIR="/Users/gheorghebeschea/Downloads/Scripturi/belasil-creatives"
 HEAD=["Detergent Gel Concentrat","200 de Spălări pe Bidon","Doar 0,49 lei pe Spălare","10L la 99 lei, de la 255",
  "Direct de la Producător","Balsam Inclus în Detergent","Spală Alb și Color","Detergent Rufe Premium",

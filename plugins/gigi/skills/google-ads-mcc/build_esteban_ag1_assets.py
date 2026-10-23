@@ -11,11 +11,12 @@ Fix Esteban Asset Group 1 (6720307893) — the main/general PMax asset group.
 Run: DATABASE_URL_METRICS=$(kb.py secret-get DATABASE_URL_METRICS) \\
        uv run build_esteban_ag1_assets.py [--apply]
 """
+import os
 import os, sys, json
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
 
-API = "v22"
+API = os.environ.get("GADS_API_VERSION", "v24")
 CID = "5229815058"
 AG  = "customers/5229815058/assetGroups/6720307893"
 

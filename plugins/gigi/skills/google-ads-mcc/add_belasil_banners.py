@@ -6,7 +6,7 @@
 import os, sys, json, base64
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
-API="v22"; CID="7566352958"; AG="customers/7566352958/assetGroups/6570957552"
+API = os.environ.get("GADS_API_VERSION", "v24"); CID="7566352958"; AG="customers/7566352958/assetGroups/6570957552"
 DIR="/Users/gheorghebeschea/Downloads/Scripturi/belasil-creatives"
 IMGS=[("bel_ls_spalari.png","MARKETING_IMAGE"),("bel_ls_pret.png","MARKETING_IMAGE"),
  ("bel_ls_producator.png","MARKETING_IMAGE"),("bel_ls_recenzii.png","MARKETING_IMAGE"),

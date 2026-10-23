@@ -81,7 +81,10 @@ VAT_DIVISOR = 1.0 + VAT_RATE
 REVENUE_STATUSES = {"PAID", "PARTIALLY_REFUNDED", "REFUNDED"}
 
 META_API_VERSION = "v23.0"
-GOOGLE_ADS_API_VERSION = "v20"
+# Google a blocat v20/v22 pe 17-oct-2026 („Version vXX is deprecated. Requests to this version will
+# be blocked") — pe v20 pasul de Google Ads răspundea 404 și OPREA toată rularea. Aceeași convenție
+# ca în `gigi:google-ads-mcc`: implicit v24, dar se poate muta din env fără deploy, la următorul blocaj.
+GOOGLE_ADS_API_VERSION = os.environ.get("GADS_API_VERSION", "v24")
 TIKTOK_API_BASE = "https://business-api.tiktok.com/open_api/v1.3"
 
 # ──────────────────────────────────────────────────────────────────────────────

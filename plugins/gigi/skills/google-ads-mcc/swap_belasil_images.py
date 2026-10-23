@@ -3,10 +3,11 @@
 # dependencies = ["psycopg2-binary>=2.9", "requests>=2.31"]
 # ///
 """Make room (remove N Gemini squares) then link the Belasil banner image assets. --apply to run."""
+import os
 import os, sys, json
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
-API="v22"; CID="7566352958"; AG="customers/7566352958/assetGroups/6570957552"; AGID="6570957552"
+API = os.environ.get("GADS_API_VERSION", "v24"); CID="7566352958"; AG="customers/7566352958/assetGroups/6570957552"; AGID="6570957552"
 REMOVE_SQUARES=8
 _PG_OK={"host","port","dbname","user","password","sslmode","sslrootcert","sslcert","sslkey","connect_timeout","application_name","options","channel_binding"}
 def clean(d):

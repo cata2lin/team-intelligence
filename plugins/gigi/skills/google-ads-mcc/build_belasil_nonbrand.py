@@ -3,11 +3,12 @@
 # dependencies = ["psycopg2-binary>=2.9", "requests>=2.31"]
 # ///
 """One-off: create Belasil non-brand Search campaign (PAUSED) atomically via GoogleAdsService.mutate."""
+import os
 import os, sys, json
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import psycopg2, psycopg2.extras, requests
 
-API="v22"; CID="7566352958"
+API = os.environ.get("GADS_API_VERSION", "v24"); CID="7566352958"
 _PG_OK={"host","port","dbname","user","password","sslmode","sslrootcert","sslcert","sslkey","connect_timeout","application_name","options","channel_binding"}
 def clean(dsn):
     p=urlsplit(dsn)
