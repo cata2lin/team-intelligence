@@ -34,7 +34,9 @@ uv run po_garda.py --po-deschise          # ce ar bloca pe PO-urile NEW/ORDERED 
 uv run test_po_garda.py                   # teste pure, fără baze de date
 ```
 
-Pragul de 4 luni nu e ales din burtă: back-testul pe 142 de linii primite (jurnalul
+**Pragul de 4 luni e decizia ownerului din 23-oct-2026**, luată după back-test; nu se schimbă
+fără el. Din 10 blocări, 9 au fost corecte, iar cele greșite erau la limită (marfa s-a vândut în
+3,4–3,5 luni, nu în 4). Pragul nu e ales din burtă: back-testul pe 142 de linii primite (jurnalul
 `2026-10-23-po-istoric-si-garzi.md`) arată sell-through la 90 de zile de **46%** sub prag și
 **9%** peste, iar garda ar fi oprit 2,01 mil. lei din care 88% chiar a rămas pe raft.
 

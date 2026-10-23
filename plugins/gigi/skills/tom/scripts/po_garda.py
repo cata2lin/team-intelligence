@@ -29,7 +29,10 @@ KB_CAI = [
     "/root/Scripturi/team-intelligence/plugins/core/scripts/kb.py",
 ]
 KB = next((c for c in KB_CAI if os.path.exists(c)), KB_CAI[0])
-PRAG_LUNI = 4.0            # calibrat: peste 4 luni, sell-through-ul la 90 de zile cade la 9%
+# 4 luni: DECIZIA OWNERULUI din 23-oct-2026, luata dupa back-test. Nu se schimba fara el.
+# Masurat: sub prag sell-through-ul la 90 de zile e 46%, peste prag 9%. Din 10 blocari, 9 au fost
+# corecte, iar cele gresite erau la limita (marfa s-a vandut in 3,4-3,5 luni, nu in 4).
+PRAG_LUNI = 4.0
 PRAG_NOU = 300             # produs nou: peste atat fara test = blocat
 # Masurat pe istoric (23-oct): sub 500 de bucati sell-through-ul la 90 de zile e 26-41%, peste
 # 500 cade la 9-15%. 44 de linii peste prag inseamna 817.337 lei, jumatate din capitalul cohortei,
@@ -180,23 +183,31 @@ def date_de_fond(skus):
         out[s]["componenta"] = s not in vandabile
     met.close()
 
-    # Stocul fizic din scanerul de depozit (toate statiile). Pe server NU exista binarul
-    # `sqlite3`, deci citim prin python3, altfel comanda da "command not found" si stocul
-    # ar ramane 0 — adica garda ar subestima lunile de stoc exact pe produsele pline.
-    cmd = ("ssh -o ConnectTimeout=15 root@84.46.242.181 \"python3 -c \\\""
-           "import sqlite3;"
-           "c=sqlite3.connect('file:/root/Scripturi/data/locations.db?mode=ro',uri=True);"
-           "print(chr(10).join('%s|%d'%(s.upper(),q) for s,q in "
-           "c.execute('select sku,sum(qty) from shelf_items where qty>0 group by 1')))"
-           "\\\"\"")
-    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
-    if not r.stdout.strip():
-        raise SystemExit("nu am putut citi stocul din scaner: %s" % (r.stderr or "").strip()[:200])
-    for linie in r.stdout.splitlines():
-        if "|" not in linie: continue
-        s, q = linie.rsplit("|", 1)
-        if s.strip().upper() in out:
-            out[s.strip().upper()]["stoc"] = int(float(q))
+    # Stocul fizic din scanerul de depozit (toate statiile). Baza sta pe 84.46.242.181; daca
+    # rulam CHIAR pe serverul ala (cum face umbra din cron), o citim direct — altfel am incerca
+    # ssh catre noi insine si am pica cu "Permission denied (publickey)".
+    LOCAL = "/root/Scripturi/data/locations.db"
+    randuri = []
+    if os.path.exists(LOCAL):
+        import sqlite3
+        c = sqlite3.connect("file:%s?mode=ro" % LOCAL, uri=True, timeout=30)
+        randuri = [(s, q) for s, q in c.execute(
+            "select sku, sum(qty) from shelf_items where qty>0 group by 1")]
+        c.close()
+    else:
+        cod = ("import sqlite3\n"
+               "c = sqlite3.connect('file:/root/Scripturi/data/locations.db?mode=ro', uri=True)\n"
+               "print(chr(10).join('%s|%d' % (s, q) for s, q in "
+               "c.execute('select sku, sum(qty) from shelf_items where qty>0 group by 1')))\n")
+        r = subprocess.run(["ssh", "-o", "ConnectTimeout=15", "root@84.46.242.181", "python3", "-"],
+                           input=cod, capture_output=True, text=True, timeout=120)
+        if not r.stdout.strip():
+            raise SystemExit("nu am putut citi stocul din scaner: %s" % (r.stderr or "").strip()[:200])
+        randuri = [(l.rsplit("|", 1)[0], l.rsplit("|", 1)[1]) for l in r.stdout.splitlines() if "|" in l]
+    for s, q in randuri:
+        s = str(s).strip().upper()
+        if s in out:
+            out[s]["stoc"] = int(float(q))
     return out
 
 
