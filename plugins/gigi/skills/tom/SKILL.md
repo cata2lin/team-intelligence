@@ -7,6 +7,37 @@ argument-hint: "pos [--source VIGO] | po TOM-039 | ghost | product <sku> | po_fr
 # tom — operate tom.arona.ro from the CLI
 > Author: **Gigi**. Reads TOM's DB and drives its signed source-app API. See [[container-pipeline-kdocs]].
 
+
+## Garda de comandă (din 23-oct-2026)
+
+`po_from_sheet.py` rulează **automat** `po_garda.py` înainte să scrie payload-ul. Pe fiecare linie
+verifică, cu datele reale din TOM + scaner + metrics:
+
+- **lunile de stoc după comandă** = (stoc pe raft + ce e deja pe drum + cantitatea nouă) / viteza
+  pe 30 de zile. Peste **4 luni** → BLOCAT;
+- **sezon**: produse de vară comandate după 1 nov, de Crăciun după 1 iul;
+- **produs fără vânzări** în 30 de zile, comandat în peste **300** de bucăți (testul de 200–300);
+- **blacklist** și **refuz peste 20%**.
+
+Blocajele nu se pot trece decât cu `--override "motivul"`, iar motivul ajunge în `notes` pe PO.
+
+Două excepții care există ca garda să fie crezută:
+- **ambalajele** (sticle, capace, cutii, etichete) nu se judecă pe viteza de vânzare — se consumă,
+  nu se vând. Un SKU care nu e în catalogul de produse vândute e tratat ca ambalaj;
+- **componentele de kit** moștenesc viteza kitului, din `po_garda_kituri.json` (listă ținută de
+  mână cât timp kiturile nu sunt bundle-uri native în Shopify).
+
+Rulare separată, fără să creezi PO:
+```bash
+uv run po_garda.py --linii '[{"sku":"HA-0001","qty":3000}]'
+uv run po_garda.py --po-deschise          # ce ar bloca pe PO-urile NEW/ORDERED de acum
+uv run test_po_garda.py                   # teste pure, fără baze de date
+```
+
+Pragul de 4 luni nu e ales din burtă: back-testul pe 142 de linii primite (jurnalul
+`2026-10-23-po-istoric-si-garzi.md`) arată sell-through la 90 de zile de **46%** sub prag și
+**9%** peste, iar garda ar fi oprit 2,01 mil. lei din care 88% chiar a rămas pe raft.
+
 ## What this is
 `contact546/tom` = a **line-item-centric PO + container tracker** for ARONA's Guangzhou sourcing.
 Source apps push POs in over a **signed HMAC `/api/v1`** API; Tom's team then works each line

@@ -104,6 +104,9 @@ def main():
     ap.add_argument("--requester", help="numele care apare în TOM ca requester (ex. Gigi)")
     ap.add_argument("--out", default="payload.json")
     ap.add_argument("--no-checksum", action="store_true", help="sari peste verificarea cu rândul TOTAL")
+    ap.add_argument("--override", metavar="MOTIV",
+                    help="trece peste blocajele gărzii de PO; motivul se scrie în payload și rămâne "
+                         "în PO, ca să se știe cine a decis și de ce")
     a = ap.parse_args()
 
     from google.oauth2.service_account import Credentials
@@ -204,7 +207,32 @@ def main():
     if bad or dupes:
         sys.exit("nu scriu payload-ul cât timp există erori blocante")
 
+    # Garda de comandă (regulile owner-ului, 22-oct): peste 4 luni de stoc după comandă, sezon
+    # ratat, produs nou peste testul de 300 → linia nu trece fără --override cu motiv scris.
+    # Back-test pe istoric: ar fi oprit 2,01 mil. lei, din care 88% chiar a rămas pe raft.
+    try:
+        import po_garda
+        verdict = po_garda.verifica([{"sku": i["sku"], "qty": i["requested_qty"],
+                                      "nume": i.get("title", "")} for i in items])
+    except Exception as e:                      # garda nu trebuie să blocheze din motive tehnice
+        print(f"⚠ garda de PO n-a putut rula ({e}); continui fără ea")
+        verdict = []
+    blocate = [v for v in verdict if v["blocat"]]
+    if blocate:
+        print(f"\n⛔ GARDA DE PO: {len(blocate)} din {len(verdict)} linii nu trec:")
+        for v in blocate:
+            print(f"   {v['sku']:<12} {v['qty']:>6} buc · {v['nume'][:40]}")
+            for m in v["motive"]:
+                print(f"      · {m}")
+        if not a.override:
+            sys.exit("nu scriu payload-ul: corectează cantitățile sau reia cu "
+                     "--override \"motivul pentru care comanzi oricum\"")
+        print(f"   trec peste, motiv: {a.override}")
+
     payload = {"source_po_id": a.source_po_id, "type": a.type, "items": items}
+    if blocate:
+        payload["notes"] = ("garda de PO trecuta cu motiv: %s · linii: %s"
+                            % (a.override, ", ".join(v["sku"] for v in blocate)))
     if a.title:
         payload["title"] = a.title
     if a.priority:

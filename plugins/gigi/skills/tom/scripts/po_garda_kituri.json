@@ -1,0 +1,13 @@
+{
+  "_nota": "Componentele de kit nu au vanzari proprii: se vand IN kit. Garda le-ar bloca la fel ca pe ambalaje, desi sunt corect comandate. Pana cand kiturile devin bundle-uri native in Shopify (si atunci compozitia se citeste din productVariantComponents), lista asta se tine de mana. Cheia = SKU-ul componentei, valoarea = SKU-ul kitului a carui viteza se mosteneste. Compozitia de mai jos e citita pe 23-oct-2026 din descrierea kitului `kitpolygel-3` de pe Rossi Nails, singurul kit polygel ACTIV, si se potriveste linie cu linie cu PO-ul TOM-052.",
+  "R196-1": "kitpolygel-3",
+  "R196-2": "kitpolygel-3",
+  "R196-7": "kitpolygel-3",
+  "R196-BRUSH": "kitpolygel-3",
+  "R196-FILE": "kitpolygel-3",
+  "R196-TIPS": "kitpolygel-3",
+  "R196-CLIPS": "kitpolygel-3",
+  "R196-SLIP": "kitpolygel-3",
+  "R196-BASE": "kitpolygel-3",
+  "R196-TOP": "kitpolygel-3"
+}
