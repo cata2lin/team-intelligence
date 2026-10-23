@@ -23,7 +23,7 @@ import urllib.parse
 import urllib.request
 from calendar import monthrange
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 log = logging.getLogger("profitability.transport_oh")
 
@@ -103,21 +103,30 @@ def pe_comenzi(month_list: List[str]) -> Dict[str, Tuple[float, float]]:
 
 
 def transport_oh_prefix(prefix_orders: List[dict], oh: Dict[str, Tuple[float, float]],
-                        flat_exvat: float) -> Tuple[float, int, int, float]:
-    """(t_oh ex-TVA, plecate, cu_cost_oh, anulate_facturate) pe un prefix: costul OH al comenzii plecate, altfel flat-ul
-    (aceeași plasă ca motorul), plus etichetele anulate dar ridicate și facturate (OH le leagă de comandă)."""
+                        flat_exvat: float,
+                        real_pe_comanda: Optional[Callable[[str], Optional[float]]] = None) -> Tuple[float, int, int, float]:
+    """(t_oh ex-TVA, plecate, cu_cost_oh, anulate_facturate) pe un prefix: costul OH al comenzii plecate; unde OH nu-l
+    are, costul REAL de dinainte (AWBprint, `real_pe_comanda`), abia apoi flat-ul (aceeași plasă ca motorul); plus
+    etichetele anulate dar ridicate și facturate (OH le leagă de comandă).
+
+    De ce cascada (22-oct-2026, prima comutare): OH are costul doar pe etichetele pe care le-a făcut el — mai 2026 0 din
+    56.144 de comenzi plecate, iunie 174, iulie 18.813 din 71.591 (august încolo ~98%). Cu plasa doar pe flat, lunile
+    vechi pierdeau transportul real din AWBprint (mai: −36,7k lei față de raportul de dinainte), deși comutarea trebuia
+    să aducă transport REAL, nu să-l scoată."""
     t = anul = 0.0
     plecate = cu = 0
     for o in prefix_orders:
         if o.get("status_category") not in PLECAT:
             continue
         plecate += 1
-        c, a = oh.get(str(o.get("order_name") or "").strip(), (None, 0.0))
+        nume = str(o.get("order_name") or "").strip()
+        c, a = oh.get(nume, (None, 0.0))
         if c is not None and c > 0:
             cu += 1
             t += c
         else:
-            t += flat_exvat
+            r = real_pe_comanda(nume) if real_pe_comanda else None
+            t += r if (r and r > 0) else flat_exvat
         anul += a or 0.0
     return t, plecate, cu, anul
 

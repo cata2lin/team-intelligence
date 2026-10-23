@@ -14,8 +14,9 @@ _SKU_IN_CAMP/_load_fx). Ce vezi aici = exact ce aloca profit_by_sku pe calea WMS
 Precedenta reala (calea WMS, in wms_marketing._group_of + priority 0):
   (0) cod SKU EXACT 'HA-####' in campanie/ad, daca e SKU vandut -> direct pe acel SKU
   (1) CAMPAIGN_KEYWORD  (substring normalizat fara diacritice in 'campanie + ad'; cel mai LUNG castiga)
-  (2) ACCOUNT           (egalitate exacta pe nume cont, lowercase)
-  ! AD_KEYWORD / CAMPAIGN_AND_AD din wms_nomen sunt INERTE pe calea WMS (wms_marketing nu le incarca).
+  (3) ACCOUNT           (egalitate exacta pe nume cont, lowercase)
+  (2) AD_KEYWORD        (aceeasi potrivire, dar consultat DUPA toate CAMPAIGN_KEYWORD; activat 18-aug-2026)
+  ! CAMPAIGN_AND_AD din wms_nomen ramane INERT pe calea WMS (wms_marketing nu il incarca).
 
 Rulare: cd /root/Scripturi && set -a; . /root/ad-spend/run.env; . .env; set +a
         .venv/bin/python mapping_admin.py <cmd> ...
@@ -34,8 +35,16 @@ DB_DEFAULT = os.environ.get("PROFITABILITY_DB", "/root/Scripturi/data/profitabil
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wms_marketing as wm  # noqa: E402
 
-ACTIVE_TYPES = ("ACCOUNT", "CAMPAIGN_KEYWORD")          # onorate de calea WMS
-INERT_TYPES = ("AD_KEYWORD", "CAMPAIGN_AND_AD")         # in wms_nomen (din sheet) dar ignorate de wms_marketing
+def wm_short_max():
+    return getattr(wm, "_SHORT_MAX", 0)
+
+
+def wm_token_only():
+    return {x.upper() for x in getattr(wm, "_TOKEN_ONLY", set())}
+
+
+ACTIVE_TYPES = ("ACCOUNT", "CAMPAIGN_KEYWORD", "AD_KEYWORD")  # onorate de calea WMS (AD_KEYWORD activat 18-aug-2026)
+INERT_TYPES = ("CAMPAIGN_AND_AD",)                      # in wms_nomen (din sheet) dar ignorate de wms_marketing
 
 
 def _clean_dsn(dsn):
@@ -364,11 +373,19 @@ def cmd_lint(a):
     print("\n[2] CAMPAIGN_KEYWORD prea SCURTE (<5 car) — risc sa prinda campanii nelegate:")
     short = [(p, pat, g) for p, mt, pat, g in rows if mt == "CAMPAIGN_KEYWORD" and len((pat or "").strip()) < 5]
     for p, pat, g in sorted(short):
-        issues += 1; print("   ~ [%s] '%s' -> %s" % (p, pat, g))
+        # de la 18-aug-2026, wms_marketing cere GRANITA DE CUVANT pt <=3 caractere si pt TEST
+        # (vezi wms_marketing._kw_hit) -> alea nu mai sunt un risc, doar de stiut.
+        pat_s = (pat or "").strip()
+        guarded = len(pat_s) <= wm_short_max() or pat_s.upper() in wm_token_only()
+        if guarded:
+            print("   . [%s] '%s' -> %s   (granita de cuvant aplicata — fara risc)" % (p, pat, g))
+        else:
+            issues += 1; print("   ~ [%s] '%s' -> %s" % (p, pat, g))
     if not short:
         print("   (niciunul)")
     # 3) reguli UMBRITE: un keyword e substring al altuia mai lung (acelasi platform) -> cel scurt poate sa nu prinda
     print("\n[3] KEYWORD UMBRIT (substring al altuia mai lung, acelasi platform) — poate nu se declanseaza:")
+    print("    (nota: 'cel mai lung castiga' e intentionat — 'OGLINDA LED' bate 'OGLINDA'. Semnal, nu bug.)")
     kw = defaultdict(list)
     for p, mt, pat, g in rows:
         if mt == "CAMPAIGN_KEYWORD":
@@ -378,6 +395,12 @@ def cmd_lint(a):
         for a1, g1 in lst:
             for a2, g2 in lst:
                 if a1 != a2 and a1 and a2 and a1 in a2 and g1 != g2:
+                    # Umbrirea e REALA doar daca cel scurt chiar s-ar putea potrivi in textul celui
+                    # lung. Pt pattern-urile cu granita de cuvant nu se poate ('CO' nu prinde in
+                    # 'COVORAS MAGIC'), deci raportarea lor era zgomot pur — si zgomotul face ca
+                    # semnalele adevarate sa fie ignorate la urmatorul audit.
+                    if not wm._kw_hit(a1, a2):
+                        continue
                     shadow += 1; issues += 1
                     print("   ~ [%s] '%s'->%s e substring al '%s'->%s" % (p, a1, g1, a2, g2))
     if not shadow:

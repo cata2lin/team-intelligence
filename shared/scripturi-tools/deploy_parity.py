@@ -32,11 +32,26 @@ SCAN_DIRS = [
     "shared/scripturi-tools",
     "plugins/core/scripts",
 ]
-IGNORE = {"__init__.py", "kb.py", "kb_env.py", "pg_mcp_launch.py", "mcp_env_launch.py",
+IGNORE = {
+    "profit_core.py",  # exceptie 22-oct: main c7bb744 (TVA pe tara) asteapta OK owner; VPS ramane pe versiunea veche -> nu alarma paritate
+    "__init__.py", "kb.py", "kb_env.py", "pg_mcp_launch.py", "mcp_env_launch.py",
           "sqlite_ssh_mcp_launch.py", "ro_sqlite_mcp.py"}  # launchere MCP, nu se deployează flat
 
 
 def _send_email(to, subject, body, key, sender):
+    _OWNER = {"gheorghe.beschea@overheat.agency", "contact@nocturna.ro"}  # owner: NU mai primeste mail
+    _lst = [a.strip() for a in (to.split(",") if isinstance(to, str) else list(to)) if a and a.strip()]
+    _own = [a for a in _lst if a in _OWNER]
+    _lst = [a for a in _lst if a not in _OWNER]
+    if _own:
+        try:
+            import briefing_alert as _ba
+            _ba.scrie(subject, body)
+        except Exception:
+            pass
+    if not _lst:
+        return
+    to = ",".join(_lst)
     import base64
     from email.mime.text import MIMEText
     from google.oauth2 import service_account

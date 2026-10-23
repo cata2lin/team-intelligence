@@ -10,6 +10,32 @@ Continutul comenzii (SKU+cantitate) vine din AWBprint. Un singur apel bulk per m
 Dedup in data/parcel_watch_seen.db. --dry-run = afiseaza. --baseline = marcheaza vazut fara email.
 """
 import os, sys, json, math, sqlite3, smtplib, collections, html
+
+# --- owner-mail -> briefing/alerts.md (scripturi-39) ---
+try:
+    import smtplib as _sm, email as _em
+    _OWNER_ADDR = {"gheorghe.beschea@overheat.agency", "contact@nocturna.ro"}
+    _orig_sendmail = _sm.SMTP.sendmail
+    def _guard_sendmail(self, from_addr, to_addrs, msg, *a, **k):
+        tos = [to_addrs] if isinstance(to_addrs, str) else list(to_addrs)
+        rest = [t for t in tos if t not in _OWNER_ADDR]
+        if len(rest) < len(tos):
+            try:
+                import briefing_alert as _ba
+                _raw = msg if isinstance(msg, str) else msg.decode("utf-8", "replace")
+                _m = _em.message_from_string(_raw)
+                _pl = _m.get_payload(decode=True)
+                _bt = _pl.decode("utf-8","replace") if isinstance(_pl,(bytes,bytearray)) else (_m.get_payload() if isinstance(_m.get_payload(),str) else "")
+                _ba.scrie(_m.get("Subject", "alerta"), _bt)
+            except Exception:
+                pass
+        if not rest:
+            return {}
+        return _orig_sendmail(self, from_addr, rest, msg, *a, **k)
+    _sm.SMTP.sendmail = _guard_sendmail
+except Exception:
+    pass
+# --- end owner-mail guard ---
 from datetime import datetime, date, timedelta
 from email.mime.text import MIMEText
 

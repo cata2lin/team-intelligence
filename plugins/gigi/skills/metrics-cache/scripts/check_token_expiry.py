@@ -29,6 +29,19 @@ import os, sys, re, argparse, datetime
 
 
 def _send_email(to, subject, body, key, sender):
+    _OWNER = {"gheorghe.beschea@overheat.agency", "contact@nocturna.ro"}  # owner: NU mai primeste mail
+    _lst = [a.strip() for a in (to.split(",") if isinstance(to, str) else list(to)) if a and a.strip()]
+    _own = [a for a in _lst if a in _OWNER]
+    _lst = [a for a in _lst if a not in _OWNER]
+    if _own:
+        try:
+            import briefing_alert as _ba
+            _ba.scrie(subject, body)
+        except Exception:
+            pass
+    if not _lst:
+        return
+    to = ",".join(_lst)
     """Trimite alertul prin SA looker-sheets (impersonare Workspace, scope gmail.modify).
     Lazy-import ca scriptul să ruleze pur (fără google libs) când NU se cere --email."""
     import base64

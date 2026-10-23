@@ -8,6 +8,7 @@ Tool-uri **standalone** (rulabile, au `__main__`) din aplicația Scripturi de pe
 |---|---|
 | `sync_raport_zilnic.py` | Backfill `daily_perf` + `profit_marketing_override` din sheet-ul „CPA și financiar". **Fără arg** = tab istoric „Raport Zilnic 2" (zile complete, până ieri) → cron `0 4`. **`--today`** = tab „Raport azi" (ziua curentă, refresh ~5 min) → upsert rândul de AZI în daily_perf + refresh override-ul lunii curente → cron `*/10 6-23`. **De ce contează:** marketingul din engine-ul de P&L vine din `profit_marketing_override` (= acest sheet, sursă PRIMARĂ; `cache.product_ad_spend` e doar fallback) — deci când tokenul Meta expiră și cache-ul Meta devine 0/stale, P&L-ul pe brand rămâne corect (citește sheet-ul), iar `--today` asigură că include și ziua curentă. |
 | `wms_ad_spend_sync.py` | **Marketing per-SKU TOKEN-INDEPENDENT** (calea care NU depinde de OAuth-ul Meta). Trage spend-ul FB+TikTok per-campanie din sheet-ul WMS (`12L1KlG4...`, tab-uri „WMS Facebook 3"/„WMS Tiktok", conector direct din ad-platforme) → `profitability.db.wms_ad_spend` (acumulează istoric, sheet-ul ține doar ziua curentă). Trage și maparea (Nomenclator FB/TT + Product Group) + construiește **suplimentul** (`wms_nomen_extra` + `wms_product_group_extra` — conturile simple lipsă din Nomenclator: Nubra/Bonhaus/Esteban 3/Reflexino→Magdeal etc., + SKU→grup din comenzi). **Cron `*/30`.** Consumat de `metrics-cache/wms_marketing.py` → `profit_by_sku.py`: per-SKU marketing din WMS de la **cutover 2026-06-19** (moartea tokenului Meta), cache pt istoric (<cutover, neatins), Google mereu din cache. USD→RON din `fx_rates`. |
+| `trendyol_stock_push.py` + `.sh` | Bootstrap de stoc pe Trendyol: împinge felia de 16% doar pe produsele pe care stock-sync nu le-a legat încă (stoc 0 → onSale false → listing INACTIVE), apoi stock-sync le ține. Citește produsele prin Product v2 `/products/approved` (`nextPageToken`, max 100/pagină) — v1 dă 426 din 13-oct-2026. **Cron `15 */2`** cu flock + heartbeat `trendyol_stock_push`. Dry-run implicit, `--apply` scrie. |
 | `sync_barcodes.py` | Sincronizează barcode-urile din toate magazinele Shopify. |
 | `sheets_labels.py` | Generează label-uri + barcode-uri din Google Sheets (per rând). |
 | `shopify_image_manager.py` | Redenumire + compresie + alt-text poze Shopify (moduri: `rename` etc.). |
@@ -83,3 +84,27 @@ lista de PUSH dar nu și în cea din care se construiește pagina → cele 484 d
 
 **Deploy:** `scp parcel_density_app.py parcel_shop_index.py colete_app.sh $VPS:/root/Scripturi/` + `pm2 restart colete`.
 Regenerarea listei de produse: `parcel_colete.sh list --apply` (cron luni 6:00).
+
+## `deconturi_ramburs.py` — deconturile de ramburs de la curieri → un rând per AWB
+
+Un singur loc care știe formatele trimise de curieri pe `contact@rossinails.ro`. Ieșirea e contractul
+cu starea „Ramburs virat" din Order Hub:
+
+```
+curier · awb · suma · moneda · data_virarii · data_livrarii · referinta_client · referinta_decont · tip · fisier
+```
+
+```python
+from deconturi_ramburs import parseaza_fisier, parseaza_director
+randuri = parseaza_director("/cale/catre/atasamente")
+```
+
+Recunoaște: **DPD** `COD_<contract>_<AAAA.LL.ZZ>_*.xls` (decont pe AWB, `Reference 1` = numărul comenzii
+noastre) · **Sameday** `*-ramburs-de-transferat-ron.xlsx` (detaliul e pe foaia `expeditii`, nu pe prima).
+**FAN** `Expeditii_FAN_*` / `Comenzi_FAN_*` NU sunt deconturi — sunt liste de expediții; se întorc cu
+`tip="expeditii"`, ca să nu intre din greșeală într-o reconciliere.
+
+⚠️ La reconciliere, grupează pe **COMANDĂ**, nu pe AWB (rambursul se încasează o dată, chiar dacă sunt
+mai multe colete), și ține minte că AWB-urile DPD sunt **secvențiale**: doar un AWB de **14 cifre** e
+colet-copil al unui părinte de 11 cu același prefix de 10. Măsurat pe aug–oct 2026 în
+`jurnal/2026-10-23-ramburs-neincasat.md`.

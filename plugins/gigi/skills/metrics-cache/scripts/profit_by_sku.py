@@ -12,10 +12,79 @@ Profit/contribuție PER SKU (și roll-up pe CATEGORIE) — reunește:
 Read-only pe profit_orders/engine. Secrete din ENV (run.env).
   cd /root/Scripturi && .venv/bin/python profit_by_sku.py 2026-05 [--db data/profitability.db]
 """
-import os, sys, re, json, sqlite3, argparse
+import os, sys, re, json, sqlite3, argparse, urllib.request, urllib.error, urllib.parse
 from collections import defaultdict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import profit_core as pc   # funcții CANONICE (vat/cogs/transport/marketing) — single source, vezi profit_core.py
+
+
+# ─────────────────────── COGS din Order Hub (pasul S2) — deocamdată în UMBRĂ ───────────────────────
+# De ce: costul real al mărfii stă pe LOT (container / PO), cu moneda și cursul BNR de la recepție, nu într-un
+# singur câmp care se suprascrie. `produs_cost` din OH îl ține așa, iar `GET /api/produs/cost/{cod}` întoarce
+# istoricul. Aici îl citim în PARALEL cu cascada veche și raportăm diferența; comutarea se face din BAZĂ
+# (`profit_settings.cogs_sursa`), nu din env — un env de container nu se schimbă fără recreare.
+# ⚠️ `cost_lei_buc` din OH e EX-TVA. Cascada veche (`line_cogs`/override) e CU TVA și se împarte la (1+vat).
+# Dacă cele două se amestecă, diferența pare 21% „din senin".
+OH_URL = os.environ.get("OH_URL", "https://orderhub.arona.ro")
+OH_TOKEN_VARS = ("OH_COST_TOKEN", "OH_CS_SB_TOKEN", "OH_GARDA_TOKEN")
+
+
+def _oh_token():
+    for v in OH_TOKEN_VARS:
+        if os.environ.get(v):
+            return os.environ[v]
+    return ""
+
+
+def cost_oh_istoric(perechi):
+    """{(sku, magazin): [(data_lot, cost_lei_buc ex-TVA), ...] descrescător} din Order Hub. {} dacă OH tace.
+
+    Un apel pe (SKU, magazin), apoi alegem lotul local — costul la DATA comenzii iese exact, nu per lună.
+    ⚠️ `magazin` NU e opțional: un cod NUMERIC înseamnă produse DIFERITE în magazine diferite. Măsurat
+    22-oct-2026: codul „30" e parfumul „L'Essence No. 30" pe Esteban, dar „Lustra LED tavan 4+2 cercuri"
+    (75,75 lei) pe George Talent. Fără magazin, umbra dădea parfumurilor costul lămpilor și ieșea o
+    diferență falsă de +1,23 milioane lei pe septembrie. Cerința e și în documentul rutei: „pentru
+    parfumuri/Duppo `magazin` e obligatoriu la cod".
+    Nu aruncă niciodată: lipsa costului NU trebuie să oprească raportul (cascada veche rămâne plasă).
+    """
+    tok = _oh_token()
+    if not tok:
+        sys.stderr.write("[cost-oh] fără token (OH_COST_TOKEN/OH_CS_SB_TOKEN/OH_GARDA_TOKEN) — sar umbra\n")
+        return {}
+    out, lipsa = {}, 0
+    for s, mag in sorted({(a, b) for a, b in perechi if a}):
+        url = OH_URL + "/api/produs/cost/" + urllib.parse.quote(str(s))
+        if mag:
+            url += "?magazin=" + urllib.parse.quote(str(mag))
+        req = urllib.request.Request(url, headers={"Authorization": "Bearer " + tok})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                j = json.loads(r.read().decode())
+        except Exception:
+            lipsa += 1
+            continue
+        ist = [(x.get("data_lot"), x.get("cost_lei_buc")) for x in (j.get("istoric") or [])
+               if x.get("data_lot") and x.get("cost_lei_buc") is not None]
+        cur = (j.get("cost") or {})
+        if cur.get("data_lot") and cur.get("cost_lei_buc") is not None:
+            ist.append((cur["data_lot"], cur["cost_lei_buc"]))
+        if ist:
+            out[(s, mag)] = sorted({(d, float(c)) for d, c in ist}, reverse=True)
+        else:
+            lipsa += 1
+    sys.stderr.write("[cost-oh] %d perechi (SKU, magazin) cu cost pe lot, %d fără\n" % (len(out), lipsa))
+    return out
+
+
+def cost_oh_la(ist, zi):
+    """Costul ex-TVA al ultimului lot cu data_lot ≤ zi. None dacă marfa s-a vândut înainte de primul lot
+    cunoscut — caz în care NU inventăm nimic și rămâne cascada veche."""
+    if not ist:
+        return None
+    for d, c in ist:                      # deja descrescător
+        if zi and d <= zi:
+            return c
+    return None
 
 
 def sku_to_group():
@@ -106,11 +175,17 @@ def main():
     fx["RON"] = 1.0   # monedă magazin → RON (CZK/EUR/PLN/BGN). Lipsă → 1.0 (tratat ca RON).
     cogs_ov = {r["sku"]: (r["unit_cost"], r["currency"]) for r in cx.execute(
         "SELECT sku, unit_cost, currency FROM profit_cogs_override").fetchall()}   # override COGS (H), ca engine-ul
+    # comutatorul stă în BAZĂ, nu în env (regula din arhitectura-țintă): 'engine' = cascada veche, 'oh' = produs_cost
+    try:
+        _cs = cx.execute("SELECT value FROM profit_settings WHERE key='cogs_sursa'").fetchone()
+        cogs_sursa = (_cs["value"] if _cs else "engine") or "engine"
+    except Exception:
+        cogs_sursa = "engine"
 
     # delivered lines, joined to status + monedă comandă
     rows = cx.execute("""
         SELECT pol.prefix, pol.order_name, pol.sku, pol.qty, pol.line_revenue, pol.line_cogs,
-               po.revenue AS order_total, po.currency AS curr
+               po.revenue AS order_total, po.currency AS curr, po.created_at AS creat_la, po.shop AS shop
         FROM profit_order_lines pol
         JOIN profit_orders po ON po.month=pol.month AND po.prefix=pol.prefix AND po.order_name=pol.order_name
         WHERE pol.month=? AND po.status_category='Livrata'
@@ -143,11 +218,18 @@ def main():
     sku = defaultdict(lambda: [0, 0.0, 0.0, 0.0])            # qty, rev_exvat, cogs_exvat, transport_exvat
     sku_orders = defaultdict(set)                            # sku -> {(prefix,order)} = nr comenzi
     brand_sku_orders = defaultdict(lambda: defaultdict(set)) # brand_id -> sku -> {(prefix,order)}
+    # umbra S2: costul pe LOT din Order Hub, citit o dată per SKU (nu per comandă)
+    cost_oh = (cost_oh_istoric({(r["sku"], r["shop"]) for r in rows})
+               if os.environ.get("COGS_OH", "1") != "0" else {})
+    sku_oh = defaultdict(lambda: [0.0, 0.0, 0])              # cogs_vechi_ex, cogs_oh_ex, linii acoperite
+    pref_oh = defaultdict(lambda: [0.0, 0.0, 0])             # același, pe PREFIX (= brand/magazin)
     for r in rows:
         # (A) NU mai sărim liniile cadou — cadoul are venit 0 dar COGS+bucăți reale (cost real, ca engine-ul).
         s = r["sku"]
-        vat = pc.vat_for_prefix(r["prefix"])                 # TVA per țară (canonic)
         k = (r["prefix"], r["order_name"]); olt = oline[k] or 1
+        # TVA pe COMANDĂ: țara explicită > moneda comenzii > prefixul magazinului. Prefixul minte la magazinele
+        # multi-țară — DUPBG (Duppo EU) are comenzi în EUR, HUF ȘI CZK sub același prefix (măsurat 22-oct).
+        vat = pc.vat_for_order(prefix=r["prefix"], currency=ocurr[k])
         rate = fx.get(ocurr[k], 1.0)                          # (G) monedă magazin → RON
         share = (r["line_revenue"] or 0) / olt               # cotă pe venit (rație, moneda se simplifică)
         rev_ex = (ototal[k] * rate * share) / (1 + vat)      # venit = cotă din total comandă, în RON, ex-TVA
@@ -158,6 +240,16 @@ def main():
         # transport: 'awb'/'dpd' = cost real DEJA ex-TVA (transport_cost_fara_tva) → direct; 'estimat' =
         # cost_per_parcel GROSS (TVA transport = RO 21%) → /1.21. (NU /(1+vat): scotea TVA de două ori pe awb/dpd.)
         tcost = (parcel_cost[k] * share / 1.21) if tsrc[k] == "estimat" else (parcel_cost[k] * share)
+        # umbră: același cost, dar din `produs_cost` (lotul valabil la DATA comenzii). Deja ex-TVA ⇒ fără /(1+vat).
+        zi = (r["creat_la"] or "")[:10]
+        c_oh = cost_oh_la(cost_oh.get((s, r["shop"])), zi)
+        if c_oh is not None:
+            o = sku_oh[s]
+            o[0] += cogs_ex; o[1] += (r["qty"] or 0) * c_oh; o[2] += 1
+            q = pref_oh[r["prefix"]]
+            q[0] += cogs_ex; q[1] += (r["qty"] or 0) * c_oh; q[2] += 1
+        if cogs_sursa == "oh" and c_oh is not None:
+            cogs_ex = (r["qty"] or 0) * c_oh                  # comutat din BAZĂ, nu din env
         d = sku[s]
         d[0] += r["qty"] or 0; d[1] += rev_ex; d[2] += cogs_ex; d[3] += tcost
         sku_orders[s].add(k)
@@ -249,6 +341,32 @@ def main():
     print(f"{'─'*74}")
     print(f"{'TOTAL (RON ex-TVA)':26}{T[0]:>7}{T[1]:>11.0f}{T[2]:>10.0f}{T[3]:>9.0f}{T[4]:>9.0f}{T[1]-T[2]-T[3]-T[4]:>11.0f}")
     print(f"  (venit reconciliază cu engine-ul RON ex-TVA pe livrate; marketing alocat pe comenzi)")
+
+    # ── UMBRA S2: cost din `produs_cost` (lot la data comenzii) vs cascada veche ──────────────────────────
+    if sku_oh:
+        v = sum(x[0] for x in sku_oh.values()); n = sum(x[1] for x in sku_oh.values())
+        linii = sum(x[2] for x in sku_oh.values())
+        print(f"\n=== UMBRĂ COGS — `produs_cost` din Order Hub vs cascada veche ({a.month}) ===")
+        print(f"  sursă ACTIVĂ: {cogs_sursa}  ·  SKU-uri acoperite de OH: {len(sku_oh)} din {len(sku)}  ·  linii: {linii}")
+        print(f"  COGS vechi (pe liniile acoperite): {v:>12.0f} lei ex-TVA")
+        print(f"  COGS nou   (cost pe lot, OH):      {n:>12.0f} lei ex-TVA")
+        print(f"  diferență:                         {n-v:>+12.0f} lei  (profitul raportat se mișcă invers)")
+        print(f"  {'magazin (prefix)':20}{'vechi':>11}{'nou':>11}{'diferență':>12}{'linii':>8}")
+        for k, x in sorted(pref_oh.items(), key=lambda z: -abs(z[1][1]-z[1][0])):
+            print(f"  {str(k)[:20]:20}{x[0]:>11.0f}{x[1]:>11.0f}{x[1]-x[0]:>+12.0f}{x[2]:>8}")
+        dif = sorted(((x[1]-x[0], k, x[0], x[1], x[2]) for k, x in sku_oh.items()), key=lambda z: -abs(z[0]))
+        print(f"  {'SKU':26}{'vechi':>10}{'nou':>10}{'diferență':>12}{'linii':>7}")
+        for d, k, vv, nn, li in dif[:20]:
+            print(f"  {str(k)[:26]:26}{vv:>10.0f}{nn:>10.0f}{d:>+12.0f}{li:>7}")
+        if os.environ.get("COGS_OH_JSON"):
+            with open(os.environ["COGS_OH_JSON"], "w", encoding="utf-8") as f:
+                json.dump({"luna": a.month, "sursa_activa": cogs_sursa,
+                           "cogs_vechi": v, "cogs_nou": n, "diferenta": n - v, "linii": linii,
+                           "pe_sku": {k: {"vechi": x[0], "nou": x[1], "linii": x[2]} for k, x in sku_oh.items()},
+                           "pe_magazin": {k: {"vechi": x[0], "nou": x[1], "linii": x[2]} for k, x in pref_oh.items()}},
+                          f, ensure_ascii=False)
+    else:
+        print("\n[umbră COGS] niciun SKU cu cost pe lot în Order Hub — cascada veche e singura sursă")
     from collections import Counter as _Counter
     _sc = _Counter(tsrc.values())
     _tot_ord = sum(_sc.values()) or 1
