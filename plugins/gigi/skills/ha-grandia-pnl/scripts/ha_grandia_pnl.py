@@ -35,14 +35,19 @@ VAT = 1.21
 # CZ, BUC, BONBG, GRAN, PL, HU, SK, APR, ORC), si se schimba de la lună la lună. Raportul o deriva
 # singur, la fiecare rulare, in defalcarea pe magazin a liniei HA.
 
-# ⚠️ ASTA NU E „lista magazinelor care vind HA" — e BAZA DE ALOCARE A MARKETINGULUI: din override-ul
-# de marketing al fiecarui magazin de aici se da lui HA o cota egala cu procentul de colete HA.
-# Numele vechi si comentariul vechi („magazinele unde se vand SKU-urile HA-*") induceau in eroare.
-# De ce NU sint toate cele 9: lărgirea ar muta +224.433 lei de marketing pe HA (CZ 96.382, Bucsa
-# 93.943, BONBG 23.830, Grandia 8.742, Apreciat 1.536), deci NET-ul HA ar scadea cu inca ~23%; iar
-# GRAN e raportat ca linie SEPARATA, deci marketingul lui ar fi numarat o data la GRAN si partial din
-# nou la HA. Decizia asta e a ownerului, nu a raportului.
-DEALS_PREFIXES = ["MAG", "OFER", "RED", "BON"]
+# BAZA DE ALOCARE A MARKETINGULUI pentru linia HA. Principiul ownerului (23-oct-2026): unde venitul
+# HA intra in linie, intra si partea lui de marketing — din override-ul fiecarui magazin se da lui HA
+# o cota egala cu procentul lui de colete HA.
+#
+# NU e o lista codificata, dinadins: se DERIVA din date (vezi `ha_share`), adica toate magazinele cu
+# colete HA, MINUS cele raportate ca linie separata (`--prefixes`, de obicei GRAN). Altfel marketingul
+# Grandiei ar fi numarat o data la linia GRAN si partial din nou la HA — dublare.
+#
+# Lista veche era `["MAG","OFER","RED","BON"]`, cu comentariul „magazinele unde se vand SKU-urile
+# HA-*" — care NU era ce facea variabila, si oricum era incompleta: HA se vinde pe 13 magazine. Cu
+# baza derivata, trec in alocare si CZ (96.382 lei), Bucsa (93.943), BONBG (23.830), PL (14.911),
+# SK (5.017), HU (3.052), Apreciat (1.536) si ORC (830).
+
 SHIPPED = ("Livrata", "In curs de livrare", "Refuzata")
 
 # core/scripts in orice layout de instalare (clona repo, marketplace, plugin-cache
@@ -116,17 +121,22 @@ def main():
     rows = remote(lines_sql)
 
     # 2. transport costs + marketing override (toate prefixele relevante)
-    allp = list(set(prefixes + DEALS_PREFIXES))
+    # cautam transportul si marketingul pe TOATE magazinele care pot intra in alocare
+    allp = list(set(prefixes + [r["prefix"] for r in remote(
+        f"SELECT DISTINCT prefix FROM profit_orders WHERE month IN {mlist} AND skus LIKE 'HA-%'")]))
     inp = "(" + ",".join("'%s'" % p for p in allp) + ")"
     tcost = {r["prefix"]: r["cost_per_parcel"] for r in remote(
         f"SELECT prefix, AVG(cost_per_parcel) cost_per_parcel FROM profit_transport_costs WHERE month IN {mlist} AND prefix IN {inp} GROUP BY prefix")}
     mkt = {r["prefix"]: r["amount"] for r in remote(
         f"SELECT prefix, SUM(amount) amount FROM profit_marketing_override WHERE month IN {mlist} AND prefix IN {inp} GROUP BY prefix")}
     # 3. alocare marketing HA: cota HA din plecate per deals-prefix
+    # Baza derivata: orice magazin cu colete HA, mai putin cele raportate separat (ca sa nu dublam).
+    _exclus = ",".join("'%s'" % p for p in prefixes) or "''"
     ha_share = remote(f"""SELECT prefix,
         SUM(CASE WHEN skus LIKE 'HA-%' AND status_category IN {tuple(SHIPPED)} THEN 1 ELSE 0 END) ha,
         SUM(CASE WHEN status_category IN {tuple(SHIPPED)} THEN 1 ELSE 0 END) tot
-        FROM profit_orders WHERE month IN {mlist} AND prefix IN ({",".join("'%s'"%p for p in DEALS_PREFIXES)}) AND {no_test} GROUP BY prefix""")
+        FROM profit_orders WHERE month IN {mlist} AND {no_test} AND prefix NOT IN ({_exclus})
+        GROUP BY prefix HAVING ha > 0""")
 
     # 3b. defalcarea liniei HA pe MAGAZIN: linia HA amesteca deals, Bonhaus CZ, Bucsa si Grandia,
     # iar pina acum nu se vedea de unde vine marja. Venitul se converteste in lei (vezi nota de unitati).
@@ -173,7 +183,9 @@ def main():
         print(f"  = contribuție {contrib:>12,.0f}  − marketing {marketing:>11,.0f}")
         print(f"  = NET {net:>12,.0f}   ({net/rev_n*100:.1f}% margin)")
     if not a.no_ha:
-        print(f"\n(marketing HA alocat = {ha_mkt:,.0f} lei — cotă HA din override-ul {DEALS_PREFIXES})")
+        print(f"\n(marketing HA alocat = {ha_mkt:,.0f} lei — cota HA din override-ul a "
+              f"{len([s for s in ha_share if s['tot']])} magazine cu colete HA, "
+              f"fara cele raportate separat: {prefixes})")
         print("\n--- linia HA, de unde vine: pe magazin (livrate, ex-TVA) ---")
         print(f"  {'magazin':10}{'venit':>13}{'COGS':>12}{'marjă brută':>14}{'%':>7}{'plecate':>9}")
         for s in ha_pe_magazin:
