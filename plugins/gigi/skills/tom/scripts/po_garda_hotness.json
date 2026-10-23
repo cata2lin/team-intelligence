@@ -1,0 +1,4 @@
+{
+  "_nota": "Cat de cautata e pagina produsului pe eMAG (HOT / STANDARD / COLD / SUPER COLD), din API-ul de vanzator eMAG, `documentation/find_by_eans`, pe loturi de 100 de EAN-uri. Fisierul se reimprospateaza periodic; garda il foloseste DOAR ca avertisment, fiindca semnalul exista numai pentru produsele care au deja pagina pe eMAG si fiindca EAN-urile generate intern nu se potrivesc cu nicio pagina. Masurat pe 23-oct-2026: din 945 de barcode-uri listate, 664 aveau pagina, din care 492 SUPER COLD, 126 COLD, 13 STANDARD, 4 HOT.",
+  "_exemplu": "\"HA-0066\": \"HOT\""
+}
