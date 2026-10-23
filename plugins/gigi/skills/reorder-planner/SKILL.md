@@ -32,9 +32,13 @@ uv run reorder_planner.py --brand "George Talent" --only-reorder
 - `--only-reorder` = doar SKU-urile care trebuie comandate ACUM · `--top N`.
 
 ## Cum calculează
-- **Viteză/zi** = `Σ max(onHand_ieri − onHand_azi, 0)` pe fereastră / nr zile — adică suma scăderilor
-  zilnice de stoc (creșterile = reaprovizionări sunt ignorate). Proxy robust din snapshot-uri, o singură
-  sursă, mereu fresh.
+- **Viteză/zi (implicit, din 23-oct-2026)** = bucăți PLASATE în fereastră pe TOATE magazinele (Order Hub,
+  `vanzari-pe-sku`) × rata de livrare a SKU-ului (livrate / (livrate + refuzate), `statistici-sku`; sub 10 colete
+  închise, media). **Stocul** = însumat pe TOATE brandurile (stocul e comun).
+  ⚠️ Vechiul calcul (`--sursa-viteza snapshot`, scăderile de stoc pe brand) umfla viteza de 4–9 ori: stock-sync
+  mută cota între magazine, iar o cotă care scade nu e o vânzare. OGLINDA pe Reduceri Bune: 75 buc/zi și 2.518 de
+  comandat (vechi) față de 58 buc/zi pe toate magazinele, 5.921 pe stoc și 0 de comandat (nou).
+  Codurile numerice (parfumuri) rămân pe calculul vechi, fiindcă sunt produse diferite pe magazine diferite.
 - **Cover (zile)** = `onHand / viteză/zi`.
 - **COMANDĂ** = `ceil(viteză × (lead + safety) − onHand − incoming)`, minim 0.
 - **Venit/zi risc** = `viteză × preț` — cât pierzi pe zi dacă rămâi fără stoc (folosit la rankare).
