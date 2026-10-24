@@ -32,6 +32,26 @@ check("adresă invalidă neexpediată nu e colet fantomă", "GT3" not in r)
 check("prefixul cel mai lung câștigă (GRAND, nu GRAN)", r["GRAND1"]["prefix"] == "GRAND")
 check("acțiunea pe culeasă-nepredată trimite în hală", "hală" in g.suggested_action("fantoma", 9, "culeasa_nepredata"))
 
+# gărzile pe colet din Orders (24-oct): marketplace-urile sărite de coada CS intră, fără dubluri pe comandă
+garzi = g.build_rows_garzi([
+    ("eticheta_in_teanc", "printată, necules", {"colete": [
+        {"comanda": "EMAG000000001", "magazin": "eMAG", "awb": "00000000001", "zile": 3, "plata": "paid",
+         "total": 164.99, "moneda": "RON", "statie": "Bartolomeu", "curier": "EMAG"},
+        {"comanda": "OLXT00000001", "magazin": "OLX", "awb": "00000000002", "zile": 4, "statie": "Uzina 2"}]}),
+    ("culeasa_nepredata", "culeasă", {"colete": [
+        {"comanda": "EMAG000000002", "magazin": "eMAG", "awb": "4EMGLN000000001", "zile": 1, "plata": "paid",
+         "statie": "Uzina 2"},
+        {"comanda": "GRAND1", "magazin": "Grandia.ro", "awb": "813", "zile": 9}]})])
+u = {x["o"]: x for x in g.uneste(g.build_rows_oh(d), garzi)}
+check("EMAG000000001 (printată, neculeasă, plătită) e fantomă", u["EMAG000000001"]["motiv"] == "eticheta_in_teanc"
+      and u["EMAG000000001"]["platita"] is True and "PLĂTITĂ" in u["EMAG000000001"]["status"])
+check("OLXT00000001 e fantomă, cu stația", u["OLXT00000001"]["statie"] == "Uzina 2")
+check("EMAG000000002 (culeasă, neridicată) e fantomă", u["EMAG000000002"]["motiv"] == "culeasa_nepredata")
+check("comanda din ambele surse apare o singură dată", sum(1 for x in g.uneste(g.build_rows_oh(d), garzi)
+                                                            if x["o"] == "GRAND1") == 1)
+check("filtrul pe magazin se aplică și gărzilor", set(x["o"] for x in g.uneste([], garzi, "eMAG")) ==
+      {"EMAG000000001", "EMAG000000002"})
+
 for k in ("OH_TEAM_READ_TOKEN", "OH_PROFIT_CITIRE_TOKEN", "OH_CS_SB_TOKEN"):
     os.environ.pop(k, None)
 g.secret = lambda k: ""

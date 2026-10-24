@@ -194,6 +194,60 @@ def build_rows_oh(d):
     return rows
 
 
+def _get_oh(cale, q):
+    """GET pe o rută /api/cs/* a Order Hub, cu aceeași cheie ca restul; eroare → OHIndisponibil."""
+    import urllib.request, urllib.error
+    tok = _token_oh()
+    if not tok:
+        raise OHIndisponibil("lipsește cheia Order Hub (OH_TEAM_READ_TOKEN în env sau în KB)")
+    req = urllib.request.Request(OH_BAZA + cale + "?" + urllib.parse.urlencode(q),
+                                 headers={"Authorization": "Bearer " + tok, "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise OHIndisponibil("Order Hub %s a răspuns HTTP %s" % (cale, e.code))
+    except Exception as e:
+        raise OHIndisponibil("Order Hub %s nu răspunde (%s)" % (cale, type(e).__name__))
+
+
+# GĂRZILE PE COLET din Orders (24-oct-2026), pe TOATE magazinele, inclusiv eMAG / OLX / Trendyol, pe care coada CS
+# (`neplecate-vechi`) le sare: o comandă eMAG printată, neculeasă și plătită și una culeasă, lăsată la ridicarea
+# Sameday, lipseau de aici (jurnalul intern din 24-oct). `/api/cs/printate-neculese` = printată + necules + nevăzută de curier;
+# `/api/cs/culese-nepredate` = culeasă + nevăzută. Pragul e în ore LUCRĂTOARE (12 = o zi), din `--days`.
+GARZI_OH = (("/api/cs/printate-neculese", "eticheta_in_teanc",
+             "printată, nimeni n-a cules-o, curierul n-a văzut-o"),
+            ("/api/cs/culese-nepredate", "culeasa_nepredata",
+             "culeasă, curierul n-a scanat-o"))
+
+
+def build_rows_garzi(raspunsuri):
+    """Rânduri FANTOMĂ din gărzile pe colet: [(motiv, explicatie, raspuns_json)] → rânduri în forma raportului."""
+    rows = []
+    for motiv, expl, d in raspunsuri:
+        for c in (d or {}).get("colete") or []:
+            nume = c.get("comanda") or ""
+            pfx = next((p for p in sorted(PREFIX, key=len, reverse=True) if nume.upper().startswith(p)),
+                       "".join(ch for ch in nume if ch.isalpha()))
+            rows.append({
+                "flag": "fantoma", "o": nume, "prefix": pfx, "brand": c.get("magazin") or PREFIX.get(pfx, pfx),
+                "age": int(c.get("zile") or 0), "rev": float(c.get("total") or 0), "cur": c.get("moneda") or "RON",
+                "awb": c.get("awb") or "", "cs": c.get("ultim_status") or "",
+                "status": expl + (" · PLĂTITĂ" if c.get("plata") == "paid" else ""), "motiv": motiv, "motive": [motiv],
+                "expediata_in_shopify": None, "culeasa_la": c.get("cules_la"), "curier": c.get("curier"),
+                "statie": c.get("statie"), "platita": c.get("plata") == "paid",
+            })
+    return rows
+
+
+def uneste(rows_coada, rows_garzi, store=""):
+    """Coada CS + gărzile pe colet, fără dubluri pe comandă: rândul gărzii (mai precis pe colet) bate rândul cozii."""
+    garzi = {r["o"]: r for r in rows_garzi
+             if not store or store.lower() in (r.get("brand") or "").lower() or r["o"].upper().startswith(store.upper())}
+    out = [r for r in rows_coada if r["o"] not in garzi]
+    return out + list(garzi.values())
+
+
 def main_oh(a):
     today = datetime.date.today()
     try:
@@ -201,6 +255,11 @@ def main_oh(a):
     except OHIndisponibil as e:
         sys.exit("EROARE: %s. Nu dau cifra veche în locul ei; calea veche doar explicit: --source awb." % e)
     rows = build_rows_oh(d)
+    ore = str(12 * max(1, int(a.days)))
+    try:
+        rows = uneste(rows, build_rows_garzi([(m, e, _get_oh(cale, {"ore": ore})) for cale, m, e in GARZI_OH]), a.store)
+    except OHIndisponibil as e:
+        sys.exit("EROARE: %s. Gărzile pe colet din Orders nu răspund; nu dau o listă fără ele." % e)
     contacts = fetch_contacts({r["o"] for r in rows})
     for r in rows:
         c = contacts.get(r["o"], {})
@@ -210,7 +269,8 @@ def main_oh(a):
         for r in rows:
             r["action"] = suggested_action(r["flag"], r["age"], r.get("motiv"))
         print(json.dumps({
-            "sursa": "order-hub /api/cs/neplecate-vechi", "la": d.get("la"),
+            "sursa": "order-hub /api/cs/neplecate-vechi + /api/cs/printate-neculese + /api/cs/culese-nepredate",
+            "la": d.get("la"),
             "days": a.days, "store": a.store or None,
             "total": len(rows),
             "ghost": sum(1 for r in rows if r["flag"] == "fantoma"),

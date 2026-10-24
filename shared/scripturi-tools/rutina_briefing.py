@@ -560,6 +560,45 @@ def culese_nepredate_section():
         return None
 
 
+# ---------- 4g. Printate neculese (OH /api/cs/printate-neculese, 24-oct) ----------
+def printate_neculese_section():
+    """Etichetele PRINTATE pe care nu le-a cules nimeni si pe care curierul nu le-a vazut, de peste o zi lucratoare.
+
+    De ce (24-oct): o comanda eMAG platita statea „printata" din 21-oct, neculeasa; briefingul avea doar „culese dar
+    nepredate", iar `picking_neculese` pornea din loturile scanerului (7 etichete fara lot). Sursa e Orders, pe toate
+    magazinele. Intoarce None la orice eroare: briefingul nu cade.
+    """
+    import json, urllib.request
+    tok = os.environ.get("OH_CS_SB_TOKEN", "").strip()
+    if not tok:
+        out, _ = sh(f'{UV} run {HERE}/team-intelligence/plugins/core/scripts/kb.py secret-get OH_CS_SB_TOKEN',
+                    timeout=40)
+        tok = (out or "").strip().splitlines()[-1].strip() if out else ""
+    if not tok:
+        return None
+    try:
+        req = urllib.request.Request("https://orderhub.arona.ro/api/cs/printate-neculese",
+                                     headers={"Authorization": "Bearer " + tok, "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=25) as r:
+            d = json.loads(r.read().decode("utf-8"))
+        rand = (d.get("rand_briefing") or "").strip()
+        if not rand:
+            return None
+        linii = ["## Etichete printate neculese", "- 🔴 " + rand]
+        # platitele intai (bani deja incasati), apoi cele mai vechi
+        colete = sorted(d.get("colete") or [], key=lambda c: (c.get("plata") != "paid", -(c.get("zile") or 0)))[:5]
+        for c in colete:
+            linii.append("  - `%s` %s (%s) · %s · printat %s zile%s%s" % (
+                c.get("awb"), c.get("comanda"), c.get("magazin"), c.get("statie"), c.get("zile"),
+                " · PLATITA" if c.get("plata") == "paid" else "",
+                " · marcata din curier" if c.get("printat_in") == "curier" else ""))
+        if (d.get("total") or 0) > len(colete):
+            linii.append("  - *(lista completa: orderhub.arona.ro/api/cs/printate-neculese)*")
+        return linii
+    except Exception:
+        return None
+
+
 # ---------- alerts (prepend) ----------
 def grandia_trepte_section():
     # A/B trepte Grandia: CPA azi + cheltuit/buget pe campaniile de test + SN (control). Fail-safe.
@@ -615,6 +654,7 @@ def main():
     so=status_oh_section(); so_md=("\n".join(so)+"\n\n") if so else ""
     pa=pret_automat_section(); pa_md=("\n".join(pa)+"\n\n") if pa else ""
     cnp=culese_nepredate_section(); cnp_md=("\n".join(cnp)+"\n\n") if cnp else ""
+    pnc=printate_neculese_section(); cnp_md=(("\n".join(pnc)+"\n\n") if pnc else "")+cnp_md
     gu=grandia_urmarire_section(); gu_md=("\n".join(gu)+"\n\n") if gu else ""
     gt=grandia_trepte_section(); gt_md=("\n".join(gt)+"\n\n") if gt else ""
     so2=scoateri_orfane_section(); so2_md=("\n".join(so2)+"\n\n") if so2 else ""

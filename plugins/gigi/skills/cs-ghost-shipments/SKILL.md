@@ -1,6 +1,6 @@
 ---
 name: cs-ghost-shipments
-description: Detects "ghost shipments" for Customer Service — the parcel where a shipping label was printed (AWB issued) but the courier NEVER scanned it at pickup, so the customer got the Shopify "your order has shipped" email while the parcel is still sitting in the warehouse. These generate the angriest WISMO tickets ("it says shipped X days ago, where is it?!"). Covers the PRE-PICKUP gap that cs-proactive-delays (in-transit only) misses. Two signals from the Scripturi profitability engine (profit_orders): (1) GHOST = shopify_delivery_status='LABEL_PRINTED' AND status_category='Netrimisa' older than N days (label made, AWB exists with courier status 'Shipment data received' = registered but never scanned at pickup); (2) NO-TRACKING = status_category='Lipsa awb' (marked shipped/FULFILLED with no AWB at all, nothing to track). Output per store, sorted by age then value, with order name, age in days, status, revenue, AWB and a suggested action (check warehouse / re-ship / proactive message), plus a summary with total count and revenue blocked. Use for "ghost shipments", "label printed but not shipped", "shipped email but parcel never left", "etichetă printată dar coletul n-a plecat", "colete fantomă", "marcate expediat fără tracking", "pre-pickup WISMO", "comenzi care n-au plecat din depozit". Read-only.
+description: Detects "ghost shipments" for Customer Service — a shipping label exists (AWB issued, often printed) but the courier NEVER scanned the parcel, so it is still in the warehouse while the customer waits (angriest WISMO tickets). Source = Orders (Order Hub), all stores including eMAG / OLX / Trendyol: the CS queue /api/cs/neplecate-vechi plus the per-parcel guards /api/cs/printate-neculese (printed, nobody picked it, courier never saw it) and /api/cs/culese-nepredate (picked, courier never scanned it). No profit engine, no AWBprint. Output per store, sorted by age then value, with order, age, reason, station, paid flag, AWB and a suggested action. Use for "ghost shipments", "label printed but not shipped", "etichetă printată dar coletul n-a plecat", "colete fantomă", "printate neculese", "culese dar nepredate", "pre-pickup WISMO", "comenzi care n-au plecat din depozit". Read-only.
 ---
 
 # CS — Colete fantomă (etichetă printată, coletul n-a plecat)
@@ -16,7 +16,12 @@ uv run cs_ghost_shipments.py --json           # pt automatizare
 ```
 
 ## Cum funcționează
-- **Sursa = Order Hub** (din 24-oct-2026): `GET /api/cs/neplecate-vechi` — coada de lucru CS, comenzile neplecate mai vechi de N zile, cu motivul fiecăreia, fără comenzile demo. Cheia: env `OH_TEAM_READ_TOKEN` (→ `OH_PROFIT_CITIRE_TOKEN` → `OH_CS_SB_TOKEN`), altfel din KB.
+- **Sursa = Orders (Order Hub)**, din 24-oct-2026, trei rute citite cu aceeași cheie (env `OH_TEAM_READ_TOKEN` → `OH_PROFIT_CITIRE_TOKEN` → `OH_CS_SB_TOKEN`, altfel din KB):
+  - `GET /api/cs/neplecate-vechi` — coada de lucru CS (comenzile neplecate mai vechi de N zile, cu motivul);
+  - `GET /api/cs/printate-neculese?ore=` — etichetă printată, nimeni n-a cules-o, curierul n-a văzut-o, pe TOATE magazinele;
+  - `GET /api/cs/culese-nepredate?ore=` — culeasă, curierul n-a scanat-o; marketplace-ul exclus doar fără nicio citire la curier.
+  Pragul gărzilor = `12 × --days` ore LUCRĂTOARE (luni–vineri, 08–20). Rândul gărzii (pe colet) bate rândul cozii pe aceeași comandă.
+  De ce: coada CS sare marketplace-urile, deci o comandă eMAG plătită, printată și neculeasă din 21-oct și una culeasă, lăsată la ridicarea Sameday, nu apăreau (cazurile: jurnalul intern din 24-oct).
 - FANTOMĂ = comandă neplecată cu etichetă vie: `culeasa_nepredata` (culeasă, curierul n-a scanat-o), `eticheta_in_teanc` (printată, pierdută din teanc), `eticheta_neprintata`, `awb_nepreluat`.
 - FĂRĂ TRACKING = fără etichetă vie, dar marcată expediată în Shopify.
 - Coletele pierdute în tranzit nu-s „neplecate" → `cs-proactive-delays`.
