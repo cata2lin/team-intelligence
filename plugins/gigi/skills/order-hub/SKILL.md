@@ -15,7 +15,7 @@ cu token emis (ORC, SK, HU, BUC, MD, DUP, LAB). Statusurile se citesc DOAR din O
 `oh_comanda`, `oh_actiuni`, `oh_operatie`, `oh_rata_livrare` (citiri) · `oh_proba` (nu scrie) ·
 `oh_executa` (doar după OK-ul explicit al omului pe planul probei). Parametrii acțiunii = `params_json`, ex.
 `{"colete": 2}`. Înregistrare: `claude mcp add --scope user arona-orderhub -- uv run <abs>/order-hub/mcp_server.py`.
-Rata de livrare: `uv run scripts/oh_delivery_rate.py --store grandia --age 14` (ssh în containerul OH, doar SELECT).
+Rata de livrare: `uv run scripts/oh_delivery_rate.py --store grandia --age 14` (ssh în containerul OH, doar SELECT); `--canal` = și pe canal de marketing (tabela Orders `comanda_canal`). Costul pe livrată pe canal și mixul de spend pe magazin: `shared/scripturi-tools/livrare_pe_canal.py`.
 
 ## Rețeta (mereu în ordinea asta)
 1. `comanda --comanda <X>` — fișa: status, etichete, hold-uri, tichet, facturi, ce se poate face acum.

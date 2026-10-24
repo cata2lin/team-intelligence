@@ -162,11 +162,15 @@ def oh_operatie(id: int) -> str:
 
 @mcp.tool()
 def oh_rata_livrare(since: str = "2026-07", store: str = "", min_orders: int = 50, age: int = 14,
-                    weeks: int = 8) -> str:
+                    weeks: int = 8, canal: bool = False) -> str:
     """Rata de livrare (livrate / livrate+refuzate) pe LUNĂ × MAGAZIN din Order Hub, din colete, plus cohorte
     săptămânale la VÂRSTĂ EGALĂ (age zile) — singura comparație corectă între perioade (luna curentă pare mereu
-    mai bună). since = YYYY-MM (statusuri doar din 2026-07); store = filtru pe nume (substring). Doar citire."""
+    mai bună). since = YYYY-MM (statusuri doar din 2026-07); store = filtru pe nume (substring); canal = true adaugă rata
+    pe CANAL de marketing (tiktok / meta / google / direct / altul / necunoscut) × lună și cohortele pe canal
+    (atribuirea din tabela Orders comanda_canal). Doar citire."""
     a = ["--since", since, "--min-orders", str(min_orders), "--age", str(age), "--weeks", str(weeks)]
+    if canal:
+        a += ["--canal"]
     if store:
         a += ["--store", store]
     return _run(RATA, a, timeout=330)

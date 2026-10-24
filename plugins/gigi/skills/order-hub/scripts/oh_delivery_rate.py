@@ -5,6 +5,9 @@ Rulează local: trimite interogarea prin ssh în containerul orderhub-web (DATAB
   uv run oh_delivery_rate.py                      # din 2026-08, toate magazinele
   uv run oh_delivery_rate.py --since 2026-09 --store grandia --min-orders 100
   uv run oh_delivery_rate.py --csv out.csv
+  uv run oh_delivery_rate.py --canal              # + pe CANAL de marketing (tiktok/meta/google/…), lună și cohorte
+Canalul vine din tabela Orders `comanda_canal` (services/canal_marketing, aceeași regulă ca
+shared/scripturi-tools/canal_marketing.py); comenzile fără atribuire ies „necunoscut”.
 """
 import argparse, csv, json, subprocess, sys
 
@@ -31,9 +34,12 @@ SH = """select order_id,
         from shipments group by 1"""
 async def m():
     c = await asyncpg.connect(os.environ["DATABASE_URL"].replace("+asyncpg", ""))
+    are_canal = await c.fetchval("select to_regclass('public.comanda_canal') is not null")
+    CJ = "left join comanda_canal cc on cc.order_id = o.id" if are_canal else ""
+    CC = "coalesce(cc.canal, 'necunoscut')" if are_canal else "'necunoscut'"
     rows = await c.fetch(f"""
       with sh as ({SH})
-      select s.name store,
+      select s.name store, {CC} canal,
         to_char(date_trunc('month', o.created_at at time zone 'Europe/Bucharest'), 'YYYY-MM') luna,
         count(*) total,
         count(*) filter (where sh.s) cu_status,
@@ -41,20 +47,21 @@ async def m():
         count(*) filter (where sh.r and not sh.d) refuzate,
         count(*) filter (where sh.t and not sh.d and not sh.r) in_curs,
         count(*) filter (where sh.order_id is null and o.cancelled_at is not null) anulate
-      from orders o join stores s on s.id = o.store_id left join sh on sh.order_id = o.id
+      from orders o join stores s on s.id = o.store_id left join sh on sh.order_id = o.id {CJ}
       where coalesce(o.is_demo, false) = false and coalesce(s.is_demo, false) = false
         and o.created_at >= ($1::text || '-01')::date
-      group by 1, 2 order by 2, 1""", SINCE)
+      group by 1, 2, 3 order by 3, 1""", SINCE)
     # cohortă săptămânală la VÂRSTĂ EGALĂ: livrat/refuzat contează doar dacă statusul final a venit în ≤ AGE zile
     weekly = await c.fetch(f"""
       with sh as ({SH})
-      select s.name store, to_char(date_trunc('week', o.created_at at time zone 'Europe/Bucharest'),'YYYY-MM-DD') sapt,
+      select s.name store, {CC} canal,
+        to_char(date_trunc('week', o.created_at at time zone 'Europe/Bucharest'),'YYYY-MM-DD') sapt,
         count(*) filter (where sh.d and sh.t_final <= o.created_at + make_interval(days => $2)) livrate,
         count(*) filter (where sh.r and not sh.d and sh.t_final <= o.created_at + make_interval(days => $2)) refuzate
-      from orders o join stores s on s.id = o.store_id join sh on sh.order_id = o.id
+      from orders o join stores s on s.id = o.store_id join sh on sh.order_id = o.id {CJ}
       where coalesce(o.is_demo,false) = false and coalesce(s.is_demo,false) = false
         and o.created_at >= ($1::text || '-01')::date and o.created_at <= now() - make_interval(days => $2)
-      group by 1, 2 order by 2, 1""", SINCE, AGE)
+      group by 1, 2, 3 order by 3, 1""", SINCE, AGE)
     print(json.dumps({"monthly": [dict(r) for r in rows], "weekly": [dict(r) for r in weekly]}))
 asyncio.run(m())
 '''
@@ -91,10 +98,21 @@ def main():
     ap.add_argument("--age", type=int, default=14, help="zile de maturizare pt comparația săptămânală")
     ap.add_argument("--weeks", type=int, default=8)
     ap.add_argument("--csv")
+    ap.add_argument("--canal", action="store_true", help="și pe canal de marketing (tiktok / meta / google / …)")
     a = ap.parse_args()
 
     data = fetch(a.since, a.age)
-    rows = [enrich(r) for r in data["monthly"] if r["store"] not in SKIP_STORES]
+    # rândurile vin pe (magazin, canal, lună); vederea pe magazin le adună peste canale
+    pe_mag = {}
+    for r in data["monthly"]:
+        if r["store"] in SKIP_STORES:
+            continue
+        t = pe_mag.setdefault((r["store"], r["luna"]), dict(r, canal="toate"))
+        if t is not r and t.get("_v"):
+            for k in ("total", "cu_status", "livrate", "refuzate", "in_curs", "anulate"):
+                t[k] += r[k]
+        t["_v"] = True
+    rows = [enrich({k: v for k, v in r.items() if k != "_v"}) for r in pe_mag.values()]
     if a.store:
         rows = [r for r in rows if a.store.lower() in r["store"].lower()]
 
@@ -126,7 +144,12 @@ def main():
         delta = f"{mature[-1] - mature[-2]:+.1f} pp" if len(mature) >= 2 else ""
         print(f"{s[:28]:28}" + "".join(cells) + f"{delta:>19}")
 
-    wk = [r for r in data["weekly"] if r["store"] not in SKIP_STORES and r["sapt"] >= WEEKLY_RELIABLE_FROM]
+    wk_brut = [r for r in data["weekly"] if r["store"] not in SKIP_STORES and r["sapt"] >= WEEKLY_RELIABLE_FROM]
+    wk_m = {}
+    for r in wk_brut:
+        t = wk_m.setdefault((r["store"], r["sapt"]), {"store": r["store"], "sapt": r["sapt"], "livrate": 0, "refuzate": 0})
+        t["livrate"] += r["livrate"]; t["refuzate"] += r["refuzate"]
+    wk = list(wk_m.values())
     if a.store:
         wk = [r for r in wk if a.store.lower() in r["store"].lower()]
     weeks = sorted({r["sapt"] for r in wk})[-a.weeks:]
@@ -144,10 +167,44 @@ def main():
             cells.append(f"{pct(r['livrate'], n):>8}" if n >= max(20, a.min_orders // 4) else f"{'-':>8}")
         print(f"{s[:28]:28}" + "".join(cells))
 
+    if a.canal:
+        pe_canal(data, a, months, weeks)
+
     if a.csv:
         with open(a.csv, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
         print(f"\nCSV: {a.csv}")
+
+def pe_canal(data, a, months, weeks):
+    """Rata de livrare pe CANAL × lună și cohortele săptămânale la vârstă egală pe canal."""
+    cm, cw = {}, {}
+    for r in data["monthly"]:
+        if r["store"] in SKIP_STORES or (a.store and a.store.lower() not in r["store"].lower()):
+            continue
+        t = cm.setdefault((r["canal"], r["luna"]), [0, 0, 0]); t[0] += r["livrate"]; t[1] += r["refuzate"]; t[2] += r["in_curs"]
+    for r in data["weekly"]:
+        if r["store"] in SKIP_STORES or r["sapt"] < WEEKLY_RELIABLE_FROM or (a.store and a.store.lower() not in r["store"].lower()):
+            continue
+        t = cw.setdefault((r["canal"], r["sapt"]), [0, 0]); t[0] += r["livrate"]; t[1] += r["refuzate"]
+    canale = sorted({c for c, _ in cm}, key=lambda c: -sum(v[0] + v[1] for (cc, _), v in cm.items() if cc == c))
+    print("\nPE CANAL DE MARKETING — rată livrare % (livrate / livrate+refuzate), N = comenzi finalizate")
+    print(f"{'canal':12}" + "".join(f"{m:>16}" for m in months))
+    for c in canale:
+        cells = []
+        for m in months:
+            l, f, _i = cm.get((c, m), [0, 0, 0])
+            cells.append(f"{(str(pct(l, l + f)) + '%') if l + f else '-':>9} ({l + f:>4})")
+        print(f"{c:12}" + "".join(cells))
+    print(f"\nPE CANAL — cohorte săptămânale la vârstă egală ({a.age} zile)")
+    print(f"{'canal':12}" + "".join(f"{w[5:]:>8}" for w in weeks))
+    for c in canale:
+        cells = []
+        for w in weeks:
+            l, f = cw.get((c, w), [0, 0])
+            cells.append(f"{pct(l, l + f) if l + f >= 30 else '-':>8}")
+        print(f"{c:12}" + "".join(cells))
+    print("(costul pe livrată pe canal și mixul de spend pe magazin: shared/scripturi-tools/livrare_pe_canal.py)")
+
 
 if __name__ == "__main__":
     main()
