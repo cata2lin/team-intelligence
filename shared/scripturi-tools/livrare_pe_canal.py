@@ -227,8 +227,11 @@ def main():
         lv = can_lun.get((c, l_compl), [0, 0])[0]
         if c in MARKETPLACE:
             rata_c, src = comision(c, com_real)
-            cost = ("%.0f lei (comision %.1f%%, %s)" % (rata_c * val_liv[(c, l_compl)] / lv, 100 * rata_c, src)
-                    if lv else "— (comision %.1f%%, %s)" % (100 * rata_c, src))
+            # marketplace-urile au comenzi în Orders abia din 15/20-oct: luna cu livrate cea mai recentă, numită
+            l_mk = next((l for l in reversed(luni) if can_lun.get((c, l), [0, 0])[0]), None)
+            lv_mk = can_lun.get((c, l_mk), [0, 0])[0] if l_mk else 0
+            cost = ("%.0f lei (%s; comision %.1f%%, %s)" % (rata_c * val_liv[(c, l_mk)] / lv_mk, l_mk, 100 * rata_c, src)
+                    if lv_mk else "— (comision %.1f%%, %s)" % (100 * rata_c, src))
         elif c == "portal":
             cost = "fără reclame (B2B)"
         else:
