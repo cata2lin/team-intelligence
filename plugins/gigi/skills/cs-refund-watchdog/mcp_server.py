@@ -27,7 +27,11 @@ def _kb(k):
                           capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120).stdout.strip()
 
 
-for s in ("DATABASE_URL_AWBPRINT", "DATABASE_URL_METRICS"):
+# 24-oct-2026: DATABASE_URL_AWBPRINT nu se mai încarcă la pornire. refund_watchdog citește metrics + Grandia (rma), nu
+# AWBprint; singurul tool de aici care mai atinge AWBprint e ghost_shipments (îmbogățire opțională: tag `test` + status)
+# și își ia singur DSN-ul din KB, cu {} la eșec. Restul (cod_confirm_queue, address_guard, duplicate_orders,
+# proactive_delays, refused_recovery) citesc metrics / Order Hub / VPS.
+for s in ("DATABASE_URL_METRICS",):
     if not os.environ.get(s):
         os.environ[s] = _kb(s)
 
