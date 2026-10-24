@@ -273,6 +273,7 @@ check("6 operatie --id greșit: cod 2 cu OH_REZULTAT", cod == 2 and out.strip().
 vechi_base = O.BASE
 for baza, permis, bun in (("http://example.invalid", "", False), ("https://altundeva.example", "", False),
                           ("https://staging.example", "staging.example", True), ("https://orderhub.arona.ro", "", True),
+                          ("https://orders.arona.ro", "", True), ("http://orders.arona.ro", "", False),
                           ("http://orderhub.arona.ro", "orderhub.arona.ro", False), ("http://localhost:1", "", True)):
     os.environ["OH_CS_BASE_ALLOW"] = permis
     try:
