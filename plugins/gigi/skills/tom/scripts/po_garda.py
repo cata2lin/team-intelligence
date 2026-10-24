@@ -461,6 +461,7 @@ def verifica(linii, azi=None, blacklist=()):
                     "rezumat": rezumat, "tip_blocaj": tip if motive else None,
                     "produs_nou": bool(nou and not componenta),
                     "zile_stoc_zero": f.get("zile_stoc_zero"),
+                    "valoare_lei": round(float(val)) if val is not None else None,
                     "zile_de_la_listare": zile_listat,
                     "luni_comandate": round(luni_comandate, 1) if luni_comandate else None,
                     "componenta": bool(componenta), "viteza_din_kit": f.get("viteza_din_kit"),
