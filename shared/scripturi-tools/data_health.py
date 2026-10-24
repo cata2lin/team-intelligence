@@ -621,6 +621,12 @@ def check_transport_mom(rows, ctx):
                  "%s %.2f vs %s %.2f lei/colet (%.0f%% drift)" % (m1, a1, m0, a0, drift)))
 
 
+def check_oh_vs_profit_orders(rows, ctx):
+    """Comenzi din Order Hub lipsă din profit_orders (13-oct: HU/SK șterse tăcut la un 401). Vezi garda_oh_profit_orders."""
+    import garda_oh_profit_orders as _g
+    rows.extend(_g.verifica(3))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Watchdog de prospețime a datelor ARONA")
     ap.add_argument("--email", help="destinatar (email trimis DOAR dacă e ceva roșu)")
@@ -633,7 +639,7 @@ def main():
     ctx = {}  # check_metrics populează cache_fresh înainte ca check_profitdb să-l citească
     for fn in (check_metrics, check_sync_rows, check_awbprint, check_awb_output,
                check_transport_real, check_transport_mom, check_profitdb,
-               check_gads_feed, check_oh_mirror, check_heartbeats, check_apk_vs_git):
+               check_gads_feed, check_oh_mirror, check_heartbeats, check_apk_vs_git, check_oh_vs_profit_orders):
         try:
             fn(rows, ctx)
         except Exception as e:
