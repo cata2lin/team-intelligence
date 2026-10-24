@@ -28,8 +28,10 @@ def sh(cmd, timeout=120):
 
 def pg(dsn_var, sql, timeout=60):
     """psql read-only prin .env; întoarce liste de tuple (split pe |)."""
+    # DSN-urile în stil Prisma au `?schema=` (metrics), pe care psql îl refuză: fără curățare, orice secțiune pe metrics
+    # ieșea goală în tăcere (24-oct-2026: „Atribuire ads", alerta de dublă-numărare, nu mai rula de la mutarea DSN-ului)
     cmd=(f'set -a; . {HERE}/.env; set +a; '
-         f'psql "${dsn_var}" -At -F"|" -c "{sql}"')
+         f'psql "$(printf %s "${dsn_var}" | sed -E \'s/[?&](schema|pgbouncer|connection_limit)=[^&]*//g\')" -At -F"|" -c "{sql}"')
     out,rc=sh(cmd,timeout)
     if rc!=0: return None
     return [ln.split("|") for ln in out.strip().splitlines() if ln.strip()]
@@ -407,6 +409,43 @@ def pret_automat_section():
         return None
 
 
+def cs_richpanel_section():
+    """Coada CS din Richpanel (metrics.richpanel_tickets, la 30 min): cate tichete stau deschise pe 30 de zile, cate sunt
+    comentarii de reclama, cate se leaga de o comanda. Harta sistemelor #10 (24-oct-2026): coada Richpanel (5.941 deschise)
+    nu se vedea nicaieri langa coada CS din Order Hub."""
+    def pg(_var, sql):
+        # DSN-ul metrics are `?schema=` (stil Prisma), pe care psql îl refuză: aici prin psycopg2, cu DSN-ul curățat
+        import os, re, psycopg2
+        dsn = re.sub(r"[?&](schema|pgbouncer|connection_limit)=[^&]*", "", os.environ.get("DATABASE_URL_METRICS") or "")
+        cx = psycopg2.connect(dsn, connect_timeout=20)
+        try:
+            cx.set_session(readonly=True)
+            with cx.cursor() as c:
+                c.execute(sql)
+                return [[("" if v is None else str(v)) for v in row] for row in c.fetchall()]
+        finally:
+            cx.close()
+    try:
+        r=pg("DATABASE_URL_METRICS",
+             "SELECT count(*), count(*) FILTER (WHERE channel ILIKE '%%comment%%'), "
+             "count(*) FILTER (WHERE channel NOT ILIKE '%%comment%%' AND coalesce(match_order,order_name,'')<>''), "
+             "min(created_at) FILTER (WHERE channel NOT ILIKE '%%comment%%') FROM richpanel_tickets "
+             "WHERE status='OPEN' AND created_at >= to_char(now()-interval '30 days','YYYY-MM-DD')")
+        top=pg("DATABASE_URL_METRICS",
+               "SELECT coalesce(nullif(resolved_store,''),nullif(store,''),'?'), count(*) FROM richpanel_tickets "
+               "WHERE status='OPEN' AND channel NOT ILIKE '%%comment%%' "
+               "AND created_at >= to_char(now()-interval '30 days','YYYY-MM-DD') GROUP BY 1 ORDER BY 2 DESC LIMIT 3")
+        if not r or len(r[0])<4: return None
+        tot,com,leg,vechi=int(r[0][0] or 0),int(r[0][1] or 0),int(r[0][2] or 0),(r[0][3] or "")[:10]
+        reale=tot-com
+        pe=" · ".join("%s %s"%(x[0],x[1]) for x in (top or []) if len(x)>=2)
+        return ["## CS Richpanel (tichete deschise, 30 z)",
+                "- %s deschise: %s comentarii de reclamă + **%s tichete reale**, din care %s legate de o comandă (%d%%) · cel mai vechi %s · %s"
+                %(ro(tot),ro(com),ro(reale),ro(leg),(100*leg//reale) if reale else 0,vechi or "—",pe)]
+    except Exception:
+        return None
+
+
 def _pret_masurate_linii(d):
     """Pasii aplicati: viteza inainte/dupa la 7 si 14 zile (din grandia_pret_automat, cheia 'masurate')."""
     m=d.get("masurate") or []
@@ -650,6 +689,7 @@ def main():
     msc=miscare_section(); u4_md+=("\n".join(msc)+"\n\n") if msc else ""
     dlt=depozit_loturi_section(); u4_md+=("\n".join(dlt)+"\n\n") if dlt else ""
     s8=umbra_s8_section(); u4_md+=("\n".join(s8)+"\n\n") if s8 else ""
+    csr=cs_richpanel_section(); u4_md+=("\n".join(csr)+"\n\n") if csr else ""
     gc=cogs_garda_section(); gc_md=("\n".join(gc)+"\n\n") if gc else ""
     so=status_oh_section(); so_md=("\n".join(so)+"\n\n") if so else ""
     pa=pret_automat_section(); pa_md=("\n".join(pa)+"\n\n") if pa else ""
