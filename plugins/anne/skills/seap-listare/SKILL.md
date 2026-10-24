@@ -1,6 +1,6 @@
 ---
 name: seap-listare
-description: Fisa de catalog SEAP / SICAP (cumparari directe, institutii publice) pentru orice produs ARONA, gata de copiat in "Adauga reper de catalog" — ia produsul din Shopify dupa SKU, transportul REAL DPD din AWBprint si calculeaza pretul unitar FARA TVA cu transport inclus (pret site/1.21 + transport/1.21, rotunjit in sus), plus descriere curata, GTIN, link, conditii de livrare/plata cu contul de Trezorerie. Use pentru "listeaza in SEAP", "fisa SICAP", "pret fara TVA cu transport pentru SEAP", "cat pun in catalogul SEAP", "reper de catalog", "cumparare directa".
+description: Fisa de catalog SEAP / SICAP (cumparari directe, institutii publice) pentru orice produs ARONA, gata de copiat in "Adauga reper de catalog" — ia produsul din Shopify dupa SKU, transportul REAL DPD din Order Hub si calculeaza pretul unitar FARA TVA cu transport inclus (pret site/1.21 + transport/1.21, rotunjit in sus), plus descriere curata, GTIN, link, conditii de livrare/plata cu contul de Trezorerie. Use pentru "listeaza in SEAP", "fisa SICAP", "pret fara TVA cu transport pentru SEAP", "cat pun in catalogul SEAP", "reper de catalog", "cumparare directa".
 ---
 
 # seap-listare
@@ -23,7 +23,7 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/seap_fisa.py" --sku GD-BR-1313741 --cpv "3
 | `--sku` | (obligatoriu) | SKU-ul din Shopify |
 | `--prefix` | `GRAN` | magazinul (prefix din `SHOPIFY_STORES_CSV`: GRAN, MAG, OFER, EST, GT…) |
 | `--price` | pret Shopify | pret site **cu TVA**, daca vrei sa-l suprascrii |
-| `--transport` | median real AWBprint | transport **cu TVA** per colet; fallback 13,01 lei daca nu-s comenzi |
+| `--transport` | median real Order Hub | transport **cu TVA** per colet; fallback 13,01 lei daca nu-s comenzi |
 | `--cpv` | gol | codul CPV (vezi lista de mai jos) |
 | `--garantie` | 24 | luni de garantie scrise in descriere |
 | `--round` | `leu` | rotunjire in sus la leu intreg sau la ban |
@@ -37,8 +37,12 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/seap_fisa.py" --sku GD-BR-1313741 --cpv "3
 pret unitar SICAP (fara TVA) = pret site cu TVA / 1.21  +  transport DPD cu TVA / 1.21
 ```
 
-- Transportul = **median `orders.transport_cost`** din AWBprint pe comenzile DPD livrate cu SKU-ul
-  respectiv (ultimele 120 zile, 1 colet). Colet standard DPD ≈ 13,01 lei cu TVA = **10,75 fara TVA**.
+- Transportul = **mediana transportului real** din Order Hub (`/api/cs/livrabilitate`, `transport_fara_tva` × 1,21)
+  pe comenzile DPD care au DOAR SKU-ul respectiv (ultimele 120 zile). `--source awb` (sau env `SEAP_FISA_SURSA=awb`)
+  = vechiul `orders.transport_cost` din AWBprint, doar pe server. Comparat 24-oct: GD-BR-1313741 12,93 vs 13,01
+  (pret 127 identic), GD-MOB-1513 13,01 vs 13,01; la mobila in mai multe colete OH da costul INTREG al comenzii
+  (GD-MOB-1938859: 45,53 lei pe 174 comenzi vs 33,45 pe 4 comenzi cu un colet in AWBprint → 145 vs 135 lei) — e
+  costul real de livrare al unei bucati; daca vrei pretul pe un colet, da `--transport`. Colet standard DPD ≈ 13,01 lei cu TVA = **10,75 fara TVA**.
 - Pretul in SICAP e **per bucata**, deci transportul se multiplica cu cantitatea comandata. SICAP nu
   are transport fix per comanda. Anne a ales varianta acoperita integral (+10,75/buc) — la 1 bucata
   nu pierzi nimic, la mai multe esti pe plus. Alternativa (+5/buc, compromis) NU e cea folosita.
@@ -90,4 +94,4 @@ Cauta in SICAP dupa denumire cand nu esti sigur; codul se poate schimba ulterior
 
 ## Secrete necesare (din KB, nu se printeaza)
 
-`SHOPIFY_STORES_CSV`, `DATABASE_URL_AWBPRINT`.
+`SHOPIFY_STORES_CSV`, `OH_TEAM_READ_TOKEN` (cheia Order Hub; `DATABASE_URL_AWBPRINT` doar pentru `--source awb`, pe server).
