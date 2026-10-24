@@ -38,7 +38,10 @@ OH_URL = os.environ.get("OH_URL", "https://orderhub.arona.ro")
 DB = "/root/Scripturi/data/profitability.db"
 VARSTA = 14
 PRAG_ALARMA = 5.0
-CANALE = ("tiktok", "meta", "google", "direct", "altul", "necunoscut")
+CANALE = ("tiktok", "meta", "google", "direct", "altul", "necunoscut", "necunoscut_magazin_inchis")
+# marketplace-urile sunt rânduri proprii; „costul” lor e comisionul marketplace-ului, nu spend de reclame
+MARKETPLACE = ("emag", "trendyol", "olx", "okazii", "pepita", "cel")
+TOATE = CANALE + MARKETPLACE
 PLATFORMA_CANAL = {"tiktok": "tiktok", "meta": "meta", "facebook": "meta", "google": "google"}
 _LITERE = re.compile(r"^#?([A-Za-z]+)")
 
@@ -89,7 +92,7 @@ def alarme(sapt, min_n=30, prag=PRAG_ALARMA):
         return [], saptamani
     ult, ant = saptamani[-1], saptamani[-5:-1]
     out = []
-    for c in CANALE:
+    for c in TOATE:
         l, f = sapt.get((ult, c), [0, 0])
         if l + f < min_n:
             continue
@@ -157,12 +160,13 @@ def main():
     elif saptamani:
         ult = saptamani[-1]
         bucati = []
-        for c in CANALE:
+        for c in TOATE:
             l, f = sapt.get((ult, c), [0, 0])
             if l + f >= 30:
                 bucati.append("%s %.1f%%" % (c, rata(l, f)))
         linii.append("🟢 Livrare pe canal, săpt. matură %s: %s (nicio scădere > %.0f pp față de media pe 4 săpt.)"
                      % (ult, ", ".join(bucati) or "—", PRAG_ALARMA))
+    i_atrib = len(linii)
     linii += ["", "| Canal | " + " | ".join(luni) + " | Cost/livrată (ultima lună completă) |",
               "|---|" + "---:|" * (len(luni) + 1)]
     l_compl = luni[-2] if len(luni) > 1 else luni[-1]
@@ -171,16 +175,26 @@ def main():
         if l == l_compl:
             sp_can[can] += s
     # costul pe livrată pe canal are sens doar când majoritatea livratelor au canal (backfill-ul pe 6 luni)
-    liv_l = sum(v[0] for (c, l), v in can_lun.items() if l == l_compl)
-    acoperire = (1 - can_lun.get(("necunoscut", l_compl), [0, 0])[0] / liv_l) if liv_l else 0
-    for c in CANALE:
+    # acoperirea atribuirii se socotește doar pe comenzile din magazinele Shopify (marketplace-urile au canal sigur)
+    liv_l = sum(v[0] for (c, l), v in can_lun.items() if l == l_compl and c not in MARKETPLACE)
+    acoperire = (1 - sum(can_lun.get((n, l_compl), [0, 0])[0] for n in ("necunoscut", "necunoscut_magazin_inchis"))
+                 / liv_l) if liv_l else 0
+    linii.insert(i_atrib, "\n*Atribuire pe magazinele Shopify, %s: %.0f%% din livrate au canal (marketplace-urile sunt "
+                 "rânduri proprii, în afara procentului; „necunoscut_magazin_inchis” = magazin fără token Shopify).*"
+                 % (l_compl, 100 * acoperire))
+    for c in TOATE:
+        if c in MARKETPLACE and not any(can_lun.get((c, l)) for l in luni):
+            continue
         cel = []
         for l in luni:
             lv, rf = can_lun.get((c, l), [0, 0])
             cel.append("%s%% (%d)" % (rata(lv, rf), lv + rf) if lv + rf else "—")
         lv = can_lun.get((c, l_compl), [0, 0])[0]
-        cost = ("%.0f lei" % (sp_can[c] / lv)) if (c in sp_can and lv and acoperire >= 0.7) else (
-            "— (atribuire %.0f%%)" % (100 * acoperire) if c in sp_can else "—")
+        if c in MARKETPLACE:
+            cost = "comision necunoscut"      # Orders nu ține comisionul marketplace-ului
+        else:
+            cost = ("%.0f lei" % (sp_can[c] / lv)) if (c in sp_can and lv and acoperire >= 0.7) else (
+                "— (atribuire %.0f%%)" % (100 * acoperire) if c in sp_can else "—")
         linii.append("| %s | %s | %s |" % (c, " | ".join(cel), cost))
     linii += ["", "| Magazin | Lună | TikTok % | Meta % | Google % | Livrare % | Cost/livrată |", "|---|---|---:|---:|---:|---:|---:|"]
     for (p, l), (lv, rf) in sorted(agg.items(), key=lambda kv: (kv[0][0], kv[0][1])):

@@ -38,3 +38,11 @@ def test_releasit_cheile_cu_spatiu():
     o = {"customAttributes": [{"key": "UTM source", "value": "facebook"}, {"key": "Telefon", "value": "07"}],
          "customerJourneySummary": {"firstVisit": None, "lastVisit": None}}
     assert C(o) == ("meta", "releasit:utm")
+
+
+def test_marketplace_are_canalul_lui():
+    from canal_marketing import canal_marketplace, CANALE, NECUNOSCUT_INCHIS
+    assert canal_marketplace("eMAG") == ("emag", "marketplace")
+    assert canal_marketplace("trendyol") == ("trendyol", "marketplace")
+    assert canal_marketplace("shopify") is None and canal_marketplace(None) is None
+    assert NECUNOSCUT_INCHIS in CANALE and "cel" in CANALE

@@ -36,7 +36,10 @@ async def m():
     c = await asyncpg.connect(os.environ["DATABASE_URL"].replace("+asyncpg", ""))
     are_canal = await c.fetchval("select to_regclass('public.comanda_canal') is not null")
     CJ = "left join comanda_canal cc on cc.order_id = o.id" if are_canal else ""
-    CC = "coalesce(cc.canal, 'necunoscut')" if are_canal else "'necunoscut'"
+    # marketplace-urile au canalul lor (după magazin); magazinele fără token = necunoscut_magazin_inchis (ca în Orders)
+    MK = ("(select lower(min(mc.marketplace)) from marketplace_conexiuni mc where mc.magazin_comenzi_id = o.store_id)")
+    IN = "(case when s.access_token is null then 'necunoscut_magazin_inchis' end)"
+    CC = (f"coalesce(cc.canal, {MK}, {IN}, 'necunoscut')" if are_canal else f"coalesce({MK}, {IN}, 'necunoscut')")
     rows = await c.fetch(f"""
       with sh as ({SH})
       select s.name store, {CC} canal,
@@ -203,7 +206,8 @@ def pe_canal(data, a, months, weeks):
             l, f = cw.get((c, w), [0, 0])
             cells.append(f"{pct(l, l + f) if l + f >= 30 else '-':>8}")
         print(f"{c:12}" + "".join(cells))
-    print("(costul pe livrată pe canal și mixul de spend pe magazin: shared/scripturi-tools/livrare_pe_canal.py)")
+    print("(marketplace-urile = rânduri proprii, „costul” lor e comisionul, nu spend; necunoscut_magazin_inchis = magazin fără token."
+          " Costul pe livrată și mixul de spend: shared/scripturi-tools/livrare_pe_canal.py)")
 
 
 if __name__ == "__main__":
