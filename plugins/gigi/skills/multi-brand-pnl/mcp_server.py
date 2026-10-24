@@ -45,7 +45,7 @@ def pnl_today() -> str:
     return _run(PNL,["--today"])
 @mcp.tool()
 def fulfillment(report: str = "refuse", by: str = "brand", days: int = 0, months: int = 3, stores: str = "") -> str:
-    """Livrabilitate din ORDER HUB: report=refuse/sales/transport/stuck/geo. by depinde de report (refuse: brand/courier/product; geo: province). days>0 override months. repeat/cod și by=payment/discount/city au nevoie de câmpuri pe care OH nu le dă → răspund cu „rulează pe serverul de scripturi”."""
+    """Livrabilitate din ORDER HUB: report=refuse/sales/transport/stuck/repeat/cod/geo. by depinde de report (refuse: brand/courier/product/payment/discount; geo: province/city). days>0 override months. discount pe OH = pe codul de reducere, nu pe %."""
     a=["--report",report,"--by",by]
     if days>0: a+=["--days",str(days)]
     else: a+=["--months",str(months)]
