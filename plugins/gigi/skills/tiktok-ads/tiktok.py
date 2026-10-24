@@ -39,32 +39,59 @@ def _kb_secret(key):
     except Exception:
         return ""
 
+_FX_TAG = "tt"
+def _fx_series_metrics(need, lo, hi):
+    """[(CURRENCY, date, rate→RON)] din metrics.fx_rates (BNR, deja pe UNITATE: HUF 0.0146, nu la 100)."""
+    try:
+        cx = _db()
+        with cx.cursor() as c:
+            c.execute('''SELECT "fromCurrency", "rateDate", rate FROM fx_rates
+                         WHERE "toCurrency" = 'RON' AND "fromCurrency" = ANY(%s) AND "rateDate" BETWEEN %s AND %s
+                         ORDER BY "fromCurrency", "rateDate"''', (need, lo, hi))
+            rows = [(r[0], r[1], float(r[2])) for r in c.fetchall()]
+        cx.close(); return rows
+    except Exception as ex:  # fără DSN în mesaj; nu cădem tăcut pe cursul fix: spend-ul RON ar ieși greșit cu ~5%
+        sys.exit(f"[{_FX_TAG}] cursul BNR din metrics.fx_rates nu se poate citi ({type(ex).__name__}). "
+                 f"Întoarcere explicită pe AWBprint: FX_SURSA=awb")
+def _fx_series_awb(need, lo, hi):
+    """Calea veche, doar la cerere (FX_SURSA=awb): AWBprint.exchange_rates, rate/multiplier."""
+    dsn = os.environ.get("DATABASE_URL_AWBPRINT") or _kb_secret("DATABASE_URL_AWBPRINT")
+    if not dsn: sys.exit(f"[{_FX_TAG}] FX_SURSA=awb dar lipsește DATABASE_URL_AWBPRINT")
+    try:
+        cx = psycopg2.connect(_clean(dsn)); cx.set_session(readonly=True)
+        with cx.cursor() as c:
+            c.execute("""SELECT currency, rate_date, rate, multiplier FROM exchange_rates
+                         WHERE currency = ANY(%s) AND rate_date BETWEEN %s AND %s ORDER BY currency, rate_date""",
+                      (need, lo, hi))
+            rows = [(r[0], r[1], float(r[2]) / float(r[3] or 1)) for r in c.fetchall()]
+        cx.close(); return rows
+    except Exception as ex:
+        sys.exit(f"[{_FX_TAG}] AWBprint.exchange_rates indisponibil ({type(ex).__name__})")
 def fx_index(currencies, start, end):
-    """{(CURRENCY, date): rate→RON} from AWBprint.exchange_rates, forward-filled (per-day, dynamic)."""
+    """{(CURRENCY, date): rate→RON}, forward-filled peste weekend/sărbători (per zi, dinamic).
+    Sursa: metrics.fx_rates (BNR; identic cu AWBprint.exchange_rates de la 2026-04-17). FX_SURSA=awb = calea veche.
+    Zilele fără niciun curs anterior (fx_rates începe pe 2026-04-13) cad pe cursul fix din KB, cu avertisment."""
     from collections import defaultdict
     need = sorted({(c or "RON").upper() for c in currencies if (c or "RON").upper() != "RON"})
     if not need: return {}
-    dsn = os.environ.get("DATABASE_URL_AWBPRINT") or _kb_secret("DATABASE_URL_AWBPRINT")
-    if not dsn: return {}
     s = datetime.date.fromisoformat(start); e = datetime.date.fromisoformat(end)
-    try:
-        cx = psycopg2.connect(_clean(dsn)); cx.set_session(readonly=True)
-        with cx.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
-            c.execute("""SELECT currency, rate_date, rate, multiplier FROM exchange_rates
-                         WHERE currency = ANY(%s) AND rate_date BETWEEN %s AND %s ORDER BY currency, rate_date""",
-                      (need, s - datetime.timedelta(days=10), e))
-            rows = c.fetchall()
-    except Exception as ex:
-        sys.stderr.write(f"[tt] FX AWBprint indisponibil ({str(ex)[:80]}); folosesc curs fix din KB\n"); return {}
+    lo = s - datetime.timedelta(days=10)
+    src = (os.environ.get("FX_SURSA") or "metrics").strip().lower()
+    rows = _fx_series_awb(need, lo, e) if src == "awb" else _fx_series_metrics(need, lo, e)
     by = defaultdict(list)
-    for r in rows: by[r["currency"]].append((r["rate_date"], float(r["rate"]) / float(r["multiplier"] or 1)))
+    for cur, d, r in rows: by[cur].append((d, r))
     out = {}
     for cur, series in by.items():
-        last=None; i=0; d=s - datetime.timedelta(days=10)
+        last=None; i=0; d=lo
         while d <= e:
             while i < len(series) and series[i][0] <= d: last=series[i][1]; i+=1
             if last is not None and s <= d <= e: out[(cur, d)] = last
             d += datetime.timedelta(days=1)
+    ndays = (e - s).days + 1
+    miss = {c: ndays - sum(1 for k in out if k[0] == c) for c in need}
+    miss = {c: n for c, n in miss.items() if n > 0}
+    if miss:
+        sys.stderr.write(f"[{_FX_TAG}] fără curs BNR ({src}) pe {miss} zile → curs fix din KB pe acele zile\n")
     return out
 
 def conv(amount, cur, day, idx):

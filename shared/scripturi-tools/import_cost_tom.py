@@ -19,8 +19,10 @@ Ce NU face (măsurat 22-oct-2026, ca să nu se presupună):
     validează și întoarce planul, fără să scrie.
   • nu inventează cursuri: dacă nu există curs BNR ≤ data lotului, linia e SĂRITĂ și raportată.
 
-Cursul: tabela `exchange_rates` din AWB Arona (950 de zile per monedă, 2023-01-03 → azi) — e BNR,
-reparată pe 19-oct. ⚠️ `bnr.ro/files/xml/years/nbrfxrates<an>.xml` face 302 către pagina principală
+Cursul: `fx_rates` din metrics (BNR, pe unitate; identic cu `exchange_rates` din AWB Arona de la 2026-04-17,
+verificat pe 24-oct pe toate cele 4.961 de zile×monede comune). Începe pe 2026-04-13, iar cel mai vechi lot TOM
+e din 2026-05 — deci ajunge. `FX_SURSA=awb` = calea veche (AWB Arona), doar la cerere: baza aceea rămâne
+fără cititori de pe laptopuri. ⚠️ `bnr.ro/files/xml/years/nbrfxrates<an>.xml` face 302 către pagina principală
 și întoarce HTML (verificat azi de pe Mac ȘI de pe serverul din RO), deci NU se citește de acolo.
 
     uv run import_cost_tom.py                      # probă: scrie planul, nu trimite nimic
@@ -60,12 +62,27 @@ def _con(dsn: str):
     return c
 
 
+def sursa_curs() -> str:
+    return "awb" if (os.environ.get("FX_SURSA") or "").strip().lower() == "awb" else "metrics"
+
+
 def cursuri_usd() -> list:
-    """[(data, curs)] USD→RON, crescător, din AWB Arona (BNR)."""
-    with _con(secret("DATABASE_URL_AWBPRINT")) as c, c.cursor() as q:
-        q.execute("select rate_date, rate, multiplier from exchange_rates "
-                  "where currency = 'USD' order by rate_date")
-        return [(r[0], float(r[1]) / (r[2] or 1)) for r in q.fetchall()]
+    """[(data, curs)] USD→RON, crescător, BNR. Implicit metrics.fx_rates; FX_SURSA=awb = AWB Arona."""
+    if sursa_curs() == "awb":
+        with _con(secret("DATABASE_URL_AWBPRINT")) as c, c.cursor() as q:
+            q.execute("select rate_date, rate, multiplier from exchange_rates "
+                      "where currency = 'USD' order by rate_date")
+            return [(r[0], float(r[1]) / (r[2] or 1)) for r in q.fetchall()]
+    dsn = os.environ.get("DATABASE_URL_METRICS") or secret("DATABASE_URL_METRICS")
+    if not dsn:
+        sys.exit("lipsește DATABASE_URL_METRICS (curs BNR din fx_rates)")
+    try:
+        with _con(dsn) as c, c.cursor() as q:
+            q.execute('select "rateDate", rate from fx_rates '
+                      "where \"fromCurrency\" = 'USD' and \"toCurrency\" = 'RON' order by \"rateDate\"")
+            return [(r[0], float(r[1])) for r in q.fetchall()]
+    except Exception as ex:     # fără DSN în mesaj
+        sys.exit("cursul BNR din metrics.fx_rates nu se poate citi (%s)" % type(ex).__name__)
 
 
 def curs_la(serie: list, zi: dt.date):
@@ -172,7 +189,7 @@ def construieste(serie: list) -> tuple:
             "moneda": "USD",
             "curs": round(curs, 4),
             "curs_data": str(curs_data),
-            "curs_sursa": "BNR (exchange_rates, AWB Arona)",
+            "curs_sursa": "BNR (exchange_rates, AWB Arona)" if sursa_curs() == "awb" else "BNR (fx_rates, metrics)",
             "vama": VAMA,
             # ex-TVA, cum cere schema: TVA se adaugă la CITIRE, nu se stochează
             "cost_lei_buc": round((marfa + transport) * curs * VAMA, 4),
@@ -211,7 +228,7 @@ def main() -> int:
 
     serie = cursuri_usd()
     if not serie:
-        print("Nu am niciun curs USD în exchange_rates — opresc (un curs ghicit e mai rău decât lipsa lui).")
+        print("Nu am niciun curs USD (%s) — opresc" % sursa_curs() + " (un curs ghicit e mai rău decât lipsa lui).")
         return 2
     print("curs USD: %d zile, %s → %s" % (len(serie), serie[0][0], serie[-1][0]))
 
