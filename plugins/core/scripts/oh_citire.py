@@ -99,7 +99,7 @@ def comenzi_deschise(zile: int, cu_anulate: bool = False) -> List[Dict[str, Any]
     dupa = None
     while True:
         d = get("/api/cs/comenzi-deschise", {"zile": int(zile), "cu_anulate": cu_anulate, "dupa": dupa,
-                                             "limita": 50000}, timeout=600)
+                                             "limita": 20000}, timeout=600)
         linii.extend(d.get("linii") or [])
         dupa = d.get("urmator")
         if dupa is None:
