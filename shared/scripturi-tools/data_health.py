@@ -205,111 +205,159 @@ def check_metrics(rows, ctx):
     cx.close()
 
 
-def check_awbprint(rows, ctx):
-    """Sursa de adevăr livrare: dacă sync-ul ei stă, tot ce ține de livrat/transport e vechi."""
-    dsn = _dsn("DATABASE_URL_AWBPRINT")
-    if not dsn:
-        rows.append((CRIT, "awbprint", "lipsește DATABASE_URL_AWBPRINT")); return
-    import psycopg2
-    cx = psycopg2.connect(dsn); cur = cx.cursor()
-    cur.execute("SELECT MAX(synced_at), MAX(frisbo_created_at) FROM orders")
-    synced, created = cur.fetchone()
-    _judge(rows, "awbprint.sync", synced, 8, "heartbeat sync")
-    _judge(rows, "awbprint.orders", created, 24, "cea mai nouă comandă")
-    cx.close()
+# ---------------------------------------------------------------- Order Hub (sursa de adevăr)
+#
+# 24-oct-2026: verificările de livrare / AWB / transport citeau AWBprint (Postgres de pe 38.242), care iese din circuit:
+# transportul real nu mai intră acolo din 28-aug și statusurile internaționale sunt înghețate din 27-sep. De aceea
+# data_health dădea zilnic CRITIC fals („transport 0%"), iar un CRITIC fals zilnic ascunde unul real. Acum fiecare
+# verificare citește sursa ei din Order Hub, prin rutele /api/cs/* cu cheia de citire (`cs.citire`).
+
+OH_BAZA = os.environ.get("OH_CS_BASE", "https://orderhub.arona.ro").rstrip("/")
+KB_PY = "/root/Scripturi/team-intelligence/plugins/core/scripts/kb.py"
+UV = "/root/.local/bin/uv"
+FUS = "Europe/Bucharest"
+PLECAT = ("Livrata", "Refuzata", "In curs de livrare")   # comanda a plecat din depozit (stare din colete OH)
+_OH_TOKEN = []
 
 
-# ⚠️ Sursa a fost /root/Scripturi/logs/xc_awb_events.jsonl, scris de xc_fulfill.sh. La cutover-ul pe
-# Order Hub (20-aug) acel script a ajuns sa sara toata flota, deci logul a ramas ORFAN: producatorul
-# a fost retras intentionat, verificatorul a ramas sa se uite la el si a raportat 18 zile la rand
-# „niciun AWB — cronul e mort complet", in timp ce depozitul facea ~2.500 etichete pe zi.
-# Acum masuram EFECTUL la sursa lui: etichetele din AWBprint. Vezi [[awb-log-orfan-dupa-cutover-oh]].
-# Praguri pe FEREASTRA ORARĂ de până acum (vezi mai jos), calibrate pe 7 zile reale de trafic:
-# Praguri CALIBRATE prin backtest pe 9 zile reale (nu ghicite). Cu 5/2 și fără condiția de consistență
-# dădea 3 fals pozitive de weekend: Rossi și Covoria aveau 0 AWB la 09:15, dar 8 pe toată ziua — magazine
-# de 8-18 AWB/zi, la care „0 dimineața" e variație normală, nu defect.
-AWB_BASE_CRIT = 20   # doar magazine cu volum mare: la ele 0 la ora asta e imposibil să fie întâmplare
-AWB_BASE_WARN = 5
-AWB_MIN_DAYS  = 6    # ...ȘI să fi produs în ≥6 din ultimele 7 zile (consistență, nu doar medie)
+def _oh_token():
+    """Cheia de citire OH: din mediu, altfel din seif (kb.py cere .env încărcat; cronul îl încarcă)."""
+    if _OH_TOKEN:
+        return _OH_TOKEN[0]
+    import subprocess
+    t = (os.environ.get("OH_CS_SB_TOKEN") or "").strip()
+    if not t:
+        r = subprocess.run([UV, "run", KB_PY, "secret-get", "OH_CS_SB_TOKEN"], capture_output=True, text=True,
+                           timeout=90, stdin=subprocess.DEVNULL)
+        t = (r.stdout or "").strip().splitlines()[-1].strip() if (r.stdout or "").strip() else ""
+    if not t:
+        raise RuntimeError("fără cheie OH_CS_SB_TOKEN (nici în mediu, nici în seif)")
+    _OH_TOKEN.append(t)
+    return t
+
+
+def oh_get(path, params=None, timeout=300):
+    """JSON de la o rută /api/cs/* a OH (răspunsurile mari vin gzip). Orice eroare = excepție: checkul o face CRIT.
+    Un 502/503/504 sau o conexiune picată se reîncearcă de două ori (20 s, 60 s): pe 24-oct, la proba de dimineață, OH
+    a dat 502 câteva secunde pe trei rute la rând și ar fi ieșit trei CRITICE false."""
+    import gzip
+    import time
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    url = OH_BAZA + path + ("?" + urllib.parse.urlencode(params) if params else "")
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + _oh_token(),
+                                               "Accept": "application/json", "Accept-Encoding": "gzip"})
+    for pauza in (20, 60, None):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                raw = r.read()
+            break
+        except urllib.error.HTTPError as e:
+            if e.code not in (502, 503, 504) or pauza is None:
+                raise
+        except urllib.error.URLError:
+            if pauza is None:
+                raise
+        time.sleep(pauza)
+    if raw[:2] == b"\x1f\x8b":
+        raw = gzip.decompress(raw)
+    d = json.loads(raw.decode("utf-8"))
+    if isinstance(d, dict) and d.get("ok") is False:
+        raise RuntimeError("OH %s: %s" % (path, d.get("rezultat") or d.get("mesaj")))
+    return d
+
+
+def _acum_ro():
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo(FUS))
+
+
+def _ro_la_utc(zi, ora=0, minut=0):
+    """Începutul zilei (sau al orei) de București → datetime UTC naiv, cum îl vrea `_age_h`. Începutul, nu sfârșitul:
+    vechimea iese cel mult o zi / o oră mai mare, niciodată negativă."""
+    from zoneinfo import ZoneInfo
+    d = datetime.fromisoformat(str(zi)[:10]).replace(hour=int(ora), minute=minut, tzinfo=ZoneInfo(FUS))
+    return d.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def oh_livrabilitate(ctx, luna):
+    """Rândurile din /api/cs/livrabilitate pe o lună (o comandă pe rând), ca listă de dict; o dată pe rulare."""
+    cache = ctx.setdefault("oh_livr", {})
+    if luna not in cache:
+        d = oh_get("/api/cs/livrabilitate", {"luna": luna})
+        col = d["coloane"]
+        cache[luna] = [dict(zip(col, r)) for r in d.get("randuri") or []]
+    return cache[luna]
+
+
+def _luni_inapoi(n):
+    y, m = _acum_ro().year, _acum_ro().month
+    out = []
+    for _ in range(n):
+        out.append("%04d-%02d" % (y, m))
+        y, m = (y - 1, 12) if m == 1 else (y, m - 1)
+    return out
+
+
+def check_oh_freshness(rows, ctx):
+    """Prospețimea Order Hub (în locul `awbprint.sync` / `awbprint.orders`).
+
+    - `oh.comenzi`: cea mai nouă oră cu vânzări în OH (comenzile intră din Shopify / marketplace-uri) — SLA 24h, ca
+      `awbprint.orders`. Dacă intrarea comenzilor stă, tot ce urmează (AWB, livrare, profit) e vechi.
+    - `oh.ridicari`: cea mai recentă ridicare de curier văzută de sincronizarea statusurilor OH, pe ultimele 4 zile.
+      Sâmbăta nu se printează și duminica nu ridică nimeni: vineri seara → luni 09:15 sunt ~63h, deci SLA 80h. Un
+      sync de statusuri oprit într-o zi lucrătoare iese a doua zi.
+    """
+    d = oh_get("/api/cs/warehouse/vanzari-pe-ora", {"zile": 2})
+    col = d["coloane"]
+    iz, io = col.index("zi"), col.index("ora")
+    best = max(((r[iz], int(r[io])) for r in d.get("randuri") or []), default=None)
+    _judge(rows, "oh.comenzi", _ro_la_utc(best[0], best[1]) if best else None, 24, "cea mai nouă vânzare în OH")
+
+    azi = _acum_ro().date()
+    from datetime import timedelta
+    r = oh_get("/api/cs/ridicate", {"zi": (azi - timedelta(days=3)).isoformat(), "pana_la": azi.isoformat()},
+               timeout=600)
+    ult = max((x.get("ultima") for x in (r.get("ridicate_in_zi") or {}).get("pe_statie_curier") or []
+               if x.get("ultima")), default=None)
+    ts = None
+    if ult:
+        ts = datetime.fromisoformat(str(ult))
+        if ts.tzinfo is None:
+            from zoneinfo import ZoneInfo
+            ts = ts.replace(tzinfo=ZoneInfo(FUS))
+    _judge(rows, "oh.ridicari", ts, 80, "ultima ridicare văzută de sync-ul de statusuri OH")
+
+
+# Pragurile pe magazin pentru comenzile rămase fără AWB fără un motiv legitim (garda OH).
+AWB_GOL_CRIT = 5     # ≥5 comenzi fără AWB și fără motiv pe un magazin = jobul de AWB al magazinului nu mai produce
+AWB_GARDA_ORE = 12   # ore LUCRĂTOARE (L–V 08–18) — pragul gărzii zilnice din OH
 
 
 def check_awb_output(rows, ctx):
-    """AWB-uri PRODUSE per magazin — golul care a lăsat incidentul din 2026-08-18 să treacă neobservat.
+    """AWB-uri care NU s-au produs, pe magazin — golul care a lăsat incidentul din 2026-08-18 să treacă neobservat.
 
-    Ce s-a întâmplat: o comandă cu `address1` NULL arunca TypeError în mijlocul buclei de `fulfill` și
-    omora restul rulării magazinului. Esteban, Apreciat, Reduceri Bune și Ofertele Zilei au făcut ÎMPREUNĂ
-    414 AWB-uri într-o zi și **0** a doua zi. Watchdog-ul zicea totul verde: `awbprint.sync` și
-    `awbprint.orders` măsoară COMENZI CARE INTRĂ, nu ETICHETE CARE IES. Logul agregat al cronului scria
-    „AWB=15 · magazine=23", adică sănătos. Nimeni n-a aflat până n-a întrebat un om.
+    Ce s-a întâmplat: o comandă cu `address1` NULL arunca TypeError în mijlocul buclei de `fulfill` și omora restul
+    rulării magazinului. Esteban, Apreciat, Reduceri Bune și Ofertele Zilei au făcut ÎMPREUNĂ 414 AWB-uri într-o zi
+    și **0** a doua zi, iar watchdog-ul zicea totul verde.
 
-    CUM compar (important): NU ziua întreagă față de media zilnică — `data_health` rulează la 09:15, când
-    ziua abia a început, deci orice prag pe total ar tăcea exact când e nevoie de el. Compar **aceeași
-    fereastră orară**: AWB-urile de azi până la ora curentă vs media AWB-urilor din ultimele 7 zile
-    până la ACEEAȘI oră. Măsurat pe date reale: până la 09:15 Esteban are mereu între 96 (duminica) și
-    632 (marți) — un 0 la ora aia nu e „zi liniștită", e cron mort.
+    SURSA (24-oct-2026): garda AWB din Order Hub (`/api/cs/garda-awb`), nu `order_awbs` din AWBprint. AWB-urile se
+    fac în OH; AWBprint nu le mai vede pe toate (intl, DPD din OH). Garda întoarce fiecare comandă fără AWB mai veche
+    de 12 ore lucrătoare cu MOTIVUL ei (tichet CS, hold, auto-AWB oprit pe magazin…): cele cu motiv legitim sunt
+    lucru normal, cele fără motiv sunt exact „cronul magazinului nu mai produce".
     """
-    # SURSA: AWBprint.order_awbs, nu logul xc_awb_events.jsonl. Logul a ramas ORFAN la cutover-ul pe
-    # Order Hub (20-21 aug): xc_fulfill.sh sare toate magazinele, deci nu mai scrie nimic, iar
-    # alarma „niciun AWB in 8 zile" a sunat fals 44 de zile la rand cu depozitul facand ~3.000 AWB/zi.
-    # order_awbs.created_at e ora LOCALA (Europe/Bucharest) naiva; shipment_created_at e 100% NULL.
-    dsn = _dsn("DATABASE_URL_AWBPRINT")
-    if not dsn:
-        rows.append((WARN, "awb.output", "lipsește DATABASE_URL_AWBPRINT")); return
-
-    from collections import defaultdict
-    from datetime import timedelta
-    import psycopg2
-
-    win = defaultdict(lambda: defaultdict(int))   # magazin -> zi -> AWB până la ora curentă
-    cx = psycopg2.connect(dsn); cur = cx.cursor()
-    # ziua si ora le da BAZA (Europe/Bucharest), nu VPS-ul: ceasul VPS e pe alt fus (CET) si fereastra
-    # orara ar aluneca o ora fata de created_at
-    cur.execute("SELECT current_date, to_char(localtime, 'HH24:MI')")
-    d0, hhmm = cur.fetchone()
-    today = d0.isoformat()
-    hist_days = [(d0 - timedelta(days=i)).isoformat() for i in range(1, 8)]
-    cur.execute("""
-        SELECT COALESCE(s.name, '?'), a.created_at::date::text, COUNT(*)
-          FROM order_awbs a
-          JOIN orders o ON o.id = a.order_id
-          LEFT JOIN stores s ON s.uid = o.store_uid
-         WHERE a.created_at >= current_date - 7
-           AND a.created_at::time <= localtime
-           AND COALESCE(a.is_return_label, false) = false
-         GROUP BY 1, 2""")
-    for store, day, n in cur.fetchall():
-        win[store.split(".")[0]][day] += n
-    cx.close()
-
-    if not win:
-        rows.append((CRIT, "awb.output", "niciun AWB în order_awbs în ultimele 8 zile — nici depozitul, nici sync-ul AWBprint nu produc"))
-        return
-
-    INTL_OH = {"duppo","duppobg","duppocz","duppohu","duppomd","bonhaus"}  # intl: etichete DPD in OH, nu AWBprint -> nu alarma (restaurat 22-oct)
-    live = tot_today = 0
-    for store, byday in sorted(win.items()):
-        if store in INTL_OH:
-            continue  # intl via OH: AWBprint nu vede etichetele lor
-        vals = [byday.get(d, 0) for d in hist_days]
-        base = sum(vals) / 7.0
-        nz = sum(1 for v in vals if v > 0)      # în câte din cele 7 zile a produs până la ora asta
-        n = byday.get(today, 0)
-        tot_today += n
-        if n:
-            live += 1
-        if n == 0 and base >= AWB_BASE_CRIT and nz >= AWB_MIN_DAYS:
-            rows.append((CRIT, "awb.%s" % store[:16],
-                         "0 AWB azi până la %s, dar media ultimelor 7 zile la aceeași oră = %.0f "
-                         "(a produs în %d/7 zile) → cronul acestui magazin nu mai produce" % (hhmm, base, nz)))
-        elif n == 0 and base >= AWB_BASE_WARN and nz == 7:
-            rows.append((WARN, "awb.%s" % store[:16],
-                         "0 AWB azi până la %s (media 7 zile la aceeași oră = %.1f, a produs în toate cele "
-                         "7 zile) — magazin mic, poate fi doar o dimineață liniștită" % (hhmm, base)))
-        elif base >= 20 and n < base * 0.25:
-            rows.append((WARN, "awb.%s" % store[:16],
-                         "doar %d AWB azi până la %s vs media %.0f (sub 25%%)" % (n, hhmm, base)))
-    rows.append((OK, "awb.output", "%d AWB azi până la %s, pe %d magazine active (din %d cu istoric)"
-                 % (tot_today, hhmm, live, len(win))))
+    d = oh_get("/api/cs/garda-awb", {"ore": AWB_GARDA_ORE, "lipsa": "false"})
+    fa = d.get("fara_awb") or {}
+    from collections import Counter
+    gol = Counter(str(c.get("magazin") or "?") for c in fa.get("comenzi") or [] if not c.get("legitim"))
+    for mag, n in sorted(gol.items(), key=lambda x: -x[1]):
+        rows.append((CRIT if n >= AWB_GOL_CRIT else WARN, "awb.%s" % mag[:16],
+                     "%d comenzi fără AWB de peste %d ore lucrătoare, fără motiv legitim%s"
+                     % (n, AWB_GARDA_ORE, " → jobul de AWB al acestui magazin nu mai produce" if n >= AWB_GOL_CRIT
+                        else "")))
+    rows.append((OK, "awb.output", "%d comenzi fără AWB > %dh lucrătoare, %d fără motiv legitim (garda OH)"
+                 % (int(fa.get("total") or 0), AWB_GARDA_ORE, sum(gol.values()))))
 
 
 def check_profitdb(rows, ctx):
@@ -576,49 +624,51 @@ def check_sync_rows(rows, ctx):
 
 
 def check_transport_real(rows, ctx):
-    """(f1) Costul de transport REAL per comandă (AWBprint.orders.transport_cost, autoritativ). Dacă nu mai
-    intră, P&L-ul cade pe transport flat (fantomă, CZ +80k etc.). A înghețat tăcut pe 28-aug-2026 (sursa a
-    trecut pe Order Hub) și nimeni n-a prins ~2 luni. Freshness + acoperire pe fereastra așezată."""
-    dsn = _dsn("DATABASE_URL_AWBPRINT")
-    if not dsn:
-        rows.append((WARN, "transport.real", "lipsește DATABASE_URL_AWBPRINT")); return
-    import psycopg2
-    cx = psycopg2.connect(dsn); cur = cx.cursor()
-    cur.execute("SELECT MAX(frisbo_created_at) FROM orders WHERE transport_cost > 0")
-    _judge(rows, "transport.real", cur.fetchone()[0], 72, "ultima comandă cu transport real (altfel P&L pe flat)")
-    cur.execute("""SELECT COUNT(*) FILTER (WHERE transport_cost > 0), COUNT(*)
-                     FROM orders
-                    WHERE frisbo_created_at BETWEEN NOW() - INTERVAL '37 days' AND NOW() - INTERVAL '7 days'
-                      AND (currency = 'RON' OR currency IS NULL)""")
-    cu, tot = cur.fetchone()
-    if tot and tot >= 500:
-        pct = 100.0 * cu / tot
+    """(f1) Costul de transport REAL per comandă. Dacă nu mai intră, P&L-ul cade pe transport flat (fantomă, CZ +80k
+    etc.). Înghețase tăcut pe 28-aug-2026 în AWBprint (`orders.transport_cost`), fiindcă etichetele se fac în Order
+    Hub; de atunci verificarea de aici dădea CRITIC zilnic cu transportul real prezent în OH.
+
+    SURSA (24-oct-2026): OH `/api/cs/livrabilitate` (`transport_fara_tva` = shipments.cost_transport: factura DPD,
+    altfel prețul curierului la creare). Prospețime + acoperire pe fereastra așezată (37..7 zile), pe comenzile RON
+    PLECATE (livrate / refuzate / pe drum): o comandă neplecată n-are etichetă, deci n-are cum să aibă transport."""
+    from datetime import timedelta
+    azi = _acum_ro().date()
+    rand = [r for luna in _luni_inapoi(3) for r in oh_livrabilitate(ctx, luna)]
+    cu = [r["zi"] for r in rand if (r.get("transport_fara_tva") or 0) > 0 and r.get("zi")]
+    _judge(rows, "transport.real", _ro_la_utc(max(cu)) if cu else None, 72,
+           "ultima comandă cu transport real în OH (altfel P&L pe flat)")
+    lo, hi = (azi - timedelta(days=37)).isoformat(), (azi - timedelta(days=7)).isoformat()
+    fer = [r for r in rand if lo <= str(r.get("zi") or "") <= hi and r.get("stare") in PLECAT
+           and (r.get("moneda") or "RON") == "RON"]
+    tot = len(fer)
+    if tot >= 500:
+        pct = 100.0 * sum(1 for r in fer if (r.get("transport_fara_tva") or 0) > 0) / tot
         st = OK if pct >= 80 else (WARN if pct >= 50 else CRIT)
-        rows.append((st, "transport.acoperire", "%.0f%% comenzi RON cu transport real (37..7z, prag 80%%)" % pct))
-    cx.close()
+        rows.append((st, "transport.acoperire",
+                     "%.0f%% comenzi RON plecate cu transport real (37..7z, prag 80%%, OH)" % pct))
+    else:
+        rows.append((WARN, "transport.acoperire", "doar %d comenzi RON plecate în 37..7z — nu pot judeca" % tot))
 
 
 def check_transport_mom(rows, ctx):
-    """(f2) lei/colet lună-pe-lună (RON, transport real > 0). Drift mare = schimbare de tarifare curier sau
-    date stricate. Se activează singur când există ≥2 luni cu date suficiente (azi: transport real înghețat)."""
-    dsn = _dsn("DATABASE_URL_AWBPRINT")
-    if not dsn:
-        return
-    import psycopg2
-    cx = psycopg2.connect(dsn); cur = cx.cursor()
-    cur.execute("""SELECT to_char(frisbo_created_at, 'YYYY-MM'), AVG(transport_cost)::float, COUNT(*)
-                     FROM orders
-                    WHERE frisbo_created_at > NOW() - INTERVAL '75 days' AND transport_cost > 0
-                      AND (currency = 'RON' OR currency IS NULL)
-                    GROUP BY 1 HAVING COUNT(*) >= 200 ORDER BY 1 DESC LIMIT 2""")
-    g = cur.fetchall(); cx.close()
+    """(f2) lei/colet lună-pe-lună (RON, comenzi plecate cu transport real > 0, fără TVA, din OH). Drift mare =
+    schimbare de tarifare curier sau date stricate. Ultimele 2 luni cu ≥200 de comenzi."""
+    g = []
+    for luna in _luni_inapoi(3):
+        v = [float(r["transport_fara_tva"]) for r in oh_livrabilitate(ctx, luna)
+             if (r.get("transport_fara_tva") or 0) > 0 and r.get("stare") in PLECAT
+             and (r.get("moneda") or "RON") == "RON"]
+        if len(v) >= 200:
+            g.append((luna, sum(v) / len(v), len(v)))
+        if len(g) == 2:
+            break
     if len(g) < 2:
         rows.append((WARN, "transport.lei_colet", "sub 2 luni cu date suficiente (transport real nu mai intră?)"))
         return
     (m1, a1, _n1), (m0, a0, _n0) = g[0], g[1]
     drift = abs(a1 - a0) / a0 * 100 if a0 else 0
     rows.append((WARN if drift > 25 else OK, "transport.lei_colet",
-                 "%s %.2f vs %s %.2f lei/colet (%.0f%% drift)" % (m1, a1, m0, a0, drift)))
+                 "%s %.2f vs %s %.2f lei/colet fără TVA (%.0f%% drift)" % (m1, a1, m0, a0, drift)))
 
 
 def check_oh_vs_profit_orders(rows, ctx):
@@ -637,7 +687,7 @@ def main():
 
     rows = []
     ctx = {}  # check_metrics populează cache_fresh înainte ca check_profitdb să-l citească
-    for fn in (check_metrics, check_sync_rows, check_awbprint, check_awb_output,
+    for fn in (check_metrics, check_sync_rows, check_oh_freshness, check_awb_output,
                check_transport_real, check_transport_mom, check_profitdb,
                check_gads_feed, check_oh_mirror, check_heartbeats, check_apk_vs_git, check_oh_vs_profit_orders):
         try:

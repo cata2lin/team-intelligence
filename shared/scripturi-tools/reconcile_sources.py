@@ -2,13 +2,15 @@
 reconcile_sources.py — reconciliere între cele 3 surse de adevăr ARONA, cu ISTORIC de drift.
 
 HARTA spune negru pe alb: „cache-urile derivate MINT per-brand — la verdict pe BANI confirmă
-la SURSĂ". Engine-ul sub-număra livratele de ~1,6× (Esteban 5.713 engine vs 10.079 AWBprint),
+la SURSĂ". Engine-ul sub-număra livratele de ~1,6× (Esteban 5.713 engine vs 10.079 la sursă),
 iar tokenul Meta mort a golit spend-ul din warehouse. Problema: nimeni nu vede CÂND o sursă
 începe să mintă — se descoperă peste două luni, la un audit.
 
 Comparăm două metrici, fiecare apple-to-apple, între surse INDEPENDENTE:
-  1. COMENZI LIVRATE  — engine (cache.brand_pnl_monthly) vs AWBprint (COUNT delivered).
-     Independentă de monedă și TVA. Exact metrica ce a picat 1,6×.
+  1. COMENZI LIVRATE  — engine (cache.brand_pnl_monthly) vs Order Hub (`/api/cs/livrabilitate`,
+     stare „Livrata” din colete). Independentă de monedă și TVA. Exact metrica ce a picat 1,6×.
+     Până pe 24-oct-2026 referința era AWBprint, care iese din circuit (statusurile intl înghețate din
+     27-sep: SK/PL/MD ieșeau „drift" zilnic, fals).
   2. MARKETING (RON)  — engine (brand_pnl.marketing, din sheet) vs warehouse
      (cache.daily_ad_spend_ron). Două căi independente care TREBUIE să coincidă;
      divergența = token mort, atribuire stricată, sau override neactualizat.
@@ -22,17 +24,21 @@ material. Complementar cu data_health (prospețime): ăsta compară VALORI, nu v
   reconcile_sources.py --email X --key ...      # + email dacă e drift material
 """
 import os, re, sys, argparse, sqlite3
+
+import data_health as dh   # clientul Order Hub (oh_get / oh_livrabilitate), un singur loc
 from datetime import datetime, date
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 PF_DB = "/root/Scripturi/data/profitability.db"
 
-# AWBprint pune tot runul de litere din order_number ca prefix (NUBRA/GRAND); engine folosește NUB/GRAN.
-AWB_TO_ENGINE = {"NUBRA": "NUB", "GRAND": "GRAN"}
-# Magazine pe care AWBprint nu le-a avut NICIODATA (nu trec prin Frisbo): fara referinta pentru livrate.
-# Fara lista asta, cu _drift care alerteaza pe referinta 0, ar suna zilnic degeaba.
-NOT_IN_AWBPRINT = {"DUPBG"}   # duppo.bg — verificat 11-oct-2026: 0 comenzi in AWBprint, nici un prefix DUP
+# Prefixul din numele comenzii OH = tot runul de litere (NUBRA/GRAND/DUP); engine folosește NUB/GRAN/DUPBG.
+# Verificat pe sep-2026: DUP 281 + DUPBG 505 în OH = DUPBG 786 în engine.
+OH_TO_ENGINE = {"NUBRA": "NUB", "GRAND": "GRAN", "DUP": "DUPBG"}
+# Prefixe pe care cheia OH nu le vede (Belasil vândut 20-oct, Covoria cu tokenul mort) sau pe care engine-ul nu le
+# are separat: fără referință pentru livrate. Fără lista asta, _drift alertează pe referința 0 zilnic degeaba.
+# TY = comenzile Trendyol din OH: engine-ul nu le are (au motorul lor, trendyol_profitability.py).
+NOT_IN_OH = {"BELA", "COV", "BUCSA", "DPCZ", "DPHU", "TY"}
 # volumul sub care ignorăm driftul procentual (zgomot pe branduri mici — ROSSI/COV/CARP)
 MIN_ORDERS = 40
 MIN_MKT_RON = 3000
@@ -101,32 +107,33 @@ def gather(months):
     """→ list de dict per (month, prefix, metric) cu engine_val, other_val, drift, sursa referinței."""
     import psycopg2
     mx = psycopg2.connect(_dsn("DATABASE_URL_METRICS")); mcur = mx.cursor()
-    ax = psycopg2.connect(_dsn("DATABASE_URL_AWBPRINT")); acur = ax.cursor()
+    oh_ctx = {}   # cache-ul rândurilor OH pe lună (data_health.oh_livrabilitate)
     rows = []
 
     for month, lo, hi in months:
-        # ---- 1. COMENZI LIVRATE: engine vs AWBprint ----
+        # ---- 1. COMENZI LIVRATE: engine vs Order Hub (stare din colete) ----
         mcur.execute("SELECT prefix, brand_name, delivered_orders, marketing, brand_id "
                      "FROM cache.brand_pnl_monthly WHERE month=%s", (month,))
         eng = {r[0]: {"brand": r[1], "delivered": r[2] or 0, "marketing": float(r[3] or 0),
                       "brand_id": r[4]} for r in mcur.fetchall()}
 
-        acur.execute("""SELECT UPPER((regexp_match(order_number,'^([A-Za-z]+)'))[1]) pfx, COUNT(*)
-                        FROM orders WHERE frisbo_created_at>=%s AND frisbo_created_at<%s
-                          AND aggregated_status='delivered' GROUP BY 1""", (lo, hi))
         awb = {}
-        for pfx, n in acur.fetchall():
-            if not pfx:
+        for r in dh.oh_livrabilitate(oh_ctx, month):
+            if r.get("stare") != "Livrata":
                 continue
-            awb[AWB_TO_ENGINE.get(pfx, pfx)] = awb.get(AWB_TO_ENGINE.get(pfx, pfx), 0) + n
+            m = re.match(r"^([A-Za-z]+)", str(r.get("comanda") or ""))
+            if not m:
+                continue
+            pfx = OH_TO_ENGINE.get(m.group(1).upper(), m.group(1).upper())
+            awb[pfx] = awb.get(pfx, 0) + 1
 
         for pfx in sorted(set(eng) | set(awb)):
-            if pfx in NOT_IN_AWBPRINT:
+            if pfx in NOT_IN_OH:
                 continue
             e = eng.get(pfx, {}).get("delivered", 0)
             a = awb.get(pfx, 0)
             rows.append({"month": month, "prefix": pfx, "brand": eng.get(pfx, {}).get("brand", pfx),
-                         "metric": "livrate", "engine": e, "other": a, "other_src": "awbprint",
+                         "metric": "livrate", "engine": e, "other": a, "other_src": "oh",
                          "drift": _drift(e, a), "material": max(e, a) >= MIN_ORDERS})
 
         # ---- 2. MARKETING: engine (sheet) vs warehouse — pe brand_id (evită cardinalitatea prefix↔brand) ----
@@ -145,7 +152,7 @@ def gather(months):
             rows.append({"month": month, "prefix": bid[:8], "brand": eng_by_bid.get(bid, {}).get("brand", bid[:8]),
                          "metric": "marketing", "engine": round(e), "other": round(w), "other_src": "warehouse",
                          "drift": _drift(e, w), "material": max(e, w) >= MIN_MKT_RON})
-    mx.close(); ax.close()
+    mx.close()
     return rows
 
 
@@ -158,7 +165,7 @@ def store_history(rows):
     cx.execute("CREATE INDEX IF NOT EXISTS idx_recon ON recon_history(month, prefix, metric, snapshot_date)")
     prev = {}
     for r in rows:
-        c = cx.execute("""SELECT drift_pct, snapshot_date FROM recon_history
+        c = cx.execute("""SELECT drift_pct, snapshot_date, other_src FROM recon_history
                           WHERE month=? AND prefix=? AND metric=? ORDER BY snapshot_date DESC LIMIT 1""",
                        (r["month"], r["prefix"], r["metric"])).fetchone()
         if c:
@@ -174,7 +181,7 @@ def store_history(rows):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Reconciliere engine ↔ AWBprint ↔ warehouse cu istoric de drift")
+    ap = argparse.ArgumentParser(description="Reconciliere engine ↔ Order Hub ↔ warehouse cu istoric de drift")
     ap.add_argument("--months", type=int, default=3)
     ap.add_argument("--threshold", type=float, default=10.0, help="prag |drift%%| pentru alertă (metrici materiale)")
     ap.add_argument("--email"); ap.add_argument("--from", dest="sender", default="gheorghe.beschea@overheat.agency")
@@ -197,6 +204,8 @@ def main():
         if pk not in prev:
             return False                       # cheie nouă → baseline tăcut
         pdrift = prev[pk][0]
+        if prev[pk][2] != r["other_src"]:      # referința s-a schimbat (AWBprint → OH, 24-oct): baseline nou, tăcut
+            return False
         return pdrift is None or abs(pdrift) <= a.threshold   # era OK, acum e drift → tranziție reală
     newly_bad = [r for r in bad if is_new(r)]
 
@@ -228,7 +237,7 @@ def main():
     for r in [x for x in rows if x["month"] == latest and x["material"]]:
         out.append(fmt(r))
     out.append("")
-    out.append("Reconciliem VALORI între surse independente: livrate = engine vs AWBprint (metrica ce a "
+    out.append("Reconciliem VALORI între surse independente: livrate = engine vs Order Hub (metrica ce a "
                "picat 1,6× în iunie), marketing = sheet vs warehouse (prinde tokenul Meta mort). Driftul e "
                "salvat zilnic → vezi CÂND începe divergența, nu peste două luni.")
     report = "\n".join(out)
@@ -242,9 +251,14 @@ def main():
             print("\n[email] trimis către %s (%d noi)" % (a.email, len(newly_bad)))
         except Exception as e:
             print("\n[email] EȘUAT: %s: %s" % (type(e).__name__, e))
+            return 2
     elif a.email:
         print("\n[email] niciun drift NOU → fără email (%d cunoscute ignorate)" % len(bad))
-    return 1 if newly_bad else 0
+    # 0 = rularea și-a făcut treaba, CU sau FĂRĂ drift (alerta a plecat). Până pe 24-oct întorcea 1 la orice drift nou,
+    # iar cronul pinguie heartbeat-ul doar la 0: în zilele cu alertă data_health striga „reconcile n-a rulat"
+    # (hb.reconcile CRIT 22–24 oct) exact când rulase și trimisese mailul. Eșecurile reale (DSN lipsă, excepție,
+    # mail nepornit) ies != 0, deci heartbeat-ul tace.
+    return 0
 
 
 if __name__ == "__main__":
