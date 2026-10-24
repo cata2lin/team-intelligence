@@ -2,7 +2,7 @@
 # dependencies = []
 # ///
 """Teste pentru garda de PO — pure, fara baze de date: verific DOAR regulile, cu date puse de mana."""
-import importlib.util, pathlib, sys
+import datetime, importlib.util, pathlib, sys
 
 spec = importlib.util.spec_from_file_location("po_garda", pathlib.Path(__file__).with_name("po_garda.py"))
 g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
@@ -17,6 +17,11 @@ FOND = {
     "HA-CADOU": {"stoc": 0,    "pe_drum": 0, "viteza30": 50,  "nume": "Set cadou parfum", "componenta": False},
     "HA-CAT":   {"stoc": 0,    "pe_drum": 0, "viteza30": 50,  "nume": "Decor masa", "categorie": "Crăciun", "componenta": False},
     "HA-GOL":   {"stoc": 0,    "pe_drum": 0, "viteza30": 100, "nume": "produs", "componenta": False},
+    "HA-PROASPAT": {"stoc": 0, "pe_drum": 0, "viteza30": 40, "nume": "produs", "componenta": False,
+                    "listat_la": datetime.date(2026, 10, 5)},
+    "HA-NELISTAT": {"stoc": 0, "pe_drum": 0, "viteza30": 0, "nume": "produs", "componenta": False},
+    "HA-VECHI": {"stoc": 0, "pe_drum": 0, "viteza30": 100, "nume": "produs", "componenta": False,
+                 "listat_la": datetime.date(2026, 3, 29)},
 }
 g.date_de_fond = lambda skus: {s: FOND.get(s.upper(), {}) for s in skus}
 import datetime
@@ -86,6 +91,22 @@ r = ruleaza([{"sku": "HA-BUN", "qty": 10, "nume": "Globuri decorative pentru bra
 bun &= test("globuri / brad in titlul liniei = Craciun", r["blocat"])
 
 # Regula 2, exact: cantitatea > viteza x 4 luni blocheaza, oricare ar fi stocul.
+# Produs nou (Orchestrator 24-oct): listat de < 30 de zile = regula 3, niciodata regula 2.
+r = ruleaza([{"sku": "HA-PROASPAT", "qty": 250}])["HA-PROASPAT"]
+bun &= test("listat de 10 zile, vinde 40/luna, 250 buc = trece (test sub 300, nu regula 2)", not r["blocat"])
+r = ruleaza([{"sku": "HA-PROASPAT", "qty": 301}])["HA-PROASPAT"]
+bun &= test("listat de 10 zile, 301 buc = blocat pe regula 3", r["blocat"] and r["motive"][0].startswith("regula 3")
+            and r["produs_nou"])
+r = ruleaza([{"sku": "HA-NELISTAT", "qty": 200}])["HA-NELISTAT"]
+bun &= test("nelistat, fara vanzari, 200 buc = trece (test)", not r["blocat"])
+r = ruleaza([{"sku": "HA-VECHI", "qty": 401}])["HA-VECHI"]
+bun &= test("listat de 200 de zile, 401 buc la 100/luna = regula 2", r["blocat"] and r["motive"][0].startswith("regula 2"))
+bun &= test("rezumatul spune luni, viteza si plafonul",
+            r["rezumat"] == "401 buc = 4,0 luni de vânzări (100/lună în Orders), peste plafonul de 4 luni")
+
+bun &= test("tipul blocajului = luni", r["tip_blocaj"] == "luni")
+bun &= test("zile de stoc 0 la rand, de la cel mai recent", g.zile_stoc_zero([0, 0, 0, 5, 0]) == 3 and g.zile_stoc_zero([4, 0]) == 0)
+
 r = ruleaza([{"sku": "HA-GOL", "qty": 401}])["HA-GOL"]
 bun &= test("regula 2: 401 buc la 100/luna, raft gol = blocat", r["blocat"] and "regula 2" in r["motive"][0])
 r = ruleaza([{"sku": "HA-GOL", "qty": 400}])["HA-GOL"]
