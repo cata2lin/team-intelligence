@@ -158,7 +158,8 @@ _oh_cache = {}
 def _oh_luna(luna):
     if luna not in _oh_cache:
         import json, urllib.request
-        tok = os.getenv("OH_CS_SB_TOKEN") or _kb_secret("OH_CS_SB_TOKEN")
+        tok = (os.getenv("OH_PROFIT_CITIRE_TOKEN") or os.getenv("OH_CS_SB_TOKEN")
+               or _kb_secret("OH_PROFIT_CITIRE_TOKEN") or _kb_secret("OH_CS_SB_TOKEN"))
         baza = os.getenv("OH_CS_BASE", "https://orderhub.arona.ro").rstrip("/")
         req = urllib.request.Request(baza + "/api/cs/livrabilitate?luna=" + luna,
                                      headers={"Authorization": "Bearer " + (tok or ""), "Accept": "application/json"})
@@ -219,8 +220,13 @@ def analyze(cur, key, days, sample, fx, source="awb"):
     delivered, refused = int(delivered or 0), int(refused or 0)
     aov, t_med = float(aov or 0), float(t_med or 0)
     t_fara_tva = None
+    sursa = "awb"
     if source == "oh":
-        delivered, refused, aov, t_fara_tva = oh_livrare(cfg["shop"], days)
+        o_d, o_r, o_aov, o_t = oh_livrare(cfg["shop"], days)
+        if o_d + o_r:
+            delivered, refused, aov, t_fara_tva, sursa = o_d, o_r, o_aov, o_t, "oh"
+        # altfel: magazinul n-are colete în OH (Belasil = livrare externă; Covoria = închis) → rămâne pe AWBprint
+        # și o spune în coloana `sursa`, nu întoarce 0 livrate / breakeven 0
     D = delivered / (delivered + refused) if (delivered + refused) else 0
 
     # COGS% from line_items × Shopify cost
@@ -251,7 +257,7 @@ def analyze(cur, key, days, sample, fx, source="awb"):
     t_ex = t_fara_tva if t_fara_tva is not None else t_med / (1 + VAT_RO)   # OH dă transportul deja fără TVA
     if cogs_pct is None:
         return dict(key=key, aov_ron=aov_ron, cur=cfg["cur"], cogs_pct=None, match=match,
-                    D=D, t_ex=t_ex, contrib=None, be_cpa=None, be_roas=None)
+                    D=D, t_ex=t_ex, contrib=None, be_cpa=None, be_roas=None, sursa=sursa)
     cogs_lei = cogs_pct * aov_ron
     if cfg["country"] == "RO":
         contrib = D * (rev_ex - cogs_lei) - t_ex                 # fără retur
@@ -260,7 +266,7 @@ def analyze(cur, key, days, sample, fx, source="awb"):
     be_roas = aov_ron / contrib if contrib and contrib > 0 else float("inf")
     return dict(key=key, aov_ron=aov_ron, cur=cfg["cur"], cogs_pct=cogs_pct, match=match,
                 D=D, delivered=delivered, refused=refused, t_med=t_med, t_ex=t_ex,
-                vat_rev=vat_rev, contrib=contrib, be_cpa=contrib, be_roas=be_roas)
+                vat_rev=vat_rev, contrib=contrib, be_cpa=contrib, be_roas=be_roas, sursa=sursa)
 
 
 def main():
@@ -269,23 +275,18 @@ def main():
     ap.add_argument("--days", type=int, default=60)
     ap.add_argument("--sample", type=int, default=4000, help="comenzi pt COGS (line_items)")
     ap.add_argument("--source", choices=["awb", "oh"], default=None,
-                    help="livrarea/AOV/transportul: awb = AWBprint (intl înghețat din 27-sep), oh = Order Hub")
+                    help="livrarea/AOV/transportul: oh = Order Hub (implicit, S1), awb = AWBprint (intl înghețat din 27-sep)")
     a = ap.parse_args()
-    if a.source is None:  # S1: implicit din comutatorul din baza (profit_settings.status_sursa)
-        try:
-            import sqlite3 as _sq
-            _cx = _sq.connect("/root/Scripturi/data/profitability.db")
-            _v = (_cx.execute("SELECT value FROM profit_settings WHERE key='status_sursa'").fetchone() or ["awb"])[0]
-            _cx.close()
-            a.source = "oh" if str(_v).lower() == "oh" else "awb"
-        except Exception:
-            a.source = "awb"
+    if a.source is None:
+        # S1 închis 24-oct-2026: Order Hub e sursa implicită peste tot (nu doar pe VPS, unde o dădea profit_settings).
+        # Întoarcere: --source awb sau BREAKEVEN_SURSA=awb.
+        a.source = "awb" if (os.getenv("BREAKEVEN_SURSA") or "").strip().lower() == "awb" else "oh"
     keys = list(STORES) if a.store == "all" else [a.store.lower()]
     cn = awb_conn(); cur = cn.cursor()
     fx = _fx_map()
     print(f"\n=== Breakeven real ({a.days}z) — AOV în RON ===")
     print(f"{'Brand':13} {'cur':>4} {'AOV_RON':>8} {'COGS%':>6} {'match':>6} {'Livr%':>6} "
-          f"{'Tr_exTVA':>9} {'Contrib':>8} {'BE_CPA':>7} {'BE_ROAS':>8}")
+          f"{'Tr_exTVA':>9} {'Contrib':>8} {'BE_CPA':>7} {'BE_ROAS':>8} sursa")
     for k in keys:
         if k not in STORES:
             print(f"  {k}: necunoscut (alege din {', '.join(STORES)})"); continue
@@ -296,7 +297,7 @@ def main():
             continue
         print(f"{k:13} {r['cur']:>4} {r['aov_ron']:8.0f} {r['cogs_pct']*100:5.1f}% {r['match']*100:5.0f}% "
               f"{r['D']*100:5.0f}% {r['t_ex']:9.2f} {r['contrib']:8.1f} "
-              f"{r['be_cpa']:7.0f} {r['be_roas']:8.2f}")
+              f"{r['be_cpa']:7.0f} {r['be_roas']:8.2f} {r['sursa']}")
     cn.close()
     print("\nModel: contrib = livrare%·(AOV/(1+TVA_țară) − COGS%·AOV) − transport_exTVA"
           "  (RO: fără retur; intl: −transport·(2−livrare%)).  COGS% = line_items×cost Shopify.")
