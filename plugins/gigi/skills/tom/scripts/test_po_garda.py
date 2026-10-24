@@ -107,6 +107,25 @@ bun &= test("rezumatul spune luni, viteza si plafonul",
 bun &= test("tipul blocajului = luni", r["tip_blocaj"] == "luni")
 bun &= test("zile de stoc 0 la rand, de la cel mai recent", g.zile_stoc_zero([0, 0, 0, 5, 0]) == 3 and g.zile_stoc_zero([4, 0]) == 0)
 
+# Viteza pe zilele cu stoc (Orchestrator 24-oct): vanzari pe zi cunoscute, T(k) = suma ultimelor k zile.
+def _T(pe_zi):
+    return lambda k: sum(pe_zi[:k])
+vand = [0] * 26 + [8] * 64          # 26 de zile fara stoc (0 vandut), inainte 8/zi
+r2 = g.viteza_pe_zile_cu_stoc(range(26), _T(vand))
+bun &= test("stoc 0 de 26 de zile: 8/zi pe zilele cu stoc = 240/luna", r2["metoda"] == "zile_cu_stoc"
+            and round(r2["viteza"]) == 240 and r2["zile_cu_stoc"] == 64)
+vand2 = [3] * 26 + [8] * 64          # in zilele fara stoc tot au intrat 3/zi (anulate mai tarziu / marketplace)
+r2 = g.viteza_pe_zile_cu_stoc(range(26), _T(vand2))
+bun &= test("vanzarile din zilele fara stoc nu intra", round(r2["viteza"]) == 240)
+zz = list(range(5)) + list(range(40, 50))  # doua siruri de zile fara stoc
+vand3 = [0] * 5 + [10] * 35 + [99] * 10 + [10] * 40
+r2 = g.viteza_pe_zile_cu_stoc(zz, _T(vand3))
+bun &= test("doua siruri de zile fara stoc: 10/zi = 300/luna", round(r2["viteza"]) == 300 and r2["zile_cu_stoc"] == 75)
+r2 = g.viteza_pe_zile_cu_stoc(range(80), _T([1] * 90))
+bun &= test("sub 14 zile cu stoc: viteza simpla pe 90 de zile, nesigura", r2["nesigura"] and r2["metoda"] == "90z"
+            and round(r2["viteza"]) == 30)
+bun &= test("fara stoc 0 in ultimele 30 de zile: viteza obisnuita", g.viteza_pe_zile_cu_stoc([45, 46], _T([1] * 90)) is None)
+
 r = ruleaza([{"sku": "HA-GOL", "qty": 401}])["HA-GOL"]
 bun &= test("regula 2: 401 buc la 100/luna, raft gol = blocat", r["blocat"] and "regula 2" in r["motive"][0])
 r = ruleaza([{"sku": "HA-GOL", "qty": 400}])["HA-GOL"]

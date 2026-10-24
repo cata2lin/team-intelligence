@@ -35,6 +35,8 @@ KB = next((c for c in KB_CAI if os.path.exists(c)), KB_CAI[0])
 PRAG_LUNI = 4.0
 PRAG_NOU = 300             # produs nou: peste atat fara test = blocat
 ZILE_FEREASTRA = 30        # fereastra vitezei; listat mai recent = produs nou (regula 3)
+FEREASTRA_LUNGA = 90       # cand a lipsit stocul, viteza se socoteste pe zilele cu stoc din ultimele 90
+MIN_ZILE_CU_STOC = 14      # sub atatea zile cu stoc, viteza simpla pe 90 de zile, marcata nesigura
 
 
 def _mii(n):
@@ -159,6 +161,63 @@ def viteza_order_hub_api(skus):
             out[s] = out.get(s, 0) + int(r.get("bucati") or 0)
     # Raspuns valid fara niciunul dintre SKU-uri = zero vanzari reale, nu sursa lipsa.
     return out, "Order Hub"
+
+
+_TOTALURI = {}
+
+
+def oh_totaluri(zile):
+    """{SKU: bucati} plasate, neanulate, in ultimele `zile` zile (Bucuresti, azi inclus), din poarta
+    Orders. None daca poarta nu raspunde sau raspunsul e taiat. Tinut 1 ora pe proces."""
+    import urllib.request
+    cheie = (int(zile), datetime.datetime.now().strftime("%Y%m%d%H"))
+    if cheie in _TOTALURI:
+        return _TOTALURI[cheie]
+    tok = _secret_text("OH_TEAM_READ_TOKEN")
+    out = None
+    if tok:
+        try:
+            req = urllib.request.Request(OH_API + "/api/cs/vanzari-pe-sku?zile=%d" % int(zile),
+                                         headers={"Authorization": "Bearer " + tok})
+            d = json.load(urllib.request.urlopen(req, timeout=60))
+            if d.get("ok") and not d.get("taiat"):
+                out = {}
+                for r in d.get("randuri") or []:
+                    k = str(r.get("sku") or "").strip().upper()
+                    out[k] = out.get(k, 0) + int(r.get("bucati") or 0)
+        except Exception:
+            out = None
+    _TOTALURI[cheie] = out
+    return out
+
+
+def viteza_pe_zile_cu_stoc(zile_zero, total, fereastra=FEREASTRA_LUNGA, min_zile=MIN_ZILE_CU_STOC):
+    """Viteza pe 30 de zile cand stocul a fost 0 in fereastra de 30 (Orchestrator, 24-oct-2026).
+
+    `zile_zero` = cate zile in urma (0 = azi) a fost stocul 0, in ultimele `fereastra` zile.
+    `total(k)` = bucati plasate neanulate in ultimele k zile. Vanzarile din zilele fara stoc se scad
+    (T(b+1) - T(a) pentru fiecare sir a..b de zile la rand), raman doar zilele cu stoc:
+        viteza = vandut in zilele cu stoc / zile cu stoc x 30.
+    Sub `min_zile` zile cu stoc: viteza simpla pe `fereastra` zile, marcata nesigura.
+    Intoarce None cand n-a fost stoc 0 in ultimele 30 de zile (ramane viteza obisnuita).
+    """
+    zz = sorted({int(i) for i in zile_zero if 0 <= int(i) < fereastra})
+    if not any(i < 30 for i in zz):
+        return None
+    cu_stoc = fereastra - len(zz)
+    t_total = total(fereastra)
+    if cu_stoc < min_zile:
+        return {"viteza": t_total / float(fereastra) * 30, "metoda": "90z", "zile_cu_stoc": cu_stoc,
+                "nesigura": True}
+    vandut_fara_stoc, a = 0, None
+    for k, i in enumerate(zz):
+        if a is None:
+            a = i
+        if k + 1 == len(zz) or zz[k + 1] != i + 1:
+            vandut_fara_stoc += total(i + 1) - (total(a) if a > 0 else 0)
+            a = None
+    return {"viteza": max(0, t_total - vandut_fara_stoc) / float(cu_stoc) * 30, "metoda": "zile_cu_stoc",
+            "zile_cu_stoc": cu_stoc, "nesigura": False}
 
 
 def viteza_order_hub(skus):
@@ -296,15 +355,43 @@ def date_de_fond(skus):
     # Cat timp n-a fost marfa, nu s-a putut vinde: viteza pe 30 de zile iese mai mica decat cererea.
     m.execute("""SELECT upper(sku), "snapshotDate", sum(greatest(coalesce("quantityAvailable", 0), 0))
                  FROM inventory_daily_snapshots
-                 WHERE upper(sku) = ANY(%s) AND "snapshotDate" >= current_date - 60
+                 WHERE upper(sku) = ANY(%s) AND "snapshotDate" >= current_date - 89
                  GROUP BY 1, 2 ORDER BY 1, 2 DESC""", (skus,))
-    serie = {}
+    serie, zero = {}, {}
+    azi_d = datetime.date.today()
     for s, d, q in m.fetchall():
         serie.setdefault(s, []).append(int(q or 0))
+        if int(q or 0) <= 0:
+            zero.setdefault(s, []).append((azi_d - d).days)
     for s, valori in serie.items():
         if s in out:
             out[s]["zile_stoc_zero"] = zile_stoc_zero(valori)
     met.close()
+    # Viteza pe zilele cu stoc (Orchestrator 24-oct): fara stoc nu s-a putut vinde, deci zilele alea
+    # nu intra la numitor. Doar cu sursa Orders si doar unde stocul a fost 0 in ultimele 30 de zile.
+    for s, zz in zero.items():
+        f = out.get(s)
+        if not f or f.get("viteza_din_kit") or not str(f.get("sursa_viteza") or "").startswith("Order Hub"):
+            continue
+        totaluri = {}
+
+        def total(k, _s=s):
+            if k not in totaluri:
+                t = oh_totaluri(k)
+                if t is None:
+                    raise LookupError("poarta Orders indisponibila")
+                totaluri[k] = t
+            return totaluri[k].get(_s, 0)
+        try:
+            r = viteza_pe_zile_cu_stoc(zz, total)
+        except LookupError:
+            r = None
+        if r:
+            f["viteza30_simpla"] = f.get("viteza30")
+            f["viteza30"] = int(round(r["viteza"]))
+            f["viteza_metoda"] = r["metoda"]
+            f["zile_cu_stoc_90"] = r["zile_cu_stoc"]
+            f["viteza_nesigura"] = r["nesigura"]
 
     # Stocul fizic din scanerul de depozit (toate statiile). Baza sta pe 84.46.242.181; daca
     # rulam CHIAR pe serverul ala (cum face umbra din cron), o citim direct — altfel am incerca
@@ -461,6 +548,8 @@ def verifica(linii, azi=None, blacklist=()):
                     "rezumat": rezumat, "tip_blocaj": tip if motive else None,
                     "produs_nou": bool(nou and not componenta),
                     "zile_stoc_zero": f.get("zile_stoc_zero"),
+                    "viteza30_simpla": f.get("viteza30_simpla"), "viteza_metoda": f.get("viteza_metoda") or "30z",
+                    "zile_cu_stoc_90": f.get("zile_cu_stoc_90"), "viteza_nesigura": bool(f.get("viteza_nesigura")),
                     "valoare_lei": round(float(val)) if val is not None else None,
                     "zile_de_la_listare": zile_listat,
                     "luni_comandate": round(luni_comandate, 1) if luni_comandate else None,
