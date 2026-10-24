@@ -4,13 +4,11 @@ description: "Customer analytics on the REAL delivered-order data (AWBprint) for
 user-invokable: true
 ---
 
-> **ARONA (gigi) — de ce pe AWBprint, nu pe Shopify.** La noi vânzarea reală = coletul
-> **LIVRAT** (COD): un refuz la ușă NU e venit. De-aia analiza de clienți se face pe
-> **AWBprint** (`orders.aggregated_status='delivered'`), nu pe comenzile brute din Shopify
-> (care includ refuzurile). Identitatea clientului = **`customer_email`** (355k clienți unici,
-> prezent pe ~443k comenzi). Monetarul e în **moneda magazinului** (RON la .ro, CZK la .cz, …) —
-> de-aia rulezi PER magazin, nu amestecat. Sursa: secret `DATABASE_URL_AWBPRINT` din KB,
-> conexiune **read-only**. Vezi [[customer-service-tool]], [[fulfillment-analytics-skill]].
+> **ARONA (gigi) — de ce pe livrate, nu pe Shopify.** La noi vânzarea reală = coletul
+> **LIVRAT** (COD): un refuz la ușă NU e venit. De-aia analiza de clienți se face pe comenzile **livrate din
+> Order Hub** (starea din colete), nu pe comenzile brute din Shopify (care includ refuzurile). Monetarul e în
+> **moneda magazinului** (RON la .ro, CZK la .cz, …) — de-aia rulezi PER magazin, nu amestecat.
+> Vezi [[customer-service-tool]], [[fulfillment-analytics-skill]].
 
 # data-analytics — analitică de CLIENȚI (RFM · Cohort · LTV · Forecast)
 
@@ -24,14 +22,28 @@ Shopify și fără să confunzi comenzile refuzate cu venit.
 - „Cât valorează un client (**LTV**) pe cohortă?" → `ltv`
 - „Ce **vânzări/comenzi** urmează săptămânile viitoare?" → `forecast`
 
-## Unde rulează (din 24-oct-2026)
-- **`forecast` = Order Hub** (`/api/cs/livrabilitate`, livrate pe săptămâna comenzii), merge de pe laptop.
-  Cheia: env `OH_TEAM_READ_TOKEN` (→ `OH_PROFIT_CITIRE_TOKEN` → `OH_CS_SB_TOKEN`), altfel din KB. Calea veche
-  doar explicit: `--source awb` / `DATA_ANALYTICS_SURSA=awb`. OH căzut = eroare, nu cifra veche.
-  Comparat 24-oct (media 8 săpt.): esteban.ro 5.762 vs 5.767 AWBprint · grandia.ro 791 vs 790 · bonhaus.cz 1.198 vs 1.198.
-- **`rfm` / `cohort` / `ltv` = doar pe 84.46** (AWBprint): au nevoie de emailul clientului, iar OH n-are încă ruta
-  „comenzi livrate pe magazin cu email/telefon ca `bidx`". Pe laptop ies cu cod 2 și mesajul „ruta OH lipsește";
-  `all` rulează atunci doar `forecast`. Serverul e recunoscut după hostname (sau `ARONA_PE_SERVER=1`).
+## Sursa (din 24-oct-2026): Order Hub, toate patru analizele, de oriunde
+- `GET /api/cs/livrabilitate?luna=AAAA-LL&cu_client=true` (o lună pe cerere, în buclă). Cheia: env
+  `OH_TEAM_READ_TOKEN` (→ `OH_PROFIT_CITIRE_TOKEN` → `OH_CS_SB_TOKEN`), altfel din KB. OH căzut = eroare, nu cifra veche.
+- **Identitatea clientului = pseudonimul de TELEFON** (`client_telefon`, ultimele 9 cifre, sha256 cu sare peste
+  indexul orb OH), cu `client_email` doar ca rezervă. NU emailul, ca pe AWBprint: pseudonimul de email e unic pe
+  COMANDĂ până în iunie-2026 (0 clienți comuni între luni), deci ar ieși zero recumpărări înainte de iulie.
+- Fereastra: `--since AAAA-LL` (implicit 2024-06). Lunile încheiate de peste 90 de zile stau în cache local
+  (`~/.cache/arona/data-analytics`, doar pseudonime); `--fara-cache` le descarcă din nou. Prima rulare pe tot
+  istoricul durează câteva minute (~9 MB/lună).
+- Calea veche (AWBprint, `customer_email`) doar explicit: `--source awb` / `DATA_ANALYTICS_SURSA=awb`, și doar pe
+  84.46 (de pe laptop AWBprint e refuzat).
+- **Comparat 24-oct, de la 2025-04, OH vs AWBprint:**
+  - esteban.ro: 193.566 vs 189.912 clienți; LTV cohorta 2025-11: 193 vs 188 lei, repeat 28,9% vs 26,9%;
+    retenția M1 pe cohorte: 4–6% în ambele.
+  - grandia.ro: 25.246 vs 20.432 clienți — AWBprint sare cele 4.974 de livrate fără email (19%), OH le prinde după
+    telefon. LTV pe cohortă la ±5%, repeat la ±1 pp.
+  - bonhaus.cz: 70.322 vs 51.879 clienți — OH are comenzile CZ din aprilie–septembrie 2025, AWBprint le are doar
+    din octombrie-2025, iar statusurile intl din AWBprint sunt înghețate din 27-sep. Pe cohortele comune: LTV la
+    ±1%, repeat la ±1 pp.
+  - Segmentele RFM diferă mai mult decât totalurile: ~85% dintre clienți au o singură comandă, deci NTILE pe
+    frecvență împarte la întâmplare egalitățile (și Postgres o face). Judecă pe cohortă/LTV, nu pe segmentul exact.
+  - Belasil / Covoria nu sunt în OH.
 - Test: `uv run scripts/test_sursa_oh.py`.
 
 ## Cum rulezi
