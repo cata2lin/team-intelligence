@@ -5,6 +5,10 @@ description: Auditează și repară COGS-ul (costPerItem) din Shopify față de 
 
 # gigi:cogs-audit — COGS-ul corect în lei, verificat la sursă
 
+> ⚠️ **Din 24-oct-2026 (S2): sursa costului e Order Hub (`produs_cost`, pe lot), nu foaia.** Foaia „COGS 2026”
+> rămâne REFERINȚĂ (auditul se poate rula), dar `fix --apply` e oprit. Costul se pune pe lot în OH (ecranul de costuri
+> AWB sau `POST /api/produs/cost`), iar Shopify îl primește din OH cu `shared/scripturi-tools/cost_shopify_din_oh.py`.
+
 Răspunde la „ce COGS pun pe produsul X" și la „câte produse au COGS greșit", fără să ghicești.
 Sursa de adevăr NU e Shopify — e sheet-ul cu formule al firmei. Shopify e doar destinația.
 
