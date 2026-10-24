@@ -95,7 +95,7 @@ MAX_AGE = {
   "order_outcome": 24, "customer_agg": 24, "daily_ad_spend_ron": 24,
   "product_refusal_rate": 24, "order_enriched": 12, "product_basket_pairs": 48,
   "product_ad_spend": 24, "daily_brand_pnl": 24, "ticket_order_link": 12, "product_returns": 48,
-  "brand_pnl_real": 48,
+  "brand_pnl_real": 48, "marketing_daily_costs": 24,
 }
 # Per-table date span (min,max) so readers know WHICH PERIOD the cache covers.
 # None = table has no time dimension (e.g. all-time per-SKU aggregate).
@@ -111,6 +111,7 @@ SPAN_SQL = {
   "ticket_order_link": None,
   "product_returns": "SELECT min(last_return), max(last_return) FROM cache.product_returns",
   "brand_pnl_real": "SELECT to_date(min(month),'YYYY-MM'), to_date(max(month),'YYYY-MM') FROM cache.brand_pnl_monthly",
+  "marketing_daily_costs": "SELECT min(cost_date), max(cost_date) FROM cache.marketing_daily_costs",
 }
 
 CACHE_META_DDL = """
@@ -226,13 +227,13 @@ FROM base WHERE identity IS NOT NULL
 GROUP BY identity;
 """
 
-# daily_ad_spend_ron = closed days from AWBprint.marketing_daily_costs (sheet-fed 'Raport Zilnic 2',
+# daily_ad_spend_ron = closed days from cache.marketing_daily_costs (sheet-fed 'Raport Zilnic 2'; until 24-oct-2026 AWBprint,
 # ~1-2 day human-entry lag) + a CURRENT-DAY overlay read live from the consolidated "Facebook Azi"
 # sheet tab (public CSV, no auth). Includes TikTok (the metrics TikTok API sync is dead). RON.
 # Grandia is not in these sheets (its spend comes from the Grandia pipeline).
 SHEET_ID = "1IVg0fI-_Rm7IptmOl3BmGrqtyyzn3auf0ZPuftr9vQo"
 AZI_TAB  = "Facebook Azi"   # consolidated current-day per-brand table (FB+TikTok+Google), all brands
-ISTORIC_GID = "1025107216"  # tab "Raport Zilnic 2" (zile inchise) — sursa releului AWBprint;
+ISTORIC_GID = "1025107216"  # tab "Raport Zilnic 2" (zile inchise) — sursa lui cache.marketing_daily_costs;
                             # citit direct DOAR pentru brandurile pe care releul nu le duce inca
 STORE_OVERRIDES = {"casaofertelor.ro": "bonhaus"}  # Casa Ofertelor = the RO Bonhaus storefront
 
@@ -241,7 +242,7 @@ CREATE SCHEMA IF NOT EXISTS cache;
 DROP TABLE IF EXISTS cache.daily_ad_spend_ron CASCADE;
 CREATE TABLE cache.daily_ad_spend_ron (
   date        date,
-  store_name  text,    -- AWBprint store domain (closed days) or '<brand>.azi' (overlay)
+  store_name  text,    -- store domain from cache.marketing_daily_costs (closed days) or '<brand>.azi' (overlay)
   brand_id    text,    -- mapped via brands.slug/name (+ STORE_OVERRIDES); NULL if no metrics brand
   platform    text,    -- meta / google / tiktok
   spend_ron   numeric,
@@ -333,7 +334,7 @@ def _rz2_brandurile_lipsa(bname, norm, acoperite, awb_max, bslug_rev):
                 urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"}), timeout=90) as r:
             rd = list(csv.reader(io.StringIO(r.read().decode("utf-8", "ignore"))))
     except Exception as e:
-        print(f"[daily_ad_spend_ron] WARN: tabul istoric inaccesibil ({e}); doar AWBprint")
+        print(f"[daily_ad_spend_ron] WARN: tabul istoric inaccesibil ({e}); doar cache.marketing_daily_costs")
         return []
     if not rd:
         return []
@@ -375,18 +376,169 @@ def _rz2_brandurile_lipsa(bname, norm, acoperite, awb_max, bslug_rev):
             marci[bid] = marci.get(bid, 0) + val
     if out:
         nume = ", ".join(sorted(bslug_rev.get(b, b) for b in marci))
-        print(f"[daily_ad_spend_ron] din foaie, branduri pe care AWBprint nu le duce: "
+        print(f"[daily_ad_spend_ron] din foaie, branduri fara mapare in BRAND_TO_STORE: "
               f"{len(out)} randuri · {round(sum(marci.values()))} RON · {nume}")
     return out
+
+
+# ── cache.marketing_daily_costs: zilele inchise din foaia CPA, in metrics (24-oct-2026) ─────────────
+# Inlocuieste releul AWBprint.marketing_daily_costs (jobul `marketing_self_heal` din backend-ul AWB,
+# google_sheets.sync_marketing_costs). Aceeasi foaie, aceleasi taburi, aceeasi mapare brand -> magazin,
+# aceeasi fereastra de 35 de zile. Tabelul e PERSISTENT: istoricul din afara ferestrei nu se rescrie.
+# Semnatura randurilor = cea din AWBprint (cost_date, store_name, facebook, tiktok, google), ca restul
+# lui run_daily_ad_spend sa nu se schimbe. Istoricul a fost copiat o data din AWBprint (24-oct).
+CPA_SHEETS = ["Raport Zilnic 2", "Grandia"]
+MARKETING_WINDOW_DAYS = 35
+# Copie a lui BRAND_TO_STORE din /opt/awb-print/backend/app/services/google_sheets.py (24-oct-2026).
+# Un brand nou in foaie trebuie adaugat AICI (backend-ul AWB nu mai scrie marketingul).
+BRAND_TO_STORE = {
+    "esteban": "esteban.ro", "gt parfumuri": "georgetalent.ro", "george talent": "georgetalent.ro",
+    "grandia": "grandia.ro", "rossi nails": "rossinails.ro", "nocturna": "nocturna.ro",
+    "nocturna lux": "nocturnalux.ro", "nocturna bg": "nocturna.bg", "bonhaus pl": "bonhaus.pl",
+    "bonhaus bg": "bonhaus.bg", "bonhaus cz": "bonhaus.cz",
+    # Comenzile Bonhaus RO stau in AWBprint sub magazinul numit istoric "casaofertelor.ro".
+    "bonhaus ro": "casaofertelor.ro",
+    "apreciat": "apreciat.ro", "belasil": "belasil.ro", "carpetto": "carpetto.ro",
+    "covoria": "covoria.ro", "magdeal": "magdeal.ro", "gento": "gento.ro",
+    "reduceri bune": "reduceribune.ro", "ce pat ai": "cepatai.ro", "ofertele zilei": "ofertelezilei.ro",
+    # branduri oprite in 2025, mapate ca spend-ul lor sa nu se piarda
+    "genti promo": "gentipromo", "nocturna hu": "nocturnahu", "nocturna pl": "nocturnapl",
+    "nocturna sk": "nocturnask", "nocturna cz": "nocturnacz", "nocturna hr": "nocturnahr",
+    "bonhaus sk": "bonhaussk", "super detergent": "superdetergent",
+    "esteban parfum": "georgetalent.ro",   # numele initial al George Talent
+    "lab noir": "labnoir.ro", "labnoir": "labnoir.ro",
+    "nubra": "nubra", "casa ofertelor": "casaofertelor.ro", "casaofertelor": "casaofertelor.ro",
+    "belasil ro": "belasil.ro", "esteban ro": "esteban.ro",
+}
+
+MARKETING_DDL = """
+CREATE SCHEMA IF NOT EXISTS cache;
+CREATE TABLE IF NOT EXISTS cache.marketing_daily_costs (
+  cost_date    date NOT NULL,
+  store_name   text NOT NULL,              -- domeniul magazinului, ca in AWBprint (esteban.ro, nubra …)
+  facebook     double precision NOT NULL DEFAULT 0,
+  tiktok       double precision NOT NULL DEFAULT 0,
+  google       double precision NOT NULL DEFAULT 0,
+  source_sheet text,
+  synced_at    timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (cost_date, store_name)
+);
+"""
+
+def _mkt_parse_date(val):
+    import datetime
+    val = (val or "").strip()
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%d.%m.%Y", "%m-%d-%Y"):
+        try:
+            return datetime.datetime.strptime(val, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+def _mkt_parse_float(val):
+    # identic cu backend-ul AWB: "4.113,62" -> 4113.62 (punctul e separator de mii)
+    val = (val or "").strip().replace(".", "").replace(",", ".")
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return 0.0
+
+def _fetch_cpa_tab(name):
+    """CSV-ul unui tab din foaia CPA (gviz, ca backend-ul AWB). None = n-a raspuns."""
+    import urllib.request, urllib.parse, csv, io
+    url = (f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet="
+           + urllib.parse.quote(name))
+    for _ in range(3):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}),
+                                        timeout=60) as r:
+                return list(csv.reader(io.StringIO(r.read().decode("utf-8", "ignore"))))
+        except Exception:
+            continue
+    return None
+
+def _sheet_marketing_records(date_from, date_to):
+    """{(data, magazin): [fb, tt, google, tab]} din taburile CPA, plus taburile care n-au raspuns.
+    Logica = google_sheets.sync_marketing_costs din backend-ul AWB (coloanele A,B,C,D,S)."""
+    recs, failed, unmapped = {}, [], set()
+    for tab in CPA_SHEETS:
+        rows = _fetch_cpa_tab(tab)
+        if not rows or len(rows) < 2:
+            failed.append(tab); continue
+        for row in rows[1:]:
+            if len(row) < 4:
+                continue
+            d = _mkt_parse_date(row[0])
+            if d is None or d < date_from or d > date_to:
+                continue
+            brand = "Grandia" if tab == "Grandia" else (row[1].strip() if len(row) > 1 else "")
+            store = BRAND_TO_STORE.get(brand.lower().strip())
+            if not store:
+                unmapped.add(brand.strip()); continue
+            x = recs.setdefault((d, store), [0.0, 0.0, 0.0, tab])
+            x[0] += _mkt_parse_float(row[2]) if len(row) > 2 else 0.0
+            x[1] += _mkt_parse_float(row[3]) if len(row) > 3 else 0.0
+            x[2] += _mkt_parse_float(row[18]) if len(row) > 18 else 0.0
+    return recs, failed, unmapped
+
+def sync_marketing_daily_costs(mcur, days=MARKETING_WINDOW_DAYS, since=None):
+    """Reimprospateaza fereastra [azi-days, azi] (sau [since, azi]) in cache.marketing_daily_costs.
+
+    FAIL-SAFE (o citire esuata NU sterge istoricul):
+      - toate taburile au raspuns -> fereastra se inlocuieste (ca releul AWB: un rand sters din foaie
+        dispare si aici);
+      - doar o parte au raspuns   -> se actualizeaza randurile citite, nu se sterge nimic;
+      - niciun tab, sau fereastra noua are sub jumatate din randurile existente -> nu se scrie nimic.
+    Scrie in tranzactia apelantului (dry-run = rollback). Intoarce True daca a scris."""
+    import datetime
+    from psycopg2.extras import execute_values
+    today = datetime.date.today()
+    d0 = since or (today - datetime.timedelta(days=days))
+    mcur.execute(MARKETING_DDL)
+    recs, failed, unmapped = _sheet_marketing_records(d0, today)
+    if unmapped:
+        print(f"[marketing_daily_costs] branduri din foaie FARA mapare (nu intra aici; le ia "
+              f"_rz2_brandurile_lipsa daca au brand in metrics): {', '.join(sorted(unmapped))}")
+    if len(failed) == len(CPA_SHEETS) or not recs:
+        print(f"[marketing_daily_costs] ⚠ foaia CPA n-a raspuns ({failed}) — tabelul ramane neatins")
+        return False
+    mcur.execute("SELECT count(*) FROM cache.marketing_daily_costs WHERE cost_date >= %s", (d0,))
+    existing = mcur.fetchone()[0]
+    if existing > 20 and len(recs) < existing * 0.5:
+        print(f"[marketing_daily_costs] ⚠ foaia are {len(recs)} randuri in fereastra fata de {existing} "
+              f"existente — pare incompleta; tabelul ramane neatins")
+        return False
+    if not failed:
+        mcur.execute("DELETE FROM cache.marketing_daily_costs WHERE cost_date >= %s AND cost_date <= %s",
+                     (d0, today))
+    rows = [(d, s, round(v[0], 2), round(v[1], 2), round(v[2], 2), v[3]) for (d, s), v in recs.items()]
+    execute_values(mcur,
+        "INSERT INTO cache.marketing_daily_costs (cost_date,store_name,facebook,tiktok,google,source_sheet) "
+        "VALUES %s ON CONFLICT (cost_date,store_name) DO UPDATE SET facebook=EXCLUDED.facebook, "
+        "tiktok=EXCLUDED.tiktok, google=EXCLUDED.google, source_sheet=EXCLUDED.source_sheet, synced_at=now()",
+        rows, page_size=2000)
+    print(f"[marketing_daily_costs] {len(rows)} randuri {d0}..{today} din foaia CPA"
+          + (f" (DOAR actualizare, taburi care n-au raspuns: {failed})" if failed else " (fereastra inlocuita)"))
+    log_refresh(mcur, "marketing_daily_costs", len(rows))
+    return True
+
+def run_marketing_daily_costs(apply, since=None):
+    mconn = psycopg2.connect(clean_dsn(secret("DATABASE_URL_METRICS"))); mcur = mconn.cursor()
+    try:
+        sync_marketing_daily_costs(mcur, since=since)
+        if apply:
+            mconn.commit(); print("[marketing_daily_costs] APPLIED")
+        else:
+            mconn.rollback(); print("DRY-RUN — nothing written. Re-run with --apply.")
+    finally:
+        mconn.close()
 
 
 def run_daily_ad_spend(apply):
     import re, csv, io, datetime
     from psycopg2.extras import execute_values
     norm = lambda s: re.sub(r"[^a-z0-9]", "", (s or "").strip().lower())
-    mdsn = secret("DATABASE_URL_METRICS"); adsn = secret("DATABASE_URL_AWBPRINT")
-    if not adsn:
-        print("!! DATABASE_URL_AWBPRINT not in secret store"); sys.exit(1)
+    mdsn = secret("DATABASE_URL_METRICS")
     def skey(s):
         s = (s or "").strip().lower(); parts = s.split(".")
         base = parts[0] if len(parts) == 1 else ("".join(parts[:-1]) if parts[-1] == "ro" else "".join(parts))
@@ -398,11 +550,13 @@ def run_daily_ad_spend(apply):
         if slug: bslug[norm(slug)] = bid
         if name: bname[norm(name)] = bid
     ovr = {dom: bslug.get(norm(slug)) for dom, slug in STORE_OVERRIDES.items()}
-    # 1) closed days from AWBprint
-    aconn = psycopg2.connect(clean_dsn(adsn)); acur = aconn.cursor()
-    acur.execute("SELECT cost_date, store_name, facebook, tiktok, google FROM marketing_daily_costs")
+    # 1) zilele inchise: foaia CPA -> cache.marketing_daily_costs (metrics), reimprospatat AICI, in aceeasi
+    #    tranzactie (fail-safe: daca foaia nu raspunde, ramane ce era). Pana pe 24-oct-2026 veneau din
+    #    AWBprint.marketing_daily_costs, scris de backend-ul AWB din aceeasi foaie.
+    sync_marketing_daily_costs(mcur)
+    mcur.execute("SELECT cost_date, store_name, facebook, tiktok, google FROM cache.marketing_daily_costs")
     rows, unmapped, brand_store, awb_max = [], set(), {}, None
-    for d, store, fb, tk, gg in acur.fetchall():
+    for d, store, fb, tk, gg in mcur.fetchall():
         bid = ovr.get((store or "").strip().lower()) or bslug.get(skey(store))
         if bid is None: unmapped.add(store)
         else: brand_store.setdefault(bid, store)
@@ -412,8 +566,7 @@ def run_daily_ad_spend(apply):
                 # TikTok >= 2026-05: îl luăm din warehouse-token (fără phantom RZ2), nu de aici
                 if plat == "tiktok" and str(d) >= TIKTOK_WAREHOUSE_SINCE:
                     continue
-                rows.append((d, store, bid, plat, float(val), "awbprint"))
-    aconn.close()
+                rows.append((d, store, bid, plat, float(val), "cpa_sheet"))
 
     # Brandurile pe care releul AWBprint nu le duce inca (masurat: Artevita, De la Bucsa) —
     # aceleasi zile, citite direct din foaia care alimenteaza releul. Vezi `_rz2_brandurile_lipsa`.
@@ -425,30 +578,32 @@ def run_daily_ad_spend(apply):
     rows += _rz2_brandurile_lipsa(bname, norm, set(brand_store), awb_max, bslug_rev)
 
     # TikTok >= 2026-05 din warehouse-ul complet, atribuit corect pe token (înlocuiește RZ2-phantom).
-    # Fallback SIGUR: dacă atribuirea eșuează, reîncarcă TikTok din marketing_daily_costs (comportament vechi).
+    # Fallback SIGUR: dacă atribuirea eșuează, reîncarcă TikTok din cache.marketing_daily_costs (foaia CPA).
     wh_until = (awb_max or datetime.date.today()).isoformat() if hasattr(awb_max, "isoformat") else str(awb_max or datetime.date.today())
+    # SAVEPOINT: o eroare SQL aici nu are voie sa anuleze tranzactia (cu sync-ul marketingului de mai sus)
+    mcur.execute("SAVEPOINT wh_tiktok")
     try:
         wh_rows = _warehouse_tiktok_rows(mcur, bname, bslug, brand_store, norm, TIKTOK_WAREHOUSE_SINCE, wh_until)
+        mcur.execute("RELEASE SAVEPOINT wh_tiktok")
         rows += wh_rows
         print(f"[daily_ad_spend_ron] TikTok warehouse-token >= {TIKTOK_WAREHOUSE_SINCE}: {len(wh_rows)} rânduri (brand×zi), "
               f"{round(sum(r[4] for r in wh_rows))} RON")
     except Exception as e:
         print(f"[daily_ad_spend_ron] ⚠ warehouse TikTok eșuat ({type(e).__name__}: {e}); FALLBACK pe RZ2 pt TikTok")
-        aconn2 = psycopg2.connect(clean_dsn(adsn)); ac2 = aconn2.cursor()
-        ac2.execute("SELECT cost_date, store_name, tiktok FROM marketing_daily_costs WHERE cost_date >= %s", (TIKTOK_WAREHOUSE_SINCE,))
-        for d, store, tk in ac2.fetchall():
+        mcur.execute("ROLLBACK TO SAVEPOINT wh_tiktok")
+        mcur.execute("SELECT cost_date, store_name, tiktok FROM cache.marketing_daily_costs WHERE cost_date >= %s", (TIKTOK_WAREHOUSE_SINCE,))
+        for d, store, tk in mcur.fetchall():
             if tk is not None:
                 bid = ovr.get((store or "").strip().lower()) or bslug.get(skey(store))
-                rows.append((d, store, bid, "tiktok", float(tk), "awbprint"))
-        aconn2.close()
-    # 2) current-day overlay from the live sheet tab (only dates AWBprint doesn't have yet)
+                rows.append((d, store, bid, "tiktok", float(tk), "cpa_sheet"))
+    # 2) current-day overlay from the live sheet tab (only dates cache.marketing_daily_costs doesn't have yet)
     overlay = 0; azi = _fetch_azi()
     if azi:
         rd = list(csv.reader(io.StringIO(azi))); idx = {h: i for i, h in enumerate(rd[0])}
         for r in rd[1:]:
             try: dd = datetime.datetime.strptime(r[idx["Data"]].strip(), "%d.%m.%Y").date()
             except Exception: continue
-            if awb_max and dd <= awb_max: continue   # AWBprint is authoritative for closed days
+            if awb_max and dd <= awb_max: continue   # the CPA closed-days table is authoritative
             bn = norm(r[idx["Brand"]])
             bid = bname.get(bn) or (bname.get(bn[:-2]) if bn.endswith("ro") else None)
             store = brand_store.get(bid) or (bn + ".azi")
@@ -456,8 +611,8 @@ def run_daily_ad_spend(apply):
                 if col in idx:
                     rows.append((dd, store, bid, plat, _ro_num(r[idx[col]]), "sheet_today")); overlay += 1
     else:
-        print("[daily_ad_spend_ron] WARN: current-day sheet tab unreachable; AWBprint-only this run")
-    print(f"[daily_ad_spend_ron] {len(rows)} rows (AWBprint thru {awb_max} + {overlay} sheet-overlay); "
+        print("[daily_ad_spend_ron] WARN: current-day sheet tab unreachable; closed days only this run")
+    print(f"[daily_ad_spend_ron] {len(rows)} rows (closed days thru {awb_max} + {overlay} sheet-overlay); "
           f"unmapped stores: {sorted(unmapped) or 'none'}")
     if not apply:
         mconn.rollback(); mconn.close()
@@ -1191,6 +1346,10 @@ def run(table, apply):
         return run_daily_brand_pnl(apply)
     if table == "daily_ad_spend_ron":
         return run_daily_ad_spend(apply)
+    if table == "marketing_daily_costs":
+        import datetime
+        since = os.environ.get("MARKETING_SINCE")
+        return run_marketing_daily_costs(apply, datetime.date.fromisoformat(since) if since else None)
     if table == "product_ad_spend":
         return run_product_ad_spend(apply)
     if table == "product_returns":
@@ -1231,7 +1390,10 @@ if __name__ == "__main__":
     # named groups for cron cadences (see SKILL.md): cs = intraday CS-facing; ads = current-day spend
     GROUPS = {"cs": ["order_enriched", "customer_agg", "ticket_order_link"], "ads": ["daily_ad_spend_ron"], "all": ALL}
     ap = argparse.ArgumentParser()
-    ap.add_argument("--table", choices=ALL)
+    # marketing_daily_costs nu e in ALL: il reimprospateaza deja daily_ad_spend_ron, in aceeasi tranzactie
+    ap.add_argument("--table", choices=ALL + ["marketing_daily_costs"])
+    ap.add_argument("--since", default=None,
+                    help="marketing_daily_costs: reia din foaie de la data asta (AAAA-LL-ZZ), nu doar 35 de zile")
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--group", choices=list(GROUPS), help="refresh a named group (cs|ads|all)")
     ap.add_argument("--status", action="store_true", help="show freshness + data period of every cache table")
@@ -1240,6 +1402,8 @@ if __name__ == "__main__":
                          "Folosește N mare pentru un rebuild ADÂNC după o corecție de curs/COGS.")
     ap.add_argument("--apply", action="store_true", help="write to prod (default is dry-run)")
     a = ap.parse_args()
+    if a.since:
+        os.environ["MARKETING_SINCE"] = a.since
     if a.months:
         # fereastra de reconstrucție pt brand_pnl_real; citită de snippetul care rulează pe VPS
         os.environ["BRAND_PNL_MONTHS"] = str(a.months)
