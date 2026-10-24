@@ -11,8 +11,10 @@ Regula:
   · linia se leagă de master prin listarea stock-sync a magazinului (magazin + SKU exact);
   · intră DOAR masterele fără niciun SKU în scaner (`shelf_items` / `product_locations`), fără parfumuri (regula
     ownerului: stocul de parfumuri are sistemul lui) și fără magazinele MD / Duppo / Artevita (stocul lor nu e la noi);
-  · kiturile NU se desfac aici: se scade masterul liniei, exact ce făcea stock-sync înainte de 28-iul. Raportul arată
-    separat liniile-kit, ca decizia de compoziție să rămână la owner.
+  · kiturile ROSSI se desfac în componente (`KITURI`, confirmate de owner din poze / descriere); alte kituri scad
+    masterul liniei, exact ce făcea stock-sync înainte de 28-iul, și apar separat în raport;
+  · marketplace (eMAG / Trendyol) nu e în oglindă: vine din `GET /api/cs/vanzari-marketplace` (OH, agregat pe
+    marketplace + SKU + zi), doar zilele ÎNCHEIATE de după bază; SKU-ul se leagă de master doar dacă e unic.
 Fără recuperare: prima rulare marchează tot ce e deja plecat ca `baza` (nu se scade). O comandă se scade O SINGURĂ dată:
 registrul local (cheie comandă + SKU) și cheia de idempotență a ledger-ului (`sfr:<comandă>:<sku>`).
 
@@ -28,7 +30,7 @@ import re
 import sqlite3
 import sys
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, "/root/Scripturi")
@@ -46,6 +48,17 @@ PARFUM = re.compile(r"^(\d{1,4}|gt-.*|zn-.*|nub.*|surpriza-.*|est-.*)$")        
 MAGAZINE_EXCLUSE = re.compile(r"esteban|parfum|nubra|lab noir|duppo|artevita|moldova", re.I)
 KIT = re.compile(r"(^kit|kit$|-kit-|bottle)", re.I)
 RULARI_CURATE = 3
+OH_URL = os.environ.get("OH_URL", "https://orderhub.arona.ro")
+# Compoziția kiturilor ROSSI (24-oct-2026). Pudră: pozele celor 3 starter kit-uri + descrierea R203-3bottle arată
+# Base Coat + Activator + Top Coat (culorile sunt la alegere și vin pe linii proprii). Polygel: „CE INCLUDE” din
+# descrierea kitpolygel-3, fără Top Coat Polygel (R196-top) până răspunde ownerul (288 numărate vs 324 kituri vândute);
+# forma reutilizabilă, clema și pila n-au SKU ROSSI separat.
+_ESENTIALE = (("r203-basecoat", 1), ("r203-activator", 1), ("r203-topcoat", 1))
+KITURI = {
+    "r203-3bottle": _ESENTIALE, "kit-culoare": _ESENTIALE, "kit-3culori": _ESENTIALE, "kit-6culori": _ESENTIALE,
+    "kitpolygel-3": (("r196-1", 1), ("r196-2", 1), ("r196-7", 1), ("r196-brush", 1), ("r196-slip", 1),
+                     ("r196-base", 1), ("lampa-6w", 1)),
+}
 
 
 def _db():
@@ -53,6 +66,8 @@ def _db():
     c.execute("""CREATE TABLE IF NOT EXISTS linie (comanda TEXT, sku TEXT, master TEXT, buc INTEGER, magazin TEXT,
         status TEXT, vazut TEXT, stare TEXT, aplicat_la TEXT, eroare TEXT, PRIMARY KEY (comanda, sku))""")
     c.execute("CREATE TABLE IF NOT EXISTS rulare (la TEXT PRIMARY KEY, mod TEXT, curata INTEGER, rezumat TEXT)")
+    # o comandă văzută o dată nu mai produce rânduri, oricum s-ar schimba regula (kituri, mapare): fără recuperări
+    c.execute("CREATE TABLE IF NOT EXISTS vazuta (comanda TEXT PRIMARY KEY, la TEXT)")
     return c
 
 
@@ -110,15 +125,57 @@ def _plecate():
         c.close()
 
 
+def _vanzari_marketplace(de_la, pana_la):
+    """{"MKT:<marketplace>:<zi>": ("marketplace:<mkt>", "vandut", [(sku, buc)])} pe zilele [de_la, pana_la]."""
+    import urllib.request
+    tok = (os.environ.get("OH_PROFIT_CITIRE_TOKEN") or os.environ.get("OH_CS_SB_TOKEN") or "").strip()
+    if not tok:
+        raise SystemExit("lipsește cheia de citire Order Hub (OH_PROFIT_CITIRE_TOKEN) — nu scad marketplace-ul pe ghicite")
+    url = OH_URL + "/api/cs/vanzari-marketplace?" + urllib.parse.urlencode({"de_la": de_la, "pana_la": pana_la})
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + tok})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        d = json.load(r)
+    if not d.get("ok"):
+        raise SystemExit("Order Hub a refuzat vânzările de marketplace: %s" % str(d)[:200])
+    out = collections.defaultdict(collections.Counter)
+    for v in d.get("vanzari") or []:
+        s, zi, mk = str(v.get("sku") or "").strip().lower(), str(v.get("zi") or ""), str(v.get("marketplace") or "?")
+        if s and zi:
+            out["MKT:%s:%s" % (mk, zi)][s] += int(round(float(v.get("bucati") or 0)))
+    return {k: ("marketplace:" + k.split(":")[1], "vandut", [(s, q) for s, q in c.items() if q > 0])
+            for k, c in out.items()}
+
+
+def _desface(linii):
+    """[(sku, buc)] cu kiturile ROSSI desfăcute în componente; (sku_kit, buc) pentru raport."""
+    out, kit = collections.Counter(), collections.Counter()
+    for sku, q in linii:
+        if sku in KITURI:
+            kit[sku] += q
+            for c, n in KITURI[sku]:
+                out[c] += q * n
+        else:
+            out[sku] += q
+    return list(out.items()), kit
+
+
 def calculeaza(plecate, listari, skus_master, in_scaner):
-    """[(comanda, sku, master, buc, magazin, status)] eligibile + contoare pentru raport. Funcție pură (testată)."""
+    """[(comanda, sku, master, buc, magazin, status)] eligibile + contoare pentru raport. Funcție pură (testată).
+    Masterul: listarea magazinului comenzii; pe marketplace (fără magazin în stock-sync) doar un SKU cu UN master."""
     eligibile, cnt, sarite = [], collections.Counter(), collections.Counter()
+    unic = collections.defaultdict(set)
+    for (_mag, s), m in listari.items():
+        unic[s].add(m)
     for onum, (mag, status, linii) in plecate.items():
         if MAGAZINE_EXCLUSE.search(mag or ""):
             cnt["magazin_exclus"] += 1
             continue
+        linii, kit = _desface(linii)
+        cnt["kit_desfacut"] += sum(kit.values())
         for sku, q in linii:
             m = listari.get(((mag or "").strip().lower(), sku))
+            if not m and (onum.startswith("MKT:") or kit):
+                m = next(iter(unic[sku])) if len(unic.get(sku, ())) == 1 else None
             if not m:
                 sarite["fara_master"] += 1
                 continue
@@ -142,11 +199,21 @@ def main():
     a = ap.parse_args()
     acum = datetime.now().isoformat(timespec="seconds")
     con = _db()
-    baza = con.execute("SELECT count(*) FROM linie").fetchone()[0] == 0
+    baza = con.execute("SELECT count(*) FROM vazuta").fetchone()[0] == 0
 
     listari, skus_master = _listari()
     in_scaner = _in_scaner()
-    eligibile, cnt, sarite = calculeaza(_plecate(), listari, skus_master, in_scaner)
+    plecate = _plecate()
+    if not baza:
+        zi_baza = (con.execute("SELECT min(la) FROM rulare WHERE mod='baza'").fetchone()[0] or acum)[:10]
+        de_la = (datetime.fromisoformat(zi_baza) + timedelta(days=1)).date().isoformat()
+        ieri = (datetime.fromisoformat(acum) - timedelta(days=1)).date().isoformat()
+        if de_la <= ieri:
+            plecate.update(_vanzari_marketplace(de_la, ieri))      # doar zilele încheiate de după bază
+    vazute = {r[0] for r in con.execute("SELECT comanda FROM vazuta")}
+    noi_comenzi = {k: v for k, v in plecate.items() if k not in vazute}
+    con.executemany("INSERT OR IGNORE INTO vazuta VALUES (?,?)", [(k, acum) for k in noi_comenzi])
+    eligibile, cnt, sarite = calculeaza(noi_comenzi, listari, skus_master, in_scaner)
     noi = 0
     for onum, sku, m, q, mag, status in eligibile:
         cur = con.execute("INSERT OR IGNORE INTO linie VALUES (?,?,?,?,?,?,?,?,NULL,NULL)",

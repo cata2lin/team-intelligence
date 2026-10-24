@@ -14,3 +14,23 @@ def test_doar_fara_raft_si_fara_parfum():
     assert el == [("ROSSI1", "r203-020", "m-rossi", 2, "ROSSI Nails", "shipped")]
     assert cnt["pe_raft"] == 1 and cnt["magazin_exclus"] == 2
     assert sarite["parfum"] == 1 and sarite["fara_master"] == 1
+
+
+def test_kitul_rossi_se_desface_in_componente():
+    listari = {("rossi nails", c): "m-" + c for c, _ in S.KITURI["kitpolygel-3"]}
+    listari[("rossi nails", "r203-basecoat")] = "m-base"
+    skus = {m: {s} for (_, s), m in listari.items()}
+    plecate = {"R2": ("ROSSI Nails", "shipped", [("kitpolygel-3", 2), ("r196-1", 1)])}
+    el, cnt, _ = S.calculeaza(plecate, listari, skus, in_scaner=set())
+    got = {sku: q for _, sku, _, q, _, _ in el}
+    assert got["r196-1"] == 3 and got["lampa-6w"] == 2 and "r196-top" not in got and "kitpolygel-3" not in got
+    assert cnt["kit_desfacut"] == 2
+
+
+def test_marketplace_doar_sku_cu_un_singur_master():
+    listari = {("rossi nails", "r203-020"): "m1", ("trendyol", "r203-020"): "m1",
+               ("grandia", "x"): "m2", ("bonhaus", "x"): "m3"}
+    skus = {"m1": {"r203-020"}, "m2": {"x"}, "m3": {"x"}}
+    plecate = {"MKT:trendyol:2026-10-25": ("marketplace:trendyol", "vandut", [("r203-020", 4), ("x", 1)])}
+    el, _, sarite = S.calculeaza(plecate, listari, skus, in_scaner=set())
+    assert [(s, m, q) for _, s, m, q, _, _ in el] == [("r203-020", "m1", 4)] and sarite["fara_master"] == 1
