@@ -300,6 +300,11 @@ def cmd_fix(a):
     if not a.apply:
         print("\n(DRY-RUN — adaugă --apply)")
         return
+    # S2 (24-oct-2026): costul se scrie în Shopify DOAR din Order Hub (produs_cost, pe lot), prin
+    # shared/scripturi-tools/cost_shopify_din_oh.py. Foaia „COGS 2026” e referință, nu mai intră în flux:
+    # dacă scria și ea, două surse s-ar fi suprascris una pe alta în fiecare noapte.
+    sys.exit("Scrierea din foaia „COGS 2026” e oprită (S2, 24-oct): sursa costului e Order Hub. Pune costul pe lot "
+             "(POST /api/produs/cost sau ecranul de costuri AWB), apoi rulează cost_shopify_din_oh.py --aplica.")
     ok = 0
     for pfx, shop, tok, sku, iid, cur, good, cls in todo:
         try:
