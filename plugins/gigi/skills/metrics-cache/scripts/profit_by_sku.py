@@ -229,7 +229,10 @@ def main():
         ocurr[k] = r["curr"] or "RON"; order_skus[k].add(r["sku"])
     # transport REAL pe COLET: media costului real DPD (dpd_nomenclator) pe SKU-urile coletului, per comandă;
     # fallback cost_per_parcel/magazin. Un colet = un cost, alocat pe linii după venit (suma cotelor = 1).
-    real_transport = load_real_transport(set(order_skus.keys()))   # transport REAL per comandă din AWBprint
+    # AWBprint fără cititori (faza 2, 24-oct-2026): cu transport_sursa=oh nu se mai deschide AWBprint; comenzile fără
+    # cost în Orders cad pe media DPD / flat, ca în motor.
+    real_transport = (load_real_transport(set(order_skus.keys())) if pc.citeste_awbprint_transport(transport_sursa)
+                      else {})   # transport REAL per comandă din AWBprint
     parcel_cost = {}; tsrc = {}
     for k, sks in order_skus.items():
         parcel_cost[k], tsrc[k] = pc.parcel_transport(sks, dpd, tc.get(k[0], 0), real_cost=real_transport.get(k))

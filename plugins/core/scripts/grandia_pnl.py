@@ -15,10 +15,11 @@ Grandia monthly P&L (Shopify-sourced).
 Sources
 -------
   Orders + revenue + line items + refunds : Shopify Admin GraphQL (LIVE)
-  COGS (per-SKU unit cost)                : AWBprint.sku_costs
-  Transport actuals                       : AWBprint.order_awbs (joined by order_number)
+  COGS (per-SKU unit cost)                : Orders `produs_cost` (lotul valabil la data comenzii)
+  Transport actuals                       : Orders `/api/cs/cost-transport` (fără TVA, pe comandă)
   Ad spend                                : Meta, Google Ads, TikTok APIs (LIVE)
-  FX (USD→RON daily)                      : AWBprint.exchange_rates
+  FX (USD→RON daily)                      : metrics.fx_rates (BNR)
+  (AWBprint fără cititori, faza 2, 24-oct-2026; calea veche rămâne cu --sursa awb, pentru umbră / întoarcere)
   Transport spot-check                    : DPD Romania API (N random AWBs)
 
 See skills/grandia-pnl.md for the per-field formula / source mapping.
@@ -65,7 +66,7 @@ VAT_DIVISOR = 1.0 + VAT_RATE
 REVENUE_STATUSES = {"PAID", "PARTIALLY_REFUNDED", "REFUNDED"}
 
 META_API_VERSION = "v23.0"
-GOOGLE_ADS_API_VERSION = "v20"
+GOOGLE_ADS_API_VERSION = "v24"   # v20/v22 blocate de Google (memoria gads-api-v22-blocked-use-v24)
 TIKTOK_API_BASE = "https://business-api.tiktok.com/open_api/v1.3"
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -305,6 +306,128 @@ def summarize_revenue(orders: list[ShopifyOrder]) -> RevenueResult:
         tax_total=sum(o.current_tax for o in included),
     )
 
+def build_fx_index_metrics(met_conn, currencies: list[str], start: date, end: date) -> dict[tuple[str, date], float]:
+    """Același index ca `build_fx_index`, din metrics.fx_rates (BNR, istoric din 2023). `rate` e deja pe UNITATE
+    (HUF inclus), deci fără împărțire la multiplier."""
+    if not currencies:
+        return {}
+    pad_start = start - timedelta(days=10)
+    rows = fetchall(met_conn,
+        """SELECT "fromCurrency" AS currency, "rateDate"::date AS rate_date, rate
+             FROM fx_rates
+            WHERE "toCurrency" = 'RON' AND "fromCurrency" = ANY(%s) AND "rateDate"::date BETWEEN %s AND %s
+            ORDER BY 1, 2""",
+        (currencies, pad_start, end))
+    return fx_umplut([(r["currency"], r["rate_date"], float(r["rate"])) for r in rows], start, end, pad_start)
+
+
+def fx_umplut(rows, start: date, end: date, pad_start: date) -> dict[tuple[str, date], float]:
+    """[(monedă, zi, curs)] → {(monedă, zi): curs} pe [start, end], cu ultimul curs cunoscut în weekend / sărbători."""
+    by_cur: dict[str, list[tuple[date, float]]] = defaultdict(list)
+    for c, d, r in sorted(rows):
+        by_cur[c].append((d, r))
+    out: dict[tuple[str, date], float] = {}
+    for cur, series in by_cur.items():
+        last = None; i = 0; d = pad_start
+        while d <= end:
+            while i < len(series) and series[i][0] <= d:
+                last = series[i][1]; i += 1
+            if last is not None and start <= d <= end:
+                out[(cur, d)] = last
+            d += timedelta(days=1)
+    return out
+
+
+OH_URL = os.environ.get("OH_URL", "https://orderhub.arona.ro")
+
+
+def _oh_token() -> str:
+    for k in ("OH_PROFIT_CITIRE_TOKEN", "OH_CS_SB_TOKEN", "OH_COST_TOKEN"):
+        if ENV.get(k):
+            return ENV[k].strip()
+    sys.exit("lipsește cheia de citire Orders (OH_PROFIT_CITIRE_TOKEN) în seif")
+
+
+def cost_la_data(loturi: list[dict], zi: date) -> float | None:
+    """Costul ex-TVA al lotului valabil la `zi` (ultimul cu data_lot ≤ zi). Dacă toate loturile sunt mai noi decât
+    comanda (loturile de catalog TOM / plasa au data importului, 23-oct), se ia cel mai VECHI — costul cunoscut cel
+    mai apropiat, cum făcea `sku_costs`, care nu avea dată deloc. None fără niciun lot."""
+    toate = sorted((l for l in loturi or [] if l.get("data_lot") and l.get("cost_lei_buc") is not None),
+                   key=lambda l: str(l["data_lot"]))
+    if not toate:
+        return None
+    valabile = [l for l in toate if str(l["data_lot"])[:10] <= zi.isoformat()]
+    return float((valabile[-1] if valabile else toate[0])["cost_lei_buc"])
+
+
+def shopify_costuri(creds: dict, access_token: str, skus: list[str]) -> dict[str, float]:
+    """{sku: costPerItem CU TVA} din Shopify Grandia — plasa pentru SKU-urile fără niciun lot în Orders."""
+    url = f"https://{creds['shopifyDomain']}/admin/api/{creds['shopifyApiVersion']}/graphql.json"
+    headers = {"X-Shopify-Access-Token": access_token, "Content-Type": "application/json"}
+    q = "query($q:String){ productVariants(first:100, query:$q){ nodes{ sku inventoryItem{ unitCost{ amount } } } } }"
+    out: dict[str, float] = {}
+    for i in range(0, len(skus), 40):
+        bucata = skus[i:i + 40]
+        resp = requests.post(url, headers=headers, timeout=60,
+                             json={"query": q, "variables": {"q": " OR ".join("sku:%s" % json.dumps(x) for x in bucata)}})
+        resp.raise_for_status()
+        for n in ((resp.json().get("data") or {}).get("productVariants") or {}).get("nodes") or []:
+            c = ((n.get("inventoryItem") or {}).get("unitCost") or {}).get("amount")
+            if n.get("sku") in bucata and c and float(c) > 0:
+                out[n["sku"]] = float(c)
+    return out
+
+
+def compute_cogs_oh(included_orders: list[ShopifyOrder], creds: dict | None = None,
+                    access_token: str | None = None) -> CogsResult:
+    """COGS din Orders (`POST /api/produs/cost/lot`, istoric, magazin = Grandia), CU TVA ca `sku_costs`; SKU-urile fără
+    niciun lot cad pe costPerItem-ul din Shopify Grandia (aceeași plasă ca motorul de profit)."""
+    skus = sorted({li["sku"] for o in included_orders for li in o.line_items if li["sku"] and li["qty"] > 0})
+    loturi: dict[str, list] = {}
+    tok = _oh_token()
+
+    def _cere(coduri, magazin):
+        for i in range(0, len(coduri), 500):
+            r = requests.post(OH_URL + "/api/produs/cost/lot", timeout=240,
+                              headers={"Authorization": "Bearer " + tok},
+                              json={"istoric": True, "perechi": [{"cod": c, **({"magazin": magazin} if magazin else {})}
+                                                                 for c in coduri[i:i + 500]]})
+            r.raise_for_status()
+            d = r.json()
+            if not d.get("ok"):
+                sys.exit("Orders a refuzat costurile: %s" % str(d)[:200])
+            for rand in d.get("rezultate") or []:
+                if rand.get("loturi"):
+                    loturi[str(rand.get("cod") or "")] = rand["loturi"]
+
+    _cere(skus, GRANDIA_SHOPIFY_DOMAIN)
+    # produsul e pe master: un SKU nelegat pe magazinul Grandia se rezolvă fără magazin (cum face vederea `sku_costs`);
+    # codurile numerice rămân doar pe magazin (un număr = produse diferite pe magazine diferite)
+    _cere([c for c in skus if c not in loturi and not c.isdigit()], None)
+    shop = shopify_costuri(creds, access_token, [c for c in skus if c not in loturi]) if creds and access_token else {}
+    line_count = units_sold = lines_missing = units_missing = 0
+    gross_cogs = 0.0
+    missing: set[str] = set()
+    for o in included_orders:
+        zi = o.created_at.date() if hasattr(o, "created_at") and o.created_at else date.today()
+        for li in o.line_items:
+            qty = li["qty"]
+            if qty <= 0:
+                continue
+            line_count += 1; units_sold += qty
+            ex = cost_la_data(loturi.get(li["sku"]), zi)
+            if ex is None and li["sku"] in shop:
+                gross_cogs += qty * shop[li["sku"]]
+                continue
+            if ex is None:
+                lines_missing += 1; units_missing += qty
+                if li["sku"]:
+                    missing.add(li["sku"])
+                continue
+            gross_cogs += qty * ex * VAT_DIVISOR
+    return CogsResult(line_count, units_sold, gross_cogs, lines_missing, units_missing, sorted(missing))
+
+
 @dataclass
 class CogsResult:
     line_count: int
@@ -525,6 +648,67 @@ def fetch_transport(awb_conn, grandia_conn, included_order_names: list[str]) -> 
 # ──────────────────────────────────────────────────────────────────────────────
 # DPD spot-check
 # ──────────────────────────────────────────────────────────────────────────────
+def transport_oh_randuri(start: date, end: date) -> dict[str, tuple[float, str]]:
+    """{comanda: (cost fără TVA, surse)} din Orders `/api/cs/cost-transport`, pe bucăți de ≤ 93 de zile.
+    Fereastra se lărgește cu 15 zile după `end`: eticheta poate pleca după ziua comenzii."""
+    tok = _oh_token()
+    out: dict[str, tuple[float, str]] = {}
+    d = start - timedelta(days=3)
+    sf = end + timedelta(days=15)
+    while d <= sf:
+        p = min(sf, d + timedelta(days=92))
+        r = requests.get(OH_URL + "/api/cs/cost-transport", params={"de_la": d.isoformat(), "pana_la": p.isoformat()},
+                         headers={"Authorization": "Bearer " + tok}, timeout=300)
+        r.raise_for_status()
+        for x in (r.json().get("randuri") or []):
+            c = x.get("cost_transport")
+            if c is not None:
+                out[str(x.get("comanda") or "").lstrip("#").strip()] = (float(c), str(x.get("surse") or ""))
+        d = p + timedelta(days=1)
+    return out
+
+
+def fetch_transport_oh(grandia_conn, included_order_names: list[str], start: date, end: date) -> TransportResult:
+    """Transportul din Orders, în aceeași formă ca `fetch_transport` (AWBprint): un rând pe comandă; comenzile fără
+    cost în Orders se completează din Grandia.courier_shipments, apoi din media pe sursă (aceeași plasă ca înainte)."""
+    if not included_order_names:
+        return TransportResult(0, 0, 0.0, 0.0, {}, [], [], [], 0, 0, 0, 0.0, 0.0, 0.0)
+    oh = transport_oh_randuri(start, end)
+    rows: list[AwbRow] = []
+    fara = []
+    for n in included_order_names:
+        hit = oh.get(n.lstrip("#").strip())
+        if hit is None:
+            # comanda n-are etichetă costată în Orders: estimată din medie, ca AWB-urile fără cost din calea veche
+            fara.append(n)
+            rows.append(AwbRow(courier="Orders (fără cost)", tracking=None, gross=None, net=None, source="missing"))
+            continue
+        net, surse = hit
+        rows.append(AwbRow(courier="Orders" + (" (%s)" % surse if surse else ""), tracking=None,
+                           gross=net * VAT_DIVISOR if net > 0 else None, net=net if net > 0 else None,
+                           source="awbprint" if net > 0 else "missing"))
+    estimated = _estimate_missing(rows)
+    by_courier: dict[str, dict[str, float]] = defaultdict(lambda: {"awbs": 0.0, "gross": 0.0, "net": 0.0})
+    measured_n = estimated_n = 0
+    net_measured = net_estimated = 0.0
+    for r in rows:
+        by_courier[r.courier]["awbs"] += 1
+        by_courier[r.courier]["gross"] += float(r.gross or 0.0)
+        by_courier[r.courier]["net"] += float(r.net or 0.0)
+        if r.source == "awbprint":
+            measured_n += 1; net_measured += r.net or 0.0
+        elif r.source == "estimated":
+            estimated_n += 1; net_estimated += r.net or 0.0
+    return TransportResult(
+        matched_order_count=len(rows), awb_count=len(rows),
+        gross_total=sum(v["gross"] for v in by_courier.values()),
+        net_total=sum(v["net"] for v in by_courier.values()),
+        by_courier=dict(by_courier), tracking_for_spotcheck=[],
+        unmatched_order_names=fara, orders_missing_awb=fara,
+        awbs_measured=measured_n, awbs_backfilled=0, awbs_estimated=estimated_n,
+        net_measured=net_measured, net_backfilled=0.0, net_estimated=net_estimated)
+
+
 def dpd_spotcheck(trackings: list[str], n: int, db_lookup: dict[str, float]) -> dict:
     if not trackings or n <= 0:
         return {"checked": 0, "agree": 0, "disagree": 0, "details": [], "skipped": True}
@@ -1113,11 +1297,13 @@ def main() -> int:
         help="Override transport: assume this many RON (net) per included order. "
              "Useful for partial months where AWBs aren't invoiced yet.")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--sursa", choices=("oh", "awb"), default=os.environ.get("GRANDIA_PNL_SURSA", "oh"),
+        help="oh (implicit, 24-oct): COGS / transport din Orders, FX din metrics; awb = calea veche, doar umbră / întoarcere")
     args = p.parse_args()
     start = date.fromisoformat(args.start); end = date.fromisoformat(args.end)
 
     print(f"== Grandia P&L {start} → {end} (Shopify-sourced) ==", file=sys.stderr)
-    awb = pg("DATABASE_URL_AWBPRINT")
+    awb = pg("DATABASE_URL_AWBPRINT") if args.sursa == "awb" else None
     met = pg("DATABASE_URL_METRICS")
 
     print("[1/7] Shopify mint token + pull orders…", file=sys.stderr)
@@ -1130,13 +1316,14 @@ def main() -> int:
     print(f"  INCLUDED: {len(rev.included_orders)} orders / gross {rev.gross_revenue:,.2f} RON", file=sys.stderr)
 
     print("[2/7] COGS…", file=sys.stderr)
-    cogs = compute_cogs(awb, rev.included_orders)
+    cogs = compute_cogs(awb, rev.included_orders) if awb is not None else compute_cogs_oh(rev.included_orders, creds, access)
     print(f"  units: {cogs.units_sold}  gross COGS: {cogs.gross_cogs:,.2f} RON  missing: {cogs.lines_missing_cost} lines / {len(cogs.distinct_skus_missing_cost)} SKUs", file=sys.stderr)
 
     print("[3/7] transport (with backfill + estimation)…", file=sys.stderr)
     names = [o.name for o in rev.included_orders]
     grn = pg("DATABASE_URL_GRANDIA")
-    transport = fetch_transport(awb, grn, names)
+    transport = (fetch_transport(awb, grn, names) if awb is not None
+                 else fetch_transport_oh(grn, names, start, end))
     if args.transport_flat_per_order is not None:
         flat = float(args.transport_flat_per_order)
         flat_net_total = flat * len(names)
@@ -1162,7 +1349,7 @@ def main() -> int:
 
     print(f"[4/7] DPD spot-check (n={args.spot_check})…", file=sys.stderr)
     db_lookup_gross = {}
-    if args.spot_check > 0 and transport.tracking_for_spotcheck:
+    if awb is not None and args.spot_check > 0 and transport.tracking_for_spotcheck:
         match_rows = fetchall(awb,
             "SELECT id FROM orders WHERE store_uid = %s AND order_number = ANY(%s)",
             (GRANDIA_STORE_UID, names))
@@ -1177,7 +1364,7 @@ def main() -> int:
     print(f"  checked={dpd_check.get('checked',0)} agree={dpd_check.get('agree',0)} disagree={dpd_check.get('disagree',0)}", file=sys.stderr)
 
     print("[5/7] FX index…", file=sys.stderr)
-    fx = build_fx_index(awb, ["USD"], start, end)
+    fx = build_fx_index(awb, ["USD"], start, end) if awb is not None else build_fx_index_metrics(met, ["USD"], start, end)
 
     print("[6/7] ad spend (live)…", file=sys.stderr)
     meta = meta_spend(met, start, end);       print(f"  Meta:       {meta['total_ron']:,.2f} RON", file=sys.stderr)

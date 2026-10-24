@@ -72,6 +72,12 @@ class CheieOHLipsa(RuntimeError):
     întorcea fără niciun semn cifra veche de transport (517.805 în loc de 591.679 lei pe octombrie)."""
 
 
+def citeste_awbprint_transport(sursa) -> bool:
+    """AWBprint fără cititori (faza 2, 24-oct-2026): transportul real din AWBprint se citește DOAR când sursa activă
+    NU e Orders (`oh`). Cu `oh`, cascada e Orders → flat, iar AWBprint nu se deschide deloc."""
+    return (sursa or "").strip().lower() != "oh"
+
+
 def cheie_oh_citire() -> str:
     for v in OH_CHEI_CITIRE:
         t = (os.environ.get(v) or "").strip()

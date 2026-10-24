@@ -676,8 +676,11 @@ def run_product_ad_spend(apply):
     mdsn = secret("DATABASE_URL_METRICS")
     # meta/tiktok pull + FX need these in env; KB rules need KB_DATABASE_URL (already in env)
     os.environ["DATABASE_URL_METRICS"] = mdsn
-    adsn = secret("DATABASE_URL_AWBPRINT")
-    if adsn: os.environ["DATABASE_URL_AWBPRINT"] = adsn
+    # AWBprint fără cititori (faza 2, 24-oct-2026): cursul vine din metrics.fx_rates; DSN-ul AWBprint se mai pune în env
+    # DOAR pentru calea veche FX_SURSA=awb (meta.py / tiktok.py), ținută temporar de cronul de la 05:30.
+    if (os.environ.get("FX_SURSA") or "").strip().lower() == "awb":
+        adsn = secret("DATABASE_URL_AWBPRINT")
+        if adsn: os.environ["DATABASE_URL_AWBPRINT"] = adsn
     since = os.environ.get("AD_SPEND_SINCE", "2025-01-01")   # current + previous year
     # LIVE Meta+TikTok per-SKU/group via the KB Nomenclator rules — replaces the stale AWBprint sku_ad_spend_daily.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
