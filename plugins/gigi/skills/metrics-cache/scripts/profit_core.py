@@ -62,6 +62,33 @@ def vat_for_order(prefix: str = "", currency: str = "", country: str = "") -> fl
 OH_API = os.environ.get("ORDER_HUB_API", "https://orderhub.arona.ro")
 OH_LOT_MAX = 2000
 
+# Cheia de CITIRE a Order Hub pentru cititorii de profit (cost pe lot, transport, stare). OH_PROFIT_CITIRE_TOKEN
+# e cheia dedicată, doar citire; celelalte rămân rezervă pentru env-urile vechi.
+OH_CHEI_CITIRE = ("OH_PROFIT_CITIRE_TOKEN", "OH_CS_SB_TOKEN", "OH_COST_TOKEN")
+
+
+class CheieOHLipsa(RuntimeError):
+    """Comutatorul e pe Order Hub, dar procesul n-are cheie. Măsurat 24-oct-2026: sub `run.env`, profit_by_sku
+    întorcea fără niciun semn cifra veche de transport (517.805 în loc de 591.679 lei pe octombrie)."""
+
+
+def cheie_oh_citire() -> str:
+    for v in OH_CHEI_CITIRE:
+        t = (os.environ.get(v) or "").strip()
+        if t:
+            return t
+    return ""
+
+
+def cere_cheie_oh(cititor: str) -> str:
+    """Cheia de citire OH sau CheieOHLipsa. Se cheamă DOAR când comutatorul cititorului e pe `oh`."""
+    t = cheie_oh_citire()
+    if not t:
+        raise CheieOHLipsa("%s: comutatorul e pe Order Hub, dar nu există cheie de citire în mediu (%s). "
+                           "Pune OH_PROFIT_CITIRE_TOKEN în env (run.env). Nu cad pe sursa veche."
+                           % (cititor, " / ".join(OH_CHEI_CITIRE)))
+    return t
+
 
 def cost_loturi_oh(coduri, token: str, magazin: str = None, timeout: int = 240) -> dict:
     """{cod_jos: [(data_lot, cost_ex_tva, are_navlu)] descrescător} din `POST /api/produs/cost/lot` cu istoric.

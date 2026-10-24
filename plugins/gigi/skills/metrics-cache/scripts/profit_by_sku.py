@@ -26,14 +26,8 @@ import profit_core as pc   # funcții CANONICE (vat/cogs/transport/marketing) �
 # ⚠️ `cost_lei_buc` din OH e EX-TVA. Cascada veche (`line_cogs`/override) e CU TVA și se împarte la (1+vat).
 # Dacă cele două se amestecă, diferența pare 21% „din senin".
 OH_URL = os.environ.get("OH_URL", "https://orderhub.arona.ro")
-OH_TOKEN_VARS = ("OH_COST_TOKEN", "OH_CS_SB_TOKEN", "OH_GARDA_TOKEN")
-
-
 def _oh_token():
-    for v in OH_TOKEN_VARS:
-        if os.environ.get(v):
-            return os.environ[v]
-    return ""
+    return pc.cheie_oh_citire()
 
 
 def cost_oh_istoric(perechi):
@@ -49,7 +43,7 @@ def cost_oh_istoric(perechi):
     """
     tok = _oh_token()
     if not tok:
-        sys.stderr.write("[cost-oh] fără token (OH_COST_TOKEN/OH_CS_SB_TOKEN/OH_GARDA_TOKEN) — sar umbra\n")
+        sys.stderr.write("[cost-oh] fără cheie (%s) — sar umbra\n" % " / ".join(pc.OH_CHEI_CITIRE))
         return {}
     out, lipsa = {}, 0
     for s, mag in sorted({(a, b) for a, b in perechi if a}):
@@ -165,10 +159,10 @@ def load_transport_oh(month):
     """{order_name: transport ex-TVA} din Order Hub (`shipments.cost_transport`: factura DPD, altfel prețul curierului
     la creare; plus etichetele anulate dar facturate) — aceeași sursă și aceeași funcție ca motorul P&L
     (`core.transport_oh`, pasul S1). Gol dacă OH tace: umbra rămâne goală, raportul nu se schimbă."""
-    # cheia de citire: OH_CS_SB_TOKEN, altfel cea de cost (același scop `cs.citire`). Măsurat 23-oct: sub run.env-ul
-    # cronului, căutarea în seif a lui `transport_oh.token()` întorcea gol și umbra ieșea goală fără niciun mesaj.
-    if not os.environ.get("OH_CS_SB_TOKEN") and os.environ.get("OH_COST_TOKEN"):
-        os.environ["OH_CS_SB_TOKEN"] = os.environ["OH_COST_TOKEN"]
+    # `transport_oh.token()` citește OH_CS_SB_TOKEN: îi dăm aceeași cheie ca restului raportului. Măsurat 23-oct:
+    # sub run.env-ul cronului, căutarea în seif întorcea gol și umbra ieșea goală fără niciun mesaj.
+    if not os.environ.get("OH_CS_SB_TOKEN") and pc.cheie_oh_citire():
+        os.environ["OH_CS_SB_TOKEN"] = pc.cheie_oh_citire()
     try:
         from core import transport_oh as _toh
         out = {n: (v[0] or 0) + (v[1] or 0) for n, v in _toh.pe_comenzi([month]).items()}
@@ -180,9 +174,31 @@ def load_transport_oh(month):
         return {}
 
 
+def comutatoare(db):
+    """(cogs_sursa, transport_sursa) din `profit_settings`. Comutatorul stă în BAZĂ, nu în env (regula din
+    arhitectura-țintă): cogs 'engine' = cascada veche, 'oh' = produs_cost; transport 'awbprint' / 'oh' (S1)."""
+    cx = sqlite3.connect(db)
+    try:
+        def _val(cheie, implicit):
+            try:
+                r = cx.execute("SELECT value FROM profit_settings WHERE key=?", (cheie,)).fetchone()
+            except sqlite3.Error:
+                return implicit
+            return (r[0] if r else implicit) or implicit
+        return _val("cogs_sursa", "engine"), _val("transport_sursa", "awbprint")
+    finally:
+        cx.close()
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("month"); ap.add_argument("--db", default="data/profitability.db")
     ap.add_argument("--top", type=int, default=25); a = ap.parse_args()
+    cogs_sursa, transport_sursa = comutatoare(a.db)
+    if "oh" in (cogs_sursa, transport_sursa):
+        try:
+            pc.cere_cheie_oh("profit_by_sku (cogs_sursa=%s, transport_sursa=%s)" % (cogs_sursa, transport_sursa))
+        except pc.CheieOHLipsa as e:
+            sys.exit("EROARE: %s" % e)
     s2g = sku_to_group()
     dpd = load_dpd_costs()   # SKU-uri cu cost transport REAL în DB (audit DPD)
     cx = sqlite3.connect(a.db); cx.row_factory = sqlite3.Row
@@ -194,18 +210,6 @@ def main():
     fx["RON"] = 1.0   # monedă magazin → RON (CZK/EUR/PLN/BGN). Lipsă → 1.0 (tratat ca RON).
     cogs_ov = {r["sku"]: (r["unit_cost"], r["currency"]) for r in cx.execute(
         "SELECT sku, unit_cost, currency FROM profit_cogs_override").fetchall()}   # override COGS (H), ca engine-ul
-    # comutatorul stă în BAZĂ, nu în env (regula din arhitectura-țintă): 'engine' = cascada veche, 'oh' = produs_cost
-    try:
-        _cs = cx.execute("SELECT value FROM profit_settings WHERE key='cogs_sursa'").fetchone()
-        cogs_sursa = (_cs["value"] if _cs else "engine") or "engine"
-    except Exception:
-        cogs_sursa = "engine"
-    # S1: transportul din Order Hub, în UMBRĂ până la `profit_settings.transport_sursa='oh'` (comutator în BAZĂ)
-    try:
-        _ts = cx.execute("SELECT value FROM profit_settings WHERE key='transport_sursa'").fetchone()
-        transport_sursa = (_ts["value"] if _ts else "awbprint") or "awbprint"
-    except Exception:
-        transport_sursa = "awbprint"
 
     # delivered lines, joined to status + monedă comandă
     rows = cx.execute("""
@@ -230,7 +234,7 @@ def main():
     for k, sks in order_skus.items():
         parcel_cost[k], tsrc[k] = pc.parcel_transport(sks, dpd, tc.get(k[0], 0), real_cost=real_transport.get(k))
     transport_oh = load_transport_oh(a.month)
-    sku_t = defaultdict(lambda: [0.0, 0.0])                  # umbra S1: transport vechi / OH, pe SKU
+    sku_t =defaultdict(lambda: [0.0, 0.0])                  # umbra S1: transport vechi / OH, pe SKU
     pref_t = defaultdict(lambda: [0.0, 0.0, 0, 0])           # același, pe PREFIX + comenzi / comenzi cu cost OH
     for k in order_skus:
         pref_t[k[0]][2] += 1
