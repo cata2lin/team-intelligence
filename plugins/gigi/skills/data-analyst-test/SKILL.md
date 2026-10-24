@@ -26,7 +26,15 @@ din baza **AWBprint** (sursa de adevăr livrare). Ieșirea: dataset anonimizat +
 1. Livrabilitate generală (rată+nr) · 2. pe județ · 3. pe produs (SKU) · 4. pe magazin · 5. anomalii de cost ·
 6. timp mediu de livrare · 7. tipare de refuz. Definiția livrării: succes = `livrat`+`ridicat_personal`; exclude `in_tranzit` din numitor.
 
-## 🔑 Schema AWBprint (câștigată greu — NU improviza altceva)
+## 🔀 Sursa (24-oct-2026): implicit ORDER HUB
+`build` ia comenzile din `GET /api/cs/livrabilitate` (ultimele `--luni 3` luni încheiate, doar RO), cu cheia din env
+`OH_TEAM_READ_TOKEN` → `OH_PROFIT_CITIRE_TOKEN` → `OH_CS_SB_TOKEN` → KB `OH_TEAM_READ_TOKEN`. Starea se traduce în vocabularul
+AWBprint (Livrata → livrat, Refuzata → refuzat_retur, În curs → in_tranzit), deci capcanele și baremul rămân aceleași. Ce
+NU are OH și se modelează: **data expedierii** (ziua comenzii + 0/1 zile) și `nr_produse` (= SKU-uri distincte). Transportul
+OH e fără TVA → se înmulțește cu 1,21 (dicționarul spune „cu TVA”). Calea veche: `--source awb` / `ANALYST_TEST_SURSA=awb`,
+doar pe serverul de scripturi. Măsurat 24-oct: livrabilitate 85,5% (OH, iul–sep) vs 84,9% (AWBprint, eșantion pe tot istoricul).
+
+## 🔑 Schema AWBprint (doar pentru `--source awb`)
 - Conexiune: secret KB **`DATABASE_URL_AWBPRINT`** (host DB 38.242.226.83), **read-only**. Tabel `orders` (~672k).
 - **NU există coloană `status`.** Statusul de livrare = **`aggregated_status`** (`delivered` / `back_to_sender`=refuz-retur /
   `cancelled` / `in_transit` / `refused` / `lost_in_transit` / `customer_pickup` / …). `shipment_status` e similar.
