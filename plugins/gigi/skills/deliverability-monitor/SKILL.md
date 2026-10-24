@@ -11,11 +11,18 @@ Cca **9.000 colete refuzate/lună (~16%)** = **~272k RON/lună transport irosit*
 ```bash
 uv run deliverability_monitor.py --month 2026-05 --by brand     # rata refuz + venit la risc per brand
 uv run deliverability_monitor.py --month 2026-05 --by courier   # per curier (DPD/Packeta/Econt/Sameday)
-uv run deliverability_monitor.py --month 2026-05 --by county    # per județ (direct din AWBprint shipping_address)
+uv run deliverability_monitor.py --month 2026-05 --by county    # per județ (din Order Hub, `judet`)
 uv run deliverability_monitor.py --month 2026-05 --by sku       # produsele cel mai des refuzate
 uv run deliverability_monitor.py --month 2026-05 --by pocket    # cele mai proaste combinatii brand×curier×judet
 uv run deliverability_monitor.py --month 2026-05 --brand Esteban --by county
 ```
+
+## Sursa (24-oct-2026)
+- **Implicit Order Hub** (`/api/cs/livrabilitate`). Cheia: env `OH_TEAM_READ_TOKEN` → `OH_PROFIT_CITIRE_TOKEN` → `OH_CS_SB_TOKEN`
+  → KB `OH_TEAM_READ_TOKEN`. Fără cheie sau OH căzut = eroare clară, NU cifra din AWBprint.
+- `--source awb` (sau `DELIVERABILITY_SURSA=awb`) = AWBprint, DOAR pe serverul de scripturi; `--source vps` = profitability.db.
+- Sep-2026, AWBprint vs OH: rata 14,6% / 14,7%, EST 9,6% / 9,3%. „Transport irosit" 0 pe AWBprint (`transport_cost` gol din
+  28-aug) vs ~150k RON pe OH — cifra bună e cea din OH.
 
 ## Cum se calculează
 - **Refuz/livrabilitate**: `profit_orders.status_category` (Livrata / Refuzata / Netrimisa / Anulata / In curs) din `data/profitability.db` (VPS, prin SSH). „Plecate" = Livrata+Refuzata+In curs; rata refuz = Refuzata/plecate.
