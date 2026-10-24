@@ -6,7 +6,7 @@
 Cross-sell recommender — market-basket analysis on our own order data: which
 products are bought together (support / confidence / lift), per store. Feeds
 "frequently bought together" PDP blocks, Klaviyo post-purchase flows, and the
-2+1 surprise-perfume offer. Read-only on the metrics DB.
+2+1 surprise-perfume offer. Read-only. Coșurile vin din Order Hub (implicit); titlurile din metrics.
 
 Connects via DATABASE_URL_METRICS (KB secret), same as gads.py.
 
@@ -52,8 +52,67 @@ BRAND_TO_STORE = {
     "george-talent": "georgetalent.ro", "nubra": "nubra", "belasil": "belasil.ro",
 }
 
+# brand → domeniul myshopify (cum îl știe Order Hub; din stores.csv, nu e secret) — pt --source oh
+BRAND_TO_SHOP = {
+    "esteban": "6f9e22-9d.myshopify.com", "grandia": "n12w89-yy.myshopify.com", "gt": "ix5bxc-hr.myshopify.com",
+    "george-talent": "ix5bxc-hr.myshopify.com", "nubra": "bmuwvv-jy.myshopify.com",
+    "belasil": "dvk4hu-dq.myshopify.com",
+}
+
 def _conn():
     return arona_pg.connect("DATABASE_URL_METRICS")
+
+
+def _luni(de_la, pana_la):
+    y, m = de_la.year, de_la.month
+    while (y, m) <= (pana_la.year, pana_la.month):
+        yield "%04d-%02d" % (y, m)
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+
+
+def basket_pairs(cosuri, min_prod, min_co):
+    """Aceeași aritmetică ca AWB_SQL, în Python: cosuri = {comanda: set(sku)} → rânduri
+    (sku_a, sku_b, co, n_a, n_b, lift, conf_ab, conf_ba), sortate după lift."""
+    from collections import Counter
+    from itertools import combinations
+    n = Counter(sku for skus in cosuri.values() for sku in skus)
+    prod = {k for k, v in n.items() if v >= min_prod}
+    tot = float(sum(1 for skus in cosuri.values() if skus & prod))
+    co = Counter()
+    for skus in cosuri.values():
+        for a, b in combinations(sorted(skus & prod), 2):
+            co[(a, b)] += 1
+    out = [(a, b, c, n[a], n[b], c * tot / (n[a] * n[b]), c / n[a], c / n[b])
+           for (a, b), c in co.items() if c >= min_co]
+    return sorted(out, key=lambda r: -r[5])
+
+
+def _rows_oh(a, bid, azi=None):
+    """Coșurile din Order Hub (`/api/cs/livrabilitate`, pe lună și magazin): SKU-urile distincte ale
+    fiecărei comenzi, fără anulate, din ultimele --days zile (ziua de București)."""
+    from datetime import date, timedelta
+    sys.path.insert(0, str(_cs))
+    import oh_citire as oh
+    shop = BRAND_TO_SHOP.get(a.brand.lower())
+    if not shop:
+        sys.exit(f"Brand necunoscut pt Order Hub: {a.brand} (adaugă în BRAND_TO_SHOP)")
+    azi = azi or date.today()
+    start = azi - timedelta(days=a.days)
+    cosuri = {}
+    try:
+        for luna in _luni(start, azi):
+            for r in oh.livrabilitate(luna, shop):
+                if r["stare"] == "Anulata" or r["zi"] < start.isoformat():
+                    continue
+                skus = {x.strip().lower() for x in (r["skus"] or "").split(";") if x.strip()}
+                if skus:
+                    cosuri[r["comanda"]] = skus
+    except oh.OhEroare as e:
+        sys.exit(f"EROARE: {e}")
+    titles = _titles_from_metrics(bid)
+    return [(titles.get(sa, sa), titles.get(sb, sb), co, na, nb, lift, cab, cba)
+            for sa, sb, co, na, nb, lift, cab, cba in basket_pairs(cosuri, a.min_prod, a.min_co)
+            if lift >= a.min_lift]
 
 # Market-basket din AWBprint (instant, ~99% complet vs warehouse care e incomplet).
 # SKU e la inventory_item.sku; titlul îl rezolvăm separat din warehouse (suficient pt
@@ -97,7 +156,12 @@ def _rows_awb(a, bid):
     store = BRAND_TO_STORE.get(a.brand.lower())
     if not store:
         sys.exit(f"Brand necunoscut pt AWBprint: {a.brand} (adaugă în BRAND_TO_STORE)")
-    c = arona_pg.connect("DATABASE_URL_AWBPRINT"); cur = c.cursor()
+    try:
+        c = arona_pg.connect("DATABASE_URL_AWBPRINT")
+    except Exception as e:
+        sys.exit(f"AWBprint nu e accesibil de aici ({type(e).__name__}) — e doar pentru servere; "
+                 "sursa implicită e Order Hub (--source oh).")
+    cur = c.cursor()
     cur.execute(AWB_SQL, {"store": store, "days": a.days, "min_prod": a.min_prod, "min_co": a.min_co})
     raw = cur.fetchall(); c.close()
     titles = _titles_from_metrics(bid)
@@ -141,12 +205,13 @@ def main():
     ap.add_argument("--cached", action="store_true",
                     help="read precomputed cache.product_basket_pairs (instant; fixed 180d window, "
                          "ignores --days/--min-prod). Refreshed nightly by gigi:metrics-cache.")
-    ap.add_argument("--source", choices=["awb", "metrics"], default="awb",
-                    help="awb = AWBprint (default, ~99%% complet, instant); metrics = warehouse (poate fi incomplet)")
+    ap.add_argument("--source", choices=["oh", "awb", "metrics"], default=(os.environ.get("CROSS_SELL_SURSA") or "oh").lower(),
+                    help="oh = Order Hub (implicit); awb = AWBprint (doar server, întoarcere explicită, sau env "
+                         "CROSS_SELL_SURSA=awb); metrics = warehouse (poate fi incomplet)")
     a = ap.parse_args()
     bid = BRANDS.get(a.brand.lower(), a.brand)
-    if a.source == "awb" and not a.cached:
-        rows = _rows_awb(a, bid)
+    if a.source in ("oh", "awb") and not a.cached:
+        rows = _rows_oh(a, bid) if a.source == "oh" else _rows_awb(a, bid)
         _print(a, rows); return
     c = _conn(); cur = c.cursor()
     if a.cached:
@@ -164,7 +229,8 @@ def main():
     _print(a, rows)
 
 def _print(a, rows):
-    src = "AWBprint" if getattr(a, "source", "metrics") == "awb" and not a.cached else "warehouse"
+    src = ("warehouse" if a.cached or a.source == "metrics" else
+           {"oh": "Order Hub", "awb": "AWBprint"}[a.source])
     if not rows:
         print(f"Niciun pattern de co-cumpărare peste praguri ({a.brand}, {a.days}z, min_co={a.min_co}). "
               f"Magazin cu coșuri mono-produs? Scade --min-co sau crește --days."); return
