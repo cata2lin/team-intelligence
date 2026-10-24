@@ -20,7 +20,9 @@ As a library:
 import sys, json, subprocess
 from pathlib import Path
 
-_KB = Path.home() / ".claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py"
+_KB_CANDS = [Path(__file__).resolve().parents[3] / "core" / "scripts" / "kb.py",
+            Path.home() / ".claude/plugins/marketplaces/team-intelligence/plugins/core/scripts/kb.py"]
+_KB = next((p for p in _KB_CANDS if p.exists()), _KB_CANDS[-1])
 
 def _kb(*args, value=None):
     cmd = ["uv", "run", str(_KB), *args]
@@ -32,6 +34,20 @@ def load():
         return json.loads(out) if out else {}
     except Exception:
         return {}
+
+def verdict_accounts(d=None):
+    """(brand, gads_cid, currency) pentru conturile de inclus in profit_verdict.
+    Includere POZITIVA: gads_verdict==True + gads_cid + breakeven_cpa. Sortat determinist.
+    Conturi fara gads_verdict (belasil=vandut, apreciat/labnoir/bonhaus_pl=oprite) sunt excluse — NU se ating."""
+    d = load() if d is None else d
+    out = []
+    for b, e in (d or {}).items():
+        if not isinstance(e, dict):
+            continue
+        if e.get("gads_verdict") and e.get("gads_cid") and e.get("breakeven_cpa"):
+            out.append((b, str(e["gads_cid"]), e.get("gads_currency", "RON")))
+    return sorted(out)
+
 
 def save(d):
     # KB config: replace the whole JSON (callers do read-modify-write via set_field)
