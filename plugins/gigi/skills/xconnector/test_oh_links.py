@@ -5,7 +5,8 @@
 """Test oh_links.py (links din Order Hub), FĂRĂ rețea: Order Hub e o dublură în memorie.
 
   1. fișa 200 → status + etichete + linkuri; tracking DPD construit din AWB;
-  2. după AWB nu se caută nimic (OH nu primește AWB) → cod 2, nicio cerere;
+  2. după AWB → /api/cs/comanda-dupa-awb; `gasit_ca` apare în text (vie / colet / anulata / retur / istoric), iar o
+     etichetă care nu e cea vie e marcată cu ⚠; 404 / 409 → cod 1; fără --order și fără --awb → cod 2, nicio cerere;
   3. 401 / 404 / ambiguă / răspuns necitit → cod 1 și eroare clară, fără altă sursă;
   4. cheia: ordinea env OH_TEAM_READ_TOKEN → OH_PROFIT_CITIRE_TOKEN → OH_CS_SB_TOKEN; cheia nu apare în ieșire;
   5. `xconnector.py links` merge implicit pe Order Hub; calea veche doar cu XCONNECTOR_LINKS_SURSA=xc.
@@ -60,9 +61,31 @@ L.ruleaza("#GT000001", shop="gt", http=oh(200, FISA))
 check("# scos, magazinul trimis", "comanda=GT000001&magazin=gt" in CERERI[-1][0], CERERI[-1])
 
 print("2. după AWB")
+for cum, asteptat, avertizat in (("vie", "eticheta VIE", False), ("colet", "cod de COLET", True),
+                                 ("anulata", "ANULATĂ", True), ("retur", "RETUR", True), ("istoric", "VECHE", True),
+                                 ("nou_necunoscut", "«nou_necunoscut»", True)):
+    corp = dict(FISA, awb_cautat="00000000002", gasit_ca=cum)
+    cod, text = L.ruleaza(awb="00000000002", http=oh(200, corp))
+    rand = [r for r in text.splitlines() if r.strip().startswith("Căutat:")]
+    check("gasit_ca=%s → rândul „Căutat” spune %s%s" % (cum, asteptat, " cu ⚠" if avertizat else ""),
+          cod == 0 and rand and asteptat in rand[0] and (("⚠" in rand[0]) == avertizat), text)
+check("cererea merge la /api/cs/comanda-dupa-awb cu AWB-ul", CERERI[-1][0].endswith("/api/cs/comanda-dupa-awb?awb=00000000002"),
+      CERERI[-1])
+cod, text = L.ruleaza(awb=" 00000000002 ", http=oh(200, dict(FISA, awb_cautat="00000000002", gasit_ca="vie")))
+check("AWB-ul se trimite fără spații", CERERI[-1][0].endswith("awb=00000000002"), CERERI[-1])
+cod, text = L.ruleaza(order="GT000001", awb="00000000002", http=oh(200, FISA))
+check("cu --order și --awb, caută după comandă", "/api/cs/comanda?comanda=GT000001" in CERERI[-1][0], CERERI[-1])
+cod, text = L.ruleaza(order="GT000001", http=oh(200, FISA))
+check("fișa după număr nu are rândul „Căutat”", "Căutat:" not in text, text)
+for nume, raspuns in (("404", (404, {"detail": {"mesaj": "awb: X · necunoscut în Order Hub"}})),
+                      ("409", (409, {"detail": {"mesaj": "awb: X · 2 comenzi",
+                                                "candidati": [{"comanda": "A1", "magazin": "M1"}, {"comanda": "B2", "magazin": "M2"}]}}))):
+    cod, text = L.ruleaza(awb="00000000003", http=oh(*raspuns))
+    check("AWB %s → cod 1, EROARE%s" % (nume, " cu candidații" if nume == "409" else ""), cod == 1
+          and text.startswith("EROARE") and (nume != "409" or ("A1 (M1)" in text and "B2 (M2)" in text)), text)
 n = len(CERERI)
-cod, text = L.ruleaza(awb="00000000001", http=oh(200, FISA))
-check("cod 2, nicio cerere, trimitere la awb_track", cod == 2 and len(CERERI) == n and "awb_track" in text, (cod, text))
+cod, text = L.ruleaza(http=oh(200, FISA))
+check("fără --order și fără --awb → cod 2, nicio cerere", cod == 2 and len(CERERI) == n, (cod, text))
 
 print("3. erori")
 for nume, raspuns in (("401", (401, {"detail": "Cheie de serviciu: invalidă"})),
