@@ -15,6 +15,15 @@ Două semnale (DOAR profitability.db / profit_orders, citit prin SSH):
   (2) FĂRĂ TRACKING: status_category='Lipsa awb' = marcat expediat/FULFILLED fără AWB deloc.
       Clientul are mail de expediere dar n-are ce urmări.
 
+SURSA IMPLICITĂ = ORDER HUB (24-oct-2026): `GET /api/cs/neplecate-vechi` — coada de lucru a CS, cu motivul
+fiecărei comenzi (eticheta în teanc, culeasă și nepredată, fără AWB, expediată în Shopify…), din etichetele vii
+din OH, fără comenzile demo. Înlocuiește ambele semnale de mai sus și îmbogățirea din AWBprint (tag/status):
+  FANTOMĂ   = comandă neplecată care ARE etichetă vie (curierul n-a scanat-o);
+  FĂRĂ AWB  = comandă neplecată fără etichetă vie, dar marcată expediată în Shopify.
+Coletele PIERDUTE în tranzit nu sunt „neplecate" → nu apar aici (sunt la gigi:cs-proactive-delays).
+Calea veche (profit_orders prin SSH + AWBprint) rămâne DOAR ca întoarcere explicită: `--source awb`
+sau CS_GHOST_SURSA=awb. Dacă Order Hub nu răspunde sau lipsește cheia → eroare, nu cifra veche.
+
 Contact (nume/telefon/oraș) din metrics.orders. Sortare: vechime desc, apoi valoare desc.
 Read-only total — nu scrie nimic în Postgres / Shopify / Richpanel.
 
@@ -22,6 +31,7 @@ Read-only total — nu scrie nimic în Postgres / Shopify / Richpanel.
   uv run cs_ghost_shipments.py --days 5        # prag vechime 5 zile
   uv run cs_ghost_shipments.py --store Esteban # un singur magazin
   uv run cs_ghost_shipments.py --json          # pt automatizare
+  uv run cs_ghost_shipments.py --source awb    # calea veche (profit_orders + AWBprint), doar ca întoarcere
 """
 import os, sys, json, subprocess, shlex, urllib.parse, argparse, datetime
 import pg8000.dbapi
@@ -78,7 +88,15 @@ PREFIX = {
 }
 
 # acțiune sugerată per semnal + vechime
-def suggested_action(flag, age):
+def suggested_action(flag, age, motiv=None):
+    if motiv == "culeasa_nepredata":
+        return "Caută coletul CULES în hală (n-a fost predat curierului) + mesaj proactiv"
+    if motiv == "eticheta_in_teanc":
+        return "Eticheta printată s-a pierdut din teanc: reprintează din Order Hub › Printing + mesaj proactiv"
+    if motiv == "eticheta_neprintata":
+        return "Eticheta n-a fost printată niciodată: print din Order Hub › Printing"
+    if motiv == "awb_anulat_la_curier":
+        return "AWB anulat la curier, comanda e vie: decide (AWB nou / anulare) prin gigi:order-hub"
     if flag == "pierdut":
         # Coletul NU e în depozit — curierul l-a pierdut pe drum. Alt flux complet:
         # reclamație la curier pentru recuperarea valorii, apoi refund/re-expediere.
@@ -98,6 +116,117 @@ def secret(k):
         return v
     kb = os.path.join(HERE, "..", "..", "..", "core", "scripts", "kb.py")
     return subprocess.run(["uv", "run", kb, "secret-get", k], capture_output=True, text=True).stdout.strip()
+
+
+OH_BAZA = os.environ.get("OH_CS_BASE", "https://orderhub.arona.ro").rstrip("/")
+
+
+class OHIndisponibil(RuntimeError):
+    pass
+
+
+def _token_oh():
+    """Cheia de citire OH: env OH_TEAM_READ_TOKEN → OH_PROFIT_CITIRE_TOKEN → OH_CS_SB_TOKEN → KB OH_TEAM_READ_TOKEN."""
+    for k in ("OH_TEAM_READ_TOKEN", "OH_PROFIT_CITIRE_TOKEN", "OH_CS_SB_TOKEN"):
+        v = (os.environ.get(k) or "").strip()
+        if v:
+            return v
+    try:
+        return secret("OH_TEAM_READ_TOKEN")
+    except Exception:
+        return ""
+
+
+def fetch_oh(days, store):
+    """Coada de lucru OH (`/api/cs/neplecate-vechi`): comenzile neplecate mai vechi de `days` zile, cu motivul lor."""
+    import urllib.request, urllib.error
+    tok = _token_oh()
+    if not tok:
+        raise OHIndisponibil("lipsește cheia Order Hub (OH_TEAM_READ_TOKEN în env sau în KB)")
+    q = {"zile": str(max(1, min(int(days), 120))), "limita": "1000"}
+    if store:
+        q["magazin"] = store
+    req = urllib.request.Request(OH_BAZA + "/api/cs/neplecate-vechi?" + urllib.parse.urlencode(q),
+                                 headers={"Authorization": "Bearer " + tok, "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=180) as r:
+            d = json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        corp = ""
+        try:
+            corp = e.read().decode("utf-8", "replace")[:200]
+        except Exception:
+            pass
+        raise OHIndisponibil("Order Hub a răspuns HTTP %s %s" % (e.code, corp))
+    except Exception as e:
+        raise OHIndisponibil("Order Hub nu răspunde (%s)" % type(e).__name__)
+    if not d.get("ok") or "comenzi" not in d:
+        raise OHIndisponibil("răspuns OH fără `comenzi`")
+    return d
+
+
+def build_rows_oh(d):
+    """Rânduri în forma raportului, din coada OH. FANTOMĂ = are etichetă vie; FĂRĂ AWB = fără etichetă, dar
+    expediată în Shopify. Restul cozii (fără AWB și neexpediată: adresă, hold) nu e „colet fantomă"."""
+    expl = {m["motiv"]: m.get("explicatie") or m["motiv"] for m in d.get("pe_motiv") or []}
+    rows = []
+    for x in d.get("comenzi") or []:
+        et = x.get("etichete") or []
+        motive = x.get("motive") or []
+        if et:
+            flag = "fantoma"
+        elif "expediata_in_shopify" in motive:
+            flag = "lipsa_awb"
+        else:
+            continue
+        nume = x.get("comanda") or ""
+        pfx = "".join(ch for ch in nume if ch.isalpha()) if nume[:1].isalpha() else ""
+        pfx = next((p for p in sorted(PREFIX, key=len, reverse=True) if nume.upper().startswith(p)), pfx)
+        bani = x.get("bani") or {}
+        rows.append({
+            "flag": flag, "o": nume, "prefix": pfx, "brand": x.get("magazin") or PREFIX.get(pfx, pfx),
+            "age": int(x.get("zile") or 0), "rev": float(bani.get("total") or 0), "cur": bani.get("moneda") or "RON",
+            "awb": (x.get("awb") or [""])[0] or "", "cs": (et[0].get("ultim_status") if et else "") or "",
+            "status": expl.get(x.get("motiv"), x.get("motiv") or ""), "motiv": x.get("motiv"), "motive": motive,
+            "expediata_in_shopify": "expediata_in_shopify" in motive, "culeasa_la": x.get("culeasa_la"),
+            "curier": (et[0].get("curier") if et else None),
+        })
+    return rows
+
+
+def main_oh(a):
+    today = datetime.date.today()
+    try:
+        d = fetch_oh(a.days, a.store)
+    except OHIndisponibil as e:
+        sys.exit("EROARE: %s. Nu dau cifra veche în locul ei; calea veche doar explicit: --source awb." % e)
+    rows = build_rows_oh(d)
+    contacts = fetch_contacts({r["o"] for r in rows})
+    for r in rows:
+        c = contacts.get(r["o"], {})
+        r["name"] = c.get("name"); r["phone"] = c.get("phone"); r["city"] = c.get("city")
+    rows.sort(key=lambda x: (-x["age"], -x["rev"]))
+    if a.json:
+        for r in rows:
+            r["action"] = suggested_action(r["flag"], r["age"], r.get("motiv"))
+        print(json.dumps({
+            "sursa": "order-hub /api/cs/neplecate-vechi", "la": d.get("la"),
+            "days": a.days, "store": a.store or None,
+            "total": len(rows),
+            "ghost": sum(1 for r in rows if r["flag"] == "fantoma"),
+            "noawb": sum(1 for r in rows if r["flag"] == "lipsa_awb"),
+            "value_blocked": round(sum(r["rev"] for r in rows), 2),
+            "coada_oh_total": d.get("total_comenzi"), "coada_oh_pe_motiv": d.get("pe_motiv"),
+            "trunchiat": d.get("trunchiat"),
+            "rows": rows,
+        }, ensure_ascii=False, indent=2, default=str))
+        return
+    print("Sursa: Order Hub (coada de lucru CS, %s). Coada întreagă: %s comenzi neplecate; aici doar cele cu "
+          "etichetă vie sau marcate expediate în Shopify. Pierdutele în tranzit: gigi:cs-proactive-delays.\n"
+          % (d.get("la"), d.get("total_comenzi")))
+    if d.get("trunchiat"):
+        print("⚠️  Coada OH e trunchiată la 1000 de comenzi — micșorează --days sau pune --store.\n")
+    render(rows, a.days, a.store, a.per_store)
 
 
 def fetch_profit(cut, prefixes):
@@ -263,7 +392,7 @@ def render(rows, days, store_filter, per_store):
             print("  %-13s %4d  %-34s %7s %-3s %-13s" % (
                 x["o"], x["age"], x["status"][:34],
                 "{:,.0f}".format(x["rev"]), x["cur"], (x["awb"] or "—")[:13]))
-            print("     → %s" % suggested_action(x["flag"], x["age"]))
+            print("     → %s" % suggested_action(x["flag"], x["age"], x.get("motiv")))
         if per_store > 0 and len(lst) > per_store:
             rest = lst[per_store:]
             print("  ... încă %d colete (%s lei) — vezi --json pt lista completă sau --per-store 0." % (
@@ -294,7 +423,14 @@ def main():
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--include-test", action="store_true",
                     help="include și comenzile cu tag 'test' (implicit sunt excluse — nu-s fantome reale)")
+    ap.add_argument("--source", choices=("oh", "awb"),
+                    default=(os.environ.get("CS_GHOST_SURSA") or "oh").strip().lower(),
+                    help="oh (implicit) = coada de lucru Order Hub; awb = calea veche profit_orders + AWBprint")
     a = ap.parse_args()
+    if a.source == "oh":
+        return main_oh(a)
+    if a.source != "awb":
+        sys.exit("CS_GHOST_SURSA necunoscută: %s (oh | awb)" % a.source)
 
     today = datetime.date.today()
     cut = (today - datetime.timedelta(days=a.days)).isoformat()

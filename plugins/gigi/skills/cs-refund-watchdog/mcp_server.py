@@ -96,7 +96,7 @@ def ghost_shipments(days: int = 7, store: str = "", per_store: bool = False) -> 
     un pachet care nu s-a mișcat; se vede doar dacă-l cauți."""
     a = ["--days", days]
     if store: a += ["--store", store]
-    if per_store: a.append("--per-store")
+    if per_store: a += ["--per-store", 0]   # 0 = toate pe magazin (flag-ul cere o valoare)
     return _run(_script("cs-ghost-shipments", "cs_ghost_shipments.py"), a)
 
 
