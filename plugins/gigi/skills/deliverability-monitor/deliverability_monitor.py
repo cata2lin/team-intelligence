@@ -264,10 +264,16 @@ def fetch_awb(month, brand):
         kb = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "core", "scripts", "kb.py")
         url = subprocess.run(["uv", "run", kb, "secret-get", "DATABASE_URL_AWBPRINT"],
                              capture_output=True, text=True).stdout.strip()
+    if not url:
+        sys.exit("Lipseste DATABASE_URL_AWBPRINT; --source awb merge doar pe serverul de scripturi (84.46).")
     u = urllib.parse.urlparse(url)
-    conn = pg8000.dbapi.connect(ssl_context=True, user=urllib.parse.unquote(u.username or ""),
-                                password=urllib.parse.unquote(u.password or ""), host=u.hostname,
-                                port=u.port or 5432, database=(u.path or "/").lstrip("/"))
+    try:
+        conn = pg8000.dbapi.connect(ssl_context=True, user=urllib.parse.unquote(u.username or ""),
+                                    password=urllib.parse.unquote(u.password or ""), host=u.hostname,
+                                    port=u.port or 5432, database=(u.path or "/").lstrip("/"))
+    except Exception as e:
+        sys.exit("AWBprint nu se deschide de aici (%s); --source awb merge doar pe serverul de scripturi (84.46)."
+                 % type(e).__name__)
     cur = conn.cursor()
     lo = month + "-01"
     cur.execute("""
@@ -304,12 +310,23 @@ def fetch_awb(month, brand):
 OH_BAZA = os.environ.get("OH_CS_BASE", "https://orderhub.arona.ro").rstrip("/")
 
 
+OH_CHEI = ("OH_TEAM_READ_TOKEN", "OH_PROFIT_CITIRE_TOKEN", "OH_CS_SB_TOKEN")
+
+
 def _token_oh():
-    t = os.environ.get("OH_CS_SB_TOKEN")
-    if t:
-        return t.strip()
+    for k in OH_CHEI:
+        if (os.environ.get(k) or "").strip():
+            return os.environ[k].strip()
     kb = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "core", "scripts", "kb.py")
-    return subprocess.run(["uv", "run", kb, "secret-get", "OH_CS_SB_TOKEN"], capture_output=True, text=True).stdout.strip()
+    try:
+        t = subprocess.run(["uv", "run", kb, "secret-get", "OH_TEAM_READ_TOKEN"], capture_output=True, text=True,
+                           timeout=120).stdout.strip()
+    except Exception:
+        t = ""
+    if not t:
+        sys.exit("Order Hub: lipseste cheia de citire (env %s sau KB OH_TEAM_READ_TOKEN). Nu cad pe AWBprint in "
+                 "tacere; calea veche: --source awb (doar pe serverul de scripturi)." % " / ".join(OH_CHEI))
+    return t
 
 
 def fetch_oh(month, brand):
@@ -319,8 +336,13 @@ def fetch_oh(month, brand):
     import urllib.request
     req = urllib.request.Request(OH_BAZA + "/api/cs/livrabilitate?luna=" + month,
                                  headers={"Authorization": "Bearer " + _token_oh(), "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=300) as r:
-        d = json.loads(r.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            d = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        cod = getattr(e, "code", None)
+        sys.exit("Order Hub /api/cs/livrabilitate nu raspunde (%s). Nu cad pe AWBprint in tacere."
+                 % ("HTTP %s" % cod if cod else type(e).__name__))
     col = {c: i for i, c in enumerate(d["coloane"])}
     rows, tcost = [], {}
     for x in d["randuri"]:
@@ -390,6 +412,14 @@ def hdr(t):
     print("-" * len(t))
 
 
+def sursa_implicita(arg):
+    """Order Hub implicit; AWBprint / VPS doar explicit (--source sau DELIVERABILITY_SURSA), niciodata fallback tacut."""
+    if arg:
+        return arg
+    env = (os.environ.get("DELIVERABILITY_SURSA") or "").strip().lower()
+    return env if env in ("awb", "vps") else "oh"
+
+
 def main():
     ap = argparse.ArgumentParser(description="Monitor livrabilitate / refuz ramburs Arona")
     ap.add_argument("--month", required=True, help="ex: 2026-05")
@@ -399,11 +429,13 @@ def main():
     ap.add_argument("--limit", type=int, default=20)
     ap.add_argument("--min-sent", type=int, default=30,
                     help="ignora bucketele cu mai putine colete trimise (zgomot)")
-    ap.add_argument("--source", choices=["awb", "oh", "vps"], default="oh",
+    ap.add_argument("--source", choices=["awb", "oh", "vps"], default=None,
                     help="oh = Order Hub (implicit: statusuri din colete, inclusiv intl, transport real); "
-                         "awb = AWBprint (statusurile INTL inghetate din 27-sep, subnumara Bucsa); "
+                         "awb = AWBprint, doar pe serverul de scripturi (statusurile INTL inghetate din 27-sep, subnumara Bucsa); "
+                         "intoarcere si cu DELIVERABILITY_SURSA=awb|vps; "
                          "vps = profitability.db de pe VPS prin SSH + judet din metrics (incomplet)")
     a = ap.parse_args()
+    a.source = sursa_implicita(a.source)
     brand = resolve_brand(a.brand)
 
     data = {"awb": fetch_awb, "oh": fetch_oh, "vps": fetch_vps}[a.source](a.month, brand)

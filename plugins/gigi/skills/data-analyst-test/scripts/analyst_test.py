@@ -49,11 +49,92 @@ FAST = {"București", "Ilfov", "Brașov", "Cluj", "Prahova", "Sibiu"}
 def csv_path(out): return os.path.join(out, "dataset_awb_30000.csv")
 
 
+# ── Order Hub (implicit din 24-oct-2026): AWBprint nu mai e deschis laptopurilor ──────────────────────────────────
+# `/api/cs/livrabilitate` dă o comandă pe rând: starea din COLETE, județul, curierul, transportul real FĂRĂ TVA, SKU-urile
+# distincte (fără cantități) și ziua comenzii. Nu dă data expedierii → o modelăm (ziua comenzii + 0/1 zile), ca data de
+# livrare. Starea se traduce în vocabularul AWBprint (Refuzata → back_to_sender, refuzul dominant), ca restul probei
+# (capcane, barem) să rămână neschimbat. Întoarcere: --source awb (doar pe serverul de scripturi).
+OH_BAZA = os.environ.get("OH_CS_BASE", "https://orderhub.arona.ro").rstrip("/")
+OH_CHEI = ("OH_TEAM_READ_TOKEN", "OH_PROFIT_CITIRE_TOKEN", "OH_CS_SB_TOKEN")
+OH_STARE = {"Livrata": "delivered", "Refuzata": "back_to_sender", "In curs de livrare": "in_transit"}
+OH_MAGAZIN = {"EST": "esteban.ro", "GT": "georgetalent.ro", "OFER": "ofertelezilei.ro", "BON": "casaofertelor.ro",
+              "LUX": "nocturnalux.ro", "NOC": "nocturna.ro", "GEN": "gento.ro", "ROSSI": "rossinails.ro",
+              "APR": "apreciat.ro", "RED": "reduceribune.ro", "CARP": "carpetto.ro", "GRAND": "grandia.ro",
+              "MAG": "magdeal.ro", "NUBRA": "nubra.ro", "BUC": "delabucsa.ro", "LAB": "labnoir.ro",
+              "ORC": "oriceredus.ro", "ART": "artevita.ro"}
+
+
+def oh_curier(c):
+    c = (c or "").lower()
+    return "DPD" if "dpd" in c else "Sameday" if "sameday" in c else "FAN Courier" if "fan" in c else (c or "necunoscut")
+
+
+def oh_get(path):
+    import urllib.request
+    tok = next((os.environ[k].strip() for k in OH_CHEI if (os.environ.get(k) or "").strip()), "") \
+        or secret("OH_TEAM_READ_TOKEN")
+    if not tok:
+        sys.exit("Order Hub: lipsește cheia de citire (env %s sau KB OH_TEAM_READ_TOKEN). "
+                 "Calea veche: --source awb (doar pe serverul de scripturi)." % " / ".join(OH_CHEI))
+    req = urllib.request.Request(OH_BAZA + path, headers={"Authorization": "Bearer " + tok, "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        sys.exit("Order Hub %s nu răspunde (%s). Nu cad pe AWBprint." % (path.split("?")[0],
+                 "HTTP %s" % e.code if getattr(e, "code", None) else type(e).__name__))
+
+
+def oh_rows(size, luni):
+    """Același tuplu ca SELECT-ul AWBprint, din ultimele `luni` luni ÎNCHEIATE, doar RO, cu SKU și stare rezolvată/pe drum."""
+    import re
+    azi = datetime.date.today().replace(day=1)
+    lista, z = [], azi
+    for _ in range(luni):
+        z = (z - datetime.timedelta(days=1)).replace(day=1)
+        lista.append(z.strftime("%Y-%m"))
+    rows = []
+    for luna in lista:
+        d = oh_get("/api/cs/livrabilitate?luna=" + luna)
+        col = {c: i for i, c in enumerate(d["coloane"])}
+        for x in d["randuri"]:
+            st = OH_STARE.get(x[col["stare"]])
+            jud = (x[col["judet"]] or "").strip()
+            skus = [k for k in (x[col["skus"]] or "").split(";") if k.strip()]
+            if not st or x[col["tara"]] != "Romania" or not jud or jud == "?" or not skus:
+                continue
+            m = re.match(r"^[A-Za-z]+", x[col["comanda"]] or "")
+            p = (m.group(0) if m else "").upper()
+            t = x[col["transport_fara_tva"]]
+            rows.append((x[col["comanda"]], st, jud, skus[0].strip().lower(), OH_MAGAZIN.get(p, p.lower()),
+                         oh_curier(x[col["curier"]]), round(float(t) * 1.21, 2) if t else None,   # gross, ca în dicționar
+                         float(x[col["total"]] or 0), len(skus), x[col["zi"]]))
+    random.shuffle(rows)
+    out = []
+    for oid, st, jud, sku, mag, cur, tc, tp, ic, zi in rows[:size]:
+        fc = datetime.datetime.strptime(zi, "%Y-%m-%d")
+        out.append((oid, st, jud, sku, mag, cur, tc, tp, ic, fc, fc + datetime.timedelta(days=random.randint(0, 1))))
+    return out
+
+
 def cmd_build(args):
-    import psycopg2
     random.seed(42)
     os.makedirs(args.out, exist_ok=True)
-    cx = psycopg2.connect(secret("DATABASE_URL_AWBPRINT")); cx.set_session(readonly=True); c = cx.cursor()
+    if args.source == "oh":
+        rows = oh_rows(args.size, args.luni)
+    else:
+        rows = awb_rows(args.size)
+    _build_din(args, rows)
+
+
+def awb_rows(size):
+    import psycopg2
+    try:
+        cx = psycopg2.connect(secret("DATABASE_URL_AWBPRINT"))
+    except Exception as e:
+        sys.exit("AWBprint nu se deschide de aici (%s); --source awb merge doar pe serverul de scripturi (84.46)."
+                 % type(e).__name__)
+    cx.set_session(readonly=True); c = cx.cursor()
     Q = """SELECT o.id, o.aggregated_status, o.shipping_address->>'province' AS judet,
       lower(trim(o.line_items->0->'inventory_item'->>'sku')) AS sku, s.name AS magazin, o.courier_name,
       o.transport_cost, o.total_price, o.item_count, o.frisbo_created_at, o.fulfilled_at
@@ -63,7 +144,12 @@ def cmd_build(args):
       AND o.aggregated_status IN ('delivered','back_to_sender','refused','unsuccessful_delivery',
                                   'lost_in_transit','returning_to_sender','customer_pickup','in_transit')
     ORDER BY random() LIMIT %s"""
-    c.execute(Q, (args.size,)); rows = c.fetchall()
+    c.execute(Q, (size,)); rows = c.fetchall()
+    cx.close()
+    return rows
+
+
+def _build_din(args, rows):
 
     def transit(cur, jud):
         b = BASE.get(cur, 3); b += 2 if jud in REMOTE else (0 if jud in FAST else 1)
@@ -264,7 +350,8 @@ Notăm: corectitudine · **explicarea pașilor** · **curățarea datelor** · r
 def write_barem(out, computed):
     header = "# BAREM / Soluție — Probă Data Analyst (document intern — NU se dă aplicanților)\n\n" \
              "> Cifrele de mai jos sunt calculate LIVE pe fișierul curent. Toleranță ±0,3pp.\n" \
-             "> Real din AWBprint: status, județ, produs, magazin, cost, valoare, date comandă+expediere.\n" \
+             "> Real din Order Hub (implicit; sau AWBprint cu --source awb): status, județ, produs, magazin, cost, valoare, " \
+             "data comenzii. Pe OH data expedierii e modelată (comanda + 0/1 zile).\n" \
              "> Modelat: data_livrare (real nu e stocat curat). Injectat: 20 anomalii cost + 6 capcane AI.\n\n"
     traps = """
 ## 🪤 Capcane AI (naiv vs corect) — vezi `_capcane_AI.json`
@@ -297,7 +384,12 @@ def main():
     ap.add_argument("cmd", choices=["build", "traps", "analyze", "all"])
     ap.add_argument("--size", type=int, default=30000)
     ap.add_argument("--out", default=os.path.expanduser("~/Downloads/Proba_Data_Analyst"))
+    ap.add_argument("--source", choices=["oh", "awb"], default=None,
+                    help="oh = Order Hub (implicit); awb = AWBprint, doar pe serverul de scripturi (sau ANALYST_TEST_SURSA=awb)")
+    ap.add_argument("--luni", type=int, default=3, help="oh: câte luni încheiate se eșantionează")
     args = ap.parse_args()
+    if args.source is None:
+        args.source = "awb" if (os.environ.get("ANALYST_TEST_SURSA") or "").strip().lower() == "awb" else "oh"
     args.out = os.path.expanduser(args.out)
     if args.cmd in ("build", "all"):
         cmd_build(args)
