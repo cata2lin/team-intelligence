@@ -24,11 +24,19 @@ Shopify și fără să confunzi comenzile refuzate cu venit.
 - „Cât valorează un client (**LTV**) pe cohortă?" → `ltv`
 - „Ce **vânzări/comenzi** urmează săptămânile viitoare?" → `forecast`
 
+## Unde rulează (din 24-oct-2026)
+- **`forecast` = Order Hub** (`/api/cs/livrabilitate`, livrate pe săptămâna comenzii), merge de pe laptop.
+  Cheia: env `OH_TEAM_READ_TOKEN` (→ `OH_PROFIT_CITIRE_TOKEN` → `OH_CS_SB_TOKEN`), altfel din KB. Calea veche
+  doar explicit: `--source awb` / `DATA_ANALYTICS_SURSA=awb`. OH căzut = eroare, nu cifra veche.
+  Comparat 24-oct (media 8 săpt.): esteban.ro 5.762 vs 5.767 AWBprint · grandia.ro 791 vs 790 · bonhaus.cz 1.198 vs 1.198.
+- **`rfm` / `cohort` / `ltv` = doar pe 84.46** (AWBprint): au nevoie de emailul clientului, iar OH n-are încă ruta
+  „comenzi livrate pe magazin cu email/telefon ca `bidx`". Pe laptop ies cu cod 2 și mesajul „ruta OH lipsește";
+  `all` rulează atunci doar `forecast`. Serverul e recunoscut după hostname (sau `ARONA_PE_SERVER=1`).
+- Test: `uv run scripts/test_sursa_oh.py`.
+
 ## Cum rulezi
 ```bash
 cd plugins/gigi/skills/data-analytics/scripts
-# secretul vine din KB automat; sau exportă-l o dată ca să fie instant:
-export DATABASE_URL_AWBPRINT="$(uv run ../../../../core/scripts/kb.py secret-get DATABASE_URL_AWBPRINT)"
 
 uv run data_analytics.py all      --store esteban.ro          # toate 4 analizele
 uv run data_analytics.py rfm      --store esteban.ro

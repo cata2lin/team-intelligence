@@ -21,7 +21,7 @@ DRY-RUN by default (`--apply` execută). Zero tokeni LLM — pur JSON-RPC peste 
     uv run rp.py snooze 312879 --until 2026-08-20 --apply
     uv run rp.py draft 312879 --body "Bună ziua, ..." --apply
 
-  PUNTE AWBprint → fișa CS (Custom Connector; vezi memoria richpanel-connector-write-api)
+  PUNTE AWBprint → fișa CS (Custom Connector; vezi memoria richpanel-connector-write-api) — DOAR pe 84.46
     uv run rp.py push --order GT54203             # dry-run: arată exact ce s-ar scrie
     uv run rp.py push --order GT54203 --apply
     uv run rp.py push --since 2026-08-15 --limit 50 --apply
@@ -149,7 +149,32 @@ class MCP:
 
 
 # ------------------------------------------------------------------- AWBprint
+# `push` are nevoie de emailul clientului (cheia fișei din Richpanel) + adresa: Order Hub n-are încă o rută cu
+# email/telefon ca `bidx` pe comandă, deci push-ul rămâne pe AWBprint DOAR pe server (84.46). Pe laptop iese
+# cu mesaj, fără să deschidă baza (24-oct-2026). Cronul run_rp_push.sh e OPRIT pe 84.46 din 19-aug.
+SERVERE = {"vmi2650854.contaboserver.net"}   # 84.46.242.181
+
+
+def pe_server():
+    """Server = hostname cunoscut sau ARONA_PE_SERVER=1 setat explicit în mediul serverului."""
+    import socket
+    if (os.environ.get("ARONA_PE_SERVER") or "").strip() == "1":
+        return True
+    try:
+        return socket.gethostname() in SERVERE
+    except Exception:
+        return False
+
+
+RUTA_LIPSA = ("push: ruta OH lipsește („comandă cu email/telefon ca bidx + AWB/curier/status, pe magazin”). "
+              "Push-ul are nevoie de emailul clientului, deci rulează doar pe 84.46 "
+              "(/root/Scripturi/run_rp_push.sh). Citirile (find/conv/list/verify) merg și de aici.")
+
+
 def awb_orders(where_sql, params):
+    if not pe_server():
+        print(RUTA_LIPSA, file=sys.stderr)
+        sys.exit(2)
     import psycopg
     # join pe `stores` ca să știm DOMENIUL magazinului -> cheia de connector corectă.
     # Fără asta am împinge datele unui magazin cu cheia altuia (contaminare între magazine).
@@ -159,7 +184,11 @@ def awb_orders(where_sql, params):
                      o.shopify_order_id, o.frisbo_created_at, s.name AS store_domain
               FROM orders o LEFT JOIN stores s ON s.uid = o.store_uid
               WHERE {where_sql}"""
-    with psycopg.connect(secret("DATABASE_URL_AWBPRINT")) as c:
+    try:
+        c = psycopg.connect(secret("DATABASE_URL_AWBPRINT"))
+    except Exception as e:   # mesajul psycopg poate conține DSN-ul: nu-l printăm
+        sys.exit(f"push: conectarea la AWBprint a eșuat ({type(e).__name__})")
+    with c:
         with c.cursor() as cur:
             cur.execute(sql, params)
             cols = [d[0] for d in cur.description]

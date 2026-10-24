@@ -11,6 +11,13 @@ venit = comenzi DELIVERED (refuzul COD nu e venit). Monetar în moneda magazinul
   uv run data_analytics.py ltv --store esteban.ro
   uv run data_analytics.py forecast --store esteban.ro --weeks 8
   uv run data_analytics.py all --store esteban.ro
+
+SURSE (24-oct-2026, AWBprint rămâne fără cititori de pe laptop):
+  forecast           → ORDER HUB `GET /api/cs/livrabilitate?luna=` (stare=Livrata, ziua comenzii București, total).
+                       Nu are nevoie de date de client. Calea veche doar explicit: --source awb.
+  rfm / cohort / ltv → au nevoie de IDENTITATEA clientului (email). Order Hub n-are încă ruta
+                       „comenzi livrate pe magazin cu email/telefon ca bidx" → rămân pe AWBprint DOAR pe server
+                       (84.46). Pe laptop ies cu cod 2 și mesaj clar, fără să deschidă baza.
 """
 import os, sys, argparse, subprocess, datetime as dt
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
@@ -26,6 +33,87 @@ def conn():
     p=urlsplit(url); OK={"host","port","dbname","user","password","sslmode","connect_timeout"}
     if p.query: url=urlunsplit((p.scheme,p.netloc,p.path,urlencode([(x,y) for x,y in parse_qsl(p.query,True) if x.lower() in OK]),p.fragment))
     c=psycopg2.connect(url); c.set_session(readonly=True); return c
+
+# ── unde rulează: AWBprint (date de client) doar pe server ──────────────
+SERVERE = {"vmi2650854.contaboserver.net"}   # 84.46.242.181 (team-intelligence pe /root/Scripturi)
+RUTA_LIPSA = ("ruta OH lipsește: „comenzi livrate pe magazin, cu email/telefon ca bidx (fără PII în clar)”; "
+              "%s are nevoie de identitatea clientului, deci rulează doar pe 84.46 (ssh root@84.46.242.181, "
+              "/root/Scripturi/team-intelligence). Pe laptop merge doar `forecast` (din Order Hub).")
+
+def pe_server():
+    """Server = hostname cunoscut sau ARONA_PE_SERVER=1 setat explicit în mediul serverului."""
+    import socket
+    if (os.environ.get("ARONA_PE_SERVER") or "").strip() == "1":
+        return True
+    try:
+        return socket.gethostname() in SERVERE
+    except Exception:
+        return False
+
+# ── Order Hub (forecast) ───────────────────────────────────────────────
+OH_BAZA = os.environ.get("OH_CS_BASE", "https://orderhub.arona.ro").rstrip("/")
+# prefixul comenzii → domeniul public (aceleași nume ca `stores.name` din AWBprint, ca `--store` să rămână la fel)
+PREFIX_DOMENIU = {
+    "APR": "apreciat.ro", "ART": "artevita.ro", "BELA": "belasil.ro", "BONBG": "bonhaus.bg", "CZ": "bonhaus.cz",
+    "HU": "bonhaus.hu", "PL": "bonhaus.pl", "SK": "bonhaus.sk", "CARP": "carpetto.ro", "BON": "casaofertelor.ro",
+    "COV": "covoria.ro", "BUC": "delabucsa.ro", "DUP": "duppo.bg", "DUPBG": "duppo.bg", "MD": "duppo.md",
+    "EST": "esteban.ro", "GEN": "gento.ro", "GT": "georgetalent.ro", "GRAND": "grandia.ro", "LAB": "labnoir.ro",
+    "MAG": "magdeal.ro", "LUX": "nocturnalux.ro", "NOC": "nocturna.ro", "NUBRA": "nubra", "OFER": "ofertelezilei.ro",
+    "ORC": "oriceredus.ro", "RED": "reduceribune.ro", "ROSSI": "rossinails.ro", "ZAF": "zafra.ro",
+}
+
+class OHIndisponibil(RuntimeError):
+    pass
+
+def token_oh():
+    """env OH_TEAM_READ_TOKEN → OH_PROFIT_CITIRE_TOKEN → OH_CS_SB_TOKEN → KB OH_TEAM_READ_TOKEN."""
+    for k in ("OH_TEAM_READ_TOKEN","OH_PROFIT_CITIRE_TOKEN","OH_CS_SB_TOKEN"):
+        v=(os.environ.get(k) or "").strip()
+        if v: return v
+    try: return kb("OH_TEAM_READ_TOKEN")
+    except Exception: return ""
+
+def oh_luna(luna):
+    import json, urllib.request, urllib.error, gzip
+    tok=token_oh()
+    if not tok: raise OHIndisponibil("lipsește cheia Order Hub (OH_TEAM_READ_TOKEN în env sau în KB)")
+    req=urllib.request.Request(f"{OH_BAZA}/api/cs/livrabilitate?luna={luna}",
+        headers={"Authorization":"Bearer "+tok,"Accept":"application/json","Accept-Encoding":"gzip"})
+    try:
+        with urllib.request.urlopen(req,timeout=300) as r:
+            b=r.read()
+            if r.headers.get("Content-Encoding")=="gzip": b=gzip.decompress(b)
+    except urllib.error.HTTPError as e:
+        raise OHIndisponibil(f"Order Hub a răspuns HTTP {e.code} pe luna {luna}")
+    except Exception as e:
+        raise OHIndisponibil(f"Order Hub nu răspunde pe luna {luna} ({type(e).__name__})")
+    d=json.loads(b.decode("utf-8"))
+    if not d.get("ok", True) or "randuri" not in d: raise OHIndisponibil(f"răspuns OH fără `randuri` pe luna {luna}")
+    return d
+
+def domeniu(comanda):
+    import re
+    m=re.match(r"^[A-Za-z]+",comanda or ""); pfx=(m.group(0) if m else "").upper()
+    return PREFIX_DOMENIU.get(pfx, pfx.lower())
+
+def saptamani_oh(store, azi=None, sapt=10, citeste=oh_luna):
+    """[(luni, comenzi_livrate, venit)] pe săptămâni ÎNTREGI, din OH, ultimele `sapt` + cea curentă (parțială)."""
+    azi=azi or dt.date.today()
+    start=azi-dt.timedelta(days=azi.weekday())-dt.timedelta(weeks=sapt)
+    luni=[]; l=start.replace(day=1)
+    while l<=azi:
+        luni.append(l.strftime("%Y-%m")); l=(l.replace(day=28)+dt.timedelta(days=4)).replace(day=1)
+    agg={}
+    for luna in luni:
+        d=citeste(luna); col={c:i for i,c in enumerate(d["coloane"])}
+        for x in d["randuri"]:
+            if x[col["stare"]]!="Livrata": continue
+            if store and store.lower() not in domeniu(x[col["comanda"]]): continue
+            zi=dt.date.fromisoformat(str(x[col["zi"]])[:10])
+            if zi<start: continue
+            wk=zi-dt.timedelta(days=zi.weekday())
+            a=agg.setdefault(wk,[0,0.0]); a[0]+=1; a[1]+=float(x[col["total"]] or 0)
+    return [(wk,n,round(v)) for wk,(n,v) in sorted(agg.items())]
 
 def store_clause(store): return ("AND s.name ILIKE %s", [f"%{store}%"]) if store else ("",[])
 
@@ -96,13 +184,20 @@ def ltv(cx, store):
         print(f"{str(coh):12} {cu:>8} {ao:>11} {lt:>10,.0f} {rp:>7}%")
     print("(LTV = venit mediu livrat/client; Repeat% = clienți cu 2+ comenzi)")
 
-def forecast(cx, store, weeks):
+def forecast(cx, store, weeks, rows=None):
+    if rows is None:
+        rows=forecast_rows_awb(cx, store)
+    _forecast_print(rows, store, weeks)
+
+def forecast_rows_awb(cx, store):
     w,p=store_clause(store)
     q=f"""SELECT date_trunc('week',o.frisbo_created_at)::date wk, COUNT(*) n, ROUND(SUM(o.total_price)) rev
       FROM orders o JOIN stores s ON s.uid=o.store_uid
       WHERE o.aggregated_status='delivered' AND o.frisbo_created_at > now()-interval '52 weeks' {w}
       GROUP BY 1 ORDER BY 1"""
-    with cx.cursor() as c: c.execute(q,p); rows=c.fetchall()
+    with cx.cursor() as c: c.execute(q,p); return c.fetchall()
+
+def _forecast_print(rows, store, weeks):
     if len(rows)<8: print("\nforecast: date insuficiente"); return
     series=rows[:-1]  # drop current partial week
     last8=series[-8:]
@@ -124,13 +219,33 @@ def main():
     ap.add_argument("analysis", choices=["rfm","cohort","ltv","forecast","all"])
     ap.add_argument("--store", default="esteban.ro", help="filtru magazin (ILIKE); '' = toate (atenție monedă)")
     ap.add_argument("--months", type=int, default=12); ap.add_argument("--weeks", type=int, default=8)
+    ap.add_argument("--source", choices=["oh","awb"], default=(os.environ.get("DATA_ANALYTICS_SURSA") or "oh").strip().lower(),
+                    help="forecast: oh (implicit, Order Hub) | awb (calea veche, doar ca întoarcere)")
     a=ap.parse_args()
     store=None if a.store=="" else a.store
-    cx=conn()
-    if a.analysis in ("rfm","all"): rfm(cx,store)
-    if a.analysis in ("cohort","all"): cohort(cx,store,a.months)
-    if a.analysis in ("ltv","all"): ltv(cx,store)
-    if a.analysis in ("forecast","all"): forecast(cx,store,a.weeks)
+    pii=[x for x in ("rfm","cohort","ltv") if a.analysis in (x,"all")]
+    if pii and not pe_server():
+        print(RUTA_LIPSA % "/".join(pii), file=sys.stderr)
+        if a.analysis=="all":
+            print("(rulez doar forecast)\n", file=sys.stderr); pii=[]
+        else:
+            sys.exit(2)
+    cx=None
+    if pii or (a.analysis in ("forecast","all") and a.source=="awb"):
+        try: cx=conn()
+        except Exception as e: sys.exit(f"EROARE: conectarea la AWBprint a eșuat ({type(e).__name__}).")
+    if "rfm" in pii: rfm(cx,store)
+    if "cohort" in pii: cohort(cx,store,a.months)
+    if "ltv" in pii: ltv(cx,store)
+    if a.analysis in ("forecast","all"):
+        if a.source=="awb":
+            forecast(cx,store,a.weeks)
+        else:
+            try: rows=saptamani_oh(store)
+            except OHIndisponibil as e:
+                sys.exit(f"EROARE: {e}. Nu dau cifra veche în locul ei; calea veche doar explicit: --source awb.")
+            print("(sursa: Order Hub /api/cs/livrabilitate — livrate pe săptămâna comenzii, ora București)")
+            forecast(None,store,a.weeks,rows=rows)
 
 if __name__=="__main__":
     main()

@@ -16,10 +16,12 @@ uv run cs_ghost_shipments.py --json           # pt automatizare
 ```
 
 ## Cum funcționează
-- Citește DOAR din `data/profitability.db` (`profit_orders`, prin SSH la VPS). Read-only total.
-- Semnal 1 — FANTOMĂ: `shopify_delivery_status='LABEL_PRINTED'` + `status_category='Netrimisa'` + `created_at` mai vechi de N zile. AWB-ul există (DPD, `courier_status='Shipment data received'` = înregistrat dar nescanat la ridicare).
-- Semnal 2 — FĂRĂ TRACKING: `status_category='Lipsa awb'` = marcat expediat/FULFILLED fără AWB deloc → clientul are mail de expediere dar n-are ce urmări.
-- Contact (nume/telefon/oraș) din `metrics.orders`. Output per magazin, sortat după vechime apoi valoare; acțiune sugerată per colet + sumar cu valoarea blocată.
+- **Sursa = Order Hub** (din 24-oct-2026): `GET /api/cs/neplecate-vechi` — coada de lucru CS, comenzile neplecate mai vechi de N zile, cu motivul fiecăreia, fără comenzile demo. Cheia: env `OH_TEAM_READ_TOKEN` (→ `OH_PROFIT_CITIRE_TOKEN` → `OH_CS_SB_TOKEN`), altfel din KB.
+- FANTOMĂ = comandă neplecată cu etichetă vie: `culeasa_nepredata` (culeasă, curierul n-a scanat-o), `eticheta_in_teanc` (printată, pierdută din teanc), `eticheta_neprintata`, `awb_nepreluat`.
+- FĂRĂ TRACKING = fără etichetă vie, dar marcată expediată în Shopify.
+- Coletele pierdute în tranzit nu-s „neplecate" → `cs-proactive-delays`.
+- Contact (nume/telefon/oraș) din `metrics.orders`. Output per magazin, sortat după vechime apoi valoare; acțiune sugerată pe motivul OH + sumar.
+- Calea veche (`profit_orders` prin SSH + AWBprint) doar explicit: `--source awb` / `CS_GHOST_SURSA=awb`. Dacă OH nu răspunde → eroare, nu cifra veche. Test: `uv run test_sursa_oh.py`.
 
 ## Note
 - Aproape toate fantomele sunt DPD-RO cu „Shipment data received" — semnal curat de etichetă nescanată.
