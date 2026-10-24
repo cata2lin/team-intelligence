@@ -34,6 +34,15 @@ KB = next((c for c in KB_CAI if os.path.exists(c)), KB_CAI[0])
 # corecte, iar cele gresite erau la limita (marfa s-a vandut in 3,4-3,5 luni, nu in 4).
 PRAG_LUNI = 4.0
 PRAG_NOU = 300             # produs nou: peste atat fara test = blocat
+ZILE_FEREASTRA = 30        # fereastra vitezei; listat mai recent = produs nou (regula 3)
+
+
+def _mii(n):
+    return format(int(round(n)), ",d").replace(",", ".")
+
+
+def _zec(x):
+    return ("%.1f" % x).replace(".", ",")
 # Masurat pe istoric (23-oct): sub 500 de bucati sell-through-ul la 90 de zile e 26-41%, peste
 # 500 cade la 9-15%. 44 de linii peste prag inseamna 817.337 lei, jumatate din capitalul cohortei,
 # la 12% sell-through median. Regula asta prinde cazul pe care lunile de stoc il lasa sa treaca:
@@ -186,6 +195,16 @@ def viteza_order_hub(skus):
         return {}, ""
 
 
+def zile_stoc_zero(valori_recente_intai):
+    """Cate instantanee la rand, incepand cu cel mai recent, au stoc 0."""
+    n = 0
+    for q in valori_recente_intai:
+        if q > 0:
+            break
+        n += 1
+    return n
+
+
 def kituri():
     """componenta -> kitul a carui viteza o mosteneste (vezi po_garda_kituri.json)"""
     try:
@@ -264,6 +283,27 @@ def date_de_fond(skus):
     vandabile = {r[0] for r in m.fetchall()}
     for s in out:
         out[s]["componenta"] = s not in vandabile
+    # Varsta listarii = prima data cand SKU-ul a aparut pe ORICARE magazin (Shopify createdAt al
+    # variantei). NU `publishedAt`: se muta la fiecare republicare (lampile 51650: listate in
+    # ianuarie, „publicate" pe 20-oct).
+    m.execute("""SELECT upper(v.sku), min(coalesce(v."shopifyCreatedAt", p."shopifyCreatedAt", v."createdAt"))::date
+                 FROM variants v LEFT JOIN products p ON p.id = v."productId"
+                 WHERE upper(v.sku) = ANY(%s) GROUP BY 1""", (skus,))
+    for s, d in m.fetchall():
+        if s in out:
+            out[s]["listat_la"] = d
+    # Zile la rand cu stoc 0 pana azi (instantaneele zilnice de stoc din Shopify, suma pe magazine).
+    # Cat timp n-a fost marfa, nu s-a putut vinde: viteza pe 30 de zile iese mai mica decat cererea.
+    m.execute("""SELECT upper(sku), "snapshotDate", sum(greatest(coalesce("quantityAvailable", 0), 0))
+                 FROM inventory_daily_snapshots
+                 WHERE upper(sku) = ANY(%s) AND "snapshotDate" >= current_date - 60
+                 GROUP BY 1, 2 ORDER BY 1, 2 DESC""", (skus,))
+    serie = {}
+    for s, d, q in m.fetchall():
+        serie.setdefault(s, []).append(int(q or 0))
+    for s, valori in serie.items():
+        if s in out:
+            out[s]["zile_stoc_zero"] = zile_stoc_zero(valori)
     met.close()
 
     # Stocul fizic din scanerul de depozit (toate statiile). Baza sta pe 84.46.242.181; daca
@@ -338,30 +378,53 @@ def verifica(linii, azi=None, blacklist=()):
         # REGULA 2 (poarta principala, decizia ownerului 22/23-oct): cantitate <= viteza_30z x 4 luni,
         # viteza din Order Hub, pe SKU. Calibrarea de 4 luni din back-test e exact raportul asta.
         luni_comandate = (q / viteza) if viteza else None
+        # PRODUS NOU (Orchestrator 24-oct): fara vanzari, SAU listat de mai putin de 30 de zile (fereastra
+        # vitezei nu e plina, deci viteza e subestimata) -> regula 3 (test 200-300), NICIODATA regula 2.
+        listat = f.get("listat_la")
+        if isinstance(listat, str):
+            listat = datetime.date.fromisoformat(listat[:10])
+        zile_listat = (azi - listat).days if listat else None
+        nou_listat = zile_listat is not None and zile_listat < ZILE_FEREASTRA
+        nou = (viteza == 0) or nou_listat
+        rezumat = None
+        tip = None
         if componenta:
             pass                      # ambalaj / materie prima: se judeca pe consum, nu aici
-        elif viteza and q > viteza * PRAG_LUNI:
+        elif nou:
+            if q > PRAG_NOU:
+                de_ce = ("listat de %d zile (sub fereastra de %d)" % (zile_listat, ZILE_FEREASTRA)
+                         if nou_listat else "fara vanzari in ultimele 30 de zile")
+                motive.append("regula 3: produs nou — %s — si comanda de %d buc, peste testul de %d"
+                              " — daca e COMPONENTA DE KIT, judec-o pe viteza kitului si semneaza motivul"
+                              % (de_ce, q, PRAG_NOU))
+                rezumat = "%s buc pe un produs nou (%s), peste testul de %d buc" % (_mii(q), de_ce, PRAG_NOU)
+                tip = "nou"
+        elif q > viteza * PRAG_LUNI:
             motive.append("regula 2: comanzi %d buc = %.1f luni de vanzari (viteza %d/luna in Order Hub)"
                           " — peste %d buc (viteza x %.0f luni)"
                           % (q, luni_comandate, viteza, int(viteza * PRAG_LUNI), PRAG_LUNI))
-        elif viteza == 0:
-            if q > PRAG_NOU:
-                motive.append("produs fara vanzari in ultimele 30 de zile si comanda de %d buc "
-                              "(peste testul de %d) — daca e COMPONENTA DE KIT, judec-o pe viteza "
-                              "kitului si treci blocajul cu motiv scris" % (q, PRAG_NOU))
+            rezumat = "%s buc = %s luni de vânzări (%s/lună în Orders), peste plafonul de %.0f luni" % (
+                _mii(q), _zec(luni_comandate), _mii(viteza), PRAG_LUNI)
+            tip = "luni"
         elif luni > PRAG_LUNI:
             # Regula 2 trece, dar cu raftul si ce e pe drum ajungi tot peste 4 luni.
             motive.append("%.1f luni de stoc dupa comanda (stoc %d + pe drum %d + %d, viteza %d/luna) "
                           "— peste pragul de %.0f" % (luni, f.get("stoc") or 0, f.get("pe_drum") or 0,
                                                       q, viteza, PRAG_LUNI))
+            rezumat = ("%s buc + %s pe raft + %s pe drum = %s luni de stoc (%s/lună în Orders), peste plafonul "
+                       "de %.0f luni" % (_mii(q), _mii(f.get("stoc") or 0), _mii(f.get("pe_drum") or 0),
+                                         _zec(luni), _mii(viteza), PRAG_LUNI))
+            tip = "stoc"
         nume = fara_diacritice((f.get("nume") or "") + " " + (l.get("nume") or ""))
         categorie = fara_diacritice((f.get("categorie") or "") + " " + (l.get("categorie") or ""))
         if VARA.search(nume) and in_fereastra(azi, FEREASTRA_BLOCATA["vara"]):
+            tip = tip or "vara"
             motive.append("produs de vara comandat intre 2 noiembrie si 31 august: nu mai ajunge pe raft "
                           "pana la 15 martie (se comanda 1 septembrie – 1 noiembrie)")
         if CRACIUN.search(nume + " " + categorie) and in_fereastra(azi, FEREASTRA_BLOCATA["craciun"]):
+            tip = tip or "craciun"
             motive.append("produs de Craciun comandat dupa 1 iulie: nu mai ajunge pe raft pana la 1 noiembrie")
-        if not componenta and q >= PRAG_BUCATI:
+        if not componenta and not nou and q >= PRAG_BUCATI:
             # Marimea singura NU blocheaza un produs care chiar se vinde: raftul metalic din
             # TOM-075 are 739 buc/luna, deci 1.000 de bucati inseamna 1,4 luni — comanda sanatoasa.
             # Blocheaza doar impreuna cu lunile de stoc; altfel ramane avertisment, fiindca peste
@@ -376,8 +439,10 @@ def verifica(linii, azi=None, blacklist=()):
                     "%.1f luni. Daca ritmul scade la jumatate, stocul tine de doua ori mai mult"
                     % (q, viteza, luni or 0))
         if s in blacklist:
+            tip = tip or "blacklist"
             motive.append("SKU pe blacklist (stop la re-comanda)")
         if l.get("refuz") is not None and l["refuz"] > PRAG_REFUZ:
+            tip = tip or "refuz"
             motive.append("refuz %.0f%%, peste pragul de %.0f%%" % (l["refuz"], PRAG_REFUZ))
         h = (hot or {}).get(s)
         avertismente = list(avertismente_marime)
@@ -390,7 +455,13 @@ def verifica(linii, azi=None, blacklist=()):
             avertismente.append("pagina eMAG e %s: cererea pe piata e mica" % h)
         elif h is None and not componenta:
             avertismente.append("produsul n-are pagina pe eMAG, deci nu avem semnal de cerere de acolo")
+        if motive and not rezumat:
+            rezumat = motive[0]
         rez.append({"sku": s, "qty": q, "nume": (f.get("nume") or "")[:50],
+                    "rezumat": rezumat, "tip_blocaj": tip if motive else None,
+                    "produs_nou": bool(nou and not componenta),
+                    "zile_stoc_zero": f.get("zile_stoc_zero"),
+                    "zile_de_la_listare": zile_listat,
                     "luni_comandate": round(luni_comandate, 1) if luni_comandate else None,
                     "componenta": bool(componenta), "viteza_din_kit": f.get("viteza_din_kit"),
                     "stoc": f.get("stoc"), "pe_drum": f.get("pe_drum"), "viteza30": viteza,
