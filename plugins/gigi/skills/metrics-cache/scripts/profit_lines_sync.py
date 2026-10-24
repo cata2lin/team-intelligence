@@ -52,7 +52,7 @@ def _sursa_cost():
 
 
 def _oh_token():
-    return (os.environ.get("OH_COST_TOKEN") or os.environ.get("OH_CS_SB_TOKEN") or "").strip()
+    return pc.cheie_oh_citire()
 
 
 def _ensure():
@@ -118,8 +118,10 @@ async def sync_store(cl, st, ym, start, end, sursa="engine", overrides=None, sur
         try:
             loturi = await asyncio.to_thread(pc.cost_loturi_oh, coduri, _oh_token(), shop)
         except RuntimeError as e:
-            print(f"  {prefix}: ⚠ Order Hub fără loturi ({str(e)[:80]}) — linii pe Shopify, ca engine-ul")
-            loturi = {}
+            # comutatorul e pe OH: liniile scrise pe Shopify ar arăta ca o lună întreagă fără cost transport
+            # maritim, fără niciun semn. Mai bine păstrăm liniile de ieri și spunem de ce.
+            print(f"  {prefix}: ⚠ Order Hub fără loturi ({str(e)[:80]}) — păstrez liniile existente")
+            return None
     # G1: agregă pe (comandă, SKU) — același SKU pe 2 variante NU mai face coliziune PK; linii fără SKU → UNKNOWN_SKU.
     perkey = defaultdict(lambda: [0, 0.0, 0.0])   # (name,key) -> qty, line_revenue, line_cogs
     for name, zi, agg in raw:
@@ -156,6 +158,11 @@ async def main(ym, which):
         stores = [s for s in stores if s["prefix"] == which]
     _ensure()
     sursa, overrides = _sursa_cost()
+    if sursa == "oh":
+        try:
+            pc.cere_cheie_oh("profit_lines_sync (cogs_sursa=oh)")
+        except pc.CheieOHLipsa as e:
+            sys.exit("EROARE: %s" % e)
     proba = "--proba" in sys.argv
     print(f"sursa COGS = {sursa} · {len(overrides)} override-uri" + (" · PROBĂ: nu scriu" if proba else ""))
     async with httpx.AsyncClient() as cl:

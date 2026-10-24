@@ -1014,17 +1014,31 @@ OH_LOT_MAX = 2000
 VAT_COGS_RO = 0.21        # TVA-ul cu care intra marfa in RO; vezi `cogs_fara_tva`
 
 
+# aceeași ordine ca `profit_core.OH_CHEI_CITIRE`: cheia dedicată de citire întâi, apoi rezervele vechi
+OH_CHEI_CITIRE = ("OH_PROFIT_CITIRE_TOKEN", "OH_CS_SB_TOKEN", "OH_COST_TOKEN")
+
+
+class _SursaOHGoala(RuntimeError):
+    """Comutatorul e pe Order Hub, dar procesul n-are cheie: oprim rularea în loc să întoarcem cifra veche."""
+
+
 def _oh_token() -> str:
-    return (os.environ.get("OH_COST_TOKEN") or os.environ.get("OH_CS_SB_TOKEN") or "").strip()
+    for v in OH_CHEI_CITIRE:
+        t = (os.environ.get(v) or "").strip()
+        if t:
+            return t
+    return ""
 
 
 async def _cost_loturi_oh(client, magazin: str, coduri: list) -> dict:
     """{cod_jos: [(data_lot, cost_ex_tva, are_navlu)] descrescător}. Nu aruncă: fără loturi, apelantul
     rămâne pe Shopify și o spune în log — un Order Hub căzut n-are voie să scadă tăcut COGS-ul."""
     token = _oh_token()
-    if not token or not coduri:
-        if not token:
-            log.warning("S2: fără cheie de Order Hub (OH_COST_TOKEN) — COGS rămâne pe Shopify")
+    if not token:
+        # se cheamă doar cu cogs_sursa='oh': fără cheie, COGS-ul ar trece tăcut pe Shopify → oprim rularea
+        raise RuntimeError("S2: cogs_sursa=oh, dar nu există cheie de citire Order Hub în mediu (%s)"
+                           % " / ".join(OH_CHEI_CITIRE))
+    if not coduri:
         return {}
     out = {}
     for i in range(0, len(coduri), OH_LOT_MAX):
@@ -2274,6 +2288,9 @@ def get_report(
         _css = sqlite3.connect(str(DB_PATH), timeout=60.0)
         _sursa_status = _soh.sursa_activa(_css); _css.close()
         if _sursa_status == "oh":
+            if not _soh.token():
+                raise _SursaOHGoala("status_sursa=oh, dar nu există cheie de citire Order Hub (%s)"
+                                    % " / ".join(OH_CHEI_CITIRE))
             _oh_stare = {}
             for _m in month_list:
                 for _k, _v in _soh.pe_comenzi(_m).items():
@@ -2285,6 +2302,8 @@ def get_report(
                     o["status_category"] = _s
                     _nflip += 1
             log.info("status OH comutat: %d comenzi reclasificate din OH", _nflip)
+    except _SursaOHGoala:
+        raise
     except Exception as e:
         log.warning("status OH indisponibil (%s); ramane cascada veche", e)
 
@@ -2454,6 +2473,11 @@ def get_report(
     except Exception as e:
         log.warning("transport OH indisponibil (%s); umbra goală", e)
         _toh, oh_transport, _sursa_transport = None, {}, "awbprint"
+        if (os.environ.get("TRANSPORT_SURSA") or "").strip().lower() == "oh":
+            raise _SursaOHGoala("TRANSPORT_SURSA=oh, dar transportul din Order Hub nu s-a putut citi (%s)" % e)
+    if _sursa_transport == "oh" and not _toh.token():
+        raise _SursaOHGoala("TRANSPORT_SURSA=oh, dar nu există cheie de citire Order Hub (%s)"
+                            % " / ".join(OH_CHEI_CITIRE))
 
     # Collect unmapped statuses across all orders
     all_unmapped = defaultdict(int)

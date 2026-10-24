@@ -35,7 +35,7 @@ def token() -> Optional[str]:
     global _token_cache
     if _token_cache:
         return _token_cache
-    t = (os.environ.get("OH_CS_SB_TOKEN") or "").strip()
+    t = (os.environ.get("OH_PROFIT_CITIRE_TOKEN") or os.environ.get("OH_CS_SB_TOKEN") or "").strip()
     if not t:
         try:
             t = subprocess.run([UV, "run", KB, "secret-get", "OH_CS_SB_TOKEN"],
