@@ -86,6 +86,35 @@ def comision_trendyol(comenzi, decontari):
     return out
 
 
+def perioade_transport(colete, facturi):
+    """{perioadă: (lunile ei, lei facturați)} — funcție pură (testată).
+
+    Facturile de transport Trendyol vin la 1–4 săptămâni după livrare, deci nu se pot pune pe luna lor. Lunile cu colete
+    fără cost se grupează în perioade continue (fără lună goală între ele: apr | iul–aug | oct), iar fiecare factură merge
+    pe perioada ultimei luni cu colete de dinaintea ei. Fără asta, 23k lei facturați în mai pentru aprilie s-ar fi
+    împărțit și pe coletele din iulie. Facturile dinaintea primei luni cu colete (comenzi din afara ferestrei) se ignoră."""
+    luni_c = sorted({l for l, _ in colete})
+    if not luni_c:
+        return {}
+
+    def urm(l):
+        y, m = map(int, l.split("-"))
+        return "%04d-%02d" % (y + (m == 12), m % 12 + 1)
+    perioade, cur = [], [luni_c[0]]
+    for l in luni_c[1:]:
+        if l == urm(cur[-1]):
+            cur.append(l)
+        else:
+            perioade.append(cur); cur = [l]
+    perioade.append(cur)
+    out = {"%s..%s" % (p[0], p[-1]): [set(p), 0.0] for p in perioade}
+    for luna, lei in facturi.items():
+        ale = [p for p in perioade if p[0] <= luna]
+        if ale:
+            out["%s..%s" % (ale[-1][0], ale[-1][-1])][1] += lei
+    return {k: (v[0], v[1]) for k, v in out.items()}
+
+
 def decontari_trendyol(start, end):
     """({orderNumber: comision lei}, cota medie comision/vânzare, {luna factură: transport lei}) din API-ul Trendyol."""
     import trendyol_profitability as T
@@ -104,10 +133,14 @@ def decontari_trendyol(start, end):
     transport = collections.defaultdict(float)
     vazute = set()
     for r in T.fetch_other_financials(start, end + dt.timedelta(days=45)):
-        if r.get("id") in vazute or "SHIPPING" not in str(r.get("transactionType") or "").upper():
+        tip = str(r.get("transactionType") or "").upper()
+        # transportul + taxele Trendyol (produs lipsă / greșit / nelivrat): ambele se rețin din plată. Facturile de
+        # comision NU: comisionul e deja reținut în `sellerRevenue` (verificat pe plăți, 24-oct)
+        if r.get("id") in vazute or not ("SHIPPING" in tip or "FEE" in tip):
             continue
         vazute.add(r.get("id"))
-        luna = dt.datetime.fromtimestamp((r.get("transactionDate") or 0) / 1000).strftime("%Y-%m")
+        # factura vine săptămânal, pe coletele din săptămâna de dinainte: cea din 1–7 ale lunii e a lunii trecute
+        luna = (dt.datetime.fromtimestamp((r.get("transactionDate") or 0) / 1000) - dt.timedelta(days=7)).strftime("%Y-%m")
         transport[luna] += float(r.get("debt") or 0) - float(r.get("credit") or 0)
     return dict(com), cota, dict(transport)
 
@@ -229,17 +262,22 @@ def main():
 
     # transportul istoric Trendyol: facturile Trendyol de transport (TVA 0%) pe coletele fără cost în Orders
     tarif = {}
-    n_fara = sum(ty_fara_colet.values())
-    if transp_ty and n_fara:
-        # doar facturile de la prima lună cu colete fără cost încoace: cele dinainte sunt ale comenzilor din afara
-        # ferestrei (mai 2026 = 23k lei pe comenzile din aprilie)
-        prima = min(l for l, _ in ty_fara_colet)
-        transp_ty = {l: v for l, v in transp_ty.items() if l >= prima}
-        pe_colet = sum(transp_ty.values()) / n_fara
+    for per, (luni_per, cost) in perioade_transport(ty_fara_colet, transp_ty).items():
+        n = sum(v for (l, _), v in ty_fara_colet.items() if l in luni_per)
+        if not n:
+            continue
+        if cost <= 0:
+            # fără factură Trendyol (coletele le-am trimis noi, cu DPD): tariful fix al motorului, nu 0 lei
+            for (luna, pfx) in ty_fara_colet:
+                if luna in luni_per:
+                    tarif[(luna, pfx)] = None
+            print("transport Trendyol %s: nicio factură pe %d colete fără cost în Orders → tariful fix (estimat)" % (per, n))
+            continue
         for (luna, pfx) in ty_fara_colet:
-            tarif[(luna, pfx)] = round(pe_colet * 1.21, 4)   # motorul scoate TVA-ul de 21% din tarif
-        print("transport Trendyol: facturi %.2f lei pe %d colete fără cost în Orders → %.2f lei/colet"
-              % (sum(transp_ty.values()), n_fara, pe_colet))
+            if luna in luni_per:
+                tarif[(luna, pfx)] = round(cost / n * 1.21, 4)   # motorul scoate TVA-ul de 21% din tarif
+        print("transport Trendyol %s: facturi %.2f lei pe %d colete fără cost în Orders → %.2f lei/colet"
+              % (per, cost, n, cost / n))
 
     print("comision Trendyol: %d comenzi cu decontare, cota reală %.1f%%" % (len(com_ty), 100 * cota_ty))
     for k in sorted(sumar):
@@ -273,6 +311,9 @@ def main():
                 "status_category, tags, skus, shopify_delivery_status, comision, comision_sursa) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", randuri[luna])
         for (luna, pfx), cost in tarif.items():
+            if cost is None:
+                cx.execute("DELETE FROM profit_transport_costs WHERE month = ? AND prefix = ?", (luna, pfx))
+                continue
             cx.execute("INSERT OR REPLACE INTO profit_transport_costs (month, prefix, cost_per_parcel, vat_included) "
                        "VALUES (?, ?, ?, 0)", (luna, pfx, cost))
     print("SCRIS: %d rânduri pe %d luni" % (sum(len(v) for v in randuri.values()), len(randuri)))
