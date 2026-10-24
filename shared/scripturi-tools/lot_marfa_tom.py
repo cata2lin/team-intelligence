@@ -169,8 +169,10 @@ def foaie_din_oh(token: str) -> dict:
                 sufixe[m.group(1)] = c
             if c.isdigit():
                 sufixe[c.lstrip("0")] = c
+        lot_oh = (d.get("lot") or {}) if isinstance(d, dict) else {}
         out[cod] = {"data_sosire": l.get("data_sosire"), "coduri": coduri, "sufixe": sufixe,
-                    "stare": l.get("stare"), "sursa": l.get("sursa")}
+                    "stare": l.get("stare"), "sursa": l.get("sursa"),
+                    "transport_real": lot_oh.get("transport_total") is not None}
     print("foaia din OH: %d loturi, %d cu dată de sosire, %d cu linii"
           % (len(out), sum(1 for v in out.values() if v["data_sosire"]), sum(1 for v in out.values() if v["coduri"])))
     return out
@@ -229,6 +231,21 @@ def _linie_oh(l: dict, cod_sursa: str, master, legatura: str, nota: str) -> dict
     if l["transport_buc"] is not None:
         out["transport_buc"] = str(l["transport_buc"])      # products.transportUnitUsd (445 produse), nefolosit până azi
     return out
+
+
+def pastreaza_transport_real(loturi: list, foaie: dict) -> int:
+    """Pe loturile care au deja costul de transport maritim REAL în OH (`transport_total`, din facturile GOPET,
+    repartizat pe CBM pe linii), nu trimite estimarea TOM (`products.transportUnitUsd`): altfel importul la 6 ore ar
+    rescrie `transport_buc` real cu estimarea. Scoate cheia din linii (îmbinarea OH păstrează ce e scris). Întoarce
+    câte linii au păstrat costul real."""
+    n = 0
+    for x in loturi:
+        if not (foaie.get(x["cod"]) or {}).get("transport_real"):
+            continue
+        for l in x["linii"]:
+            if l.pop("transport_buc", None) is not None:
+                n += 1
+    return n
 
 
 def construieste(linii: list, foaie: dict, token_citire: str) -> tuple:
@@ -400,6 +417,7 @@ def main() -> int:
     token_citire = "" if a.fara_oh else secret("OH_CS_SB_TOKEN")
     foaie = {} if a.fara_oh else foaie_din_oh(token_citire)
     loturi, raport, anulate = construieste(linii, foaie, token_citire)
+    raport["transport_real_pastrat"] = pastreaza_transport_real(loturi, foaie)
 
     print("loturi: %(loturi)d · linii: %(linii)d (dovadă %(dovada)d, candidat %(candidat)d, cu master %(cu_master)d, "
           "cu transport/buc %(cu_transport_buc)d) · linii de grup nerepartizate: %(linii_grup_nerepartizate)d · "
