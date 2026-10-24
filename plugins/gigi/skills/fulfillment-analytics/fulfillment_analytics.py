@@ -55,6 +55,10 @@ PREFIX_TO_STORE = {
     "PAT": "cepatai.ro", "GRAN": "grandia.ro", "MAG": "magdeal.ro",
     "COV": "covoria.ro", "NUB": "nubra", "CZ": "bonhaus.cz", "PL": "bonhaus.pl",
     "BG": "bonhaus.bg",
+    # prefixele noi (aceleași domenii ca `stores.name` din AWBprint), ca OH și AWBprint să aibă aceeași etichetă
+    "BUC": "delabucsa.ro", "BUCSA": "delabucsa.ro", "DUPBG": "duppo.bg", "DUP": "duppo.bg",
+    "ORC": "oriceredus.ro", "SK": "bonhaus.sk", "HU": "bonhaus.hu", "ART": "artevita.ro",
+    "LAB": "labnoir.ro", "MD": "duppo.md",
 }
 
 S_DELIVERED = {"delivered", "customer_pickup", "administrative_closure"}
@@ -465,6 +469,261 @@ def rep_stuck(cur, frm, to, stores, days, limit):
     return ["Brand", "Comandă", "Status", "Zile vechime", "Curier", "Ghost(AWB nescanat)"], rows[:limit], f"blocate > {days} zile"
 
 
+# ════════════════════════ Order Hub (implicit din 24-oct-2026) ════════════════════════
+# AWBprint rămâne fără cititori pe laptopuri: statusurile intl sunt înghețate acolo din 27-sep și `transport_cost` e gol
+# din 28-aug. Order Hub dă starea din COLETE (`GET /api/cs/livrabilitate`, o comandă pe rând, ziua de București) și
+# transportul real FĂRĂ TVA. Ce NU are ruta, dinadins (fără PII / plată): metoda de plată, reducerea, orașul, telefonul,
+# numărul AWB-ului. Rapoartele care au nevoie de ele rămân pe AWBprint, doar cu `--source awb`, pe serverul de scripturi.
+OH_BAZA = os.getenv("OH_CS_BASE", "https://orderhub.arona.ro").rstrip("/")
+OH_CHEI = ("OH_TEAM_READ_TOKEN", "OH_PROFIT_CITIRE_TOKEN", "OH_CS_SB_TOKEN")
+_OH_NORM = {"GRAND": "GRAN", "NUBRA": "NUB", "BONBG": "BG"}   # prefixul comenzii în OH → prefixul de aici
+OH_BUCKET = {"Livrata": "delivered", "Refuzata": "refused", "In curs de livrare": "in_transit",
+             "Netrimisa": "pending", "Anulata": "other"}
+DOAR_AWB = {  # (raport, by) → ce lipsește din Order Hub
+    ("refuse", "payment"): "metoda de plată (COD/prepaid)",
+    ("refuse", "discount"): "reducerea comenzii",
+    ("cod", None): "metoda de plată (COD/prepaid)",
+    ("geo", "city"): "orașul (ruta dă doar județul)",
+    ("repeat", None): "telefonul clientului (date personale)",
+}
+
+
+def _oh_token():
+    for k in OH_CHEI:
+        if (os.getenv(k) or "").strip():
+            return os.getenv(k).strip()
+    t = _kb_secret("OH_TEAM_READ_TOKEN")
+    if not t:
+        raise SystemExit("Order Hub: lipsește cheia de citire (env %s sau KB OH_TEAM_READ_TOKEN). "
+                         "Nu cad pe AWBprint în tăcere; pentru calea veche: --source awb (doar pe server)." % " / ".join(OH_CHEI))
+    return t
+
+
+_oh_tok = None
+
+
+def _oh_get(path):
+    import urllib.request, urllib.error
+    global _oh_tok
+    if _oh_tok is None:
+        _oh_tok = _oh_token()
+    req = urllib.request.Request(OH_BAZA + path, headers={"Authorization": "Bearer " + _oh_tok, "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise SystemExit("Order Hub %s → HTTP %s. Nu cad pe AWBprint în tăcere." % (path.split("?")[0], e.code))
+    except Exception as e:
+        raise SystemExit("Order Hub %s nu răspunde (%s). Nu cad pe AWBprint în tăcere." % (path.split("?")[0], type(e).__name__))
+
+
+def oh_prefix(nume):
+    m = re.match(r"^[A-Za-z]+", nume or "")
+    p = (m.group(0) if m else "").upper()
+    return _OH_NORM.get(p, p)
+
+
+def oh_label(prefix):
+    """Eticheta brandului = domeniul (ca `stores.name` din AWBprint), altfel prefixul."""
+    p = _OH_NORM.get(prefix.upper(), prefix.upper())
+    return PREFIX_TO_STORE.get(p, p)
+
+
+def oh_rows(frm, to_excl, stores):
+    """Rândurile OH (dict) din fereastra [frm, to_excl), filtrate pe magazine. Lunile se iau întregi, ziua e de București."""
+    d0, d1 = datetime.strptime(frm, "%Y-%m-%d").date(), datetime.strptime(to_excl, "%Y-%m-%d").date()
+    luni, z = [], d0.replace(day=1)
+    while z < d1:
+        luni.append(z.strftime("%Y-%m"))
+        z = (z.replace(day=28) + timedelta(days=4)).replace(day=1)
+    vreau = {oh_label(s) for s in stores} if stores and stores != ["ALL"] else None
+    out = []
+    for luna in luni:
+        d = _oh_get("/api/cs/livrabilitate?luna=" + luna)
+        col = {c: i for i, c in enumerate(d["coloane"])}
+        for x in d["randuri"]:
+            if not (frm <= x[col["zi"]] < to_excl):
+                continue
+            p = oh_prefix(x[col["comanda"]])
+            if not p:
+                continue
+            lab = oh_label(p)
+            if vreau is not None and lab not in vreau:
+                continue
+            out.append({"comanda": x[col["comanda"]], "brand": lab, "total": float(x[col["total"]] or 0),
+                        "moneda": x[col["moneda"]] or "RON", "judet": (x[col["judet"]] or "").strip(),
+                        "tara": x[col["tara"]] or "", "stare": x[col["stare"]] or "",
+                        "bucket": OH_BUCKET.get(x[col["stare"]], "other"),
+                        "curier": x[col["curier"]] or "(fără)", "ultim_status": x[col["ultim_status"]] or "",
+                        "transport": x[col["transport_fara_tva"]], "skus": x[col["skus"]] or "", "zi": x[col["zi"]]})
+    return out
+
+
+def _refuz_rows(agg, extra_total=False):
+    rows = []
+    for g, b in agg.items():
+        resolved = b["delivered"] + b["returned"] + b["refused"]
+        rate = 100.0 * (b["returned"] + b["refused"]) / resolved if resolved else 0
+        base = (g, sum(b.values())) if extra_total else (g,)
+        rows.append(base + (resolved, b["delivered"], b["returned"], b["refused"],
+                            b["in_transit"] + b["pending"], round(rate, 1)))
+    rows.sort(key=lambda r: r[-1], reverse=True)
+    return rows
+
+
+def oh_rep_refuse(R, by, stores, limit):
+    if by == "product":
+        # OH dă SKU-urile distincte ale comenzii, fără cantitate → numărăm COMENZI cu SKU-ul, nu bucăți.
+        agg = defaultdict(lambda: defaultdict(int))
+        for r in R:
+            for sku in {s.strip() for s in r["skus"].split(";") if s.strip()}:
+                agg[sku][r["bucket"]] += 1
+        titles = {}
+        for p in (stores or []):
+            if p != "ALL":
+                titles.update(fetch_titles(p))
+        rows = []
+        for sku, b in agg.items():
+            resolved = b["delivered"] + b["refused"]
+            if resolved < 5:
+                continue
+            rows.append((titles.get(sku, sku), sku, resolved, b["delivered"], 0, b["refused"],
+                         b["in_transit"] + b["pending"], round(100.0 * b["refused"] / resolved, 1)))
+        rows.sort(key=lambda r: r[-1], reverse=True)
+        header = ["Produs", "SKU", "Rezolvate (comenzi)", "Livrate", "Returnate", "Refuzate", "În curs", "Refuz %"]
+        return header, rows[:limit], "refuz per produs (comenzi cu SKU-ul, Order Hub)"
+    key = "curier" if by == "courier" else "brand"
+    agg = defaultdict(lambda: defaultdict(int))
+    for r in R:
+        agg[r[key]][r["bucket"]] += 1
+    header = [by.capitalize(), "Total", "Rezolvate", "Livrate", "Returnate", "Refuzate", "În curs", "Refuz %"]
+    return header, _refuz_rows(agg, extra_total=True)[:limit], f"refuz per {by} (Order Hub)"
+
+
+def oh_rep_geo(R, limit):
+    agg = defaultdict(lambda: defaultdict(int))
+    for r in R:
+        if r["tara"] not in ("Romania", "RO", "") or not r["judet"] or r["judet"] == "?":
+            continue
+        agg[r["judet"]][r["bucket"]] += 1
+    rows, natdeliv, natfail = [], 0, 0
+    for g, b in agg.items():
+        resolved = b["delivered"] + b["refused"]
+        natdeliv += b["delivered"]; natfail += b["refused"]
+        if resolved < 40:
+            continue
+        rows.append((g, resolved, b["delivered"], b["refused"], round(100.0 * b["refused"] / resolved, 1)))
+    rows.sort(key=lambda r: r[-1], reverse=True)
+    nat = round(100.0 * natfail / (natdeliv + natfail), 1) if (natdeliv + natfail) else 0
+    header = ["Province", "Rezolvate", "Livrate", "Returnate+Refuzate", f"Refuz % (național {nat}%)"]
+    return header, rows[:limit], "heatmap refuz pe province (RO, Order Hub)"
+
+
+def _shop_la_eticheta():
+    """{domeniu myshopify: eticheta brandului} din stores.csv (prefix, shop). vanzari-pe-sku dă magazinul ca domeniu
+    myshopify, iar numele magazinelor din OH nu sunt uniforme (esteban.ro nu se rezolvă, grandia.ro da)."""
+    try:
+        txt = _stores_csv_text()
+    except SystemExit:
+        return {}
+    out = {}
+    for row in csv.DictReader(io.StringIO(txt)):
+        p = (row.get("prefix") or "").strip().lstrip("﻿").upper()
+        shop = (row.get("shop") or "").strip().replace("https://", "").replace("http://", "").strip("/").lower()
+        if p and shop:
+            out[shop] = oh_label(p)
+    return out
+
+
+def _oh_bucati(frm, to_excl, labels):
+    """{eticheta_brand: bucăți} din /api/cs/vanzari-pe-sku (comenzi plasate, cu anulate, ca rândurile de comenzi).
+    Ruta numără de azi înapoi: fereastra [frm, to] = zile(frm..azi) − zile(to+1..azi)."""
+    azi = datetime.now(TZ).date()
+    d0 = datetime.strptime(frm, "%Y-%m-%d").date()
+    d1 = datetime.strptime(to_excl, "%Y-%m-%d").date()          # exclusiv
+    if (azi - d0).days + 1 > 400:
+        return None
+    shop2lab = _shop_la_eticheta()
+    if not shop2lab:
+        return None
+
+    def _sum(zile):
+        if zile <= 0:
+            return {}
+        d = _oh_get("/api/cs/vanzari-pe-sku?zile=%d&cu_anulate=true" % zile)
+        if d.get("taiat"):
+            return None
+        out = defaultdict(int)
+        for x in d.get("randuri") or []:
+            mag = (x.get("magazin") or "").lower()
+            out[shop2lab.get(mag, mag)] += int(x.get("bucati") or 0)
+        return out
+
+    tot = _sum((azi - d0).days + 1)
+    dupa = _sum((azi - d1).days + 1) if d1 <= azi else {}
+    if tot is None or dupa is None:
+        return None
+    return {k: v - dupa.get(k, 0) for k, v in tot.items()}
+
+
+def oh_rep_sales(R, frm, to_excl, daily, limit):
+    if daily:
+        z = defaultdict(lambda: [0, 0.0])
+        for r in R:
+            z[r["zi"]][0] += 1; z[r["zi"]][1] += r["total"]
+        rows = [(d, v[0], round(v[1], 2)) for d, v in sorted(z.items(), reverse=True)]
+        return ["Zi", "Comenzi", "Venit"], rows[:limit], "vânzări pe zi (Order Hub)"
+    b = defaultdict(lambda: [0, 0.0, "RON"])
+    for r in R:
+        v = b[r["brand"]]; v[0] += 1; v[1] += r["total"]; v[2] = r["moneda"]
+    buc = _oh_bucati(frm, to_excl, sorted(b, key=len, reverse=True))
+    rows = [(nm, v[0], (buc.get(nm, "n/a") if buc is not None else "n/a"), round(v[1], 2), v[2]) for nm, v in b.items()]
+    rows.sort(key=lambda r: r[3], reverse=True)
+    return ["Brand", "Comenzi", "Bucăți", "Venit", "Val."], rows[:limit], "vânzări per brand (Order Hub)"
+
+
+def oh_rep_transport(R, limit):
+    g = defaultdict(lambda: [0, 0, 0.0, 0.0])
+    for r in R:
+        v = g[(r["brand"], r["curier"])]
+        v[0] += 1; v[3] += r["total"]
+        if r["transport"] and r["transport"] > 0:
+            v[1] += 1; v[2] += float(r["transport"])
+    rows = []
+    for (brand, courier), (parcels, priced, tcost, rev) in g.items():
+        rows.append((brand, courier, parcels, round(tcost / priced, 2) if priced else 0, round(tcost, 2),
+                     round(100.0 * tcost / rev, 1) if rev else 0))
+    rows.sort(key=lambda r: r[4], reverse=True)
+    return (["Brand", "Curier", "Colete", "Cost/colet fără TVA", "Cost total fără TVA", "% din venit"], rows[:limit],
+            "transport per brand×curier (Order Hub, fără TVA)")
+
+
+def oh_rep_stuck(R, days, limit):
+    cutoff = (datetime.now(TZ) - timedelta(days=days)).strftime("%Y-%m-%d")
+    today = datetime.now(TZ).date()
+    rows = []
+    for r in sorted(R, key=lambda r: r["zi"]):
+        if r["bucket"] not in ("in_transit", "pending") or r["zi"] > cutoff:
+            continue
+        age = (today - datetime.strptime(r["zi"], "%Y-%m-%d").date()).days
+        # ghost = are etichetă la un curier, dar coletul n-a mișcat (Netrimisa cu curier)
+        ghost = "DA" if (r["bucket"] == "pending" and r["curier"] not in ("", "(fără)")) else ""
+        rows.append((r["brand"], r["comanda"], r["ultim_status"] or r["stare"], age, r["curier"], ghost))
+    return (["Brand", "Comandă", "Status", "Zile vechime", "Curier", "Ghost(AWB nescanat)"], rows[:limit],
+            f"blocate > {days} zile (Order Hub)")
+
+
+def sursa_implicita(arg):
+    if arg:
+        return arg
+    return "awb" if (os.getenv("FULFILLMENT_SURSA") or "").strip().lower() == "awb" else "oh"
+
+
+def lipsa_oh(report, by):
+    """Ce câmp lipsește din Order Hub pentru (report, by), sau None dacă raportul merge pe OH."""
+    return DOAR_AWB.get((report, by)) or DOAR_AWB.get((report, None))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--report", choices=["refuse", "sales", "transport", "stuck", "repeat", "cod", "geo"], default="refuse")
@@ -479,7 +738,11 @@ def main():
     ap.add_argument("--limit", type=int, default=40)
     ap.add_argument("--sheet", action="store_true", help="scrie și un Google Sheet partajat")
     ap.add_argument("--sheet-title")
+    ap.add_argument("--source", choices=["oh", "awb"], default=None,
+                    help="oh = Order Hub (implicit); awb = AWBprint, doar pe serverul de scripturi "
+                         "(întoarcere explicită, sau FULFILLMENT_SURSA=awb)")
     args = ap.parse_args()
+    args.source = sursa_implicita(args.source)
 
     to_date = args.to_date or datetime.now(TZ).strftime("%Y-%m-%d")
     if args.from_date:
@@ -492,8 +755,38 @@ def main():
     stores = [s.strip().upper() for s in args.stores.split(",")] if args.stores else None
     stuck_days = args.days or 7
 
-    conn = awb_conn(); cur = conn.cursor()
-    print(f"sursă: AWBprint (instant) · {from_date} → {to_date} · magazine: {args.stores or 'toate'}", file=sys.stderr)
+    by_geo = args.by if args.by in ("province", "city") else "province"
+    if args.source == "oh":
+        lipsa = lipsa_oh(args.report, by_geo if args.report == "geo" else args.by)
+        if lipsa:
+            raise SystemExit(f"Raportul {args.report}" + (f" --by {args.by}" if args.report == "refuse" else
+                             (f" --by {by_geo}" if args.report == "geo" else "")) +
+                             f" are nevoie de {lipsa}, pe care Order Hub nu-l dă (/api/cs/livrabilitate). "
+                             "Rulează-l pe serverul de scripturi (84.46) cu --source awb.")
+        print(f"sursă: Order Hub · {from_date} → {to_date} · magazine: {args.stores or 'toate'}", file=sys.stderr)
+        R = oh_rows(from_date, to_excl, stores)
+        if args.report == "refuse":
+            header, rows, label = oh_rep_refuse(R, args.by, stores, args.limit)
+        elif args.report == "sales":
+            header, rows, label = oh_rep_sales(R, from_date, to_excl, args.daily, args.limit)
+        elif args.report == "transport":
+            header, rows, label = oh_rep_transport(R, args.limit)
+        elif args.report == "geo":
+            header, rows, label = oh_rep_geo(R, args.limit)
+        else:
+            header, rows, label = oh_rep_stuck(R, stuck_days, args.limit)
+        _afiseaza(header, rows, label, from_date, to_date, args)
+        return
+
+    try:
+        conn = awb_conn()
+    except SystemExit:
+        raise
+    except Exception as e:
+        raise SystemExit(f"AWBprint nu se deschide de aici ({type(e).__name__}); calea --source awb merge doar pe "
+                         "serverul de scripturi (84.46).")
+    cur = conn.cursor()
+    print(f"sursă: AWBprint (--source awb) · {from_date} → {to_date} · magazine: {args.stores or 'toate'}", file=sys.stderr)
     if args.report == "refuse":
         header, rows, label = rep_refuse(cur, from_date, to_excl, args.by, stores, args.limit)
     elif args.report == "sales":
@@ -505,12 +798,14 @@ def main():
     elif args.report == "cod":
         header, rows, label = rep_cod(cur, from_date, to_excl, stores, args.limit)
     elif args.report == "geo":
-        by_geo = args.by if args.by in ("province", "city") else "province"
         header, rows, label = rep_geo(cur, from_date, to_excl, by_geo, stores, args.limit)
     else:
         header, rows, label = rep_stuck(cur, from_date, to_excl, stores, stuck_days, args.limit)
     conn.close()
+    _afiseaza(header, rows, label, from_date, to_date, args)
 
+
+def _afiseaza(header, rows, label, from_date, to_date, args):
     print(f"\n=== {label} ({from_date} → {to_date}) — top {min(len(rows), args.limit)} ===")
     print("  " + " | ".join(str(h) for h in header))
     for r in rows:
