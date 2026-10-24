@@ -2,8 +2,9 @@
 # requires-python = ">=3.10"
 # dependencies = ["psycopg2-binary>=2.9", "requests>=2.31"]
 # ///
-"""Weekly Performance Insights — week-over-week, combining Google Ads (live) with REAL Shopify
-orders (metrics `orders`). Shows paid spend/ROAS/CPA, real revenue/orders/AOV, the blended ad-cost
+"""Weekly Performance Insights — week-over-week, combining Google Ads (live) with REAL orders from Order Hub
+(metrics `cache.oh_livrabilitate`, oglinda orară a OH: toate magazinele, inclusiv cele pe care tabela `orders` din
+metrics nu le are — MagDeal, Bucșa, Lux, PL, Nocturna, Orice Redus, MD, Zafra, HU; anulatele nu se numără). Shows paid spend/ROAS/CPA, real revenue/orders/AOV, the blended ad-cost
 ratio (Ads spend ÷ total revenue ≈ MER), the Ads-vs-real reconciliation gap, plus a narrative of
 what moved and what to do. Read-only.
 
@@ -26,6 +27,15 @@ _PG_OK={"host","port","dbname","user","password","sslmode","sslrootcert","sslcer
 def clean(d):
     p=urlsplit(d)
     return d if not p.query else urlunsplit((p.scheme,p.netloc,p.path,urlencode([(x,y) for x,y in parse_qsl(p.query,keep_blank_values=True) if x.lower() in _PG_OK]),p.fragment))
+# brandul din metrics (`brands.slug`) → prefixele comenzilor lui în Order Hub
+BRAND_PREFIXE = {
+    "esteban": ["EST"], "george-talent": ["GT"], "bonhaus-cz": ["CZ"], "ofertele-zilei": ["OFER"],
+    "magdeal": ["MAG"], "de-la-bucsa": ["BUC"], "grandia": ["GRAND"], "casa-ofertelor": ["BON"],
+    "duppo": ["DUP", "DUPBG"], "reduceri-bune": ["RED"], "nubra": ["NUBRA"], "nocturna-lux": ["LUX"],
+    "carpetto": ["CARP"], "rossi-nails": ["ROSSI"], "bonhaus-pl": ["PL"], "gento": ["GEN"], "bonhaus-bg": ["BONBG"],
+    "nocturna": ["NOC"], "orice-redus": ["ORC"], "lab-noir": ["LAB"], "apreciat": ["APR"], "artevita": ["ART"],
+    "bonhaus-hu": ["HU"], "belasil": ["BELA"], "covoria": ["COV"],
+}
 def pct(n,o): return f"{'+' if n>=o else ''}{(100*(n-o)/o):.0f}%" if o else ("+∞" if n else "0%")
 
 def main():
@@ -76,18 +86,19 @@ def main():
     # Shopify real orders
     rev=None
     if a.brand:
+        prefixe=BRAND_PREFIXE.get(a.brand) or [a.brand.upper()]
         c.execute("""SELECT
-            sum("totalPrice") FILTER (WHERE o."createdAt"::date BETWEEN %s::date AND %s::date) tw_rev,
-            count(*)         FILTER (WHERE o."createdAt"::date BETWEEN %s::date AND %s::date) tw_ord,
-            sum("totalPrice") FILTER (WHERE o."createdAt"::date BETWEEN %s::date AND %s::date) lw_rev,
-            count(*)         FILTER (WHERE o."createdAt"::date BETWEEN %s::date AND %s::date) lw_ord
-            FROM orders o WHERE o."brandId"=(SELECT id FROM brands WHERE slug=%s)""",
-            (tw[0],tw[-1],tw[0],tw[-1],lw[0],lw[-1],lw[0],lw[-1],a.brand))
+            sum(total) FILTER (WHERE zi BETWEEN %s::date AND %s::date) tw_rev,
+            count(*)   FILTER (WHERE zi BETWEEN %s::date AND %s::date) tw_ord,
+            sum(total) FILTER (WHERE zi BETWEEN %s::date AND %s::date) lw_rev,
+            count(*)   FILTER (WHERE zi BETWEEN %s::date AND %s::date) lw_ord
+            FROM cache.oh_livrabilitate WHERE prefix = ANY(%s) AND stare <> 'Anulata'""",
+            (tw[0],tw[-1],tw[0],tw[-1],lw[0],lw[-1],lw[0],lw[-1],prefixe))
         rev=c.fetchone()
     if rev and rev["tw_ord"]:
         twr=float(rev["tw_rev"] or 0); lwr=float(rev["lw_rev"] or 0); two=rev["tw_ord"]; lwo=rev["lw_ord"]
         aov_t=twr/two if two else 0; aov_l=lwr/lwo if lwo else 0
-        print(f"\n— SHOPIFY (real, toate canalele) —")
+        print(f"\n— COMENZI REALE (Order Hub, toate canalele, fără anulate) —")
         print(f"  comenzi {two:8d}      ({pct(two,lwo)})")
         print(f"  revenue {twr:8.0f} lei  ({pct(twr,lwr)})   AOV {aov_t:.0f} lei ({pct(aov_t,aov_l)})")
         mer=T['spend']/twr if twr else 0
@@ -95,7 +106,7 @@ def main():
         print(f"  ad-cost ratio (Ads spend ÷ revenue real) {100*mer:.1f}%   → MER {1/mer if mer else 0:.1f}x")
         print(f"  Ads-attribuit {T['val']:.0f} lei vs revenue real {twr:.0f} lei = Ads ia {100*T['val']/twr if twr else 0:.0f}% din vânzări")
     else:
-        print(f"\n— SHOPIFY — (fără date de comenzi în metrics pt acest brand; doar Ads)")
+        print(f"\n— COMENZI — (niciuna în Order Hub pe acest brand în ferestre; doar Ads)")
     # movers
     movers=[]
     for nm,d in cc.items():
