@@ -29,7 +29,7 @@ Totul e implementat într-un singur fișier: **`profit_core.py`**. Orice motor n
 | **Venit** | `total_price` al comenzilor livrate ÷ TVA, minus retururi Shopify | AWBprint `orders` | via engine |
 | **COGS** | Shopify `unitCost` × buc ÷ 1,21. **Costul e RON pe TOATE magazinele** — nu-l converti cu cursul | Shopify | `profit_core.cogs_ron()` |
 | **Transport** | `orders.transport_cost` ÷ 1,21 — **UN AWB principal per comandă**, autoritativ | AWBprint `orders.transport_cost` | `profit_core.parcel_transport()` |
-| **Marketing (brand)** | spend Meta+TikTok+Google, RON | `cache.daily_ad_spend_ron` <- `AWBprint.marketing_daily_costs` <- sheet Raport Zilnic 2 | engine |
+| **Marketing (brand)** | spend Meta+TikTok+Google, RON | `cache.daily_ad_spend_ron` <- `cache.marketing_daily_costs` (metrics; pana pe 24-oct-2026 `AWBprint.marketing_daily_costs`) <- sheet Raport Zilnic 2 | engine |
 | **Marketing (per SKU)** | de la cutover **19-06-2026**: sheet WMS per-ad; înainte + Google: `cache.product_ad_spend` | `wms_ad_spend_sync.py` | `wms_marketing.py` |
 | **Profit per SKU / categorie** | venit RON ex-TVA reconciliat cu engine, COGS+override, transport real, marketing pe comenzi | `profit_orders` + `profit_order_lines` | `profit_by_sku.py YYYY-MM` |
 | **Bucăți vândute per produs** | qty pe linie | Shopify / AWBprint | `gigi:product-sales` |
@@ -114,8 +114,16 @@ total 239 = totalul din ERP):
 Lantul complet, descoperit 30-iul-2026:
 
 ```
-sheet "Raport Zilnic 2" -> AWBprint.marketing_daily_costs -> cache.daily_ad_spend_ron -> engine -> brand_pnl
+sheet "Raport Zilnic 2" -> cache.marketing_daily_costs -> cache.daily_ad_spend_ron -> engine -> brand_pnl
 ```
+
+> Din **24-oct-2026** releul nu mai trece prin AWBprint: `build_cache.py` (la fiecare
+> `daily_ad_spend_ron`) citeste foaia si reimprospateaza ultimele 35 de zile in
+> `cache.marketing_daily_costs` (metrics), cu aceeasi mapare brand -> magazin (`BRAND_TO_STORE`
+> din `build_cache.py`, copiata din backend-ul AWB). Fail-safe: daca foaia nu raspunde sau vine pe
+> jumatate, tabelul ramane neatins. Istoricul de dinainte a fost copiat 1:1 din AWBprint. Un brand
+> nou in foaie se mapeaza in `BRAND_TO_STORE` din `build_cache.py`, nu in AWB. Reluare mai adanca:
+> `build_cache.py --table marketing_daily_costs --since 2026-08-01 --apply`.
 
 Tabelele Meta din warehouse (`meta_ad_insights_daily`, `meta_campaign_insights_daily`) **NU
 alimenteaza P&L-ul** - sunt pentru analiza de ads. Consecinte practice:
@@ -129,7 +137,7 @@ alimenteaza P&L-ul** - sunt pentru analiza de ads. Consecinte practice:
 ### Ingestia sheet -> tabela PIERDE branduri (verificat 30-iul-2026)
 
 Sheet-ul "Raport Zilnic 2" are **31 de branduri**; `marketing_daily_costs` are **21 de magazine**.
-Ingesterul (in aplicatia AWBprint) mapeaza brand -> `store_name`, si **nu are regula pentru 10
+Ingesterul (in aplicatia AWBprint pana pe 24-oct-2026, acum `build_cache.py`) mapeaza brand -> `store_name`, si **nu are regula pentru 10
 dintre ele**. Spend-ul lor nu ajunge niciodata in P&L:
 
 | Brand in sheet | Spend RON | Perioada | Stare |
