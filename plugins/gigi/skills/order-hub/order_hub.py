@@ -35,6 +35,9 @@ import urllib.request
 
 BASE = os.environ.get("OH_CS_BASE", "https://orderhub.arona.ro").rstrip("/")
 GAZDA = "orderhub.arona.ro"
+# Numele pe care Order Hub (platforma „Orders”) răspunde la API: din 24-oct-2026 orders.arona.ro servește aceeași
+# aplicație, iar orderhub.arona.ro rămâne pe termen nedefinit (copiile pluginului de pe calculatoarele echipei).
+GAZDE = (GAZDA, "orders.arona.ro")
 GAZDA_ENV = "OH_CS_BASE_ALLOW"      # altă gazdă HTTPS, numită explicit (ex. un staging)
 _LOCALE = ("127.0.0.1", "localhost", "::1")
 TOKEN_ENV = "OH_CS_SB_TOKEN"
@@ -86,7 +89,7 @@ def cheie():
 
 def baza_sigura(base=None):
     """Adresa Order Hub, verificată ÎNAINTE ca cheia (toate scopurile cs.*, banii inclusiv) să plece: doar HTTPS, doar
-    orderhub.arona.ro (sau gazda din OH_CS_BASE_ALLOW); HTTP doar pe 127.0.0.1/localhost, pentru teste. Un OH_CS_BASE
+    orderhub.arona.ro / orders.arona.ro (sau gazda din OH_CS_BASE_ALLOW); HTTP doar pe 127.0.0.1/localhost, pentru teste. Un OH_CS_BASE
     greșit trimitea cheia în clar, la prima cerere, înaintea oricărui redirect."""
     b = BASE if base is None else base
     try:
@@ -97,10 +100,10 @@ def baza_sigura(base=None):
     if u is not None and u.scheme == "http" and gazda in _LOCALE:
         return b
     if u is not None and u.scheme == "https" and gazda and (
-            gazda == GAZDA or gazda == os.environ.get(GAZDA_ENV, "").strip().lower()):
+            gazda in GAZDE or gazda == os.environ.get(GAZDA_ENV, "").strip().lower()):
         return b
     raise SystemExit(_iesire(2, "baza", "OH_CS_BASE: doar https://%s (altă gazdă HTTPS: %s=<gazda>) · nimic trimis"
-                             % (GAZDA, GAZDA_ENV)))
+                             % (" / https://".join(GAZDE), GAZDA_ENV)))
 
 
 def http(method, cale, corp=None, token=""):

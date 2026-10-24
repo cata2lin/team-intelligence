@@ -76,7 +76,7 @@ Frisbo de la MD le face depozitul: OH nu le poate anula sau reface.
 
 ## Tehnic
 `order_hub.py` (doar stdlib), cheia `OH_CS_SB_TOKEN` din env (Second Brain) sau KB. API: `POST /api/cs/<actiune>`,
-`GET /api/cs/actiuni`, `GET /api/cs/comanda`, `GET /api/cs/operatie/{id}` pe https://orderhub.arona.ro. Manifestul se
+`GET /api/cs/actiuni`, `GET /api/cs/comanda`, `GET /api/cs/operatie/{id}` pe https://orderhub.arona.ro (sau https://orders.arona.ro, același server, din 24-oct-2026: `OH_CS_BASE`). Manifestul se
 generează din schema OH cu `gen_manifest.py`, deci numele și tipurile parametrilor vin mereu din Order Hub. Înainte de
 publicare: `uv run gen_manifest.py --verifica <schema>.json <manifest>.json` pe fiecare manifest (cod 1 = vechi:
 regenerează-l cu `uv run gen_manifest.py <schema>.json > <manifest>.json`).
