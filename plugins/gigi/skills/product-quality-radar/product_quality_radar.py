@@ -13,7 +13,8 @@ Semnal de CALITATE per produs, din DOUĂ circuite independente:
                             (de ce se returnează: poor_quality / defective / damaged /
                              not_as_described / wrong_product / missing_parts / other)
                             + RATA DE DEFECT per SKU (retururi / comenzi vândute, numitor
-                            din AWBprint — istoric complet, NU metrics care e truncat la 19-apr
+                            din Order Hub, 400 de zile — istoric complet; --source awb = AWBprint,
+                            doar pe server; NU metrics care e truncat la 19-apr
                             și supraestima defect-rate ~38%).
   Cross-validare: SKU-uri care apar în AMBELE circuite = problemă confirmată.
 
@@ -113,14 +114,43 @@ def shopify_refunds(store, limit):
     return rows
 
 
-# numitor pt rata de defect: câte comenzi a vândut fiecare SKU (Grandia).
+# numitor pt rata de defect, din ORDER HUB (implicit, 24-oct-2026): `/api/cs/vanzari-pe-sku` pe 400 de zile
+# (plafonul rutei; acoperă tot istoricul Grandia, din nov-2025), CU anulate — aceeași definiție ca AWBprint
+# (COUNT DISTINCT comenzi, orice status). Fără cheie / OH căzut = eroare, nu cifra veche.
+GRANDIA_SHOP = "n12w89-yy.myshopify.com"
+
+
+def sold_denominator_oh(skus):
+    if not skus:
+        return {}
+    sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "core", "scripts"))
+    import oh_citire as oh
+    try:
+        d = oh.vanzari_pe_sku(400, GRANDIA_SHOP, cu_anulate=True)
+    except oh.OhEroare as e:
+        sys.exit("EROARE: %s" % e)
+    if d.get("taiat"):
+        sys.exit("EROARE: Order Hub a tăiat vânzările Grandia la 5000 de SKU — numitor incomplet.")
+    by_lower = {}
+    for r in d.get("randuri") or []:
+        x = by_lower.setdefault(str(r["sku"]).strip().lower(), {"sold_orders": 0, "sold_qty": 0})
+        x["sold_orders"] += int(r.get("comenzi") or 0)
+        x["sold_qty"] += int(r.get("bucati") or 0)
+    return {s: by_lower.get(str(s).lower(), {"sold_orders": 0, "sold_qty": 0}) for s in skus}
+
+
+# --source awb (doar server): numitorul vechi din AWBprint.
 # SURSĂ = AWBprint (DB AWB/Frisbo), NU metrics: metrics.orders pt Grandia e TRUNCAT (începe ~19-apr-2026),
 # pe când AWBprint are istoricul complet (din nov-2025) → metrics sub-numără vânzările vechi și
 # SUPRAESTIMEAZĂ defect-rate ~38% (poate flipa decizia „scot de pe COD"). SKU la inventory_item.sku.
 def sold_denominator(brand, skus):
     if not skus:
         return {}
-    conn = connect("DATABASE_URL_AWBPRINT")
+    try:
+        conn = connect("DATABASE_URL_AWBPRINT")
+    except Exception as e:
+        sys.exit("EROARE: AWBprint nu e accesibil de aici (%s) — e doar pentru servere; "
+                 "implicit numitorul vine din Order Hub (--source oh)." % type(e).__name__)
     cur = conn.cursor()
     ph = ",".join(["%s"] * len(skus))
     cur.execute(
@@ -230,7 +260,7 @@ def run(a):
 
     # numitor defect-rate pt SKU-urile RMA (Grandia)
     rma_skus = [r["sku"] for r in rma]
-    denom = sold_denominator("Grandia", rma_skus)
+    denom = sold_denominator_oh(rma_skus) if a.source == "oh" else sold_denominator("Grandia", rma_skus)
     for r in rma:
         d = denom.get(r["sku"], {})
         so = d.get("sold_orders", 0)
@@ -308,6 +338,9 @@ def main():
     ap.add_argument("--reason", default="", help="filtrează retururile RMA pe un motiv (%s)" % "/".join(REASON_LABEL))
     ap.add_argument("--limit", type=int, default=15, help="nr rânduri per secțiune (default 15)")
     ap.add_argument("--json", action="store_true", help="output JSON pt automatizare")
+    ap.add_argument("--source", choices=["oh", "awb"], default=(os.environ.get("PRODUCT_QUALITY_RADAR_SURSA") or "oh").lower(),
+                    help="numitorul ratei de defect: oh = Order Hub (implicit); awb = AWBprint, doar pe server "
+                         "(sau env PRODUCT_QUALITY_RADAR_SURSA=awb)")
     a = ap.parse_args()
     if a.reason and a.reason not in REASON_LABEL:
         sys.exit("EROARE: --reason trebuie să fie unul din: %s" % ", ".join(REASON_LABEL))
