@@ -1,6 +1,6 @@
 ---
 name: meta-ads
-description: Read AND operate Meta (Facebook/Instagram) Ads for any team brand. Read — accounts, performance reports at account/campaign/adset/ad level (spend, purchases, revenue, ROAS, CPA, CTR, CPM), demographic & placement breakdowns (age/gender/platform/country), daily trend, creative/ad ranking (with optional match to local video files), and `list` (ids/status/budget). Write — gated mutations: pause/activate a campaign/adset/ad and set daily/lifetime budget (DRY-RUN by default via Meta validate_only; `--apply` to execute). Token + ad accounts come from the `metrics` DB (no per-account login). Use to answer "which Meta ads/creatives/audiences perform best for brand X", to pull a brand's Meta spend/ROAS, to pick winning creatives to reuse on Google, or to pause/scale Meta campaigns. Also `products` — spend per product (Nomenclator/HA mapping) split TEST vs SALES, for multi-product "deals" accounts like Reflexino/Magdeal. All amounts in RON (per-day FX from AWBprint.exchange_rates). Companion to `gigi:google-ads-mcc` and `gigi:tiktok-ads`.
+description: Read AND operate Meta (Facebook/Instagram) Ads for any team brand. Read — accounts, performance reports at account/campaign/adset/ad level (spend, purchases, revenue, ROAS, CPA, CTR, CPM), demographic & placement breakdowns (age/gender/platform/country), daily trend, creative/ad ranking (with optional match to local video files), and `list` (ids/status/budget). Write — gated mutations: pause/activate a campaign/adset/ad and set daily/lifetime budget (DRY-RUN by default via Meta validate_only; `--apply` to execute). Token + ad accounts come from the `metrics` DB (no per-account login). Use to answer "which Meta ads/creatives/audiences perform best for brand X", to pull a brand's Meta spend/ROAS, to pick winning creatives to reuse on Google, or to pause/scale Meta campaigns. Also `products` — spend per product (Nomenclator/HA mapping) split TEST vs SALES, for multi-product "deals" accounts like Reflexino/Magdeal. All amounts in RON (per-day BNR FX from metrics.fx_rates). Companion to `gigi:google-ads-mcc` and `gigi:tiktok-ads`.
 ---
 
 # Meta Ads performance (read-only)
@@ -15,8 +15,10 @@ skill never mutates campaigns.
 > fallback. It matters: e.g. **Magdeal → FB account "Reflexino"**, **Ofertele Zilei → "Genti promo,
 > Esteban 3"** — a plain ILIKE would attribute the wrong accounts (or none). A brand can have several
 > accounts; the tool queries all and aggregates. **All output is in RON** — USD/EUR/… accounts are
-> converted **per day** from the dynamic BNR rates in `AWBprint.exchange_rates` (via `DATABASE_URL_AWBPRINT`,
-> forward-filled; fixed `CURRENCY_RATES_RON` KB config as fallback). Validated vs "Raport Zilnic 2":
+> converted **per day** from the BNR rates in `metrics.fx_rates` (same `DATABASE_URL_METRICS`, forward-filled
+> over weekends/holidays; days before the table starts, 2026-04-13, use the fixed `CURRENCY_RATES_RON` KB config,
+> with a warning). If `fx_rates` can't be read the tool stops instead of guessing; `FX_SURSA=awb` = the old
+> `AWBprint.exchange_rates` path, on request only. Validated vs "Raport Zilnic 2":
 > Belasil/GT/Esteban/Nubra match the Facebook column within ~1%.
 >
 > **Config/creds come from the KB** (no hardcoded paths): `GA4_SA_JSON` (the Sheets/GA4 service account,

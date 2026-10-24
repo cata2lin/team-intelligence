@@ -1,6 +1,6 @@
 ---
 name: tiktok-ads
-description: Read AND operate TikTok Ads for any team brand. Read — accounts, performance reports at account/campaign/adgroup/ad level (spend, purchases, revenue, ROAS, CPA, CTR, CPM), daily trend, and `list` (ids/status/budget). Write — gated mutations: pause/activate a campaign and set its budget (DRY-RUN by default; `--apply` to execute). Brand→accounts uses the canonical Mapping (brand_map.json); the key trick: a single TikTok advertiser (e.g. "ROSSI Nails Romania") runs SEVERAL brands, so spend is attributed by a campaign-name token (e.g. 'GT','APRECIAT','COVORIA'). Creds (advertiser_id + token) from the `metrics` DB. Use to answer "how is brand X doing on TikTok", pull TikTok spend/ROAS, or pause/scale TikTok campaigns. Also `products` — per-product spend split TEST vs SALES (Nomenclator/HA mapping). All amounts in RON (per-day BNR FX from AWBprint.exchange_rates). Companion to `gigi:meta-ads` and `gigi:google-ads-mcc`.
+description: Read AND operate TikTok Ads for any team brand. Read — accounts, performance reports at account/campaign/adgroup/ad level (spend, purchases, revenue, ROAS, CPA, CTR, CPM), daily trend, and `list` (ids/status/budget). Write — gated mutations: pause/activate a campaign and set its budget (DRY-RUN by default; `--apply` to execute). Brand→accounts uses the canonical Mapping (brand_map.json); the key trick: a single TikTok advertiser (e.g. "ROSSI Nails Romania") runs SEVERAL brands, so spend is attributed by a campaign-name token (e.g. 'GT','APRECIAT','COVORIA'). Creds (advertiser_id + token) from the `metrics` DB. Use to answer "how is brand X doing on TikTok", pull TikTok spend/ROAS, or pause/scale TikTok campaigns. Also `products` — per-product spend split TEST vs SALES (Nomenclator/HA mapping). All amounts in RON (per-day BNR FX from metrics.fx_rates). Companion to `gigi:meta-ads` and `gigi:google-ads-mcc`.
 ---
 
 # TikTok Ads (read + gated writes)
@@ -45,9 +45,10 @@ uv run tiktok.py products magdeal --range last_30d                  # spend per 
 Ranges: `today`,`yesterday`,`last_7d`,`last_14d`,`last_30d`,`last_90d`,`this_month`, or `"2026-05-01,2026-06-11"`.
 Metrics use TikTok `complete_payment` (purchases) and `complete_payment_roas`; revenue = spend×ROAS.
 **All output is in RON.** USD/EUR/… accounts are converted **per day** using the dynamic BNR rates in
-`AWBprint.exchange_rates` (`rate/multiplier`, forward-filled across weekends — same source as `grandia_pnl`),
-read via `DATABASE_URL_AWBPRINT` (from the KB). If that DB is unreachable it falls back to the fixed
-`CURRENCY_RATES_RON` KB config. Verified vs the team's "Raport Zilnic 2": Belasil/GT/Magdeal match to the
+`metrics.fx_rates` (already per unit, forward-filled across weekends/holidays; identical to the old
+`AWBprint.exchange_rates` since 2026-04-17), read via `DATABASE_URL_METRICS`. If it can't be read the tool stops
+(no silent fixed rate); `FX_SURSA=awb` = the old AWBprint path, on request only. Days before 2026-04-13 use the
+fixed `CURRENCY_RATES_RON` KB config, with a warning. Verified vs the team's "Raport Zilnic 2": Belasil/GT/Magdeal match to the
 leu; Nubra (USD) lands within ~0.3% (we use the real daily rate, the sheet a fixed 4.55).
 
 ## Products & TEST vs SALES (`products`)
