@@ -7,8 +7,10 @@
 Cine sunt clienții (RFM, cohorte, LTV, churn), ce se cumpără împreună, ce produse merită scalate
 sau omorâte, și un lint de integritate pe warehouse.
 
-⚠️ Distincția care contează: se calculează pe comenzi **LIVRATE din AWBprint** (= venit COD real),
-NU pe Shopify brut — Shopify include refuzurile, deci LTV-ul iese umflat.
+⚠️ Distincția care contează: se calculează pe comenzi **LIVRATE** (= venit COD real), NU pe Shopify brut —
+Shopify include refuzurile, deci LTV-ul iese umflat. `forecast` vine din Order Hub; RFM/cohort/LTV au nevoie de
+emailul clientului, rută pe care OH n-o are încă → rulează doar pe 84.46 (pe laptop întorc mesajul „ruta OH lipsește").
+Serverul NU mai pune DSN-ul AWBprint în mediu (24-oct-2026): fiecare script își ia singur ce-i trebuie.
 
 Read-only. `data_slice` acceptă SQL propriu, dar tot read-only.
 Register: claude mcp add --scope user arona-bi -- uv run <abs path>/mcp_server.py
@@ -25,7 +27,7 @@ def _kb(k):
                           capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=120).stdout.strip()
 
 
-for s in ("DATABASE_URL_AWBPRINT", "DATABASE_URL_METRICS"):
+for s in ("DATABASE_URL_METRICS",):
     if not os.environ.get(s):
         os.environ[s] = _kb(s)
 
@@ -54,6 +56,7 @@ mcp = FastMCP("arona-bi")
 def customer_analytics(analysis: str = "all", store: str = "", months: int = 0, weeks: int = 0) -> str:
     """Segmentare și valoare pe clienți. analysis = rfm | cohort | ltv | forecast | all.
     Pe comenzi LIVRATE (venit COD real), identitate = email, per magazin/monedă.
+    `forecast` = Order Hub (merge oriunde); rfm/cohort/ltv = doar pe 84.46 (lipsește ruta OH cu email bidx).
     ⚠️ NU pe Shopify brut — acolo refuzurile umflă LTV-ul."""
     a = [analysis]
     if store: a += ["--store", store]
