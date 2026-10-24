@@ -28,6 +28,15 @@ Tag `duplicata` = ACELAȘI tag cu flow-ul Shopify care BLOCHEAZĂ crearea AWB (�
   uv run dup_guard.py --apply             # EXECUTĂ (tag + anulare + hold + awb-void)
 
 DRY-RUN implicit. Citirile-s read-only. Anularea/hold/awb-void doar cu --apply.
+
+⛔ RETRAS (24-oct-2026). Nu mai rulează: iese cu cod 2 și spune unde e garda acum.
+  - Cronul lui fusese deja șters pe 15-iul (se bătea cu `xconnector fulfill`, reguli opuse).
+  - Garda de dubluri stă acum în Order Hub (`services/cron_parity/duplicates.py` + `dubluri_identice.py`,
+    `duplicates.cancel_apply` pornit pe organizația 4 din septembrie; coada CS are motivul `duplicate`).
+  - Execuția trecea prin xConnector (`order-cancel`, `awb-hold`), dezinstalat pe 19-oct.
+  - Starea AWB o lua din AWBprint, care rămâne fără cititori de pe laptop.
+  Raportul de dubluri (doar citire, pe metrics) rămâne `cs_duplicate_orders.py`.
+  Funcțiile rămân în fișier doar ca referință a arborelui de decizie (și pentru testul din xconnector).
 """
 import os, sys, re, json, argparse, subprocess, datetime, urllib.parse as up
 import psycopg2
@@ -152,21 +161,13 @@ def fetch_orders(days, store):
     cn.close()
     return rows
 
+RETRAS = ("dup_guard.py e RETRAS (24-oct-2026): garda de dubluri e în Order Hub "
+          "(cron_parity/duplicates, coada CS motiv `duplicate`). Raport doar-citire: "
+          "uv run cs_duplicate_orders.py. Pentru o comandă anume: gigi:order-hub comanda.")
+
 def awb_status(order_numbers):
-    """order_number -> aggregated_status (+ awb_count) din AWBprint."""
-    if not order_numbers: return {}
-    dsn = secret("DATABASE_URL_AWBPRINT"); cn = conn(dsn); cn.set_session(readonly=True); c = cn.cursor()
-    # AWBprint order_number poate fi cu sau fără prefix — încerc pe ambele forme
-    keys = set()
-    for n in order_numbers:
-        keys.add(str(n)); keys.add(re.sub(r"^[A-Za-z]+","",str(n)))
-    c.execute("""select order_number, aggregated_status, awb_count from orders
-                 where order_number = ANY(%s)""", (list(keys),))
-    out = {}
-    for onum, st, cnt in c.fetchall():
-        out[str(onum)] = {"status": st, "awb_count": cnt or 0}
-    cn.close()
-    return out
+    """Fost: aggregated_status + awb_count din AWBprint. AWBprint nu se mai citește de aici (vezi RETRAS)."""
+    raise RuntimeError(RETRAS)
 
 def enrich_awb(o, awbmap):
     for key in (str(o.get("name") or ""), str(o.get("ordnum") or ""), re.sub(r"^[A-Za-z]+","",str(o.get("name") or ""))):
@@ -243,6 +244,8 @@ def level_of(old, new):
     return "POSIBIL"
 
 def main():
+    print(RETRAS, file=sys.stderr)
+    sys.exit(2)
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--store", default="")
