@@ -14,3 +14,9 @@ def test_luna_veche_ramane_cu_toate_prefixele_chiar_daca_magazinul_e_inchis_azi(
     oh = ["PL%d" % i for i in range(30)]
     assert G.compara(oh, [])["PL"] == (30, 30)
     assert G.compara(oh, oh)["PL"] == (30, 0)
+
+
+def test_comenzile_migrate_in_duppo_eu_nu_sunt_lipsa():
+    tags = "factura-oh,HU,migrat-clona,no-awb,orig-DPHU1001"
+    po = ["DUP1799"] + G._ORIG.findall(tags)
+    assert G.compara(["DPHU1001"], po)["DPHU"] == (1, 0)

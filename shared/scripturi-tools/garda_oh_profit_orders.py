@@ -32,6 +32,9 @@ EXCLUSE = {
     "OLX": "OLX (vinde din rebut)", "OLXT": "OLX", "OKZ": "Okazii", "PEP": "Pepita",
 }
 _PREFIX = re.compile(r"^#?([A-Za-z]+)")
+# Comenzile Duppo HU și Duppo CZ au fost recreate în Duppo EU (fostul Duppo BG), cu eticheta `orig-<comanda veche>`:
+# sunt în profit_orders sub DUPBG, nu lipsesc (ownerul, 24-oct).
+_ORIG = re.compile(r"orig-([A-Za-z]+\d+)", re.I)
 
 
 def _luni(n):
@@ -44,14 +47,14 @@ def _luni(n):
 
 
 def compara(nume_oh, nume_po):
-    """{prefix: (în OH, lipsă din profit_orders)} — funcție pură (testată)."""
-    po = set(nume_po)
+    """{prefix: (în OH, lipsă din profit_orders)} — funcție pură (testată). Nume comparate fără majuscule."""
+    po = {str(n).upper() for n in nume_po}
     out = collections.defaultdict(lambda: [0, 0])
     for n in nume_oh:
         m = _PREFIX.match(n or "")
         p = m.group(1).upper() if m else "?"
         out[p][0] += 1
-        if n not in po:
+        if str(n).upper() not in po:
             out[p][1] += 1
     return {p: tuple(v) for p, v in out.items()}
 
@@ -66,7 +69,10 @@ def verifica(luni=3):
             if not oh:
                 rows.append(("WARN", "oh_vs_profit.%s" % luna, "Order Hub n-a dat comenzile lunii (cheie? rețea?)"))
                 continue
-            po = [r[0] for r in cx.execute("SELECT order_name FROM profit_orders WHERE month = ?", (luna,))]
+            po = []
+            for nume, tags in cx.execute("SELECT order_name, tags FROM profit_orders WHERE month = ?", (luna,)):
+                po.append(nume)
+                po += _ORIG.findall(tags or "")    # comenzi migrate (Duppo HU / CZ → Duppo EU): `orig-DPHU1001`
             rosii = []
             for p, (tot, lipsa) in sorted(compara(oh.keys(), po).items()):
                 if p in EXCLUSE or tot < PRAG_MIN:
