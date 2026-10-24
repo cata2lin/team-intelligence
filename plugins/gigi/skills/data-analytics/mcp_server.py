@@ -8,8 +8,8 @@ Cine sunt clienții (RFM, cohorte, LTV, churn), ce se cumpără împreună, ce p
 sau omorâte, și un lint de integritate pe warehouse.
 
 ⚠️ Distincția care contează: se calculează pe comenzi **LIVRATE** (= venit COD real), NU pe Shopify brut —
-Shopify include refuzurile, deci LTV-ul iese umflat. `forecast` vine din Order Hub; RFM/cohort/LTV au nevoie de
-emailul clientului, rută pe care OH n-o are încă → rulează doar pe 84.46 (pe laptop întorc mesajul „ruta OH lipsește").
+Shopify include refuzurile, deci LTV-ul iese umflat. Toate patru analizele vin din Order Hub (clientul = pseudonimul
+de telefon din `livrabilitate?cu_client=true`), de oriunde.
 Serverul NU mai pune DSN-ul AWBprint în mediu (24-oct-2026): fiecare script își ia singur ce-i trebuie.
 
 Read-only. `data_slice` acceptă SQL propriu, dar tot read-only.
@@ -56,13 +56,13 @@ mcp = FastMCP("arona-bi")
 def customer_analytics(analysis: str = "all", store: str = "", months: int = 0, weeks: int = 0) -> str:
     """Segmentare și valoare pe clienți. analysis = rfm | cohort | ltv | forecast | all.
     Pe comenzi LIVRATE (venit COD real), identitate = email, per magazin/monedă.
-    `forecast` = Order Hub (merge oriunde); rfm/cohort/ltv = doar pe 84.46 (lipsește ruta OH cu email bidx).
+    Sursa = Order Hub (client = pseudonim telefon). Prima rulare pe tot istoricul durează câteva minute.
     ⚠️ NU pe Shopify brut — acolo refuzurile umflă LTV-ul."""
     a = [analysis]
     if store: a += ["--store", store]
     if months: a += ["--months", months]
     if weeks: a += ["--weeks", weeks]
-    return _run("data-analytics", "scripts/data_analytics.py", a)
+    return _run("data-analytics", "scripts/data_analytics.py", a, timeout=1500)   # prima rulare: toate lunile din OH
 
 
 @mcp.tool()
