@@ -5460,9 +5460,16 @@ def find_by_awb(awb, a):
 
 
 def cmd_links(a):
-    """CS „du-mă la comanda X" — totul prin xConnector (NU consumă rația Shopify).
-    `links --order GT123` (după nr comandă) sau `links --awb <tracking>` (după AWB) → comandă + status +
-    linkuri Shopify + xConnector + tracking. `--open` le deschide în browser."""
+    """CS „du-mă la comanda X". Implicit din ORDER HUB (oh_links.py, GET /api/cs/comanda): xConnector e dezinstalat din
+    19-oct-2026 și AWBprint nu se mai citește de pe laptopuri. Order Hub caută doar după numărul comenzii.
+    Calea veche (xConnector + AWBprint) doar cerută explicit: env XCONNECTOR_LINKS_SURSA=xc."""
+    if (os.environ.get("XCONNECTOR_LINKS_SURSA") or "").strip().lower() != "xc":
+        import oh_links
+        cod, text = oh_links.ruleaza(getattr(a, "order", "") or "", getattr(a, "awb", "") or "", getattr(a, "shop", "") or "")
+        print(text)
+        if cod:
+            sys.exit(cod)
+        return
     if getattr(a, "awb", None) or getattr(a, "order", None):
         if getattr(a, "awb", None):
             sh, o = find_by_awb(a.awb, a)

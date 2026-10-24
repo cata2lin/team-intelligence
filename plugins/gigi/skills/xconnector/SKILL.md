@@ -5,6 +5,14 @@ description: Punte spre xConnector (curierat) pt magazinele ARONA, pe TOATE cele
 
 # /xconnector
 
+> ⛔ **xConnector e DEZINSTALAT din 19-oct-2026** (cheile API dau 401): comenzile care citesc sau scriu prin xConnector
+> nu mai au de unde. Ce rămâne viu:
+> - `links --order GT123` citește **Order Hub** (`oh_links.py`, GET /api/cs/comanda), nu AWBprint. Order Hub caută doar
+>   după numărul comenzii; după AWB → `gigi:awb-track`. Calea veche doar explicit: `XCONNECTOR_LINKS_SURSA=xc`.
+> - MCP `arona-fulfillment`: `xc_links` = Order Hub; `xc_summary` / `xc_address_issues` / `xc_not_downloaded` sunt
+>   retrase (trimit la `arona-cs-guard`); acțiunile `xc_*` sunt **depreciate** și trimit la `gigi:order-hub` (CS.md §4).
+>   MCP-ul nu mai pune `DATABASE_URL_AWBPRINT` în env.
+
 Punte spre **API-ul xConnector** (cheie API per magazin) pt fluxul de adrese al ARONA. Model actual
 (order-created): comanda nouă → Shopify Flow creează AWB; cele cu **tag „duplicata"** sau **adresă proastă**
 rămân **unfulfilled**. Skill-ul ăsta trece prin cele unfulfilled fără AWB, **corectează** adresele sigure
@@ -18,7 +26,7 @@ uv run xconnector.py recheck [--order GT1,GT2] [--days 30]    # care s-au auto-v
 uv run xconnector.py correct [--shop <domain>] [--days 60] [--min-age-hours N] [--exclude d1,d2] [--apply]  # CRON
 uv run xconnector.py connectors [--shop <domain>]            # curieri + facturare per magazin (id/type)
 uv run xconnector.py orders [--shop d] [--sku A] [--total-items 1] [--line-items 1] [--sort fulfillmentDate] [--sort-dir asc]  # filtrează/sortează comenzi
-uv run xconnector.py links  --order GT123 | --awb <tracking> [--open]    # CS: ce comandă + status + linkuri Shopify/xConnector/tracking
+uv run xconnector.py links  --order GT123 [--shop d]    # CS: status + etichete + linkuri, din ORDER HUB (după AWB → gigi:awb-track)
 uv run xconnector.py print-batch [--shop a,b] [--sku HA-0002] [--total-items 1] [--from .. --to ..] [--sort sku|totalItemsCount] [--limit 250] [--printed] [--test] [--apply]  # PRINT depozit
 uv run xconnector.py awb-make  --order GT123 [--shop d] [--connector ID] [--parcels N] [--type PARCEL] [--notify] [--apply]
 uv run xconnector.py awb-void  --order GT123 [--agent N] [--motiv "…"] [--apply]        # prin Order Hub: OPREȘTE comanda (anulează AWB + hold)
