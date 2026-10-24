@@ -19,10 +19,32 @@ def test_sursa_implicita(monkeypatch):
     assert F.sursa_implicita("oh") == "oh"
 
 
-def test_rapoarte_fara_camp_in_oh():
-    assert F.lipsa_oh("cod", "brand") and F.lipsa_oh("repeat", "brand")
-    assert F.lipsa_oh("refuse", "payment") and F.lipsa_oh("geo", "city")
-    assert F.lipsa_oh("refuse", "brand") is None and F.lipsa_oh("geo", "province") is None
+def test_rapoarte_cu_client():
+    assert F.cere_client("cod", "brand") and F.cere_client("repeat", "brand")
+    assert F.cere_client("refuse", "payment") and F.cere_client("geo", "city")
+    assert not F.cere_client("refuse", "brand") and not F.cere_client("geo", "province")
+
+
+def test_cod_si_reducere():
+    for p in ("Cash on Delivery (COD), xConnector", "Plată ramburs", "Numerar la livrare", "Plată ramburs la livrare"):
+        assert F.este_cod(p)
+    for p in ("shopify_payments", "xConnector", "manual", ""):
+        assert not F.este_cod(p)
+    assert F.grup_reducere("") == "fără cod"
+    assert F.grup_reducere("quantity discount -8.50").startswith("quantity")
+    assert F.grup_reducere("персонализирана отстъпка") == "personalizat"
+    assert F.norm_oras(" București ") == F.norm_oras("bucuresti") == "bucuresti"
+
+
+def test_repeat_refuz_noi_vs_revenit(monkeypatch):
+    col = COL + ["canal", "magazin", "plata", "reducere", "oras", "client_email", "client_telefon"]
+    ist = [["EST0", 1, "RON", "", "Romania", "Livrata", "", "", None, "", "2026-08-10", "", "m1", "", "", "", "", "T1"]]
+    monkeypatch.setattr(F, "_oh_luni", lambda luni, cu_client=False: iter([{"coloane": col, "randuri": ist}]))
+    mk = lambda n, st, tel: {"brand": "esteban.ro", "magazin": "m1", "telefon": tel,
+                             "bucket": F.OH_BUCKET[st], "zi": "2026-09-05"}
+    R = {"fereastra": [mk("a", "Livrata", "T1"), mk("b", "Refuzata", "T2"), mk("c", "Livrata", "T3")], "inainte": []}
+    h, rows, _ = F.oh_rep_repeat(R, "2026-09-01", 1, 10)
+    assert rows[0][1:5] == (3, 3, 2, 1) and rows[0][-2:] == (50.0, 0.0)
 
 
 def test_oh_rows_si_refuz(monkeypatch):
