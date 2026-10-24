@@ -4,8 +4,13 @@
 # ///
 """arona-profit MCP — profitabilitate & livrabilitate: P&L per brand, breakeven, refuz/transport/COD/retenție.
 
-Strat SUBȚIRE peste CLI-ul testat: `multi_brand_pnl.py` (local, SSH la VPS), `fulfillment_analytics.py` + `breakeven.py`
-(../fulfillment-analytics, citesc AWBprint). Read-only. Credențiale din KB. Python/FastMCP stdio.
+Strat SUBȚIRE peste CLI-ul testat: `multi_brand_pnl.py` (metrics cache.brand_pnl_monthly + SSH la VPS),
+`fulfillment_analytics.py` (Order Hub implicit) + `breakeven.py` (../fulfillment-analytics). Read-only. Credențiale din KB.
+Python/FastMCP stdio.
+
+24-oct-2026: serverul NU mai pune DATABASE_URL_AWBPRINT în mediu — niciun tool nu mai are nevoie de el implicit.
+Excepția: breakeven.py ia încă COGS% din AWBprint line_items (mutarea pe OH = pasul de cost S2) și își cere singur
+DSN-ul din KB; de aceea copiii primesc KB_PY.
 
 Register: claude mcp add --scope user arona-profit -- uv run <abs path>/mcp_server.py
 """
@@ -13,10 +18,10 @@ import os, subprocess
 HERE=os.path.dirname(os.path.abspath(__file__))
 KB=os.path.join(HERE,"..","..","..","core","scripts","kb.py")
 def _kb(k): return subprocess.run(["uv","run",KB,"secret-get",k],capture_output=True,text=True, stdin=subprocess.DEVNULL, timeout=120).stdout.strip()
-for s in ("DATABASE_URL_AWBPRINT","DATABASE_URL_METRICS"):
+for s in ("DATABASE_URL_METRICS",):
     if not os.environ.get(s): os.environ[s]=_kb(s)
 def _env():
-    e=dict(os.environ); e.pop("VIRTUAL_ENV",None); return e
+    e=dict(os.environ); e.pop("VIRTUAL_ENV",None); e.setdefault("KB_PY",os.path.normpath(KB)); return e
 from mcp.server.fastmcp import FastMCP
 mcp=FastMCP("arona-profit")
 PNL=os.path.join(HERE,"multi_brand_pnl.py")
@@ -40,7 +45,7 @@ def pnl_today() -> str:
     return _run(PNL,["--today"])
 @mcp.tool()
 def fulfillment(report: str = "refuse", by: str = "brand", days: int = 0, months: int = 3, stores: str = "") -> str:
-    """Livrabilitate din AWBprint: report=refuse/sales/transport/stuck/repeat/cod/geo. by depinde de report (brand/courier/product/payment/discount; geo:province/city). days>0 override months."""
+    """Livrabilitate din ORDER HUB: report=refuse/sales/transport/stuck/geo. by depinde de report (refuse: brand/courier/product; geo: province). days>0 override months. repeat/cod și by=payment/discount/city au nevoie de câmpuri pe care OH nu le dă → răspund cu „rulează pe serverul de scripturi”."""
     a=["--report",report,"--by",by]
     if days>0: a+=["--days",str(days)]
     else: a+=["--months",str(months)]
