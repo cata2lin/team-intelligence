@@ -26,6 +26,22 @@ OH_BAZA = os.environ.get("OH_CS_BASE", "https://orderhub.arona.ro").rstrip("/")
 KB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kb.py")
 ORDINE_CHEI = ("OH_TEAM_READ_TOKEN", "OH_PROFIT_CITIRE_TOKEN", "OH_CS_SB_TOKEN")
 
+# domeniul public al magazinului → domeniul myshopify (cum îl știe Order Hub și Shopify Admin)
+PUBLIC_TO_SHOP = {
+    "esteban.ro": "6f9e22-9d.myshopify.com", "georgetalent.ro": "ix5bxc-hr.myshopify.com",
+    "ofertelezilei.ro": "ofertelezilei.myshopify.com", "casaofertelor.ro": "bonhaus.myshopify.com",
+    "belasil.ro": "dvk4hu-dq.myshopify.com", "nocturnalux.ro": "de51c5-b8.myshopify.com",
+    "nocturna.ro": "1eee37-2d.myshopify.com", "gento.ro": "cn54vk-uz.myshopify.com",
+    "rossinails.ro": "1d2bce-2.myshopify.com", "apreciat.ro": "8e3700-d9.myshopify.com",
+    "reduceribune.ro": "audusp-rf.myshopify.com", "carpetto.ro": "nxfer1-n4.myshopify.com",
+    "cepatai.ro": "ce-pat-ai.myshopify.com", "grandia.ro": "n12w89-yy.myshopify.com",
+    "magdeal.ro": "covoareauto-ro.myshopify.com", "covoria.ro": "bb4nmc-pb.myshopify.com",
+    "nubra.ro": "bmuwvv-jy.myshopify.com", "bonhaus.cz": "vthuzq-7j.myshopify.com",
+    "bonhaus.pl": "f0yrmh-ia.myshopify.com", "bonhaus.bg": "ux1x6n-n2.myshopify.com",
+    "labnoir.ro": "31k0py-bi.myshopify.com", "de-la-bucsa": "6vz3hk-07.myshopify.com",
+    "orice-redus": "oriceredus.myshopify.com",
+}
+
 _cheie: Optional[str] = None
 
 

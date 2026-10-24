@@ -24,19 +24,6 @@ from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 CORE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "core", "scripts")
 
-# domeniul public (cum îl dai la --store) → domeniul myshopify (cum îl știe Order Hub și Shopify Admin)
-PUBLIC_TO_SHOP = {
-    "esteban.ro": "6f9e22-9d.myshopify.com", "georgetalent.ro": "ix5bxc-hr.myshopify.com",
-    "ofertelezilei.ro": "ofertelezilei.myshopify.com", "casaofertelor.ro": "bonhaus.myshopify.com",
-    "belasil.ro": "dvk4hu-dq.myshopify.com", "nocturnalux.ro": "de51c5-b8.myshopify.com",
-    "nocturna.ro": "1eee37-2d.myshopify.com", "gento.ro": "cn54vk-uz.myshopify.com",
-    "rossinails.ro": "1d2bce-2.myshopify.com", "apreciat.ro": "8e3700-d9.myshopify.com",
-    "reduceribune.ro": "audusp-rf.myshopify.com", "carpetto.ro": "nxfer1-n4.myshopify.com",
-    "cepatai.ro": "ce-pat-ai.myshopify.com", "grandia.ro": "n12w89-yy.myshopify.com",
-    "magdeal.ro": "covoareauto-ro.myshopify.com", "covoria.ro": "bb4nmc-pb.myshopify.com",
-    "nubra.ro": "bmuwvv-jy.myshopify.com", "bonhaus.cz": "vthuzq-7j.myshopify.com",
-    "bonhaus.pl": "f0yrmh-ia.myshopify.com", "bonhaus.bg": "ux1x6n-n2.myshopify.com",
-}
 
 def kb(k):
     v=os.environ.get(k)
@@ -58,6 +45,7 @@ def conn():
     c.set_session(readonly=True); return c
 
 def shop_for(store):
+    sys.path.insert(0, CORE); from oh_citire import PUBLIC_TO_SHOP
     m=[v for k,v in PUBLIC_TO_SHOP.items() if store.lower() in k or store.lower()==v]
     if len(m)!=1: sys.exit(f"--store {store!r}: {'nicio potrivire' if not m else 'ambiguu'} în PUBLIC_TO_SHOP")
     return m[0]
