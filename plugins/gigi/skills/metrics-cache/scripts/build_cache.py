@@ -743,18 +743,31 @@ CREATE TABLE cache.product_refusal_rate (
 );
 CREATE INDEX IF NOT EXISTS product_refusal_pct_idx ON cache.product_refusal_rate(refusal_pct DESC);
 """
-PRODUCT_REFUSAL_SELECT = """
-WITH li AS (
-  SELECT oli.sku, oli."brandId" AS brand_id, o."name" AS order_name
-  FROM order_line_items oli JOIN orders o ON o.id=oli."orderId"
-  WHERE oli.sku IS NOT NULL AND oli.sku<>'' AND o."deletedAt" IS NULL
-)
+# Comenzile din ORDER HUB (24-oct-2026, harta sistemelor #7), nu din `orders` / `order_line_items` din metrics, cărora le
+# lipsesc 10 magazine (MagDeal, Bucșa, Lux, PL, Nocturna, Orice Redus, MD, Zafra, HU: ~10,5k comenzi pe oct). Sursa:
+# `cache.oh_livrabilitate_linii` (oglinda orară a OH, scrisă de 84.46 `oh_livrabilitate_cache.py`, din mar-2026), cu
+# starea din COLETE. Prefixul comenzii → brandul din `brands` (slug); SKU-ul cu majusculele din `variants`.
+OH_PREFIX_BRAND = """(VALUES ('EST','esteban'),('GT','george-talent'),('CZ','bonhaus-cz'),('OFER','ofertele-zilei'),
+  ('MAG','magdeal'),('BUC','de-la-bucsa'),('GRAND','grandia'),('BON','casa-ofertelor'),('DUP','duppo'),('DUPBG','duppo'),
+  ('RED','reduceri-bune'),('NUBRA','nubra'),('LUX','nocturna-lux'),('CARP','carpetto'),('ROSSI','rossi-nails'),
+  ('PL','bonhaus-pl'),('GEN','gento'),('BONBG','bonhaus-bg'),('NOC','nocturna'),('ORC','orice-redus'),('LAB','lab-noir'),
+  ('APR','apreciat'),('ART','artevita'),('HU','bonhaus-hu'),('BELA','belasil'),('COV','covoria')) AS pb(prefix, slug)"""
+OH_LINII = f"""
+  SELECT DISTINCT COALESCE(cv.sku, l.sku) AS sku, b.id::text AS brand_id, l.comanda, l.stare, l.zi
+  FROM cache.oh_livrabilitate_linii l
+  JOIN {OH_PREFIX_BRAND} ON pb.prefix = l.prefix
+  JOIN brands b ON b.slug = pb.slug
+  LEFT JOIN (SELECT DISTINCT ON (lower(sku)) lower(sku) k, sku FROM variants WHERE sku IS NOT NULL AND sku <> ''
+             ORDER BY lower(sku), sku) cv ON cv.k = lower(l.sku)
+  WHERE l.sku <> '' AND l.stare <> 'Anulata'"""
+PRODUCT_REFUSAL_SELECT = f"""
+WITH li AS ({OH_LINII})
 SELECT li.sku, li.brand_id,
-  COUNT(DISTINCT li.order_name) FILTER (WHERE oo.status_category='Livrata')::int,
-  COUNT(DISTINCT li.order_name) FILTER (WHERE oo.is_refusal)::int,
-  ROUND(100.0*COUNT(DISTINCT li.order_name) FILTER (WHERE oo.is_refusal)
-    / NULLIF(COUNT(DISTINCT li.order_name) FILTER (WHERE oo.status_category IN ('Livrata','Refuzata')),0),1)
-FROM li JOIN cache.order_outcome oo ON oo.order_name=li.order_name
+  COUNT(DISTINCT li.comanda) FILTER (WHERE li.stare='Livrata')::int,
+  COUNT(DISTINCT li.comanda) FILTER (WHERE li.stare='Refuzata')::int,
+  ROUND(100.0*COUNT(DISTINCT li.comanda) FILTER (WHERE li.stare='Refuzata')
+    / NULLIF(COUNT(DISTINCT li.comanda) FILTER (WHERE li.stare IN ('Livrata','Refuzata')),0),1)
+FROM li
 GROUP BY li.sku, li.brand_id;
 """
 
@@ -825,14 +838,14 @@ CREATE TABLE cache.product_basket_pairs (
 );
 CREATE INDEX IF NOT EXISTS basket_brand_co_idx ON cache.product_basket_pairs(brand_id, co_count DESC);
 """
-PRODUCT_BASKET_SELECT = """
+# Coșul din Order Hub (ca `product_refusal_rate`): produsul = SKU-ul, nu `productId` Shopify, fiindcă OH ține liniile pe
+# SKU și cuprinde toate magazinele. Titlul, din `order_line_items` (doar pentru afișare); lipsă = SKU-ul.
+PRODUCT_BASKET_SELECT = f"""
 WITH items AS (
-  SELECT DISTINCT o."brandId" AS brand_id, oli."orderId" AS oid, oli."productId" AS pid
-  FROM order_line_items oli JOIN orders o ON o.id=oli."orderId"
-  WHERE o."deletedAt" IS NULL AND o."shopifyCreatedAt" >= now()-interval '180 days'
-    AND oli."productId" IS NOT NULL AND oli."productId"<>''
+  SELECT DISTINCT brand_id, comanda AS oid, sku AS pid FROM ({OH_LINII}) x WHERE zi >= current_date - 180
 ),
-titles AS (SELECT "productId" pid, MAX(title) title FROM order_line_items WHERE "productId" IS NOT NULL GROUP BY 1),
+titles AS (SELECT DISTINCT ON ("brandId", lower(sku)) "brandId"::text AS brand_id, lower(sku) AS k, title
+           FROM order_line_items WHERE sku IS NOT NULL AND sku <> '' ORDER BY "brandId", lower(sku), length(title) DESC),
 bo AS (SELECT brand_id, COUNT(DISTINCT oid) n FROM items GROUP BY 1),
 pc AS (SELECT brand_id, pid, COUNT(DISTINCT oid) c FROM items GROUP BY 1,2),
 pairs AS (
@@ -840,15 +853,15 @@ pairs AS (
   FROM items a JOIN items b ON a.oid=b.oid AND a.pid<b.pid
   GROUP BY 1,2,3 HAVING COUNT(*) >= 3
 )
-SELECT p.brand_id, p.pa, p.pb, ta.title, tb.title, p.co,
+SELECT p.brand_id, p.pa, p.pb, COALESCE(ta.title, p.pa), COALESCE(tb.title, p.pb), p.co,
   ROUND(p.co::numeric/ca.c,4), ROUND(p.co::numeric/cb.c,4),
   ROUND((p.co::numeric*bo.n)/(ca.c*cb.c),3), 180
 FROM pairs p
 JOIN bo ON bo.brand_id=p.brand_id
 JOIN pc ca ON ca.brand_id=p.brand_id AND ca.pid=p.pa
 JOIN pc cb ON cb.brand_id=p.brand_id AND cb.pid=p.pb
-LEFT JOIN titles ta ON ta.pid=p.pa
-LEFT JOIN titles tb ON tb.pid=p.pb;
+LEFT JOIN titles ta ON ta.brand_id=p.brand_id AND ta.k=lower(p.pa)
+LEFT JOIN titles tb ON tb.brand_id=p.brand_id AND tb.k=lower(p.pb);
 """
 
 # Ticket → order → delivery outcome, precomputed (CS triage/profiles/draft link a ticket to its

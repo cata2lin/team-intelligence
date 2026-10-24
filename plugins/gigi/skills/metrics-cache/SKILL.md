@@ -54,12 +54,13 @@ agency-audit, weekly-insights, grandia-pnl, daily-ops-briefing. _Caveat:_ insigh
 account-level, so an ad account shared across brands attributes full spend to each (the gap
 `bi-data-integrity-check` flags); fix mapping there.
 
-### `cache.product_refusal_rate`  (in-DB from order_line_items ⨝ orders ⨝ order_outcome)
+### `cache.product_refusal_rate`  (in-DB from `cache.oh_livrabilitate_linii`, the Order Hub mirror — all stores)
 Per `sku × brand_id`: distinct-order `delivered, refused, refusal_pct`. Matches the known
-"HA-* products refuse 40-56%" reality. Readers: cod-confirmation, product-quality-radar,
+"HA-* products refuse 40-56%" reality. Since 24-oct-2026 delivered/refused come from the OH parcels
+(`order_line_items` misses 10 stores: MagDeal, Bucșa, Lux, Nocturna, ORC, …). Readers: cod-confirmation, product-quality-radar,
 anne:ha-refuz, cs-* risk scoring.
 
-### `cache.product_basket_pairs`  (in-DB market-basket, last 180d, co-count ≥ 3)
+### `cache.product_basket_pairs`  (in-DB market-basket from `cache.oh_livrabilitate_linii`, last 180d, co-count ≥ 3)
 Per `brand × product_a × product_b`: `co_count, conf_a_to_b, conf_b_to_a, lift` + titles.
 "Frequently bought together" — powers PDP cross-sell, Klaviyo post-purchase flows, 2+1 pairings.
 Readers: gigi:cross-sell, PDP FBT blocks, klaviyo flows.
