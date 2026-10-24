@@ -13,7 +13,7 @@ import os, subprocess
 HERE=os.path.dirname(os.path.abspath(__file__))
 KB=os.path.join(HERE,"..","..","..","core","scripts","kb.py")
 def _kb(k): return subprocess.run(["uv","run",KB,"secret-get",k],capture_output=True,text=True, stdin=subprocess.DEVNULL, timeout=120).stdout.strip()
-for s in ("DATABASE_URL_AWBPRINT","DATABASE_URL_METRICS"):
+for s in ("DATABASE_URL_METRICS",):  # product_sales citește din Order Hub (cheia o ia singur), nu din AWBprint
     if not os.environ.get(s): os.environ[s]=_kb(s)
 def _env():
     e=dict(os.environ); e.pop("VIRTUAL_ENV",None); return e
@@ -28,9 +28,10 @@ def _run(script, args, timeout=240):
     return ((r.stdout or "").strip() or "(fără output)")+(("\n[stderr] "+(r.stderr or "")[:400]) if r.returncode!=0 else "")
 
 @mcp.tool()
-def product_sales(stores: str = "", months: int = 1, metric: str = "units", limit: int = 30, source: str = "") -> str:
-    """Câte BUCĂȚI a vândut fiecare produs (top/bottom) pe magazin(e), pe perioadă. stores=prefixe csv (EST,GT). metric=units/revenue. source=shopify pt 100% (mai lent)."""
-    a=["--months",str(months),"--metric",metric,"--limit",str(limit),"--no-sheet"]
+def product_sales(stores: str = "", months: int = 1, metric: str = "gross", limit: int = 30, source: str = "", order: str = "top") -> str:
+    """Câte BUCĂȚI a vândut fiecare produs (top/bottom) pe magazin(e), pe perioadă. stores=prefixe csv (EST,GT). metric=gross (plasate) / net (fără anulate). order=top/bottom. Sursa implicită = Order Hub (fără venit); source=shopify pt venit (mai lent)."""
+    metric={"units":"gross","revenue":"gross"}.get(metric,metric)
+    a=["--months",str(months),"--metric",metric,"--limit",str(limit),"--order",order,"--no-sheet"]
     if stores: a+=["--stores",stores]
     if source: a+=["--source",source]
     return _run(PS,a)

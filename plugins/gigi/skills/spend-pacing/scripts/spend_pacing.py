@@ -5,13 +5,15 @@
 """spend_pacing.py — pacing buget ads + MER pe luna curentă, per brand și canal.
 Spend = metrics.cache.daily_ad_spend_ron (RON, FRESH zilnic, toate 3 platformele, alimentat de
 pipeline-ul WMS — independent de tabelele insight care pică odată cu tokenul Meta). MER = venit
-PLASAT (AWBprint, comenzi create în lună, gross) / spend, doar magazine RON (non-RON = pacing only).
+PLASAT (Order Hub `/api/cs/livrabilitate` pe luna curentă: toate comenzile create în lună, gross, ziua de
+București) / spend, doar magazine RON (non-RON = pacing only). --source awb (sau env SPEND_PACING_SURSA=awb)
+= AWBprint, doar de pe server.
 
   proiecție lună = spend MTD / zile_scurse × zile_în_lună     (run-rate liniar)
 
   uv run spend_pacing.py                       # toate magazinele
   uv run spend_pacing.py --store esteban.ro    # un magazin + breakdown canal
-  uv run spend_pacing.py --no-mer              # doar pacing spend (fără AWBprint)
+  uv run spend_pacing.py --no-mer              # doar pacing spend (fără venit)
 """
 import os, sys, calendar, argparse, subprocess, datetime as dt
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
@@ -33,10 +35,31 @@ def norm(s):  # cache store_name → domeniu AWBprint
     s=(s or "").strip().lower()
     return "nubra.ro" if s=="nubra" else s
 
+CORE=os.path.join(os.path.dirname(os.path.abspath(__file__)),"..","..","..","..","core","scripts")
+
+def revenue_oh(luna, stores):
+    """{store_name normalizat: Σ total} pe comenzile RON create în `luna`, din Order Hub, pe magazinele din cache."""
+    sys.path.insert(0, CORE); import oh_citire as oh
+    rev,lipsa={},[]
+    for sn in stores:
+        shop=oh.PUBLIC_TO_SHOP.get(sn)
+        if not shop: continue                      # magazin fără domeniu cunoscut (non-RON / TikTok) → „—"
+        try:
+            randuri=oh.livrabilitate(luna, shop)
+        except oh.OhEroare as e:
+            if "Necunoscuta" not in str(e): raise
+            lipsa.append(sn); continue             # magazinul nu e în Order Hub (ex. Belasil, Covoria) → „—"
+        tot=sum(float(r["total"] or 0) for r in randuri if (r["moneda"] or "RON")=="RON")
+        if tot>0: rev[sn]=tot
+    if lipsa: print(f"(fără venit: {', '.join(lipsa)} nu sunt în Order Hub)")
+    return rev
+
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--store", default=None, help="filtru magazin (ILIKE pe store_name)")
-    ap.add_argument("--no-mer", action="store_true", help="sari peste venit/MER (nu mai lovi AWBprint)")
+    ap.add_argument("--no-mer", action="store_true", help="sari peste venit/MER")
+    ap.add_argument("--source", choices=["oh","awb"], default=(os.getenv("SPEND_PACING_SURSA") or "oh").lower(),
+                    help="venitul MTD: oh = Order Hub (implicit); awb = AWBprint, doar pe server")
     a=ap.parse_args()
     mx=conn("DATABASE_URL_METRICS")
     today=dt.date.today(); mstart=today.replace(day=1)
@@ -62,7 +85,13 @@ def main():
         if fr and (not fresh_max or fr>fresh_max): fresh_max=fr
     # revenue (placed, gross) per store RON, current month
     rev={}
-    if not a.no_mer:
+    if not a.no_mer and a.source=="oh":
+        sys.path.insert(0, CORE); import oh_citire as oh
+        try:
+            rev=revenue_oh(f"{today:%Y-%m}", list(store))
+        except oh.OhEroare as e:
+            sys.exit(f"EROARE venit MTD: {e} (rulează cu --no-mer pentru doar pacing)")
+    elif not a.no_mer:
         try:
             ax=conn("DATABASE_URL_AWBPRINT")
             with ax.cursor() as c:
@@ -71,7 +100,7 @@ def main():
                     WHERE o.currency='RON' AND o.frisbo_created_at >= %s GROUP BY 1""",[mstart])
                 rev={norm(k):float(v or 0) for k,v in c.fetchall()}
         except Exception as e:
-            print(f"(MER skip — AWBprint indisponibil: {e})")
+            print(f"(MER skip — AWBprint indisponibil ({type(e).__name__}); e doar pentru servere, implicit e Order Hub)")
     print(f"\n=== Spend pacing & MER — luna {today:%Y-%m} (ziua {elapsed}/{dim}) ===")
     if fresh_max and fresh_max < today - dt.timedelta(days=2):
         print(f"⚠️  Spend cel mai recent = {fresh_max} ({(today-fresh_max).days}z în urmă) — pipeline ads întârziat, proiecția poate fi sub-estimată.")
@@ -95,7 +124,7 @@ def main():
     print("-"*78)
     print(f"{'TOTAL':18} {tot_mtd:>10,.0f} {tot_proj:>10,.0f} {tot_last:>10,.0f} {(f'{vs_t:+.0%}' if vs_t is not None else '—'):>6} {tot_rev:>11,.0f} {(f'{mer_t:.1f}' if mer_t else '—'):>5}")
     print("\nproiecție = spend MTD / zile_scurse × zile_lună · vs LM = proiecție vs luna trecută (full)")
-    print("MER = venit PLASAT gross (AWBprint, comenzi create în lună) / spend; doar magazine RON (non-RON: pacing only).")
+    print(f"MER = venit PLASAT gross ({'Order Hub' if a.source=='oh' else 'AWBprint'}, comenzi create în lună) / spend; doar magazine RON (non-RON: pacing only).")
     print("MER ≠ profit: nu scade COGS/transport/refuz. Pt contribuție reală → multi-brand-pnl / profit_by_sku.")
 
 if __name__=="__main__": main()

@@ -24,7 +24,8 @@ Trei capcane pe care le rezolvă (toate ne-au costat deja):
 3. **Un SKU are câte un rând `products` per magazin**, iar unele n-au deloc imagini. Când
    luăm poza din DB ne uităm peste TOATE rândurile SKU-ului, nu doar peste primul.
 
-Secrete: DATABASE_URL_TOM / DATABASE_URL_AWBPRINT din KB. Nimic nu se printează.
+Secrete: DATABASE_URL_TOM + cheia Order Hub (OH_TEAM_READ_TOKEN) din env/KB; DATABASE_URL_AWBPRINT doar cu
+env PO_FROM_SHEET_SURSA=awb (pe server). Nimic nu se printează.
 """
 import argparse, json, os, re, subprocess, sys, urllib.parse as up
 from pathlib import Path
@@ -63,6 +64,53 @@ def db(key):
         return None
     p = up.urlsplit(dsn)                       # DSN-ul TOM are ?schema= → psycopg2 crapă
     return psycopg2.connect(up.urlunsplit((p.scheme, p.netloc, p.path, "", "")))
+
+
+SURSA_IMG = (os.environ.get("PO_FROM_SHEET_SURSA") or "oh").lower()
+
+
+def oh_images(skus):
+    """sku(lower) → poza produsului canonic din Order Hub (`/api/produs/{cod}` → produs.imagine)."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "core", "scripts"))
+    import oh_citire as oh
+    out = {}
+    for s in skus:
+        try:
+            d = oh.get("/api/produs/" + up.quote(s, safe=""))
+        except oh.OhEroare as e:
+            if "HTTP 404" in str(e):
+                continue
+            sys.exit(f"⛔ poze din Order Hub: {e}")
+        u = ((d.get("produs") or {}).get("imagine") or "") if d.get("gasit") else ""
+        if u.startswith("http") and PLACEHOLDER not in u.lower():
+            out[s] = u
+    return out
+
+
+def awb_images(skus):
+    """env PO_FROM_SHEET_SURSA=awb (doar server): prima poză validă din AWBprint products.images."""
+    found = {}
+    try:
+        c = db("DATABASE_URL_AWBPRINT")
+    except Exception as e:
+        sys.exit(f"⛔ AWBprint nu e accesibil de aici ({type(e).__name__}) — e doar pentru servere; implicit pozele vin din Order Hub.")
+    if not c:
+        return found
+    cur = c.cursor()
+    cur.execute("SELECT lower(sku), images FROM products WHERE lower(sku) = ANY(%s)", (list(skus),))
+    for s, imgs in cur.fetchall():
+        if s in found or not imgs:
+            continue
+        if isinstance(imgs, str):
+            try:
+                imgs = json.loads(imgs)
+            except ValueError:
+                continue
+        u = (imgs[0] or {}).get("src", "") if isinstance(imgs, list) and imgs and isinstance(imgs[0], dict) else ""
+        if u.startswith("http") and PLACEHOLDER not in u.lower():
+            found[s] = u
+    c.close()
+    return found
 
 
 def num(x):
@@ -146,7 +194,7 @@ def main():
                       "image_url": img, "requested_qty": qty,
                       "requested_unit_cost_usd": num(r[col["usd"]]) if "usd" in col else 0.0})
 
-    # imagini lipsă: TOM → AWBprint (prima validă peste TOATE rândurile SKU-ului)
+    # imagini lipsă: TOM → Order Hub (poza produsului canonic; env PO_FROM_SHEET_SURSA=awb = AWBprint, doar server)
     need = [it["sku"].lower() for it in items if not it["image_url"].startswith("http")]
     found = {}
     if need:
@@ -158,22 +206,8 @@ def main():
                           if u and u.startswith("http") and PLACEHOLDER not in u.lower()})
             c.close()
         rest = [s for s in need if s not in found]
-        c = db("DATABASE_URL_AWBPRINT") if rest else None
-        if c:
-            cur = c.cursor()
-            cur.execute("SELECT lower(sku), images FROM products WHERE lower(sku) = ANY(%s)", (rest,))
-            for s, imgs in cur.fetchall():
-                if s in found or not imgs:
-                    continue
-                if isinstance(imgs, str):
-                    try:
-                        imgs = json.loads(imgs)
-                    except ValueError:
-                        continue
-                u = (imgs[0] or {}).get("src", "") if isinstance(imgs, list) and imgs and isinstance(imgs[0], dict) else ""
-                if u.startswith("http") and PLACEHOLDER not in u.lower():
-                    found[s] = u
-            c.close()
+        if rest:
+            found.update(oh_images(rest) if SURSA_IMG == "oh" else awb_images(rest))
     for it in items:
         if not it["image_url"].startswith("http"):
             it["image_url"] = found.get(it["sku"].lower(), "")

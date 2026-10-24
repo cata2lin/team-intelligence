@@ -1,7 +1,7 @@
 ---
 name: cross-sell
-description: Cross-sell / "frequently bought together" recommender from our own order data — market-basket analysis (support / confidence / lift) per store. Default source AWBprint (--source awb, instant, ~99% complet); warehouse (--source metrics) e fallback dar e incomplet pe unele branduri (GT ~15% comenzi lipsă). Surfaces which products are actually bought together so we can add PDP "frequently bought together" blocks, power Klaviyo post-purchase flows, and pick the 2+1 surprise-perfume pairings. Use for "what's bought together", "cross-sell", "frequently bought together", "produse complementare", "ce se cumpără împreună", "upsell pairings". Read-only.
-argument-hint: "--brand <esteban|grandia|gt|nubra|belasil> [--source awb|metrics] [--product <title>] [--days 180]"
+description: Cross-sell / "frequently bought together" recommender from our own order data — market-basket analysis (support / confidence / lift) per store. Default source Order Hub (--source oh, coșurile din /api/cs/livrabilitate); AWBprint (--source awb) doar pe server; warehouse (--source metrics) e fallback dar e incomplet pe unele branduri (GT ~15% comenzi lipsă). Surfaces which products are actually bought together so we can add PDP "frequently bought together" blocks, power Klaviyo post-purchase flows, and pick the 2+1 surprise-perfume pairings. Use for "what's bought together", "cross-sell", "frequently bought together", "produse complementare", "ce se cumpără împreună", "upsell pairings". Read-only.
+argument-hint: "--brand <esteban|grandia|gt|nubra|belasil> [--source oh|awb|metrics] [--product <title>] [--days 180]"
 ---
 
 # cross-sell — frequently-bought-together (our data)
@@ -9,10 +9,10 @@ argument-hint: "--brand <esteban|grandia|gt|nubra|belasil> [--source awb|metrics
 
 Pure market-basket weighted by **lift** (how much more often two products sell together than chance). Read-only.
 
-**Sursă (`--source`, default `awb`):** `awb` = AWBprint (DB AWB/Frisbo, `DATABASE_URL_AWBPRINT`) — instant, ~99% complet; coșul vine din `line_items.inventory_item.sku`, titlul produsului e rezolvat din warehouse (`order_line_items`, suficient pt produsele cu volum). `metrics` = warehouse direct (`DATABASE_URL_METRICS`) — poate fi INCOMPLET (GT ~15% comenzi lipsă), păstrat ca fallback + pt `--cached`. Vezi `gigi:product-sales` / `gigi:fulfillment-analytics` pt același pattern.
+**Sursă (`--source`, default `oh`):** `oh` = Order Hub `/api/cs/livrabilitate` pe lună și magazin (SKU-urile distincte ale fiecărei comenzi, fără `Anulata`, ziua de București; cheia `OH_TEAM_READ_TOKEN`, fără cheie = eroare). Comparat 24-oct pe 60–90 de zile: aceleași perechi și aceleași co-apariții (GT: 40/42/34/50/45/36, identic), lift-ul diferă la a doua zecimală (numitorul de comenzi). `awb` (doar pe server, întoarcere explicită, sau env `CROSS_SELL_SURSA=awb`) = AWBprint (DB AWB/Frisbo, `DATABASE_URL_AWBPRINT`) — instant, ~99% complet; coșul vine din `line_items.inventory_item.sku`, titlul produsului e rezolvat din warehouse (`order_line_items`, suficient pt produsele cu volum). `metrics` = warehouse direct (`DATABASE_URL_METRICS`) — poate fi INCOMPLET (GT ~15% comenzi lipsă), păstrat ca fallback + pt `--cached`. Vezi `gigi:product-sales` / `gigi:fulfillment-analytics` pt același pattern.
 
 ```bash
-uv run cross_sell.py --brand grandia                      # top pairs (AWBprint, last 180d)
+uv run cross_sell.py --brand grandia                      # top pairs (Order Hub, last 180d)
 uv run cross_sell.py --brand esteban --product "scandal"  # complements for a product (title match)
 uv run cross_sell.py --brand gt --days 365 --min-co 10 --top 25
 uv run cross_sell.py --brand esteban --source metrics --cached   # warehouse precomputed (instant)

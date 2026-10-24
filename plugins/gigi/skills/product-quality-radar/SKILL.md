@@ -43,9 +43,12 @@ uv run product_quality_radar.py --json               # pt automatizare / export
   `"createdAt"`). `rma_request_items` e un tabel **real per-linie** (nu aproximăm prin toate
   liniile comenzii ca în `returns-rma-report`), deci motivul e atribuit exact SKU-ului
   returnat.
-- **Numitorul** ratei de defect = comenzi vândute pentru SKU, **din AWBprint** (store `grandia.ro`,
-  `line_items.inventory_item.sku`). NU din metrics: metrics.orders pt Grandia e truncat (din ~19-apr-2026),
-  pe când AWBprint are istoricul complet (din nov-2025) — altfel numitorul iese mic și defect-rate
+- **Numitorul** ratei de defect = comenzi vândute pentru SKU, **din Order Hub** (din 24-oct-2026):
+  `/api/cs/vanzari-pe-sku?zile=400&magazin=<grandia>&cu_anulate=true` — comenzi distincte, orice status, ca
+  înainte. Comparat cu AWBprint pe cele 15 SKU-uri de top: 9 identice, restul +1…+12 comenzi (GD-MOB-19050
+  229→241, rata 8,7%→8,3%). `--source awb` (sau env `PRODUCT_QUALITY_RADAR_SURSA=awb`) = AWBprint, doar pe
+  server. Cheia OH: `OH_TEAM_READ_TOKEN` (env, apoi KB); fără ea = eroare. NU din metrics: metrics.orders pt
+  Grandia e truncat (din ~19-apr-2026), pe când OH/AWBprint au istoricul complet (din nov-2025) — altfel numitorul iese mic și defect-rate
   supraestimat ~38% (poate flipa fals pragul de „scoate de pe COD").
 - Conexiuni `pg8000` cu SSL; URL-urile vin din env, altfel din KB (`kb.py secret-get`).
   Doar `SELECT`, nu scrie nimic.
@@ -62,7 +65,7 @@ uv run product_quality_radar.py --json               # pt automatizare / export
 - Motivele de retur (RMA) există **doar pentru Grandia** (singurul magazin cu modulul RMA).
   Pentru celelalte branduri ai doar circuitul de refund Shopify (fără „de ce").
 - Rata de defect e calculată doar pentru SKU-urile Grandia (singurul brand cu RMA). Numitorul
-  vine acum din AWBprint (istoric complet), deci e mult mai aproape de realitate decât înainte
+  vine acum din Order Hub (istoric complet), deci e mult mai aproape de realitate decât înainte
   (când metrics-ul truncat la apr supraestima rata ~38%).
 - Sume brute în RON (cum sunt în DB), fără TVA-adjust sau transport.
 - `--reason X` restrânge setul de SKU-uri și cifrele de headline la acel motiv; linia

@@ -5,8 +5,9 @@
 """
 seap_fisa.py — fisa de catalog SEAP/SICAP pentru un produs ARONA, gata de copiat.
 
-Ia produsul din Shopify (dupa SKU), costul REAL de transport din AWBprint
-(orders.transport_cost pe comenzile livrate cu SKU-ul ala) si calculeaza
+Ia produsul din Shopify (dupa SKU), costul REAL de transport din Order Hub
+(/api/cs/livrabilitate: transportul fara TVA pe comenzile DPD cu DOAR SKU-ul ala, ultimele 120 de zile,
+mediana x 1.21; --source awb = AWBprint orders.transport_cost, doar de pe server) si calculeaza
 pretul unitar fara TVA = pret site / 1.21 + transport / 1.21, rotunjit in sus.
 
 Exemple:
@@ -104,7 +105,36 @@ def html_to_text(h):
     return re.sub(r"\n{3,}", "\n\n", t).strip()
 
 
-# ---------- AWBprint: transport real ----------
+# ---------- Order Hub: transport real (implicit) ----------
+CORE = Path(__file__).resolve().parents[4] / "core" / "scripts"
+
+
+def real_transport_oh(sku, shop, days=120, azi=None):
+    """Mediana transportului CU TVA (fara TVA din OH x 1.21) pe comenzile DPD cu UN singur SKU = `sku`,
+    create in ultimele `days` zile. Comanda cu un singur produs ~ un colet (AWBprint filtra package_count=1)."""
+    from datetime import date, timedelta
+    sys.path.insert(0, str(CORE))
+    import oh_citire as oh
+    azi = azi or date.today()
+    start = (azi - timedelta(days=days)).isoformat()
+    y, m = int(start[:4]), int(start[5:7])
+    rows, k = [], sku.strip().lower()
+    try:
+        while (y, m) <= (azi.year, azi.month):
+            for r in oh.livrabilitate("%04d-%02d" % (y, m), shop):
+                t = r.get("transport_fara_tva")
+                if (r["zi"] >= start and t and float(t) > 0 and "dpd" in (r.get("curier") or "")
+                        and [x for x in (r.get("skus") or "").split(";") if x] == [k]):
+                    rows.append(float(t) * VAT)
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    except oh.OhEroare as e:
+        sys.exit(f"EROARE transport: {e} (sau da --transport manual)")
+    if not rows:
+        return FALLBACK_TRANSPORT, 0
+    return round(median(rows), 2), len(rows)
+
+
+# ---------- AWBprint: transport real (--source awb, doar server) ----------
 def real_transport(sku, days=120):
     import psycopg
     sql = """
@@ -118,8 +148,8 @@ def real_transport(sku, days=120):
         with psycopg.connect(secret("DATABASE_URL_AWBPRINT"), connect_timeout=15) as c:
             rows = [r[0] for r in c.execute(sql, (f"%{sku}%", str(days))).fetchall()]
     except Exception as e:
-        print(f"! AWBprint indisponibil ({e}); folosesc {FALLBACK_TRANSPORT} lei", file=sys.stderr)
-        return FALLBACK_TRANSPORT, 0
+        sys.exit(f"AWBprint nu e accesibil de aici ({type(e).__name__}) — e doar pentru servere; "
+                 "implicit transportul vine din Order Hub (--source oh).")
     if not rows:
         return FALLBACK_TRANSPORT, 0
     return round(median(rows), 2), len(rows)
@@ -145,19 +175,22 @@ def main():
     ap.add_argument("--sku", required=True)
     ap.add_argument("--prefix", default="GRAN", help="prefix magazin din SHOPIFY_STORES_CSV (default GRAN)")
     ap.add_argument("--price", type=float, help="pret site CU TVA; default = pretul din Shopify")
-    ap.add_argument("--transport", type=float, help="transport CU TVA per colet; default = median real AWBprint")
+    ap.add_argument("--transport", type=float, help="transport CU TVA per colet; default = median real din Order Hub")
     ap.add_argument("--cpv", default="", help='ex "38434560-9 Analizoare chimice"')
     ap.add_argument("--garantie", type=int, default=24, help="luni garantie (default 24)")
     ap.add_argument("--round", choices=["leu", "ban"], default="leu", help="rotunjire in sus la leu (default) sau la ban")
     ap.add_argument("--out", help="salveaza fisa in fisier .txt")
     ap.add_argument("--img", action="store_true", help="descarca poza principala <1MB (JPG) langa --out sau in cwd")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--source", choices=["oh", "awb"], default=(os.getenv("SEAP_FISA_SURSA") or "oh").lower(),
+                    help="transportul real: oh = Order Hub (implicit); awb = AWBprint, doar pe server")
     a = ap.parse_args()
 
     v, shop = shopify_product(a.prefix, a.sku)
     p = v["product"]
     price = a.price or float(v["price"])
-    transport, n = (a.transport, -1) if a.transport else real_transport(a.sku)
+    transport, n = ((a.transport, -1) if a.transport else
+                    real_transport_oh(a.sku, shop) if a.source == "oh" else real_transport(a.sku))
 
     price_ex = price / VAT
     transport_ex = transport / VAT
@@ -181,8 +214,9 @@ def main():
                           "images": images}, ensure_ascii=False, indent=2))
         return
 
+    sursa = "Order Hub" if a.source == "oh" else "AWBprint"
     src = ("dat manual" if n == -1 else
-           f"median real AWBprint, {n} comenzi DPD" if n else "fallback, fara comenzi in AWBprint")
+           f"median real {sursa}, {n} comenzi DPD" if n else f"fallback, fara comenzi in {sursa}")
     stoc = "In stoc" if p.get("status") == "ACTIVE" else "(produs inactiv in Shopify!)"
     lines = [
         f"=== FISA SEAP - {a.sku} ({a.prefix}) ===", "",
