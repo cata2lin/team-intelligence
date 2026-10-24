@@ -345,6 +345,8 @@ def comenzi_deschise_oh(oh_url=None, oh_tok=None, zile=FEREASTRA_COMENZI_ZILE):
         if dupa is not None:
             p["dupa"] = dupa
         d = _oh_get(oh_url, oh_tok, "/api/cs/comenzi-deschise", p)
+        import garda_push
+        garda_push.verifica_raspuns_oh(d)      # degradat / instantaneu vechi → GardaRefuz, nu rezervări parțiale
         if not d.get("ok"):
             raise RuntimeError("Order Hub: %s %s" % (d.get("rezultat"), str(d.get("mesaj"))[:120]))
         if dupa is None:

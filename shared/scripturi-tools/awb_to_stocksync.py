@@ -967,10 +967,12 @@ def calculeaza_tinte(base, tok, E, stores, scop=None, doar_scaderi_nenumarate=Fa
           "livrare) | decalaj AWBprint %s" % (tot_rez, sum(1 for r in pe_master.values() if r.get("rezervat")),
                                               tot_inapoi, decalaj if decalaj is not None else "nemasurat (0)"))
     reguli = collections.Counter()
+    tinte = {}       # ținta pe FIECARE master (nu doar ce se schimbă): o compară garda_push între ture
     for mid, rec in pe_master.items():
         t = tinta_master(rec, G.get(mid))
         if doar_scaderi_nenumarate:
             t = doar_scaderi_pe_nenumarate(t, (G.get(mid) or {}).get("counted") or [])
+        tinte[mid] = t["la"]
         reguli[t["regula"]] += 1
         if t["pasi"]:
             p = {"sku": "+".join(sorted(rec["skus"])), "master": mid, "nume": rec["nume"],
@@ -988,7 +990,7 @@ def calculeaza_tinte(base, tok, E, stores, scop=None, doar_scaderi_nenumarate=Fa
         print("mastere alimentate din mai multe SKU-uri: %d" % len(multi))
         for r in multi[:8]:
             print("   %-34s %s -> %d" % (r["nume"][:34], "+".join(sorted(r["skus"])), r["tinta"]))
-    return {"F": F, "bc_map": bc_map, "M": M, "G": G, "plan": plan, "pe_master": pe_master,
+    return {"F": F, "bc_map": bc_map, "M": M, "G": G, "plan": plan, "pe_master": pe_master, "tinte": tinte,
             "fara_master": fara_master, "ambigue": ambigue, "sarite": sarite, "dezambiguate": dezambiguate,
             "supra": supra}
 
@@ -1009,6 +1011,10 @@ def main():
                     help="permite rularea sambata/duminica (implicit se sare)")
     ap.add_argument("--fara-autoritate", action="store_true",
                     help="nu declara in stock-sync depozitele numarate (D-023); doar ajustari")
+    ap.add_argument("--garda-override", metavar="MOTIV",
+                    help="trece peste garda_push pentru o scadere REALA documentata (ex. inventar); motivul ramane in stare")
+    ap.add_argument("--garda-seed", action="store_true",
+                    help="scrie doar baza gărzii (instantaneul de acum) dacă nu există, fără ajustări; o dată, la pornire")
     a = ap.parse_args()
 
     # SAMBATA/DUMINICA nu pleaca comenzi (abia luni), deci nu are ce impinge — iar un push in weekend
@@ -1034,12 +1040,38 @@ def main():
     stores = {r["prefix"].strip(): (r["shop"].strip(), r["token"].strip())
               for r in csv.DictReader(open(STORES_CSV))}
 
+    import garda_push as gp
+    override = gp.override_din(a.garda_override)
     try:
         R = calculeaza_tinte(base, tok, E, stores)
     except ImportIncomplet as e:
         print("\u26d4 OPRIT: AWBprint n-a primit inca nicio comanda de dupa ultima livrare stock-sync "
               "(%s UTC; ultima comanda %s UTC) — rezervarile ar iesi prea mici. Reincerc." % e.args)
         return 1
+    except gp.GardaRefuz as e:      # Orders degradat / instantaneu vechi: nu se trece nici cu override
+        gp.alerta(a.eticheta, e.motive, a.apply)
+        return gp.COD_REFUZ
+    # GARDA PUSH (24-oct-2026): pe ambele surse, înainte de orice scriere — o tură cu raftul sau ținta prăbușită față de
+    # ultima tură scrisă nu scrie nimic (vezi garda_push.py).
+    _gcur = gp.instantaneu(R["F"], R["tinte"])
+    _gprev = gp.citeste_stare()
+    _gmot = gp.compara(_gprev, _gcur)
+    print("garda push: raft %d, tinta %d (ultima tura scrisa: raft %s, tinta %s)%s" % (
+        _gcur["raft_total"], _gcur["tinta_total"], (_gprev or {}).get("raft_total", "—"),
+        (_gprev or {}).get("tinta_total", "—"), "" if not _gmot else " — REFUZ"))
+    if a.garda_seed:
+        if _gprev:
+            print("garda push: baza exista deja (%s), n-o suprascriu" % _gprev.get("cand"))
+        else:
+            gp.salveaza_stare(_gcur, a.eticheta + "-seed")
+            print("garda push: baza scrisa din instantaneul de acum (fara ajustari)")
+        return 0
+    if _gmot:
+        if override:
+            print("⚠ garda push: trec peste refuz cu override: %s" % override)
+        else:
+            gp.alerta(a.eticheta, _gmot, a.apply)
+            return gp.COD_REFUZ
     F, bc_map, M, G, plan, pe_master = R["F"], R["bc_map"], R["M"], R["G"], R["plan"], R["pe_master"]
     fara_master, ambigue, sarite, dezambiguate, supra = (R["fara_master"], R["ambigue"], R["sarite"],
                                                          R["dezambiguate"], R["supra"])
@@ -1260,6 +1292,8 @@ def main():
                      "a esuat de doua ori: <b>%s</b>.</p><p>Ajustarile stau in master pana la urmatorul sync "
                      "(02:00 RO) — pana atunci magazinele arata cifrele vechi.</p>"
                      % (a.eticheta, ok, stare_sync), E)
+    if not err:
+        gp.salveaza_stare(_gcur, a.eticheta, override)
     json.dump({"cand": stamp, "eticheta": a.eticheta, "ajustate": ok, "erori": err,
                "fara_master": len(fara_master), "ambigue": len(ambigue)},
               open(STATE, "w"), ensure_ascii=False)
