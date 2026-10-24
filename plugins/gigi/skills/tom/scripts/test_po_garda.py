@@ -66,5 +66,13 @@ bun &= test("blacklist = blocat", r["blocat"])
 r = ruleaza([{"sku": "HA-BUN", "qty": 100, "refuz": 35.0}])["HA-BUN"]
 bun &= test("refuz 35% = blocat", r["blocat"])
 
+r = ruleaza([{"sku": "HA-PLIN", "qty": 1000, "valoare_lei": 25000}])["HA-PLIN"]
+bun &= test("linie de 25.000 lei pe produs lent = avertisment de valoare",
+            r["blocat"] and any("25.000 lei" in a for a in r["avertismente"]))
+
+r = ruleaza([{"sku": "HA-BUN", "qty": 400, "valoare_lei": 90000}])["HA-BUN"]
+bun &= test("valoare mare pe produs rapid = fara avertisment de valoare",
+            not any(" lei pe un produs" in a for a in r["avertismente"]))
+
 print("\n%s" % ("toate testele trec" if bun else "SUNT TESTE PICATE"))
 sys.exit(0 if bun else 1)

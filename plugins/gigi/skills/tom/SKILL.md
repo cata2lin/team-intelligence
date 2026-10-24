@@ -123,6 +123,21 @@ gh api repos/contact546/tom/commits/<sha>/status --jq .state     # success ≠ �
 ```
 Vezi [[tom-app-deploy-vercel]]. (Contrast: AWB Arona se deployează pe VPS, nu din GitHub.)
 
+## Garda de comandă ÎN TOM (din 24-oct-2026) ⭐
+TOM cheamă garda (`po_garda.py`, aceeași funcție `verifica` ca umbra și `po_from_sheet.py`) prin
+`po_garda_http.py` — serviciu pe 84.46.242.181 (systemd `po-garda`, 127.0.0.1:8733, public doar ca
+`https://scripts.arona.ro/po-garda/verifica`, semnat HMAC cu `PO_GARDA_HMAC_SECRET`). TOM păstrează
+doar verdictul și semnătura (`purchase_order_items.guard*` / `override*`).
+- **UI:** draft-ul se verifică la fiecare salvare; **Submit** e refuzat cât timp o linie oprită n-are
+  motiv scris de mână (min 20 de caractere, nu identic cu al altei linii, semnat = userul logat +
+  ora). Pe un PO deja NEW, adăugarea / schimbarea cantității unei linii oprite cere motivul pe loc.
+- **API:** pe linie `override_reason` + `override_signed_by`; lipsă → `422 guard_blocked` (nimic
+  scris); garda căzută → `503 guard_unavailable`. Fără flag de ocolire.
+- O semnătură acoperă DOAR cantitatea pentru care a fost dată. Statusurile de după trimitere
+  (order → receive → ship) nu cheamă garda. Liniile de dinainte = `GRANDFATHERED`.
+- Raport: secțiunea „Signed past the order guard" din emailul săptămânal TOM (luni) și
+  `tom.py semnate --zile 7` (pentru briefing).
+
 ## The one thing to never forget (the trap)
 A line can go **NEW → CANCELLED directly** with a free-text `cancelNote` like *"Use of tables in
 multiple sizes"* — 0 ordered qty, no shipment link, invisible to any "what's in this container"

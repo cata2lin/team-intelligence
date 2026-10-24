@@ -19,6 +19,7 @@ on container contents, never the packing list (that's the KDocs file; see gigi:i
   tom.py pos [--source GRANDIA] [--status NEW]      # list POs (read)
   tom.py po TOM-039                                  # PO detail: lines, statuses, cancelNote
   tom.py ghost                                       # cancelled-but-maybe-produced lines (the trap)
+  tom.py semnate [--zile 7]                          # lines sent past the order guard, who signed + why
   tom.py shipments · tom.py product GD-IL-6658 · tom.py events <lineItemId>
   tom.py po-get GRANDIA <sourcePoId>                 # read a PO via the signed API (proves signing)
   tom.py po-create GRANDIA --json '{...}' --yes      # create a PO as a source app (HMAC)
@@ -104,6 +105,18 @@ def q_ghost():
                  group by 1,2,3 order by 4 desc limit 40""")
     rows(c)
 
+def q_semnate(zile):
+    """Liniile trimise peste garda de comanda, cu motivul scris de mana si cine a semnat (pt briefing)."""
+    cn = db(); c = cn.cursor()
+    c.execute("""select po."tomNumber", upper(i."externalSku") sku, i."requestedQty" qty,
+                        i."overrideSignedByName" semnat_de, i."overrideSignedVia" prin,
+                        to_char(i."overrideSignedAt" at time zone 'Europe/Bucharest','YYYY-MM-DD HH24:MI') cand,
+                        i."overrideReason" motiv, i."guardReasons"->>0 garda
+                 from purchase_order_items i join purchase_orders po on po.id=i."poId"
+                 where i."overrideSignedAt" > now() - make_interval(days => %s)
+                 order by i."overrideSignedAt" desc""", (zile,))
+    rows(c)
+
 def q_shipments():
     cn = db(); c = cn.cursor()
     c.execute("""select s.code, s.name, s.status, s.carrier,
@@ -168,6 +181,7 @@ def main():
     s = sub.add_parser("pos"); s.add_argument("--source"); s.add_argument("--status")
     s = sub.add_parser("po"); s.add_argument("tomNumber")
     sub.add_parser("ghost"); sub.add_parser("shipments")
+    s = sub.add_parser("semnate"); s.add_argument("--zile", type=int, default=7)
     s = sub.add_parser("product"); s.add_argument("term")
     s = sub.add_parser("events"); s.add_argument("lineId")
     s = sub.add_parser("sql"); s.add_argument("query")
@@ -183,6 +197,7 @@ def main():
     if a.cmd == "pos": q_pos(a.source, a.status)
     elif a.cmd == "po": q_po(a.tomNumber)
     elif a.cmd == "ghost": q_ghost()
+    elif a.cmd == "semnate": q_semnate(a.zile)
     elif a.cmd == "shipments": q_shipments()
     elif a.cmd == "product": q_product(a.term)
     elif a.cmd == "events": q_events(a.lineId)
