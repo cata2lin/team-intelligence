@@ -1042,17 +1042,22 @@ check("_run: o comandă trecută de timpul limită: ce a apucat să spună + „
 subprocess.run = fara_retea
 RULARI = []
 M._run = lambda script, args, timeout=180: RULARI.append((os.path.basename(script), list(args), timeout)) or "ok"
-M.xc_order_cancel("TST1", apply=True, agent="Raluca", motiv="client")
-M.xc_awb_void("TST1")
-M.xc_awb_regen("TST1", parcels=2, awb="70000000001", apply=True, agent="Raluca")
-M.xc_awb_make("TST1")
-check("xc_order_cancel trimite agentul și motivul", RULARI[0][1] == [
-    "order-cancel", "--order", "TST1", "--apply", "--agent", "Raluca", "--motiv", "client"], RULARI[0])
-check("xc_awb_void fără agent: fără --agent gol, fără --apply", RULARI[1][1] == ["awb-void", "--order", "TST1"], RULARI[1])
-check("xc_awb_regen există și trimite coletele și eticheta", RULARI[2][1] == [
-    "awb-regen", "--order", "TST1", "--parcels", "2", "--awb", "70000000001", "--apply", "--agent", "Raluca"], RULARI[2])
-check("uneltele care trec prin Order Hub (și xc_awb_make) au timp peste cele 90 s ale cererii", len(RULARI) == 4
-      and all(r[2] >= 300 for r in RULARI), RULARI)
+dep = [M.xc_order_cancel("TST1", apply=True, agent="Raluca", motiv="client"), M.xc_awb_void("TST1", apply=True),
+       M.xc_awb_regen("TST1", parcels=2, awb="70000000001", apply=True, agent="Raluca"), M.xc_awb_make("TST1", apply=True),
+       M.xc_inv_make("TST1", apply=True)]
+check("acțiunile xc_* sunt DEPRECIATE (CS.md §4): nu rulează nimic, trimit la gigi:order-hub cu acțiunea potrivită",
+      not RULARI and all(t.startswith("DEPRECIAT (nimic executat)") and "gigi:order-hub" in t for t in dep)
+      and ["`anulare`", "`oprire`", "`refacere`", "`awb-nou`", "`factura`"] == [t.split("gigi:order-hub ")[1].split(" ")[0] for t in dep],
+      (RULARI, dep))
+ret = [M.xc_summary(), M.xc_address_issues(), M.xc_not_downloaded()]
+check("uneltele de citire xConnector sunt retrase (nimic rulat, trimitere la înlocuitor)",
+      not RULARI and all(t.startswith("RETRAS") for t in ret) and "address_guard" in ret[1] and "ghost_shipments" in ret[2], ret)
+M.xc_links(order="TST1"); M.xc_links(awb="70000000001")
+check("xc_links rulează oh_links.py (Order Hub), nu xconnector.py", [r[:2] for r in RULARI] == [
+    ("oh_links.py", ["--order", "TST1"]), ("oh_links.py", ["--awb", "70000000001"])], RULARI)
+SRC_MCP = open(os.path.join(AICI, "mcp_server.py"), encoding="utf-8").read()
+check("MCP-ul nu mai injectează DATABASE_URL_AWBPRINT în env", 'for s in ("DATABASE_URL_METRICS",)' in SRC_MCP
+      and '"DATABASE_URL_AWBPRINT","DATABASE_URL_METRICS"' not in SRC_MCP)
 
 print("12. oh_client")
 r = OH._cere("/api/depozit/anulare", {"dry_run": True}, CHEIE, http=lambda *a: (200, json.dumps({"detail": "x"})))
@@ -1224,9 +1229,6 @@ check("MCP, timeout la xc_awb_regen cu apply: repetă același apel cu același 
       and "NU lua awb dintr-o probă nouă" in text_regen and "apply=false" not in text_regen, text_regen)
 check("MCP, timeout la celelalte acțiuni: sfatul de dinainte (verifică starea înainte de a repeta)",
       "verifică starea comenzii (apply=false)" in text_void and "Repetă EXACT" not in text_void, text_void)
-doc = M2.xc_awb_regen.__doc__ or ""
-check("MCP: descrierea xc_awb_regen spune ce faci după un răspuns pierdut", "repetă EXACT același apel" in doc
-      and "NU lua awb dintr-o probă nouă" in doc, doc)
 
 print("15. numele canonic: Order Hub primește comanda găsită, nu ce s-a tastat")
 OH_COMENZI_0["TST123456"] = {"vii": ["70000000284"], "cont": "dpd-ro-arona"}   # etichetă OH, încă nu e în Shopify

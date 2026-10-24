@@ -4,8 +4,14 @@
 # ///
 """arona-fulfillment MCP — Customer Service + Fulfillment: caut comandă/client, status, AWB, factură, acțiuni.
 
-Strat SUBȚIRE peste CLI-ul testat: `xconnector.py` (local) + `cs360.py` (../cs-360). Read-only by default;
-ACȚIUNILE (anulare/AWB/factură) sunt DRY-RUN dacă nu pui apply=true (garda „plecată" din xconnector rămâne).
+Strat SUBȚIRE peste CLI-uri testate: `cs360.py` (../cs-360), `oh_links.py` (Order Hub), `awb_track.py`,
+`deliverability_monitor.py`. Doar citire.
+
+xConnector e DEZINSTALAT din 19-oct-2026 (cheile API dau 401): uneltele care citeau xConnector (xc_summary,
+xc_address_issues, xc_not_downloaded) întorc doar trimiterea la înlocuitor, iar ACȚIUNILE xc_* (anulare, AWB, factură)
+sunt DEPRECIATE din 6-oct (shared/CS.md §4): întorc „folosește gigi:order-hub <acțiune>" și nu mai ating nimic.
+`xc_links` citește Order Hub (GET /api/cs/comanda), nu AWBprint. MCP-ul nu mai pune DATABASE_URL_AWBPRINT în env:
+nicio unealtă rămasă nu deschide AWBprint (baza nu mai are voie să fie citită de pe laptopuri).
 Credențiale din KB. Python/FastMCP stdio.
 
 Register: claude mcp add --scope user arona-fulfillment -- uv run <abs path>/mcp_server.py
@@ -14,7 +20,7 @@ import os, subprocess
 HERE=os.path.dirname(os.path.abspath(__file__))
 KB=os.path.join(HERE,"..","..","..","core","scripts","kb.py")
 def _kb(k): return subprocess.run(["uv","run",KB,"secret-get",k],capture_output=True,text=True, stdin=subprocess.DEVNULL, timeout=120).stdout.strip()
-for s in ("DATABASE_URL_AWBPRINT","DATABASE_URL_METRICS"):
+for s in ("DATABASE_URL_METRICS",):   # cs360 citește metrics; AWBprint NU se mai injectează (vezi docstring)
     if not os.environ.get(s): os.environ[s]=_kb(s)
 def _env():
     e=dict(os.environ); e.pop("VIRTUAL_ENV",None); e["PYTHONIOENCODING"]="utf-8"; return e
@@ -68,51 +74,60 @@ def cs_conversation(conv: str, llm: bool = False) -> str:
         raise RuntimeError(out)
     return out
 
-# ─────────── FULFILLMENT / AWB (xconnector) — READ ───────────
+# ─────────── FULFILLMENT / AWB — READ ───────────
+OHL=os.path.join(HERE,"oh_links.py")
 @mcp.tool()
 def xc_links(order: str = "", awb: str = "") -> str:
-    """Status comandă + linkuri (Shopify/xConnector/tracking) + livrare reală din AWBprint. Caută după order# SAU awb. (xConnector NU caută după telefon/nume — pt aia = cs_customer.)"""
-    a=["links"]
+    """Status comandă din ORDER HUB (sursa de adevăr): stare livrare, etichete (AWB, curier, status), hold, tichet CS +
+    linkuri (Order Hub, Shopify, tracking). Caută DOAR după numărul comenzii; după AWB → `awb_track` (status live).
+    Telefon/nume → cs_customer."""
+    a=[]
     if order: a+=["--order",order]
     if awb: a+=["--awb",awb]
-    return _run(XC,a)
+    return _run(OHL,a)
+
+RETRAS=("RETRAS: xConnector e dezinstalat din 19-oct-2026 (API-ul dă 401), unealta nu mai are de unde citi. %s")
 @mcp.tool()
 def xc_summary() -> str:
-    """Sumar xConnector: comenzi pe stări, ce e de procesat (AWB-uri de făcut, etichete de descărcat)."""
-    return _run(XC,["summary"])
+    """RETRASĂ (xConnector dezinstalat 19-oct-2026). Coada de lucru: Order Hub."""
+    return RETRAS % "Coada CS / ce e de procesat: Order Hub (https://orderhub.arona.ro/app/orders); stare pe comandă: oh_comanda."
 @mcp.tool()
 def xc_address_issues(shop: str = "", days: int = 60) -> str:
-    """Comenzi cu probleme de adresă (înainte de pickup) — coada de reparat. Opțional filtrează pe --shop."""
-    a=["address-issues","--days",str(days)]
-    if shop: a+=["--shop",shop]
-    return _run(XC,a)
+    """RETRASĂ (xConnector dezinstalat 19-oct-2026). Adrese proaste înainte de pickup: arona-cs-guard address_guard."""
+    return RETRAS % "Adrese de reparat înainte de pickup: MCP arona-cs-guard → address_guard."
 @mcp.tool()
 def xc_not_downloaded(min_age_hours: int = 48) -> str:
-    """AWB-uri emise dar NEscanate de curier (ghost shipments) mai vechi de min_age_hours."""
-    return _run(XC,["not-downloaded","--min-age-hours",str(min_age_hours)])
+    """RETRASĂ (xConnector dezinstalat 19-oct-2026). AWB-uri nescanate de curier: arona-cs-guard ghost_shipments."""
+    return RETRAS % "AWB-uri emise dar nescanate (ghost shipments): MCP arona-cs-guard → ghost_shipments."
 
-# ─────────── ACȚIUNI (dry-run default) ───────────
-def _cine(agent, motiv): return (['--agent',agent] if agent else [])+(['--motiv',motiv] if motiv else [])
+# ─────────── ACȚIUNI: DEPRECIATE (shared/CS.md §4) — nu ating nimic ───────────
+# Din 6-oct orice modificare pe o comandă trece prin gigi:order-hub (proba + execuția cu confirmare, gărzi, istoric).
+# Calea xConnector e moartă din 19-oct; order-cancel și awb-make citeau și AWBprint. Semnăturile rămân, ca agenții
+# care le cheamă să primească trimiterea, nu „unealtă necunoscută".
+def _depreciat(actiune, ex):
+    return ("DEPRECIAT (nimic executat): acțiunile xc_* nu se mai folosesc (shared/CS.md §4; xConnector dezinstalat "
+            "19-oct-2026). Folosește gigi:order-hub `%s` (MCP arona-orderhub: oh_comanda → oh_proba → acordul omului → "
+            "oh_executa), ex: %s." % (actiune, ex))
 @mcp.tool()
 def xc_order_cancel(order: str, apply: bool = False, force: bool = False, agent: str = "", motiv: str = "") -> str:
-    """Anulează o comandă. Întreabă ÎNTÂI Order Hub: el anulează eticheta la curier, apoi comanda, și rambursează singur ce e plătit cu cardul (force nu există acolo); xConnector doar dacă Order Hub nu cunoaște comanda. agent = cine cere (ajunge în istoricul comenzii din Order Hub), motiv = de ce (în nota comenzii). DRY-RUN dacă apply=false; citește planul probei înainte de apply=true."""
-    return _run(XC,["order-cancel","--order",order]+(["--apply"] if apply else [])+(["--force"] if force else [])+_cine(agent,motiv),timeout=300)
+    """DEPRECIATĂ: nu execută nimic. Anularea = gigi:order-hub `anulare`."""
+    return _depreciat("anulare", "comanda: %s" % order)
 @mcp.tool()
 def xc_awb_make(order: str, apply: bool = False) -> str:
-    """Fă AWB prin xConnector. Se refuză pe o comandă care are deja AWB în Order Hub (acolo: xc_awb_regen) și nu eliberează hold-urile puse de Order Hub. Folosește-l doar când Order Hub cere eticheta făcută manual în xConnector. DRY-RUN dacă apply=false."""
-    return _run(XC,["awb-make","--order",order]+(["--apply"] if apply else []),timeout=300)
+    """DEPRECIATĂ: nu execută nimic. AWB nou = gigi:order-hub `awb-nou`."""
+    return _depreciat("awb-nou", "comanda: %s" % order)
 @mcp.tool()
 def xc_awb_void(order: str, apply: bool = False, agent: str = "", motiv: str = "") -> str:
-    """OPREȘTE o comandă a Order Hub: anulează AWB-ul și o ține pe hold (se eliberează din Order Hub). Pe o comandă pe care Order Hub n-o cunoaște doar anulează AWB-ul în xConnector. NU e pasul întâi din „anulez și fac alt AWB" — pentru asta e xc_awb_regen. DRY-RUN dacă apply=false."""
-    return _run(XC,["awb-void","--order",order]+(["--apply"] if apply else [])+_cine(agent,motiv),timeout=300)
+    """DEPRECIATĂ: nu execută nimic. Oprirea (AWB anulat + hold) = gigi:order-hub `oprire`."""
+    return _depreciat("oprire", "comanda: %s" % order)
 @mcp.tool()
 def xc_awb_regen(order: str, parcels: int = 0, awb: str = "", apply: bool = False, agent: str = "", motiv: str = "") -> str:
-    """Reface AWB-ul unei comenzi (anulează + face altul, pe același curier), prin Order Hub. Întâi probă (apply=false): arată eticheta de refăcut și numărul de colete. Execuția (apply=true) cere parcels și awb = eticheta din proba făcută ÎNAINTEA execuției; o cerere repetată pe aceeași etichetă e refuzată, deci nu iese a treia. Dacă execuția nu întoarce răspuns (timeout, eroare, „POATE să fi fost executată”): repetă EXACT același apel, cu același awb — Order Hub îl refuză (eticheta_anulata) dacă refacerea s-a făcut, altfel o face o singură dată. NU lua awb dintr-o probă nouă după un răspuns pierdut: proba arată deja eticheta nouă, iar refacerea ei face a treia. Dacă proba nu tipărește „→ execuție” (refacere de curând: „e gata”, sau „→ repetă” după un răspuns pierdut, chiar și după un timeout al uneltei), nu construi execuția de mână. Se folosește și după o schimbare de adresă pe o comandă care are deja AWB — la 1–2 minute după schimbare, ca adresa nouă să fi ajuns peste tot. Pe o comandă pe care Order Hub n-o cunoaște: anulează + reface prin xConnector."""
-    return _run(XC,["awb-regen","--order",order]+(["--parcels",str(parcels)] if parcels else [])+(["--awb",awb] if awb else [])+(["--apply"] if apply else [])+_cine(agent,motiv),timeout=300)
+    """DEPRECIATĂ: nu execută nimic. Refacerea AWB-ului = gigi:order-hub `refacere` (+ `awb` = eticheta din probă)."""
+    return _depreciat("refacere", "comanda: %s, colete: %s" % (order, parcels or "N"))
 @mcp.tool()
 def xc_inv_make(order: str, apply: bool = False) -> str:
-    """Creează factură pt o comandă (SmartBill). DRY-RUN dacă apply=false."""
-    return _run(XC,["inv-make","--order",order]+(["--apply"] if apply else []))
+    """DEPRECIATĂ: nu execută nimic. Factura = gigi:order-hub `factura`."""
+    return _depreciat("factura", "comanda: %s" % order)
 
 
 # ─── Tracking multi-curier + livrabilitate (erau doar CLI) ───────────────
@@ -123,7 +138,7 @@ DELIV=os.path.join(HERE,"..","deliverability-monitor","deliverability_monitor.py
 def awb_track(awb: str = "", courier: str = "", problems_only: bool = False) -> str:
     """Status LIVE la unul sau mai multe AWB-uri, pe orice curier (DPD/Sameday/Econt/Packeta).
     awb = unul sau mai multe separate prin virgulă. problems_only=true arată doar cele blocate.
-    Pentru statusul din baza noastră (fără să lovești curierul), folosește `xc_links`."""
+    Pentru statusul din Order Hub (fără să lovești curierul), folosește `xc_links` (după numărul comenzii)."""
     a=[]
     for x in [s.strip() for s in awb.split(",") if s.strip()]:
         a+=["--awb",x]
