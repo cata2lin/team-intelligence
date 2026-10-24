@@ -143,6 +143,8 @@ def check_metrics(rows, ctx):
     else:
         rows.append((OK, "brand_pnl.gol", "%d livrate, %.0f venit, %.0f marketing" % (dlv, rev, mkt)))
 
+    # Cursul BNR al echipei (meta-ads, tiktok-ads, ad_spend_live, wms_ad_spend_api, import_cost_tom îl citesc de aici
+    # din 24-oct; înainte îl luau din AWBprint.exchange_rates, care a stat 21-iul → 19-oct fără să-l vadă nimeni).
     cur.execute('SELECT MAX("rateDate") FROM fx_rates')
     _judge(rows, "fx_rates", cur.fetchone()[0], 96, "curs BNR")
 
@@ -214,10 +216,6 @@ def check_awbprint(rows, ctx):
     synced, created = cur.fetchone()
     _judge(rows, "awbprint.sync", synced, 8, "heartbeat sync")
     _judge(rows, "awbprint.orders", created, 24, "cea mai nouă comandă")
-    # Cursul BNR din AWB Arona (îl folosesc P&L-ul din AWB, meta-ads și tiktok-ads): a stat pe 21-iul până pe
-    # 19-oct fiindcă BNR a mutat fluxul XML, iar nimeni n-a văzut — consumatorii îl prelungesc tăcut.
-    cur.execute("SELECT MAX(rate_date) FROM exchange_rates")
-    _judge(rows, "awbprint.curs_bnr", cur.fetchone()[0], 96, "curs BNR din AWB Arona")
     cx.close()
 
 
@@ -623,6 +621,12 @@ def check_transport_mom(rows, ctx):
                  "%s %.2f vs %s %.2f lei/colet (%.0f%% drift)" % (m1, a1, m0, a0, drift)))
 
 
+def check_oh_vs_profit_orders(rows, ctx):
+    """Comenzi din Order Hub lipsă din profit_orders (13-oct: HU/SK șterse tăcut la un 401). Vezi garda_oh_profit_orders."""
+    import garda_oh_profit_orders as _g
+    rows.extend(_g.verifica(3))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Watchdog de prospețime a datelor ARONA")
     ap.add_argument("--email", help="destinatar (email trimis DOAR dacă e ceva roșu)")
@@ -635,7 +639,7 @@ def main():
     ctx = {}  # check_metrics populează cache_fresh înainte ca check_profitdb să-l citească
     for fn in (check_metrics, check_sync_rows, check_awbprint, check_awb_output,
                check_transport_real, check_transport_mom, check_profitdb,
-               check_gads_feed, check_oh_mirror, check_heartbeats, check_apk_vs_git):
+               check_gads_feed, check_oh_mirror, check_heartbeats, check_apk_vs_git, check_oh_vs_profit_orders):
         try:
             fn(rows, ctx)
         except Exception as e:
