@@ -100,7 +100,10 @@ tom.py po-create VIGO --json @payload.json --yes            # abia asta comandă
 **Trei capcane pe care scriptul le rezolvă (fiecare ne-a costat deja):**
 1. **Poza e o formulă `=IMAGE("…")`** în coloana Foto → `values.get` normal întoarce `""` și pari
    fără poze. Se citește cu `valueRenderOption=FORMULA`. Dacă ratezi asta ajungi să trimiți
-   placeholder-ul, care în TOM e un **URL 404** — exact bug-ul reparat pe TOM-045.
+   placeholder-ul, care în TOM e un **URL 404** — exact bug-ul reparat pe TOM-045. Linia fără formulă își
+   ia poza din TOM (`products.imageUrl`), apoi din **Order Hub** (`/api/produs/{sku}` → `produs.imagine`,
+   cheia `OH_TEAM_READ_TOKEN`; din 24-oct-2026, aceeași poză ca vechiul AWBprint `products.images`). Env
+   `PO_FROM_SHEET_SURSA=awb` = AWBprint, doar pe server.
 2. **Sheet-ul e editat în timp ce-l citești** (trei citiri = trei numere de linii). Suma calculată
    se compară cu **rândul TOTAL din același snapshot** și refuză dacă nu se potrivește.
 3. **Coloanele diferă de la tab la tab** → mapare pe **header**, nu pe index.
