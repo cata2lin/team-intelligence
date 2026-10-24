@@ -2,18 +2,21 @@
 # requires-python = ">=3.10"
 # dependencies = []
 # ///
-"""`links` din Order Hub: status + etichete + linkuri pentru O comandă, după numărul ei.
+"""`links` din Order Hub: status + etichete + linkuri pentru O comandă, după numărul ei SAU după un AWB.
 
 DE CE: xConnector e dezinstalat din 19-oct-2026 (cheile API dau 401), iar statusul de livrare din AWBprint e înghețat
 pe internațional din 27-sep; baza AWBprint nu mai are voie să fie citită de pe laptopuri. Sursa de adevăr pentru starea
 unei comenzi e Order Hub: GET /api/cs/comanda (fișa, doar citire, fără date personale).
 
-LIMITĂ: Order Hub caută comanda DOAR după număr (ruta nu primește AWB). După AWB → `awb_track` (status live la curier).
+După AWB: GET /api/cs/comanda-dupa-awb — aceeași fișă plus `gasit_ca`: vie | colet (cod de colet DPD de 14 cifre →
+AWB-ul părinte) | anulata | retur (AWB-ul de retur) | istoric (etichetă veche din era AWBprint). Textul spune când AWB-ul
+căutat NU e eticheta vie, ca agentul să nu trateze o etichetă anulată / veche drept cea curentă.
 
 Cheia (doar citire, `cs.citire`): env OH_TEAM_READ_TOKEN → OH_PROFIT_CITIRE_TOKEN → OH_CS_SB_TOKEN → KB OH_TEAM_READ_TOKEN.
 Fără cheie sau fără răspuns de la Order Hub = eroare clară, nu o cifră din altă sursă.
 
   uv run oh_links.py --order GT123 [--shop <domeniu|nume>] [--json]
+  uv run oh_links.py --awb <cod> [--json]
 """
 import argparse
 import json
@@ -28,8 +31,13 @@ BASE = "https://orderhub.arona.ro"
 UI_COMENZI = BASE + "/app/orders"
 KB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "core", "scripts", "kb.py")
 ENV_CHEI = ("OH_TEAM_READ_TOKEN", "OH_PROFIT_CITIRE_TOKEN", "OH_CS_SB_TOKEN")
-FARA_AWB = ("Order Hub caută comanda doar după NUMĂR (ruta /api/cs/comanda nu primește AWB). "
-            "Pentru statusul live al unui AWB: awb_track; pentru comandă: dă numărul ei (ex GT123).")
+GASIT_CA = {
+    "vie": None,
+    "colet": "cod de COLET (14 cifre) al AWB-ului părinte",
+    "anulata": "o etichetă ANULATĂ a comenzii, nu eticheta vie",
+    "retur": "AWB-ul de RETUR al comenzii",
+    "istoric": "o etichetă VECHE (era AWBprint), nu eticheta vie",
+}
 
 TRACKING = {
     "dpd": "https://tracking.dpd.ro/?shipmentNumber=%s",
@@ -80,7 +88,16 @@ def fisa(comanda, magazin="", cheie=None, http=None):
     p = {"comanda": comanda.strip().lstrip("#").strip()}
     if magazin:
         p["magazin"] = magazin
-    cod, corp = _get("/api/cs/comanda", p, cheie or token(), http)
+    return _fisa("/api/cs/comanda", p, cheie, http)
+
+
+def fisa_dupa_awb(awb, cheie=None, http=None):
+    """Fișa comenzii după AWB (vie / colet / anulată / retur / istoric). EroareOH ca la `fisa`."""
+    return _fisa("/api/cs/comanda-dupa-awb", {"awb": str(awb).strip()}, cheie, http)
+
+
+def _fisa(cale, p, cheie, http):
+    cod, corp = _get(cale, p, cheie or token(), http)
     try:
         d = json.loads(corp)
     except Exception:
@@ -110,6 +127,11 @@ def formateaza(d):
     awbs = ", ".join(e.get("awb") or "?" for e in vii)
     out = ["  %s (%s · %s)%s" % (d.get("comanda"), mg.get("nume"), mg.get("domeniu"),
                                  (" · AWB %s" % awbs) if awbs else " · fără AWB")]
+    if d.get("awb_cautat"):
+        cum = d.get("gasit_ca") or "?"
+        nota = GASIT_CA.get(cum, "găsită ca «%s»" % cum)
+        out.append("  Căutat:     AWB %s → %s" % (d["awb_cautat"], ("eticheta VIE" if nota is None else
+                                                                   "⚠ %s; starea de mai jos e a comenzii" % nota)))
     stare = "ANULATĂ" if st.get("anulata") else (st.get("livrare") or "—")
     out.append("  Status:     %s · procesare=%s · adresă=%s · stadiu=%s · colete=%s%s" % (
         stare, st.get("procesare") or "?", st.get("adresa") or "?", st.get("stadiu") or "?", st.get("colete"),
@@ -138,12 +160,10 @@ def formateaza(d):
 
 def ruleaza(order="", awb="", shop="", ca_json=False, http=None):
     """(cod_iesire, text)."""
-    if awb and not order:
-        return 2, FARA_AWB
-    if not order:
-        return 2, "Dă --order GT123 (Order Hub nu caută după AWB)."
+    if not order and not awb:
+        return 2, "Dă --order GT123 sau --awb <cod>."
     try:
-        d = fisa(order, shop, http=http)
+        d = fisa(order, shop, http=http) if order else fisa_dupa_awb(awb, http=http)
     except EroareOH as e:
         return 1, "EROARE: %s" % e
     return 0, (json.dumps(d, ensure_ascii=False, indent=1) if ca_json else formateaza(d))

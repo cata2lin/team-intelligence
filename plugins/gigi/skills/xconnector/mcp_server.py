@@ -79,7 +79,9 @@ OHL=os.path.join(HERE,"oh_links.py")
 @mcp.tool()
 def xc_links(order: str = "", awb: str = "") -> str:
     """Status comandă din ORDER HUB (sursa de adevăr): stare livrare, etichete (AWB, curier, status), hold, tichet CS +
-    linkuri (Order Hub, Shopify, tracking). Caută DOAR după numărul comenzii; după AWB → `awb_track` (status live).
+    linkuri (Order Hub, Shopify, tracking). Caută după numărul comenzii SAU după AWB (viu, cod de colet, anulat, retur
+    sau etichetă veche din era AWBprint — rândul „Căutat" spune care; o etichetă ANULATĂ / VECHE nu e cea vie).
+    Status live la curier → `awb_track`.
     Telefon/nume → cs_customer."""
     a=[]
     if order: a+=["--order",order]
