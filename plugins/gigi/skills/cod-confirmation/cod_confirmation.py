@@ -130,12 +130,67 @@ def blacklist():
         print("  … încă %d (--json pentru toate)" % (len(serial) - 300))
 
 
+# ── S1 (24-oct-2026): statusurile din ORDER HUB (starea din colete), nu din profit_orders ──
+# `profit_orders.status_category` păstrează cascada veche (AWBprint + maparea curierilor): motorul pune starea OH doar în
+# memorie. Coada de aici citea deci statusuri vechi — la intl înghețate din 27-sep. Întoarcere: --source awb.
+_OH_NORM = {"GRAND": "GRAN", "NUBRA": "NUB"}
+
+
+def _prefix(comanda):
+    import re
+    m = re.match(r"^#?([A-Za-z]+)", comanda or "")
+    p = (m.group(1) if m else "").upper()
+    return _OH_NORM.get(p, p)
+
+
+def date_din_oh(randuri, nlo, rlo, rf, prefix=""):
+    """Aceeași formă ca varianta din profit_orders: {'net', 'refz', 'red'}. `randuri` = dict-uri din /api/cs/livrabilitate
+    (comanda, stare, total, skus, zi). Funcție pură (testată)."""
+    net, refz = [], []
+    pl, pr, prod = collections.Counter(), collections.Counter(), collections.defaultdict(lambda: [0, 0])
+    for x in randuri:
+        o, st, zi, p = x["comanda"], x["stare"], (x.get("zi") or ""), _prefix(x["comanda"])
+        if st == "Netrimisa" and zi >= nlo and (not prefix or p == prefix):
+            net.append({"o": o, "p": p, "rev": x.get("total") or 0, "skus": x.get("skus") or ""})
+        if st == "Refuzata" and zi >= rlo:
+            refz.append(o)
+        if st in ("Livrata", "Refuzata") and zi[:7] >= rf:
+            (pl if st == "Livrata" else pr)[p] += 1
+            for sk in {y.strip() for y in (x.get("skus") or "").split(";")}:
+                if sk:
+                    prod[(p, sk)][0 if st == "Livrata" else 1] += 1
+    red = []
+    for (p, sk), (liv, ref) in prod.items():
+        tot = liv + ref
+        if tot >= 40 and ref / tot > 0.30:
+            avg = pr[p] / (pl[p] + pr[p]) if (pl[p] + pr[p]) else 0
+            if avg and ref / tot > 1.6 * avg:
+                red.append([p, sk])
+    return {"net": net, "refz": refz, "red": red}
+
+
+def citeste_oh(luni):
+    import urllib.request
+    tok = secret("OH_PROFIT_CITIRE_TOKEN") or secret("OH_CS_SB_TOKEN")
+    out = []
+    for luna in sorted(luni):
+        req = urllib.request.Request("https://orderhub.arona.ro/api/cs/livrabilitate?luna=" + luna,
+                                     headers={"Authorization": "Bearer " + tok, "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=300) as r:
+            d = json.loads(r.read().decode("utf-8"))
+        col = d["coloane"]
+        out += [dict(zip(col, x)) for x in d["randuri"]]
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--brand", default=""); ap.add_argument("--days", type=int, default=5)
     ap.add_argument("--min-value", type=float, default=150, dest="minv"); ap.add_argument("--limit", type=int, default=50)
     ap.add_argument("--draft", action="store_true")
     ap.add_argument("--blacklist", action="store_true", help="listă telefoane card-only (≥2 refuzuri/180z)")
+    ap.add_argument("--source", choices=["oh", "awb"], default=os.environ.get("COD_CONFIRMARE_SURSA", "oh"),
+                    help="statusurile: oh = Order Hub (implicit, S1), awb = profit_orders (cascada veche)")
     a = ap.parse_args()
     if a.blacklist:
         return blacklist()
@@ -165,9 +220,17 @@ def main():
           "  avg=pr[pfx]/(pl[pfx]+pr[pfx]) if (pl[pfx]+pr[pfx]) else 0\n"
           "  if avg and ref/tot>1.6*avg: red.append([pfx,s])\n"
           "print(json.dumps({'net':net,'refz':refz,'red':red}))") % {'nl': nlo, 'pf': pf, 'rl': rlo, 'rf': rf}
-    d = ssh(py)
+    if a.source == "oh":
+        luni, z = set(), datetime.date.today().replace(day=1)
+        prag = min(nlo, rlo, rf + "-01")
+        while z.isoformat() >= prag[:8] + "01":
+            luni.add(z.strftime("%Y-%m"))
+            z = (z - datetime.timedelta(days=1)).replace(day=1)
+        d = date_din_oh(citeste_oh(luni), nlo, rlo, rf, prefix)
+    else:
+        d = ssh(py)
     if not d:
-        print("Nu am putut citi comenzile (SSH/DB)."); return
+        print("Nu am putut citi comenzile (%s)." % ("Order Hub" if a.source == "oh" else "SSH/DB")); return
     net, refz = d["net"], d["refz"]
     conn = mconn(); cur = conn.cursor()
     risky_phones = set()
