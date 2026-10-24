@@ -2415,53 +2415,68 @@ def get_report(
     # același cost pe fiecare rând; sumarea le multiplica). orders.transport_cost prinde corect și duplicatul
     # (= AWB principal) și split-ul real (= sumă). Fallback: MAX(transport_cost_fara_tva) = principalul deduplicat
     # (ex-TVA), unde orders.transport_cost lipsește. Final fallback: cost_per_parcel flat (în blocul de transport).
+    # AWBprint fără cititori (faza 2, 24-oct-2026): cu TRANSPORT_SURSA=oh blocul AWBprint nu se mai deschide deloc —
+    # cascada devine Orders → flat. Înainte se deschidea necondiționat (și pica pe laptopuri după restricția pg_hba).
+    try:
+        from core import transport_oh as _toh_pre
+        _sursa_pre = _toh_pre.sursa_activa()
+    except Exception:
+        _sursa_pre = (os.environ.get("TRANSPORT_SURSA") or "").strip().lower()
     real_transport_eng = {}
     try:
-        import sys as _ts, os as _to, re as _tr
-        import psycopg2 as _tpg
-        if "/root/Scripturi" not in _ts.path:
-            _ts.path.insert(0, "/root/Scripturi")
-        import profit_core as _tpc
-        def _tcl(d):
-            d = _tr.sub(r"([?&])(schema|channel_binding|pgbouncer|connection_limit)=[^&]*", r"\1", d)
-            return _tr.sub(r"[?&]+(&|$)", r"\1", d).rstrip("?&")
-        _ac = _tpg.connect(_tcl(_to.environ["DATABASE_URL_AWBPRINT"])); _acur = _ac.cursor()
-        _acur.execute("SELECT uid, name FROM stores")
-        _dom2uid = {(n or "").strip().lower(): u for u, n in _acur.fetchall()}
-        _PLECAT = ("Livrata", "In curs de livrare", "Refuzata")
-        for _pfx, _ords in by_prefix.items():
-            _uid = _dom2uid.get((_tpc.PREFIX_AWB_DOMAIN.get(_pfx) or "").lower())
-            if not _uid:
-                continue
-            _names = [o["order_name"] for o in _ords if o.get("status_category") in _PLECAT]
-            if not _names:
-                continue
-            # 8-sep-2026: SUMA tuturor liniilor de AWB ale comenzii (outbound + RETUR + colete
-            # suplimentare), nu o singură valoare. `orders.transport_cost` ține UN cost/comandă și
-            # pierde piciorul de retur internațional și coletele în plus. Însumarea e sigură de când
-            # importul de CSV curier se face din Scripturi (api/courier_import.py): 0 perechi
-            # (order_id, tracking_number) duplicate pe iun-aug 2026. Lipsa față de vechea regulă,
-            # măsurată: iunie 8.261 / iulie 17.119 / august 9.799 RON ex-TVA (CZ/PL/BONBG/HU/SK = retur).
-            # Fallback păstrat pe orders.transport_cost dacă nu există nicio linie costată.
-            _acur.execute(
-                "SELECT o.order_number, "
-                "COALESCE(SUM(COALESCE(a.transport_cost_fara_tva, a.transport_cost / 1.21)), 0) AS awb_sum_exvat, "
-                "MAX(o.transport_cost) AS otc_gross "
-                "FROM orders o JOIN order_awbs a ON a.order_id = o.id "
-                "WHERE o.store_uid = %s AND o.order_number = ANY(%s) "
-                "GROUP BY o.order_number",
-                (_uid, _names))
-            for _on, _sum, _otc in _acur.fetchall():
-                _t = float(_sum or 0)
-                if _t <= 0 and _otc and _otc > 0:
-                    _t = float(_otc) / 1.21
-                if _t > 0:
-                    real_transport_eng[(_pfx, _on)] = _t   # ex-TVA, toate AWB-urile comenzii
-        _ac.close()
-        log.info("transport REAL AWBprint: %d comenzi mapate", len(real_transport_eng))
-    except Exception as e:
-        log.warning("transport real AWBprint indisponibil (%s); fallback cost_per_parcel flat", e)
-        real_transport_eng = {}
+        import profit_core as _pcs
+        _cu_awbprint = _pcs.citeste_awbprint_transport(_sursa_pre)
+    except Exception:
+        _cu_awbprint = _sursa_pre != "oh"
+    if not _cu_awbprint:
+        log.info("transport: sursa Orders — AWBprint nu se citește (cascada Orders → flat)")
+    else:
+        try:
+            import sys as _ts, os as _to, re as _tr
+            import psycopg2 as _tpg
+            if "/root/Scripturi" not in _ts.path:
+                _ts.path.insert(0, "/root/Scripturi")
+            import profit_core as _tpc
+            def _tcl(d):
+                d = _tr.sub(r"([?&])(schema|channel_binding|pgbouncer|connection_limit)=[^&]*", r"\1", d)
+                return _tr.sub(r"[?&]+(&|$)", r"\1", d).rstrip("?&")
+            _ac = _tpg.connect(_tcl(_to.environ["DATABASE_URL_AWBPRINT"])); _acur = _ac.cursor()
+            _acur.execute("SELECT uid, name FROM stores")
+            _dom2uid = {(n or "").strip().lower(): u for u, n in _acur.fetchall()}
+            _PLECAT = ("Livrata", "In curs de livrare", "Refuzata")
+            for _pfx, _ords in by_prefix.items():
+                _uid = _dom2uid.get((_tpc.PREFIX_AWB_DOMAIN.get(_pfx) or "").lower())
+                if not _uid:
+                    continue
+                _names = [o["order_name"] for o in _ords if o.get("status_category") in _PLECAT]
+                if not _names:
+                    continue
+                # 8-sep-2026: SUMA tuturor liniilor de AWB ale comenzii (outbound + RETUR + colete
+                # suplimentare), nu o singură valoare. `orders.transport_cost` ține UN cost/comandă și
+                # pierde piciorul de retur internațional și coletele în plus. Însumarea e sigură de când
+                # importul de CSV curier se face din Scripturi (api/courier_import.py): 0 perechi
+                # (order_id, tracking_number) duplicate pe iun-aug 2026. Lipsa față de vechea regulă,
+                # măsurată: iunie 8.261 / iulie 17.119 / august 9.799 RON ex-TVA (CZ/PL/BONBG/HU/SK = retur).
+                # Fallback păstrat pe orders.transport_cost dacă nu există nicio linie costată.
+                _acur.execute(
+                    "SELECT o.order_number, "
+                    "COALESCE(SUM(COALESCE(a.transport_cost_fara_tva, a.transport_cost / 1.21)), 0) AS awb_sum_exvat, "
+                    "MAX(o.transport_cost) AS otc_gross "
+                    "FROM orders o JOIN order_awbs a ON a.order_id = o.id "
+                    "WHERE o.store_uid = %s AND o.order_number = ANY(%s) "
+                    "GROUP BY o.order_number",
+                    (_uid, _names))
+                for _on, _sum, _otc in _acur.fetchall():
+                    _t = float(_sum or 0)
+                    if _t <= 0 and _otc and _otc > 0:
+                        _t = float(_otc) / 1.21
+                    if _t > 0:
+                        real_transport_eng[(_pfx, _on)] = _t   # ex-TVA, toate AWB-urile comenzii
+            _ac.close()
+            log.info("transport REAL AWBprint: %d comenzi mapate", len(real_transport_eng))
+        except Exception as e:
+            log.warning("transport real AWBprint indisponibil (%s); fallback cost_per_parcel flat", e)
+            real_transport_eng = {}
 
     # Transportul din ORDER HUB (pasul S1, 22-oct-2026): costul real pe comandă (ex-TVA, factura DPD sau prețul
     # curierului la creare) + etichetele anulate dar facturate. În UMBRĂ: se calculează în paralel, se scrie în

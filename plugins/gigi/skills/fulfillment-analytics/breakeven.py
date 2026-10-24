@@ -150,7 +150,8 @@ def _shopify_cost_map(prefix):
 # ── Order Hub: livrarea, AOV-ul și transportul REAL (Orchestrator/owner, 22-oct-2026) ──
 # AWBprint are statusurile internaționale înghețate din 27-sep și `transport_cost` gol din 28-aug, deci D-ul intl ieșea
 # prea bun și transportul median 0. `--source oh` le ia din `GET /api/cs/livrabilitate` (starea din colete, transportul
-# fără TVA). COGS% rămâne din AWBprint line_items × Shopify (mutarea lui e pasul de cost, S2).
+# fără TVA). COGS% (AWBprint faza 2, 24-oct-2026): tot din Orders — SKU-urile comenzilor din `livrabilitate`, costul pe
+# lot din `POST /api/produs/cost/lot` (magazinele în RON; CU TVA, ca costPerItem), altfel costul din Shopify.
 _OH_NORM = {"GRAND": "GRAN", "NUBRA": "NUB"}
 _oh_cache = {}
 
@@ -203,9 +204,110 @@ def oh_livrare(prefix, days):
     return livr, refuz, aov, (median(transport) if transport else 0.0)
 
 
+def _loturi_oh(coduri, magazin):
+    """{cod: cost CU TVA} — ultimul lot din Orders (lotul cu cost transport maritim sau plasa), pe magazin."""
+    import json, urllib.request
+    tok = (os.getenv("OH_PROFIT_CITIRE_TOKEN") or os.getenv("OH_CS_SB_TOKEN")
+           or _kb_secret("OH_PROFIT_CITIRE_TOKEN") or _kb_secret("OH_CS_SB_TOKEN"))
+    baza = os.getenv("OH_CS_BASE", "https://orderhub.arona.ro").rstrip("/")
+    out, coduri = {}, sorted(coduri)
+    for i in range(0, len(coduri), 500):
+        corp = {"istoric": True, "perechi": [{"cod": c, "magazin": magazin} for c in coduri[i:i + 500]]}
+        req = urllib.request.Request(baza + "/api/produs/cost/lot", data=json.dumps(corp).encode(), method="POST",
+                                     headers={"Authorization": "Bearer " + (tok or ""), "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=240) as r:
+            d = json.loads(r.read().decode("utf-8"))
+        for rand in d.get("rezultate") or []:
+            l = sorted(rand.get("loturi") or [], key=lambda x: str(x.get("data_lot") or ""))
+            if l and l[-1].get("cost_lei_buc") is not None:
+                out[str(rand.get("cod") or "")] = float(l[-1]["cost_lei_buc"]) * (1 + VAT_RO)
+    return out
+
+
+def cogs_pct_din(comenzi, cost):
+    """(COGS%, match) din [(total, [(sku, buc), …])] și {sku_jos: cost}: Σcost·buc / Σtotal pe comenzile cu total > 0.
+    Pur (testat). Cantitatea contează: promo 2+1 / seturi au mai multe bucăți pe aceeași linie."""
+    tot_cogs = tot_rev = 0.0; mu = miss = 0
+    cost = {str(k).strip().lower(): v for k, v in cost.items()}
+    for total, linii in comenzi:
+        if not total or total <= 0:
+            continue
+        for sku, q in linii:
+            q = float(q or 0)
+            if sku.lower() in cost:
+                tot_cogs += cost[sku.lower()] * q; mu += q
+            else:
+                miss += q
+        tot_rev += float(total)
+    return ((tot_cogs / tot_rev) if tot_rev else None), (mu / (mu + miss) if (mu + miss) else 0)
+
+
+_linii_cache = {}
+
+
+def _oh_linii(days):
+    """{comanda: [(sku, buc)]} din Orders `/api/cs/comenzi-deschise?cu_anulate=true` (≤120 zile), paginat."""
+    if days in _linii_cache:
+        return _linii_cache[days]
+    import json, urllib.parse, urllib.request
+    tok = (os.getenv("OH_PROFIT_CITIRE_TOKEN") or os.getenv("OH_CS_SB_TOKEN")
+           or _kb_secret("OH_PROFIT_CITIRE_TOKEN") or _kb_secret("OH_CS_SB_TOKEN"))
+    baza = os.getenv("OH_CS_BASE", "https://orderhub.arona.ro").rstrip("/")
+    out, dupa = {}, None
+    for _ in range(2000):
+        q = {"cu_anulate": "true", "zile": min(int(days), 120), "limita": 5000}
+        if dupa is not None:
+            q["dupa"] = dupa
+        req = urllib.request.Request(baza + "/api/cs/comenzi-deschise?" + urllib.parse.urlencode(q),
+                                     headers={"Authorization": "Bearer " + (tok or ""), "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=300) as r:
+            d = json.loads(r.read().decode("utf-8"))
+        for k, v in d.items():
+            if isinstance(v, list) and v and isinstance(v[0], dict) and "sku" in v[0]:
+                for x in v:
+                    out.setdefault(str(x.get("comanda") or ""), []).append((str(x.get("sku") or ""), x.get("buc") or 0))
+        dupa = d.get("urmator")
+        if not dupa:
+            break
+    _linii_cache[days] = out
+    return out
+
+
+def oh_comenzi(prefix, days):
+    """[(total, [(sku, buc)])] din Orders: totalul din `livrabilitate`, liniile (cu cantitate) din `comenzi-deschise`,
+    pe prefixul comenzii, ultimele `days` zile."""
+    import datetime as dt, re
+    azi = dt.date.today(); de_la = azi - dt.timedelta(days=days)
+    luni, z = [], de_la.replace(day=1)
+    while z <= azi:
+        luni.append(z.strftime("%Y-%m")); z = (z.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
+    out = []
+    for luna in luni:
+        d = _oh_luna(luna); col = {c: i for i, c in enumerate(d["coloane"])}
+        for x in d["randuri"]:
+            if x[col["zi"]] < de_la.isoformat():
+                continue
+            m = re.match(r"^[A-Za-z]+", x[col["comanda"]] or "")
+            p = (m.group(0) if m else "").upper()
+            if _OH_NORM.get(p, p) != prefix:
+                continue
+            linii = _oh_linii(days).get(x[col["comanda"]])
+            if linii is None:      # comanda n-are linii în fereastra rutei: SKU-urile din livrabilitate, câte 1
+                linii = [(s.strip(), 1) for s in (x[col["skus"]] or "").split(";") if s.strip()]
+            out.append((x[col["total"]], linii))
+    return out
+
+
 def analyze(cur, key, days, sample, fx, source="awb"):
     cfg = STORES[key]; awb = f"%{cfg['awb']}%"
     W = "frisbo_created_at >= now() - interval '%d days'" % days
+    if source == "oh":
+        o_d, o_r, o_aov, o_t = oh_livrare(cfg["shop"], days)
+        if o_d + o_r:
+            return _analyze_oh(key, cfg, days, fx, o_d, o_r, o_aov, o_t)
+        if cur is None:     # n-are colete în Orders (Belasil = livrare externă, Covoria = închis) și AWBprint e închis
+            return dict(key=key, aov_ron=0.0, cur=cfg["cur"], cogs_pct=None, match=0, D=0, t_ex=0.0,
+                        contrib=None, be_cpa=None, be_roas=None, sursa="—")
 
     # delivery / refuse (terminal statuses only) + AOV + transport
     cur.execute(f"""
@@ -269,6 +371,50 @@ def analyze(cur, key, days, sample, fx, source="awb"):
                 vat_rev=vat_rev, contrib=contrib, be_cpa=contrib, be_roas=be_roas, sursa=sursa)
 
 
+def _analyze_oh(key, cfg, days, fx, delivered, refused, aov, t_ex):
+    """Breakeven numai din Orders (AWBprint faza 2): livrare, AOV, transport, COGS%."""
+    cm = _shopify_cost_map(cfg["shop"])
+    comenzi = oh_comenzi(cfg["shop"], days)
+    cost = dict(cm)
+    if cfg["cur"] == "RON":       # lotul e în lei: are sens doar lângă un total în lei
+        try:
+            shop_dom = _shop_domain(cfg["shop"])
+            if shop_dom:
+                cost.update(_loturi_oh({s for _, sk in comenzi for s, _q in sk}, shop_dom))
+        except Exception as e:  # noqa: BLE001 — Orders căzut: rămâne costul din Shopify
+            print("  (%s: loturile din Orders indisponibile, rămâne costul Shopify: %s)" % (key, e), file=sys.stderr)
+    cogs_pct, match = cogs_pct_din(comenzi, cost)
+    if not cost or match < 0.5:
+        cogs_pct = None
+    D = delivered / (delivered + refused) if (delivered + refused) else 0
+    rate = fx.get(cfg["cur"], 1.0)
+    aov_ron = aov * rate
+    vat_rev = VAT.get(cfg["country"], VAT_RO)
+    rev_ex = aov_ron / (1 + vat_rev)
+    if cogs_pct is None:
+        return dict(key=key, aov_ron=aov_ron, cur=cfg["cur"], cogs_pct=None, match=match,
+                    D=D, t_ex=t_ex, contrib=None, be_cpa=None, be_roas=None, sursa="oh")
+    cogs_lei = cogs_pct * aov_ron
+    contrib = (D * (rev_ex - cogs_lei) - t_ex) if cfg["country"] == "RO" else (D * (rev_ex - cogs_lei) - t_ex * (2 - D))
+    be_roas = aov_ron / contrib if contrib and contrib > 0 else float("inf")
+    return dict(key=key, aov_ron=aov_ron, cur=cfg["cur"], cogs_pct=cogs_pct, match=match, D=D,
+                delivered=delivered, refused=refused, t_med=None, t_ex=t_ex, vat_rev=vat_rev, contrib=contrib,
+                be_cpa=contrib, be_roas=be_roas, sursa="oh")
+
+
+def _shop_domain(prefix):
+    here = Path(__file__).resolve()
+    for up_ in range(1, 6):
+        cand = here.parents[up_] / "shopify-stores" / "scripts"
+        if (cand / "shopify_gql.py").exists():
+            sys.path.insert(0, str(cand)); break
+    from shopify_gql import resolve_store
+    try:
+        return resolve_store(prefix)[0]
+    except SystemExit:
+        return None
+
+
 def main():
     ap = argparse.ArgumentParser(description="Breakeven CPA/ROAS real per brand.")
     ap.add_argument("--store", default="all", help="esteban|belasil|carpetto|gento|all")
@@ -282,7 +428,9 @@ def main():
         # Întoarcere: --source awb sau BREAKEVEN_SURSA=awb.
         a.source = "awb" if (os.getenv("BREAKEVEN_SURSA") or "").strip().lower() == "awb" else "oh"
     keys = list(STORES) if a.store == "all" else [a.store.lower()]
-    cn = awb_conn(); cur = cn.cursor()
+    # AWBprint faza 2: pe Orders nu se deschide AWBprint; cu --source awb, calea veche (doar de pe servere)
+    cn = awb_conn() if a.source == "awb" else None
+    cur = cn.cursor() if cn else None
     fx = _fx_map()
     print(f"\n=== Breakeven real ({a.days}z) — AOV în RON ===")
     print(f"{'Brand':13} {'cur':>4} {'AOV_RON':>8} {'COGS%':>6} {'match':>6} {'Livr%':>6} "
@@ -298,9 +446,10 @@ def main():
         print(f"{k:13} {r['cur']:>4} {r['aov_ron']:8.0f} {r['cogs_pct']*100:5.1f}% {r['match']*100:5.0f}% "
               f"{r['D']*100:5.0f}% {r['t_ex']:9.2f} {r['contrib']:8.1f} "
               f"{r['be_cpa']:7.0f} {r['be_roas']:8.2f} {r['sursa']}")
-    cn.close()
+    if cn:
+        cn.close()
     print("\nModel: contrib = livrare%·(AOV/(1+TVA_țară) − COGS%·AOV) − transport_exTVA"
-          "  (RO: fără retur; intl: −transport·(2−livrare%)).  COGS% = line_items×cost Shopify.")
+          "  (RO: fără retur; intl: −transport·(2−livrare%)).  COGS% = cantitățile comenzilor din Orders × lotul din Orders (RON) sau costul Shopify.")
 
 
 if __name__ == "__main__":

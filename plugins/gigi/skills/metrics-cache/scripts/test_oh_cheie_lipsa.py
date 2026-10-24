@@ -76,3 +76,10 @@ def test_profit_lines_sync_iese_cu_eroare_fara_cheie(tmp_path, fara_chei, monkey
     monkeypatch.setattr(pls, "list_stores", lambda: [])
     with pytest.raises(SystemExit, match="Nu cad pe sursa veche"):
         asyncio.run(pls.main("2026-10", "all"))
+
+
+def test_cu_sursa_orders_awbprint_nu_se_citeste():
+    # faza 2 AWBprint: motorul și profit_by_sku nu mai deschid AWBprint când transportul vine din Orders
+    assert pc.citeste_awbprint_transport("oh") is False
+    assert pc.citeste_awbprint_transport(" OH ") is False
+    assert pc.citeste_awbprint_transport("awbprint") is True and pc.citeste_awbprint_transport(None) is True
