@@ -202,16 +202,71 @@ def fetch_store(prefix, from_date, to_date):
     return prod, n_orders
 
 
-# ════════════════════════ sursa AWBprint (Postgres, instant, ~99% complet) ════════════════════════
+# ════════════════════════ sursa Order Hub (implicit, 24-oct-2026) ════════════════════════
+def _oh():
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "core", "scripts"))
+    import oh_citire
+    return oh_citire
+
+
+def fetch_store_oh(prefix, from_date, to_date, today=None):
+    """Bucăți per SKU din Order Hub (`/api/cs/vanzari-pe-sku`, comenzi PLASATE, fără demo, ziua de București).
+
+    gross = toate liniile (cu anulate) · net = fără comenzile ANULATE. Refuzurile rămân în net (OH nu le scade pe
+    ruta asta; AWBprint le scădea) — vezi SKILL.md. Venitul pe produs NU există în OH → 0 (pt venit: --source shopify).
+    Fereastra [from, to] = W(azi−from+1) − W(azi−to), ca să nu cerem defalcarea pe zile (plafon 5000 rânduri)."""
+    oh = _oh()
+    shop, _ = resolve_store(prefix)
+    today = today or datetime.now(TZ).date()
+    d_from = datetime.strptime(from_date, "%Y-%m-%d").date()
+    d_to = min(datetime.strptime(to_date, "%Y-%m-%d").date(), today)
+    z_from, z_to = (today - d_from).days + 1, (today - d_to).days
+    if z_from > 400:
+        raise SystemExit(f"Order Hub ține fereastra de vânzări pe cel mult 400 de zile (cerut de la {from_date}). "
+                         "Scurtează perioada sau folosește --source shopify.")
+    agg = {}
+    for cu_anulate, camp in ((True, "gross"), (False, "net")):
+        for zile, semn in ((z_from, 1), (z_to, -1)):
+            if zile <= 0:
+                continue
+            try:
+                d = oh.vanzari_pe_sku(zile, shop, cu_anulate=cu_anulate)
+            except oh.OhEroare as e:
+                raise SystemExit(f"[{prefix}] {e}")
+            if d.get("taiat"):
+                raise SystemExit(f"[{prefix}] Order Hub a tăiat răspunsul la 5000 de rânduri — rezultat incomplet.")
+            for r in d.get("randuri") or []:
+                sku = str(r.get("sku") or "").strip().lower()
+                a = agg.setdefault(sku, {"gross": 0, "net": 0, "orders": 0})
+                a[camp] += semn * int(r.get("bucati") or 0)
+                if camp == "gross":
+                    a["orders"] += semn * int(r.get("comenzi") or 0)
+    titles = fetch_titles(prefix)
+    prod, n_units = {}, 0
+    for sku, a in agg.items():
+        if not sku or a["gross"] <= 0:
+            continue
+        prod[(prefix, sku)] = {"store": prefix, "title": titles.get(sku, sku), "skus": {sku},
+                               "gross": a["gross"], "net": a["net"], "revenue": 0.0, "orders": a["orders"],
+                               "currency": "RON"}
+        n_units += a["gross"]
+    return prod, n_units
+
+
+# ════════════════════════ sursa AWBprint (întoarcere explicită: --source awb; doar de pe server) ═══════════════
 def _awb_conn():
     import pg8000.dbapi, urllib.parse as up
     url = os.getenv("DATABASE_URL_AWBPRINT") or _kb_secret("DATABASE_URL_AWBPRINT")
     if not url:
-        raise SystemExit("Lipsește DATABASE_URL_AWBPRINT (env sau KB).")
+        raise SystemExit("Lipsește DATABASE_URL_AWBPRINT (env sau KB). Sursa implicită e Order Hub (--source oh).")
     u = up.urlparse(url)
-    return pg8000.dbapi.connect(user=up.unquote(u.username or ""), password=up.unquote(u.password or ""),
-                                host=u.hostname, port=u.port or 5432,
-                                database=(u.path or "/").lstrip("/"), ssl_context=True)
+    try:
+        return pg8000.dbapi.connect(user=up.unquote(u.username or ""), password=up.unquote(u.password or ""),
+                                    host=u.hostname, port=u.port or 5432,
+                                    database=(u.path or "/").lstrip("/"), ssl_context=True)
+    except Exception as e:
+        raise SystemExit(f"AWBprint nu e accesibil de aici ({type(e).__name__}) — e doar pentru servere. "
+                         "Folosește sursa implicită Order Hub (--source oh).") from None
 
 
 PRODUCTS_GQL = """
@@ -367,8 +422,10 @@ def main():
     ap.add_argument("--sheet-title", help="titlul Sheet-ului nou")
     ap.add_argument("--no-sheet", action="store_true", help="doar print, fără Google Sheet")
     ap.add_argument("--json", help="scrie clasamentul complet ca JSON la calea dată")
-    ap.add_argument("--source", choices=["awb", "shopify"], default="awb",
-                    help="awb = AWBprint (instant, ~99%%, default); shopify = live (100%%, lent)")
+    ap.add_argument("--source", choices=["oh", "awb", "shopify"],
+                    default=(os.getenv("PRODUCT_SALES_SURSA") or "oh").lower(),
+                    help="oh = Order Hub (implicit, plasate, fără venit); awb = AWBprint (doar server, întoarcere "
+                         "explicită, sau env PRODUCT_SALES_SURSA=awb); shopify = live (100%%, cu venit, lent)")
     args = ap.parse_args()
 
     to_date = args.to_date or datetime.now(TZ).strftime("%Y-%m-%d")
@@ -378,10 +435,12 @@ def main():
 
     all_prod = {}
     excluded = []
-    print(f"sursă date: {args.source} ({'AWBprint — instant' if args.source=='awb' else 'Shopify live — lent'})", file=sys.stderr)
+    eticheta = {"oh": "Order Hub — plasate, fără venit pe produs", "awb": "AWBprint — întoarcere explicită",
+                "shopify": "Shopify live — lent"}[args.source]
+    print(f"sursă date: {args.source} ({eticheta})", file=sys.stderr)
+    fetch = {"oh": fetch_store_oh, "awb": fetch_store_awb, "shopify": fetch_store}[args.source]
     for pfx in stores:
-        prod, total = (fetch_store_awb(pfx, from_date, to_date) if args.source == "awb"
-                       else fetch_store(pfx, from_date, to_date))
+        prod, total = fetch(pfx, from_date, to_date)
         kept = 0
         for k, p in prod.items():
             if exclude_re and exclude_re.search(p["title"]):
@@ -389,7 +448,7 @@ def main():
                 continue
             all_prod[k] = p
             kept += 1
-        unit = "buc gross (total)" if args.source == "awb" else "comenzi"
+        unit = "comenzi" if args.source == "shopify" else "buc gross (total)"
         print(f"[{pfx}] {total} {unit}, {len(prod)} produse ({kept} parfumuri păstrate, "
               f"{len(prod)-kept} excluse)", file=sys.stderr)
     if excluded:
@@ -415,7 +474,8 @@ def main():
             print(f"{i:>3}  {r['store']:4}  {r['gross']:>6}  {r['net']:>5}  {r['orders']:>4}  {r['product'][:58]}")
         return rows
 
-    header = ["#", "Magazin", "Parfum", "SKU", "Bucăți (gross)", "Net (excl. anulate)", "Comenzi", "Venit", "Val."]
+    header = ["#", "Magazin", "Parfum", "SKU", "Bucăți (gross)", "Net (excl. anulate)", "Comenzi",
+              "Venit" if args.source != "oh" else "Venit (n/a în OH)", "Val."]
     sheet_rows, sheets = [], []
     if args.scope == "combined":
         ranked = rank_and_emit(rows_data, "EST+GT combinat" if len(stores) > 1 else stores[0])
