@@ -1187,6 +1187,8 @@ def run_product_returns(apply):
 # prefix -> brand name (canonical, from Scripturi core/brands.py; small + stable, inlined to avoid
 # coupling build_cache to the private app package).
 PREFIX_TO_BRAND = {
+  # Zafra (24-oct): comenzile vin din OH, fără token Shopify și fără cost pe lot → numele o spune, nu COGS 0 tăcut
+  "ZAF":"Zafra (fără COGS)",
   "APR":"Apreciat","BELA":"Belasil","BONBG":"Bonhaus BG","CZ":"Bonhaus CZ","PL":"Bonhaus PL",
   "BON":"Casa Ofertelor","CARP":"Carpetto","PAT":"Ce Pat Ai","COV":"Covoria","EST":"Esteban",
   "GEN":"Gento","GT":"George Talent","MAG":"Magdeal","NOC":"Nocturna","BG":"Nocturna BG",
