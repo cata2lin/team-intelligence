@@ -267,6 +267,13 @@ def _ensure_db():
             conn.execute("ALTER TABLE profit_orders ADD COLUMN shopify_delivery_status TEXT DEFAULT ''")
         except Exception:
             pass
+        # Comisionul marketplace-ului pe comandă (lei, fără TVA) + de unde vine (real / regula / estimat).
+        # Îl scrie marketplace_profit_sync.py; pe magazinele Shopify rămâne 0.
+        for _col, _tip in (("comision", "REAL DEFAULT 0"), ("comision_sursa", "TEXT DEFAULT ''")):
+            try:
+                conn.execute("ALTER TABLE profit_orders ADD COLUMN %s %s" % (_col, _tip))
+            except Exception:
+                pass
         # SKU → product title cache
         conn.execute("""
             CREATE TABLE IF NOT EXISTS profit_sku_titles (
@@ -308,10 +315,13 @@ DEFAULT_COUNTRY_MAP = {
     "HU": "HU",    # Bonhaus.hu  — HUF, TVA 27%
     "MD": "MD",    # Duppo Moldova — MDL, TVA 20%
     "DUPBG": "BG", # Duppo BG — țara BG, dar magazinul vinde în EUR
+    # marketplace-uri (24-oct-2026, marketplace_profit_sync.py): prefixul poartă țara, contul e același
+    "EMAG": "RO", "EMAGBG": "BG", "EMAGHU": "HU", "TY": "RO", "TYBG": "BG", "TYGR": "GR",
+    "OLX": "RO", "OKZ": "RO", "PEP": "RO", "CEL": "RO",
 }
 
 DEFAULT_VAT_RATES = {"RO": 0.21, "CZ": 0.21, "PL": 0.23, "BG": 0.20, "SK": 0.23,
-                     "HU": 0.27, "MD": 0.20}  # RO trecut la 21% (aug 2025)
+                     "HU": 0.27, "MD": 0.20, "GR": 0.24}  # RO trecut la 21% (aug 2025)
 
 CURRENCY_BY_COUNTRY = {"RO": "RON", "CZ": "CZK", "PL": "PLN", "BG": "BGN", "SK": "EUR",
                        "HU": "HUF", "MD": "MDL"}
@@ -323,10 +333,12 @@ def _get_settings() -> dict:
     with _db() as conn:
         rows = conn.execute("SELECT key, value FROM profit_settings").fetchall()
     d = {r["key"]: r["value"] for r in rows}
+    # Implicitele se completează sub ce e salvat: harta salvată în bază e o copie de la o dată, iar un prefix
+    # adăugat după (ex. marketplace-urile, 24-oct) ar cădea tăcut pe RO / 21%. Valorile salvate câștigă.
     return {
         "exclude_test": json.loads(d.get("exclude_test", "true")),
-        "country_map": json.loads(d.get("country_map", json.dumps(DEFAULT_COUNTRY_MAP))),
-        "vat_rates": json.loads(d.get("vat_rates", json.dumps(DEFAULT_VAT_RATES))),
+        "country_map": {**DEFAULT_COUNTRY_MAP, **json.loads(d.get("country_map", "{}"))},
+        "vat_rates": {**DEFAULT_VAT_RATES, **json.loads(d.get("vat_rates", "{}"))},
     }
 
 
@@ -2561,6 +2573,8 @@ def get_report(
         incasari_ron = 0.0
         cogs_total = 0.0
         cogs_missing_count = 0
+        comision_total = 0.0
+        comision_surse = defaultdict(int)
 
         for o in prefix_orders:
             cat = o.get("status_category", "")
@@ -2603,6 +2617,9 @@ def get_report(
                 # ex-TVA se scoate downstream la `cogs_fara_tva = cogs_total/(1+vat_rate)`.)
                 cogs_val = o.get("cogs", 0)
                 cogs_total += cogs_val
+                if o.get("comision"):
+                    comision_total += o["comision"]
+                    comision_surse[o.get("comision_sursa") or "?"] += 1
 
             # Track missing COGS
             if o.get("cogs_missing", 0) > 0:
@@ -2691,6 +2708,9 @@ def get_report(
             "cost_transport": tc["cost"],
             "transport_vat_included": tc["vat_included"],
             "cogs_missing_count": cogs_missing_count,
+            # comisionul marketplace-ului (lei, deja fără TVA); 0 pe magazine
+            "comision_fara_tva": round(comision_total, 2),
+            "comision_surse": dict(comision_surse),
         })
 
     return {

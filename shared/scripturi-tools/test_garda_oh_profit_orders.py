@@ -20,3 +20,10 @@ def test_comenzile_migrate_in_duppo_eu_nu_sunt_lipsa():
     tags = "factura-oh,HU,migrat-clona,no-awb,orig-DPHU1001"
     po = ["DUP1799"] + G._ORIG.findall(tags)
     assert G.compara(["DPHU1001"], po)["DPHU"] == (1, 0)
+
+
+def test_marketplace_urile_nu_mai_sunt_excluse():
+    # din 24-oct marketplace-urile intră în profit_orders (marketplace_profit_sync): o lună fără ele e o gaură, nu design
+    for p in ("EMAG", "TY", "OLXT", "OKZ", "PEP"):
+        assert p not in G.EXCLUSE
+    assert "BUCSA" in G.EXCLUSE
