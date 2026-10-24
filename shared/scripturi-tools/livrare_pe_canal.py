@@ -41,7 +41,38 @@ PRAG_ALARMA = 5.0
 CANALE = ("tiktok", "meta", "google", "direct", "altul", "necunoscut", "necunoscut_magazin_inchis")
 # marketplace-urile sunt rânduri proprii; „costul” lor e comisionul marketplace-ului, nu spend de reclame
 MARKETPLACE = ("emag", "trendyol", "olx", "okazii", "pepita", "cel")
-TOATE = CANALE + MARKETPLACE
+TOATE = CANALE + MARKETPLACE + ("portal",)
+# Comisionul marketplace-ului = „costul” pe livrată (nu spend de reclame). Sursa se vede în raport:
+#   real    — din decontările marketplace-ului (Trendyol: settlements, commissionAmount / vânzări, ultimele 90 de zile);
+#   regulă  — regula de preț aprobată (arona-marketplace COMISION: eMAG 17%, Trendyol 18%, Pepita 15%);
+#   estimat — nu există nici regulă, nici decontare (OLX, Okazii, CEL): 17%.
+COMISION_REGULA = {"emag": 0.17, "trendyol": 0.18, "pepita": 0.15}
+COMISION_ESTIMAT = 0.17
+
+
+def comision(mk, real=None):
+    """(rata, sursa) pentru un marketplace: real > regulă > estimat."""
+    if real and real.get(mk):
+        return real[mk], "real"
+    if mk in COMISION_REGULA:
+        return COMISION_REGULA[mk], "regulă"
+    return COMISION_ESTIMAT, "estimat"
+
+
+def _comision_real_trendyol(zile=90):
+    """Comisionul mediu Trendyol din decontări (commissionAmount / credit pe Sale); None dacă API-ul tace."""
+    try:
+        import datetime as _dt
+        sys.argv = sys.argv[:1]
+        import trendyol_profitability as T
+        sf = _dt.datetime.now()
+        rows = T.fetch_settlements(sf - _dt.timedelta(days=zile), sf)
+        v = sum(float(r.get("credit") or 0) for r in rows if r.get("transactionType") == "Sale")
+        c = sum(float(r.get("commissionAmount") or 0) for r in rows if r.get("transactionType") == "Sale")
+        return round(c / v, 4) if v > 0 else None
+    except Exception as e:  # noqa: BLE001
+        print("comision Trendyol din decontări indisponibil: %s" % e, file=sys.stderr)
+        return None
 PLATFORMA_CANAL = {"tiktok": "tiktok", "meta": "meta", "facebook": "meta", "google": "google"}
 _LITERE = re.compile(r"^#?([A-Za-z]+)")
 
@@ -143,10 +174,12 @@ def main():
     # A. magazin × lună: mix de spend, rata de livrare, cost pe livrată
     agg = collections.defaultdict(lambda: [0, 0])
     can_lun = collections.defaultdict(lambda: [0, 0])
+    val_liv = collections.defaultdict(float)     # (canal, lună) → valoarea comenzilor livrate (total comandă)
     for r in randuri:
         k = (r["prefix"], r["luna"])
         if r["stare"] == "Livrata":
             agg[k][0] += 1; can_lun[(r.get("canal") or "necunoscut", r["luna"])][0] += 1
+            val_liv[(r.get("canal") or "necunoscut", r["luna"])] += float(r.get("total") or 0)
         elif r["stare"] == "Refuzata":
             agg[k][1] += 1; can_lun[(r.get("canal") or "necunoscut", r["luna"])][1] += 1
     linii = ["## Rata de livrare pe canal și pe magazin (Orders + spend din metrics)",
@@ -176,14 +209,16 @@ def main():
             sp_can[can] += s
     # costul pe livrată pe canal are sens doar când majoritatea livratelor au canal (backfill-ul pe 6 luni)
     # acoperirea atribuirii se socotește doar pe comenzile din magazinele Shopify (marketplace-urile au canal sigur)
-    liv_l = sum(v[0] for (c, l), v in can_lun.items() if l == l_compl and c not in MARKETPLACE)
+    liv_l = sum(v[0] for (c, l), v in can_lun.items() if l == l_compl and c not in MARKETPLACE + ("portal",))
     acoperire = (1 - sum(can_lun.get((n, l_compl), [0, 0])[0] for n in ("necunoscut", "necunoscut_magazin_inchis"))
                  / liv_l) if liv_l else 0
     linii.insert(i_atrib, "\n*Atribuire pe magazinele Shopify, %s: %.0f%% din livrate au canal (marketplace-urile sunt "
-                 "rânduri proprii, în afara procentului; „necunoscut_magazin_inchis” = magazin fără token Shopify).*"
+                 "rânduri proprii, în afara procentului, cu „costul” = comisionul; portal = B2B fără reclame; "
+                 "„necunoscut_magazin_inchis” = magazin fără token Shopify).*"
                  % (l_compl, 100 * acoperire))
+    com_real = {"trendyol": _comision_real_trendyol()} if any(can_lun.get(("trendyol", l)) for l in luni) else {}
     for c in TOATE:
-        if c in MARKETPLACE and not any(can_lun.get((c, l)) for l in luni):
+        if c in MARKETPLACE + ("portal",) and not any(can_lun.get((c, l)) for l in luni):
             continue
         cel = []
         for l in luni:
@@ -191,7 +226,11 @@ def main():
             cel.append("%s%% (%d)" % (rata(lv, rf), lv + rf) if lv + rf else "—")
         lv = can_lun.get((c, l_compl), [0, 0])[0]
         if c in MARKETPLACE:
-            cost = "comision necunoscut"      # Orders nu ține comisionul marketplace-ului
+            rata_c, src = comision(c, com_real)
+            cost = ("%.0f lei (comision %.1f%%, %s)" % (rata_c * val_liv[(c, l_compl)] / lv, 100 * rata_c, src)
+                    if lv else "— (comision %.1f%%, %s)" % (100 * rata_c, src))
+        elif c == "portal":
+            cost = "fără reclame (B2B)"
         else:
             cost = ("%.0f lei" % (sp_can[c] / lv)) if (c in sp_can and lv and acoperire >= 0.7) else (
                 "— (atribuire %.0f%%)" % (100 * acoperire) if c in sp_can else "—")

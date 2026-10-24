@@ -46,3 +46,8 @@ def test_marketplace_are_canalul_lui():
     assert canal_marketplace("trendyol") == ("trendyol", "marketplace")
     assert canal_marketplace("shopify") is None and canal_marketplace(None) is None
     assert NECUNOSCUT_INCHIS in CANALE and "cel" in CANALE
+
+
+def test_portal_are_canalul_lui():
+    from canal_marketing import CANALE, PORTAL
+    assert PORTAL in CANALE

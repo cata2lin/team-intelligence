@@ -30,7 +30,10 @@ from urllib.parse import parse_qs, urlparse
 MARKETPLACE = ("emag", "trendyol", "olx", "okazii", "pepita", "cel")
 # „necunoscut” pe două rânduri: fără UTM vs magazin fără token Shopify (închis), ca să nu se amestece cauzele
 NECUNOSCUT_INCHIS = "necunoscut_magazin_inchis"
-CANALE = ("tiktok", "meta", "google", "direct", "altul", "necunoscut") + MARKETPLACE + (NECUNOSCUT_INCHIS,)
+# Portal parteneri (B2B, fără reclame) are canalul lui, nu e „magazin închis” (Orchestrator, 24-oct)
+PORTAL = "portal"
+DOMENII_PORTAL = ("portal-parteneri.arona.invalid",)
+CANALE = ("tiktok", "meta", "google", "direct", "altul", "necunoscut") + MARKETPLACE + (PORTAL, NECUNOSCUT_INCHIS)
 CLICK_ID = (("ttclid", "tiktok"), ("fbclid", "meta"), ("gclid", "google"), ("gbraid", "google"), ("wbraid", "google"))
 _UTM = (
     (re.compile(r"^(tiktok|tt|tik[-_ ]?tok)", re.I), "tiktok"),

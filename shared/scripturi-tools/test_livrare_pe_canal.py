@@ -27,3 +27,9 @@ def test_alarma_cand_canalul_scade_peste_prag():
 
 def test_rata():
     assert L.rata(3, 1) == 75.0 and L.rata(0, 0) is None
+
+
+def test_comision_real_regula_estimat():
+    assert L.comision("trendyol", {"trendyol": 0.134}) == (0.134, "real")
+    assert L.comision("emag") == (0.17, "regulă") and L.comision("trendyol") == (0.18, "regulă")
+    assert L.comision("olx") == (0.17, "estimat") and L.comision("cel")[1] == "estimat"
