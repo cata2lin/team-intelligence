@@ -143,6 +143,8 @@ def check_metrics(rows, ctx):
     else:
         rows.append((OK, "brand_pnl.gol", "%d livrate, %.0f venit, %.0f marketing" % (dlv, rev, mkt)))
 
+    # Cursul BNR al echipei (meta-ads, tiktok-ads, ad_spend_live, wms_ad_spend_api, import_cost_tom îl citesc de aici
+    # din 24-oct; înainte îl luau din AWBprint.exchange_rates, care a stat 21-iul → 19-oct fără să-l vadă nimeni).
     cur.execute('SELECT MAX("rateDate") FROM fx_rates')
     _judge(rows, "fx_rates", cur.fetchone()[0], 96, "curs BNR")
 
@@ -214,10 +216,6 @@ def check_awbprint(rows, ctx):
     synced, created = cur.fetchone()
     _judge(rows, "awbprint.sync", synced, 8, "heartbeat sync")
     _judge(rows, "awbprint.orders", created, 24, "cea mai nouă comandă")
-    # Cursul BNR din AWB Arona (îl folosesc P&L-ul din AWB, meta-ads și tiktok-ads): a stat pe 21-iul până pe
-    # 19-oct fiindcă BNR a mutat fluxul XML, iar nimeni n-a văzut — consumatorii îl prelungesc tăcut.
-    cur.execute("SELECT MAX(rate_date) FROM exchange_rates")
-    _judge(rows, "awbprint.curs_bnr", cur.fetchone()[0], 96, "curs BNR din AWB Arona")
     cx.close()
 
 
