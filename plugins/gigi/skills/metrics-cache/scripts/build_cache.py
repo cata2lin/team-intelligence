@@ -1201,6 +1201,9 @@ PREFIX_TO_BRAND = {
   # BON = casaofertelor.ro ('Bonhaus RO' nu exista in brands).
   "LAB":"Lab Noir","SK":"Bonhaus SK","BUC":"De la Bucsa",
   "ORC":"Orice Redus","HU":"Bonhaus HU","ART":"Artevita",  # branduri create in metrics pe 11-oct-2026
+  # marketplace-uri (24-oct, marketplace_profit_sync.py): comision în coloana `comision`, marketing 0
+  "EMAG":"eMAG RO","EMAGBG":"eMAG BG","EMAGHU":"eMAG HU","TY":"Trendyol RO","TYBG":"Trendyol BG",
+  "TYGR":"Trendyol GR","OLX":"OLX","OKZ":"Okazii","PEP":"Pepita","CEL":"CEL.ro",
 }
 BRAND_PNL_MONTHLY_DDL = """
 CREATE SCHEMA IF NOT EXISTS cache;
@@ -1217,11 +1220,13 @@ CREATE TABLE IF NOT EXISTS cache.brand_pnl_monthly (
   cogs_exvat       numeric,
   transport_exvat  numeric,
   marketing        numeric,
-  net_profit       numeric,  -- revenue_exvat - cogs_exvat - transport_exvat - marketing
+  net_profit       numeric,  -- revenue_exvat - cogs_exvat - transport_exvat - marketing - comision
   margin_pct       numeric,
   computed_at      timestamptz DEFAULT now(),
   PRIMARY KEY (month, prefix)
 );
+-- comisionul marketplace-ului (eMAG / Trendyol / OLX …), fără TVA; 0 pe magazine (24-oct-2026)
+ALTER TABLE cache.brand_pnl_monthly ADD COLUMN IF NOT EXISTS comision numeric DEFAULT 0;
 CREATE INDEX IF NOT EXISTS brand_pnl_monthly_brand_idx ON cache.brand_pnl_monthly(brand_id, month);
 """
 # Remote snippet (runs on the VPS under the Scripturi venv): emit canonical per-(month,prefix) P&L TSV.
@@ -1248,8 +1253,10 @@ async def main():
             pfx = p.get("prefix", ""); d = deliv.get(pfx, {})
             inc = p.get("incasari_fara_tva") or 0; cg = p.get("cogs_fara_tva") or 0
             tr = p.get("transport_fara_tva") or 0; mk = p.get("marketing_fara_tva") or 0
+            cm = p.get("comision_fara_tva") or 0
             sys.stdout.write("\t".join([mo, pfx, str(d.get("livrata") or 0), str(p.get("plecate") or 0),
-                "%.2f" % inc, "%.2f" % cg, "%.2f" % tr, "%.2f" % mk, "%.2f" % (inc - cg - tr - mk)]) + "\n")
+                "%.2f" % inc, "%.2f" % cg, "%.2f" % tr, "%.2f" % mk, "%.2f" % (inc - cg - tr - mk - cm),
+                "%.2f" % cm]) + "\n")
 asyncio.run(main())
 '''
 def _pull_brand_pnl():
@@ -1315,13 +1322,13 @@ def run_brand_pnl_real(apply):
         except Exception: return 0
     rows = []
     for r in raw:
-        mo, pfx, deliv, sent, inc, cg, tr, mk, net = (r + [""] * 9)[:9]
+        mo, pfx, deliv, sent, inc, cg, tr, mk, net, cm = (r + [""] * 10)[:10]
         bn = PREFIX_TO_BRAND.get(pfx, pfx)
         nbn = norm(bn)
         bid = bid_by.get(nbn) or (bid_by.get(nbn[:-2]) if nbn.endswith("ro") else None)
         inc_f, net_f = f(inc), f(net)
         margin = round(100.0 * net_f / inc_f, 1) if inc_f > 0 else None
-        rows.append((mo, pfx, bn, bid, iv(deliv), iv(sent), inc_f, f(cg), f(tr), f(mk), net_f, margin))
+        rows.append((mo, pfx, bn, bid, iv(deliv), iv(sent), inc_f, f(cg), f(tr), f(mk), net_f, margin, f(cm)))
     # ⚠️ FĂRĂ TRUNCATE: rulările normale acoperă doar ultimele 6 luni, iar un TRUNCATE ar ȘTERGE
     # lunile mai vechi construite cu --months N (și, dacă engine-ul pică, ar goli tot cache-ul).
     # Pur UPSERT ⇒ fiecare rulare împrospătează DOAR lunile pe care le-a calculat. Vezi lecția
@@ -1329,13 +1336,13 @@ def run_brand_pnl_real(apply):
     mcur.execute(BRAND_PNL_MONTHLY_DDL)
     execute_values(mcur,
         "INSERT INTO cache.brand_pnl_monthly (month,prefix,brand_name,brand_id,delivered_orders,"
-        "sent_parcels,revenue_exvat,cogs_exvat,transport_exvat,marketing,net_profit,margin_pct) VALUES %s "
+        "sent_parcels,revenue_exvat,cogs_exvat,transport_exvat,marketing,net_profit,margin_pct,comision) VALUES %s "
         "ON CONFLICT (month,prefix) DO UPDATE SET "
         "brand_name=EXCLUDED.brand_name, brand_id=EXCLUDED.brand_id, "
         "delivered_orders=EXCLUDED.delivered_orders, sent_parcels=EXCLUDED.sent_parcels, "
         "revenue_exvat=EXCLUDED.revenue_exvat, cogs_exvat=EXCLUDED.cogs_exvat, "
         "transport_exvat=EXCLUDED.transport_exvat, marketing=EXCLUDED.marketing, "
-        "net_profit=EXCLUDED.net_profit, margin_pct=EXCLUDED.margin_pct, computed_at=now()",
+        "net_profit=EXCLUDED.net_profit, margin_pct=EXCLUDED.margin_pct, comision=EXCLUDED.comision, computed_at=now()",
         rows, page_size=2000)
     mcur.execute("SELECT COUNT(*) FROM cache.brand_pnl_monthly"); n = mcur.fetchone()[0]
     log_refresh(mcur, "brand_pnl_real", n)

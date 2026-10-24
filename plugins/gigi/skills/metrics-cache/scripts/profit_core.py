@@ -15,9 +15,10 @@ from collections import defaultdict
 
 # ---- TVA per ȚARĂ (nu per prefix arbitrar) ----
 VAT_BY_COUNTRY = {"RO": 0.21, "BG": 0.20, "CZ": 0.21, "PL": 0.23, "HU": 0.27, "SK": 0.23, "HR": 0.25,
-                  "MD": 0.20}  # SK 23% din 2025; MD = Moldova (Going Stellar SRL, altă firmă)
+                  "MD": 0.20, "GR": 0.24}  # SK 23% din 2025; MD = Moldova (Going Stellar SRL, altă firmă)
 PREFIX_COUNTRY = {"BG": "BG", "BONBG": "BG", "CZ": "CZ", "PL": "PL", "LUX": "RO", "NOC": "RO",
-                  "HU": "HU", "SK": "SK", "MD": "MD"}  # restul = RO
+                  "HU": "HU", "SK": "SK", "MD": "MD",
+                  "EMAGBG": "BG", "EMAGHU": "HU", "TYBG": "BG", "TYGR": "GR"}  # restul = RO (marketplace: 24-oct)
 # ⚠️ Prefixul NU e de ajuns la magazinele care vând în mai multe țări dintr-unul singur: măsurat pe
 # 22-oct-2026, **DUPBG (Duppo EU) are comenzi în EUR, HUF ȘI CZK** sub același prefix. Pentru ele,
 # țara se ia din MONEDA comenzii, nu din prefix — altfel o comandă maghiară primește TVA 21% în loc

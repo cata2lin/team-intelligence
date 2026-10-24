@@ -26,10 +26,11 @@ sys.path.insert(0, "/root/Scripturi")
 DB = "/root/Scripturi/data/profitability.db"
 PRAG_MIN = 20
 PRAG_LIPSA = 50.0
-# prefixe de comandă care nu trec prin motorul de profit Shopify (au P&L-ul lor sau nu au deloc)
+# prefixe de comandă care nu intră în motorul de profit. Marketplace-urile (EMAG, TY, OLXT, …) intră din 24-oct prin
+# `marketplace_profit_sync.py`, deci garda le cere acum ca pe orice magazin.
 EXCLUSE = {
-    "EMAG": "marketplace eMAG (P&L separat)", "TY": "Trendyol (trendyol_profitability)",
-    "OLX": "OLX (vinde din rebut)", "OLXT": "OLX", "OKZ": "Okazii", "PEP": "Pepita",
+    "BUCSA": "Portal parteneri (total 0 în Orders, marfa se facturează în afara lui)",
+    "PROBA": "comandă de probă din Portal parteneri",
 }
 _PREFIX = re.compile(r"^#?([A-Za-z]+)")
 # Comenzile Duppo HU și Duppo CZ au fost recreate în Duppo EU (fostul Duppo BG), cu eticheta `orig-<comanda veche>`:
