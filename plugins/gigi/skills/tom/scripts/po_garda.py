@@ -40,6 +40,9 @@ PRAG_NOU = 300             # produs nou: peste atat fara test = blocat
 # cele 35.000 de lavete (149.940 lei blocati) erau "3 luni de stoc" la ritmul de atunci.
 PRAG_BUCATI = 500
 PRAG_REFUZ = 20.0          # %
+# Linie scumpa pe un produs lent: AVERTISMENT, nu blocaj (masurat in umbra pe 23-oct). Un produs
+# lent e deja blocat de regula lunilor; textul spune doar cati bani stau in spatele ei.
+PRAG_VALOARE_LEI = 20000.0
 # Cutoff-ul se refera la DATA COMENZII, nu a vanzarii: marfa comandata in iulie ajunge in
 # august-septembrie, la coada sezonului. Masurat: produsele de vara comandate dupa 1 iunie au
 # vandut 0,3% in prima luna, fata de 4,0% la cele nesezoniere.
@@ -77,6 +80,54 @@ def hotness(skus):
         return {k.upper(): v for k, v in json.load(open(fis)).items() if not k.startswith("_")}
     except Exception:
         return {}
+
+
+OH_API = os.environ.get("OH_BASE_URL", "https://orderhub.arona.ro").rstrip("/")
+
+
+def _secret_text(k):
+    """Un secret oarecare (token), intai din mediu, apoi din KB. Gol daca nu se poate."""
+    v = os.environ.get(k) or ""
+    if not v:
+        uv = "/root/.local/bin/uv" if os.path.exists("/root/.local/bin/uv") else "uv"
+        try:
+            v = subprocess.run([uv, "run", KB, "secret-get", k], capture_output=True,
+                               text=True, timeout=60).stdout.strip()
+        except Exception:
+            v = ""
+    return v if v and " " not in v else ""
+
+
+def viteza_order_hub_api(skus):
+    """Aceeasi viteza, prin poarta de citire a Order Hub (`/api/cs/vanzari-pe-sku`, scop cs.citire).
+
+    De ce exista (24-oct): pe VPS-ul unde ruleaza umbra si serviciul de garda (84.46.242.181) nu
+    avem ssh catre serverul Order Hub, deci varianta prin docker exec esua TACUT si garda cadea pe
+    metrics — sursa care pierde o treime din bucati. Poarta HTTP merge de oriunde, cu un token de
+    citire, fara date personale. Definitia e a Order Hub: comanda PLASATA, neanulata, fara demo.
+    Daca raspunsul e taiat la plafonul de randuri, NU il folosesc: produsele lente ar disparea din
+    lista si ar parea fara vanzari, adica exact cazul in care garda ar bloca pe nedrept.
+    """
+    import urllib.request
+    tok = _secret_text("OH_TEAM_READ_TOKEN")
+    if not tok:
+        return {}, ""
+    try:
+        req = urllib.request.Request(OH_API + "/api/cs/vanzari-pe-sku?zile=30",
+                                     headers={"Authorization": "Bearer " + tok})
+        d = json.load(urllib.request.urlopen(req, timeout=60))
+    except Exception:
+        return {}, ""
+    if not d.get("ok") or d.get("taiat"):
+        return {}, ""
+    cerute = {x.upper() for x in skus}
+    out = {}
+    for r in d.get("randuri") or []:
+        s = str(r.get("sku") or "").strip().upper()
+        if s in cerute:
+            out[s] = out.get(s, 0) + int(r.get("bucati") or 0)
+    # Raspuns valid fara niciunul dintre SKU-uri = zero vanzari reale, nu sursa lipsa.
+    return out, "Order Hub"
 
 
 def viteza_order_hub(skus):
@@ -147,8 +198,10 @@ def date_de_fond(skus):
     # 29.698 bucati in metrics fata de 44.629 in Order Hub, adica 33% lipsa. Pe HA viteza reala e
     # de 1,58-1,68x cea din metrics, deci garda ar supraestima lunile de stoc si ar bloca pe nedrept.
     # Sursa buna e Order Hub; metrics ramane doar ca rezerva, cu avertisment in raport.
-    viteza, sursa_viteza = viteza_order_hub(skus)
-    if not viteza:
+    viteza, sursa_viteza = viteza_order_hub_api(skus)
+    if not sursa_viteza:
+        viteza, sursa_viteza = viteza_order_hub(skus)
+    if not sursa_viteza:
         sursa_viteza = "metrics (REZERVA — lipsesc magazine, cifrele sunt sub realitate)"
         met = conectare("DATABASE_URL_METRICS"); m = met.cursor()
         m.execute("""SELECT upper(sku), sum(quantity)::int FROM order_line_items
@@ -211,8 +264,36 @@ def date_de_fond(skus):
     return out
 
 
+_CURS = {}
+
+
+def curs_usd_ron():
+    """Ultimul curs BNR USD->RON din metrics.fx_rates, tinut o ora. None daca nu se poate citi:
+    atunci avertismentul de valoare nu apare, in loc sa fie calculat pe un curs inventat."""
+    acum = datetime.datetime.now()
+    if _CURS.get("t") and (acum - _CURS["t"]).total_seconds() < 3600:
+        return _CURS.get("v")
+    v = None
+    try:
+        met = conectare("DATABASE_URL_METRICS"); m = met.cursor()
+        m.execute("""SELECT rate FROM fx_rates WHERE "fromCurrency"='USD' AND "toCurrency"='RON'
+                     ORDER BY "rateDate" DESC LIMIT 1""")
+        r = m.fetchone(); met.close()
+        v = float(r[0]) if r else None
+    except Exception:
+        v = None
+    _CURS.update(t=acum, v=v)
+    return v
+
+
 def verifica(linii, azi=None, blacklist=()):
     azi = azi or datetime.date.today()
+    if any(l.get("valoare_lei") is None and l.get("valoare_usd") for l in linii):
+        curs = curs_usd_ron()
+        if curs:
+            for l in linii:
+                if l.get("valoare_lei") is None and l.get("valoare_usd"):
+                    l["valoare_lei"] = float(l["valoare_usd"]) * curs
     fond = date_de_fond([l["sku"] for l in linii])
     hot = hotness([l["sku"] for l in linii])
     rez = []
@@ -260,6 +341,11 @@ def verifica(linii, azi=None, blacklist=()):
             motive.append("refuz %.0f%%, peste pragul de %.0f%%" % (l["refuz"], PRAG_REFUZ))
         h = (hot or {}).get(s)
         avertismente = list(avertismente_marime)
+        val = l.get("valoare_lei")
+        if val is not None and float(val) >= PRAG_VALOARE_LEI and luni is not None and luni > PRAG_LUNI:
+            avertismente.append("linie de %s lei pe un produs care se misca incet: la produsele scumpe "
+                                "si lente cantitatea mica pacaleste regula pe bucati"
+                                % format(round(float(val)), ",d").replace(",", "."))
         if h in ("SUPER COLD", "COLD"):
             avertismente.append("pagina eMAG e %s: cererea pe piata e mica" % h)
         elif h is None and not componenta:
@@ -268,9 +354,15 @@ def verifica(linii, azi=None, blacklist=()):
                     "componenta": bool(componenta), "viteza_din_kit": f.get("viteza_din_kit"),
                     "stoc": f.get("stoc"), "pe_drum": f.get("pe_drum"), "viteza30": viteza,
                     "luni_dupa_comanda": round(luni, 1) if luni else None,
+                    "sursa_viteza": f.get("sursa_viteza"),
                     "blocat": bool(motive), "motive": motive,
                     "hotness": h, "avertismente": avertismente})
     return rez
+
+
+PRAGURI = {"luni": PRAG_LUNI, "produs_nou_bucati": PRAG_NOU, "bucati_pe_linie": PRAG_BUCATI,
+           "refuz_pct": PRAG_REFUZ, "valoare_lei_avertisment": PRAG_VALOARE_LEI,
+           "cutoff_vara": "%02d-%02d" % CUTOFF["vara"], "cutoff_craciun": "%02d-%02d" % CUTOFF["craciun"]}
 
 
 def main():
