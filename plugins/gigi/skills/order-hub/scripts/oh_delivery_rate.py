@@ -38,7 +38,8 @@ async def m():
     CJ = "left join comanda_canal cc on cc.order_id = o.id" if are_canal else ""
     # marketplace-urile au canalul lor (după magazin); magazinele fără token = necunoscut_magazin_inchis (ca în Orders)
     MK = ("(select lower(min(mc.marketplace)) from marketplace_conexiuni mc where mc.magazin_comenzi_id = o.store_id)")
-    IN = "(case when s.access_token is null then 'necunoscut_magazin_inchis' end)"
+    IN = ("(case when lower(s.domain) = 'portal-parteneri.arona.invalid' then 'portal' "
+          "when s.access_token is null then 'necunoscut_magazin_inchis' end)")
     CC = (f"coalesce(cc.canal, {MK}, {IN}, 'necunoscut')" if are_canal else f"coalesce({MK}, {IN}, 'necunoscut')")
     rows = await c.fetch(f"""
       with sh as ({SH})
