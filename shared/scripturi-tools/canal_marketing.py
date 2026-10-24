@@ -26,7 +26,11 @@ import re
 from typing import Any, Dict, Iterable, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
-CANALE = ("tiktok", "meta", "google", "direct", "altul", "necunoscut")
+# Marketplace-urile au canalul lor (ownerul, 24-oct): decis după MAGAZINUL comenzii din Orders, nu după UTM.
+MARKETPLACE = ("emag", "trendyol", "olx", "okazii", "pepita", "cel")
+# „necunoscut” pe două rânduri: fără UTM vs magazin fără token Shopify (închis), ca să nu se amestece cauzele
+NECUNOSCUT_INCHIS = "necunoscut_magazin_inchis"
+CANALE = ("tiktok", "meta", "google", "direct", "altul", "necunoscut") + MARKETPLACE + (NECUNOSCUT_INCHIS,)
 CLICK_ID = (("ttclid", "tiktok"), ("fbclid", "meta"), ("gclid", "google"), ("gbraid", "google"), ("wbraid", "google"))
 _UTM = (
     (re.compile(r"^(tiktok|tt|tik[-_ ]?tok)", re.I), "tiktok"),
@@ -82,6 +86,12 @@ def _atribute(o: Dict[str, Any]) -> Dict[str, str]:
         if k:
             out[k] = str(a.get("value") or "").strip()
     return out
+
+
+def canal_marketplace(marketplace: Any) -> Optional[Tuple[str, str]]:
+    """(canal, „marketplace”) pentru o comandă de pe un marketplace cunoscut (după magazin), altfel None."""
+    m = str(marketplace or "").strip().lower()
+    return (m, "marketplace") if m in MARKETPLACE else None
 
 
 def canal_din_comanda(o: Dict[str, Any]) -> Tuple[str, str]:
