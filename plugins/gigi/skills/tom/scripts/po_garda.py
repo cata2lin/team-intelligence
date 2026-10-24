@@ -43,12 +43,34 @@ PRAG_REFUZ = 20.0          # %
 # Linie scumpa pe un produs lent: AVERTISMENT, nu blocaj (masurat in umbra pe 23-oct). Un produs
 # lent e deja blocat de regula lunilor; textul spune doar cati bani stau in spatele ei.
 PRAG_VALOARE_LEI = 20000.0
-# Cutoff-ul se refera la DATA COMENZII, nu a vanzarii: marfa comandata in iulie ajunge in
-# august-septembrie, la coada sezonului. Masurat: produsele de vara comandate dupa 1 iunie au
-# vandut 0,3% in prima luna, fata de 4,0% la cele nesezoniere.
-CUTOFF = {"vara": (6, 1), "craciun": (7, 1)}
+# Ferestrele de sezon se refera la DATA COMENZII, nu a vanzarii. Decizia Orchestratorului, 24-oct-2026
+# (regula 1 din `reguli-comanda-furnizor-2027`):
+#   * VARA: marfa trebuie sa fie pe raft pana la 15 martie, deci PO-ul pleaca pana la 1 noiembrie.
+#     Blocat intre 2 noiembrie si 31 august; intre 1 septembrie si 1 noiembrie trece liber.
+#     (Versiunea de pana acum bloca 1 iunie – 31 decembrie si lasa liber ianuarie – mai, adica
+#     exact comenzile care ajung prea tarziu.)
+#   * CRACIUN: pe raft pana la 1 noiembrie, deci PO pana la 1 iulie. Blocat 2 iulie – 31 decembrie.
+# Fereastra = (luna, zi) de inceput si de sfarsit, ambele INCLUSE; poate trece peste Anul Nou.
+FEREASTRA_BLOCATA = {"vara": ((11, 2), (8, 31)), "craciun": ((7, 2), (12, 31))}
+CUTOFF = {"vara": (11, 1), "craciun": (7, 1)}   # ultima zi in care se poate comanda (pentru afisare)
 VARA = re.compile(r"gradin|plaja|piscin|sezlong|racor|ventilator|aer condi|umbrel|camping", re.I)
-CRACIUN = re.compile(r"craciun|brad|ornament|instalatie lumin|cadou", re.I)
+# Craciun = DOAR termeni expliciti. „cadou" singur NU e Craciun: prindea seturile cadou, cardurile
+# cadou si produsele „cadou" din oferte, care se vand tot anul. Textul se compara fara diacritice.
+CRACIUN = re.compile(r"craciun|christmas|xmas|\bbrad(ut|uti|ul)?\b|\bmos\b|mos craciun|ornament"
+                     r"|\bglob(uri|urile)?\b|instalati[ae] lumin|luminit[ae] (de )?brad", re.I)
+
+
+def fara_diacritice(t):
+    import unicodedata
+    t = unicodedata.normalize("NFKD", str(t or ""))
+    return "".join(c for c in t if not unicodedata.combining(c)).lower()
+
+
+def in_fereastra(azi, fereastra):
+    """True daca data comenzii cade in fereastra (luna, zi)-(luna, zi), capete incluse."""
+    (a, b) = fereastra
+    x = (azi.month, azi.day)
+    return a <= x <= b if a <= b else (x >= a or x <= b)
 
 
 def secret(k):
@@ -191,6 +213,14 @@ def date_de_fond(skus):
         out[s]["pe_drum"] = max(0, int(pe_drum or 0))
         out[s]["comenzi_anterioare"] = int(ant or 0)
         out[s]["nume"] = nume or ""
+    # Categoria din catalogul TOM (product_types): un produs pus in categoria de Craciun e de
+    # Craciun chiar daca titlul nu o spune.
+    t.execute("""SELECT upper(p.sku), coalesce(pt.name, '') FROM products p
+                 LEFT JOIN product_types pt ON pt.id = p."productTypeId"
+                 WHERE upper(p.sku) = ANY(%s)""", (skus,))
+    for s, cat in t.fetchall():
+        if s in out:
+            out[s]["categorie"] = cat or ""
     tom.close()
 
     # ⚠ Viteza NU se ia din `metrics.order_line_items`: acolo LIPSESC magazine intregi
@@ -305,22 +335,32 @@ def verifica(linii, azi=None, blacklist=()):
         total = (f.get("stoc") or 0) + (f.get("pe_drum") or 0) + q
         luni = (total / viteza) if viteza else None
         componenta = f.get("componenta")
+        # REGULA 2 (poarta principala, decizia ownerului 22/23-oct): cantitate <= viteza_30z x 4 luni,
+        # viteza din Order Hub, pe SKU. Calibrarea de 4 luni din back-test e exact raportul asta.
+        luni_comandate = (q / viteza) if viteza else None
         if componenta:
             pass                      # ambalaj / materie prima: se judeca pe consum, nu aici
+        elif viteza and q > viteza * PRAG_LUNI:
+            motive.append("regula 2: comanzi %d buc = %.1f luni de vanzari (viteza %d/luna in Order Hub)"
+                          " — peste %d buc (viteza x %.0f luni)"
+                          % (q, luni_comandate, viteza, int(viteza * PRAG_LUNI), PRAG_LUNI))
         elif viteza == 0:
             if q > PRAG_NOU:
                 motive.append("produs fara vanzari in ultimele 30 de zile si comanda de %d buc "
                               "(peste testul de %d) — daca e COMPONENTA DE KIT, judec-o pe viteza "
                               "kitului si treci blocajul cu motiv scris" % (q, PRAG_NOU))
         elif luni > PRAG_LUNI:
+            # Regula 2 trece, dar cu raftul si ce e pe drum ajungi tot peste 4 luni.
             motive.append("%.1f luni de stoc dupa comanda (stoc %d + pe drum %d + %d, viteza %d/luna) "
                           "— peste pragul de %.0f" % (luni, f.get("stoc") or 0, f.get("pe_drum") or 0,
                                                       q, viteza, PRAG_LUNI))
-        nume = (f.get("nume") or "") + " " + (l.get("nume") or "")
-        if VARA.search(nume) and (azi.month, azi.day) >= CUTOFF["vara"]:
-            motive.append("produs de vara comandat dupa 1 noiembrie")
-        if CRACIUN.search(nume) and (azi.month, azi.day) >= CUTOFF["craciun"]:
-            motive.append("produs de Craciun comandat dupa 1 iulie")
+        nume = fara_diacritice((f.get("nume") or "") + " " + (l.get("nume") or ""))
+        categorie = fara_diacritice((f.get("categorie") or "") + " " + (l.get("categorie") or ""))
+        if VARA.search(nume) and in_fereastra(azi, FEREASTRA_BLOCATA["vara"]):
+            motive.append("produs de vara comandat intre 2 noiembrie si 31 august: nu mai ajunge pe raft "
+                          "pana la 15 martie (se comanda 1 septembrie – 1 noiembrie)")
+        if CRACIUN.search(nume + " " + categorie) and in_fereastra(azi, FEREASTRA_BLOCATA["craciun"]):
+            motive.append("produs de Craciun comandat dupa 1 iulie: nu mai ajunge pe raft pana la 1 noiembrie")
         if not componenta and q >= PRAG_BUCATI:
             # Marimea singura NU blocheaza un produs care chiar se vinde: raftul metalic din
             # TOM-075 are 739 buc/luna, deci 1.000 de bucati inseamna 1,4 luni — comanda sanatoasa.
@@ -351,6 +391,7 @@ def verifica(linii, azi=None, blacklist=()):
         elif h is None and not componenta:
             avertismente.append("produsul n-are pagina pe eMAG, deci nu avem semnal de cerere de acolo")
         rez.append({"sku": s, "qty": q, "nume": (f.get("nume") or "")[:50],
+                    "luni_comandate": round(luni_comandate, 1) if luni_comandate else None,
                     "componenta": bool(componenta), "viteza_din_kit": f.get("viteza_din_kit"),
                     "stoc": f.get("stoc"), "pe_drum": f.get("pe_drum"), "viteza30": viteza,
                     "luni_dupa_comanda": round(luni, 1) if luni else None,
@@ -362,7 +403,10 @@ def verifica(linii, azi=None, blacklist=()):
 
 PRAGURI = {"luni": PRAG_LUNI, "produs_nou_bucati": PRAG_NOU, "bucati_pe_linie": PRAG_BUCATI,
            "refuz_pct": PRAG_REFUZ, "valoare_lei_avertisment": PRAG_VALOARE_LEI,
-           "cutoff_vara": "%02d-%02d" % CUTOFF["vara"], "cutoff_craciun": "%02d-%02d" % CUTOFF["craciun"]}
+           "comanda_vara_pana_la": "%02d-%02d" % CUTOFF["vara"],
+           "comanda_craciun_pana_la": "%02d-%02d" % CUTOFF["craciun"],
+           "blocat_vara": "%02d-%02d..%02d-%02d" % (FEREASTRA_BLOCATA["vara"][0] + FEREASTRA_BLOCATA["vara"][1]),
+           "blocat_craciun": "%02d-%02d..%02d-%02d" % (FEREASTRA_BLOCATA["craciun"][0] + FEREASTRA_BLOCATA["craciun"][1])}
 
 
 def main():

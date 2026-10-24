@@ -135,6 +135,10 @@ doar verdictul și semnătura (`purchase_order_items.guard*` / `override*`).
   scris); garda căzută → `503 guard_unavailable`. Fără flag de ocolire.
 - O semnătură acoperă DOAR cantitatea pentru care a fost dată. Statusurile de după trimitere
   (order → receive → ship) nu cheamă garda. Liniile de dinainte = `GRANDFATHERED`.
+- Reguli (24-oct, Orchestrator): **regula 2** = cantitate > viteza_30z (Order Hub) × 4 luni blochează;
+  în plus raft + drum + cantitate > 4 luni; **vara** blocată 2 nov – 31 aug (liber 1 sep – 1 nov);
+  **Crăciun** doar pe termeni expliciți sau categorie (nu „cadou"), blocat 2 iul – 31 dec. Fără viteză
+  din Order Hub serviciul răspunde 503 (nu judecă pe metrics). Back-test: `jurnal/2026-10-24-tom-garda-backtest.md`.
 - Raport: secțiunea „Signed past the order guard" din emailul săptămânal TOM (luni) și
   `tom.py semnate --zile 7` (pentru briefing).
 

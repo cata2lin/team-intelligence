@@ -134,6 +134,13 @@ class Garda(BaseHTTPRequestHandler):
         try:
             with LACAT:
                 rez = po_garda.verifica(linii)
+            # Regula 2 se judeca pe viteza din Order Hub. Daca poarta OH si ssh-ul au cazut si garda a
+            # luat rezerva din metrics (care pierde o treime din bucati), NU dam verdict: TOM refuza
+            # trimiterea (503) in loc sa blocheze pe nedrept sau sa lase sa treaca pe cifre gresite.
+            surse = {r.get("sursa_viteza") for r in rez if not r.get("componenta")}
+            if surse - {"Order Hub", None}:
+                return self._json(503, {"ok": False, "eroare": "viteza din Order Hub indisponibila (%s)"
+                                        % ", ".join(sorted(x for x in surse if x))})
         except SystemExit as e:          # secret / sursa lipsa: garda NU a judecat
             return self._json(503, {"ok": False, "eroare": "garda indisponibila: %s" % e})
         except Exception as e:
