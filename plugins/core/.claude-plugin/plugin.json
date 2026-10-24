@@ -29,10 +29,6 @@
       "command": "uv",
       "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/pg_mcp_launch.py", "DATABASE_URL_SCENTUM"]
     },
-    "postgres-awbprint": {
-      "command": "uv",
-      "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/pg_mcp_launch.py", "DATABASE_URL_AWBPRINT"]
-    },
     "postgres-pro": {
       "command": "uv",
       "args": ["run", "--no-project", "${CLAUDE_PLUGIN_ROOT}/scripts/mcp_env_launch.py", "DATABASE_URI=DATABASE_URL_METRICS", "--", "uvx", "--python", "3.12", "--overrides", "${CLAUDE_PLUGIN_ROOT}/scripts/postgres_mcp_overrides.txt", "postgres-mcp", "--access-mode", "restricted"]
