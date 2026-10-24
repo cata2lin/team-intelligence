@@ -35,12 +35,17 @@ class GardaRefuz(RuntimeError):
 
 
 def verifica_raspuns_oh(d):
-    """Contractul Orders pentru instantaneu / rezervări (scripturi-ed, 24-oct). Ridică GardaRefuz pe degradat."""
+    """Contractul Orders pentru instantaneu / rezervări (scripturi-ed, 24-oct, eecc6a5c): `ok: false` / `degradat: true` /
+    `raft_esuat: N` / `motiv: "RAFT_NECITIT"` / `citire_degradata: {mastere, din, pct, degradat}`; snapshot din cache:
+    `din_cache_vechi: true` + `varsta_s`. Ridică GardaRefuz pe degradat sau pe cache mai vechi de 30 min."""
     d = d or {}
     motive = []
+    cd = d.get("citire_degradata") or {}
+    if isinstance(cd, dict) and cd.get("degradat"):
+        motive.append("Orders: citire degradată (%s mastere, %s%% din %s)" % (cd.get("mastere"), cd.get("pct"), cd.get("din")))
     if d.get("ok") is False or d.get("degradat"):
-        motive.append("Orders a răspuns degradat (ok=%s, degradat=%s, raft_esuat=%s)"
-                      % (d.get("ok"), d.get("degradat"), d.get("raft_esuat")))
+        motive.append("Orders a răspuns degradat (ok=%s, degradat=%s, raft_esuat=%s, motiv=%s)"
+                      % (d.get("ok"), d.get("degradat"), d.get("raft_esuat"), d.get("motiv")))
     elif int(d.get("raft_esuat") or 0) > 0:
         motive.append("Orders: %s SKU-uri n-au putut fi citite din scaner" % d.get("raft_esuat"))
     if d.get("din_cache_vechi") and int(d.get("varsta_s") or 0) > CACHE_VARSTA_MAX_S:

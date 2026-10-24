@@ -56,7 +56,9 @@ def test_override(monkeypatch):
 
 @pytest.mark.parametrize("d", [{"ok": False, "degradat": True, "raft_esuat": 1137},
                                {"ok": True, "raft_esuat": 3},
-                               {"ok": True, "din_cache_vechi": True, "varsta_s": 2400}])
+                               {"ok": True, "din_cache_vechi": True, "varsta_s": 2400},
+                               {"ok": False, "degradat": True, "raft_esuat": 1137, "motiv": "RAFT_NECITIT"},
+                               {"ok": True, "citire_degradata": {"mastere": 1137, "din": 2012, "pct": 56.5, "degradat": True}}])
 def test_raspuns_orders_degradat_sau_vechi_e_refuzat(d):
     with pytest.raises(G.GardaRefuz):
         G.verifica_raspuns_oh(d)
@@ -64,7 +66,8 @@ def test_raspuns_orders_degradat_sau_vechi_e_refuzat(d):
 
 def test_raspuns_orders_bun_sau_cache_proaspat_trece():
     G.verifica_raspuns_oh({"ok": True, "linii": []})
-    G.verifica_raspuns_oh({"ok": True, "din_cache_vechi": True, "varsta_s": 600})
+    G.verifica_raspuns_oh({"ok": True, "din_cache_vechi": True, "varsta_s": 600,
+                           "citire_degradata": {"mastere": 0, "din": 2012, "pct": 0, "degradat": False}})
 
 
 def test_stare_se_scrie_si_se_citeste(tmp_path):
